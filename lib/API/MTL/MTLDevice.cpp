@@ -109,7 +109,8 @@ class MTLDevice : public offloadtest::Device {
 
     if (R.isRaw()) {
       MTL::Buffer *Buf =
-          Device->newBuffer(R.Data.get(), R.Size, MTL::StorageModeManaged);
+          Device->newBuffer(R.Data.get(), R.Size,
+                            MTL::ResourceStorageModeManaged);
       IRBufferView View = {};
       View.buffer = Buf;
       View.bufferSize = R.Size;
@@ -137,8 +138,33 @@ class MTLDevice : public offloadtest::Device {
 
   llvm::Error createSRV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    return llvm::createStringError(std::errc::not_supported,
-                                   "MTLDevice::createSRV not supported.");
+    auto *TablePtr = (IRDescriptorTableEntry *)IS.ArgBuffer->contents();
+
+    if (R.isRaw()) {
+      MTL::Buffer *Buf = Device->newBuffer(R.Data.get(), R.Size,
+                                           MTL::ResourceStorageModeManaged);
+      IRBufferView View = {};
+      View.buffer = Buf;
+      View.bufferSize = R.Size;
+
+      IRDescriptorTableSetBufferView(&TablePtr[HeapIdx], &View);
+      IS.Buffers.push_back(Buf);
+    } else {
+      uint64_t Width = R.Size / R.getElementSize();
+      MTL::TextureDescriptor *Desc =
+          MTL::TextureDescriptor::textureBufferDescriptor(
+              getMTLFormat(R.Format, R.Channels), Width,
+              MTL::ResourceStorageModeManaged, MTL::ResourceUsageRead);
+
+      MTL::Texture *NewTex = Device->newTexture(Desc);
+      NewTex->replaceRegion(MTL::Region(0, 0, Width, 1), 0, R.Data.get(), 0);
+
+      IS.Textures.push_back(NewTex);
+
+      IRDescriptorTableSetTexture(&TablePtr[HeapIdx], NewTex, 0, 0);
+    }
+
+    return llvm::Error::success();
   }
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
@@ -223,9 +249,16 @@ class MTLDevice : public offloadtest::Device {
           break;
         }
         case DataAccess::ReadOnly:
+          // Nothing to copy back, just increment the appropriate index.
+          if (R.isRaw())
+            ++BufferIndex;
+          else
+            ++TextureIndex;
+          break;
         case DataAccess::Constant:
-          return llvm::createStringError(std::errc::not_supported,
-                                         "MTLDevice only supports ReadWrite.");
+          return llvm::createStringError(
+              std::errc::not_supported, "MTLDevice does not support Constant.");
+          break;
         }
       }
     }
