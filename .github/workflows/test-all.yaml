@@ -133,7 +133,7 @@ jobs:
       - name: Checkout OffloadTest
         uses: actions/checkout@v4
         with:
-          repository: llvm-beanz/HLSLTest
+          repository: llvm-beanz/offload-test-suite
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1
