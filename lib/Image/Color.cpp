@@ -26,6 +26,11 @@ static Color multiply(const Color LHS, double Mat[9], ColorSpace NewSpace) {
   return Color(X, Y, Z, NewSpace);
 }
 
+static Color clampColor(const Color C) {
+  return Color(std::clamp(C.R, 0.0, 1.0), std::clamp(C.G, 0.0, 1.0),
+               std::clamp(C.B, 0.0, 1.0), C.Space);
+}
+
 static Color RGBToXYZ(const Color Old) {
   // Matrix assumes D65 white point.
   // Source: http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
@@ -39,7 +44,7 @@ static Color XYZToRGB(const Color Old) {
   // Source: http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
   double Mat[] = {3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108,
                   0.0415560, 0.0556434,  -0.2040259, 1.0572252};
-  return multiply(Old, Mat, ColorSpace::RGB);
+  return clampColor(multiply(Old, Mat, ColorSpace::RGB));
 }
 
 static double convertXYZ(double Val) {
