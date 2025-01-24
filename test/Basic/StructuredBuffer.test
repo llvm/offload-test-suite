@@ -39,7 +39,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
 # RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil | FileCheck %s %}
