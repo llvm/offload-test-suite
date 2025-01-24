@@ -1,0 +1,59 @@
+#--- source.hlsl
+struct S1 {
+  int4 i;
+};
+
+StructuredBuffer<S1> In : register(t0);
+RWStructuredBuffer<S1> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI].i = In[GI].i * 2.0;
+}
+//--- pipeline.yaml
+---
+DispatchSize: [1, 1, 1]
+DescriptorSets:
+  - Resources:
+    - Access: ReadOnly
+      Format: Hex32
+      RawSize: 32
+      Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003]
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Access: ReadWrite
+      Format: Hex32
+      RawSize: 16
+      ZeroInitSize: 16
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
+# RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil | FileCheck %s %}
+# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.spv %t/source.hlsl %}
+# RUN: %if Vulkan %{ %offloader %t/pipeline.yaml %t.spv | FileCheck %s %}
+
+# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
+# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
+# RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s %}
+
+# CHECK: Access: ReadOnly
+# CHECK: Data: [
+# CHECK: 0x0,
+# CHECK: 0x1,
+# CHECK: 0x2,
+# CHECK: 0x3
+# CHECK: ]
+
+# CHECK: Access: ReadWrite
+# CHECK: Data: [
+# CHECK: 0x0,
+# CHECK: 0x2,
+# CHECK: 0x4,
+# CHECK: 0x6
+# CHECK: ]
