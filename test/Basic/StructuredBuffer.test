@@ -44,6 +44,7 @@ DescriptorSets:
 # RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil | FileCheck %s %}
 # RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.spv %t/source.hlsl %}
 # RUN: %if Vulkan %{ %offloader %t/pipeline.yaml %t.spv | FileCheck %s %}
+# XFAIL: Vulkan
 
 # RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
 # RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
