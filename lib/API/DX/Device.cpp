@@ -74,7 +74,7 @@ private:
   CComPtr<ID3D12Device> Device;
   Capabilities Caps;
 
-  struct UAVResourceSet {
+  struct ResourceSet {
     CComPtr<ID3D12Resource> Upload;
     CComPtr<ID3D12Resource> Buffer;
     CComPtr<ID3D12Resource> Readback;
@@ -89,7 +89,7 @@ private:
     CComPtr<ID3D12GraphicsCommandList> CmdList;
     CComPtr<ID3D12Fence> Fence;
     HANDLE Event;
-    llvm::SmallVector<UAVResourceSet> Resources;
+    llvm::SmallVector<ResourceSet> Resources;
   };
 
 public:
@@ -288,8 +288,79 @@ public:
 
   llvm::Error createSRV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    return llvm::createStringError(std::errc::not_supported,
-                                   "DXDevice::createSRV not supported.");
+    llvm::outs() << "Creating SRV: { Size = " << R.Size << ", Register = t"
+                 << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
+                 << " }\n";
+    CComPtr<ID3D12Resource> Buffer;
+    CComPtr<ID3D12Resource> UploadBuffer;
+
+    const D3D12_HEAP_PROPERTIES HeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const D3D12_RESOURCE_DESC ResDesc = {
+        D3D12_RESOURCE_DIMENSION_BUFFER,
+        0,
+        R.Size,
+        1,
+        1,
+        1,
+        DXGI_FORMAT_UNKNOWN,
+        {1, 0},
+        D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
+
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
+                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                   IID_PPV_ARGS(&Buffer)),
+                               "Failed to create committed resource (buffer)."))
+      return Err;
+
+    const D3D12_HEAP_PROPERTIES UploadHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    const D3D12_RESOURCE_DESC UploadResDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(R.Size);
+
+    if (auto Err =
+            HR::toError(Device->CreateCommittedResource(
+                            &UploadHeapProp, D3D12_HEAP_FLAG_NONE,
+                            &UploadResDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                            nullptr, IID_PPV_ARGS(&UploadBuffer)),
+                        "Failed to create committed resource (upload buffer)."))
+      return Err;
+
+    // Initialize the SRV data
+    void *ResDataPtr = nullptr;
+    if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
+                               "Failed to acquire UAV data pointer."))
+      return Err;
+    memcpy(ResDataPtr, R.Data.get(), R.Size);
+    UploadBuffer->Unmap(0, nullptr);
+
+    addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+
+    const uint32_t EltSize = R.getElementSize();
+    const uint32_t NumElts = R.Size / EltSize;
+    DXGI_FORMAT EltFormat =
+        R.isRaw() ? DXGI_FORMAT_UNKNOWN : getDXFormat(R.Format, R.Channels);
+    const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {
+        EltFormat,
+        D3D12_SRV_DIMENSION_BUFFER,
+        D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+        {D3D12_BUFFER_SRV{0, NumElts, static_cast<uint32_t>(R.RawSize),
+                          D3D12_BUFFER_SRV_FLAG_NONE}}};
+
+    llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
+                 << " NumElts = " << NumElts << "\n";
+    D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle =
+        IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
+    SRVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
+                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    Device->CreateShaderResourceView(Buffer, &SRVDesc, SRVHandle);
+
+    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
+    IS.Resources.push_back(Resources);
+
+    return llvm::Error::success();
   }
 
   llvm::Error createUAV(Resource &R, InvocationState &IS,
@@ -385,7 +456,7 @@ public:
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     Device->CreateUnorderedAccessView(Buffer, nullptr, &UAVDesc, UAVHandle);
 
-    UAVResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
+    ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
     IS.Resources.push_back(Resources);
 
     return llvm::Error::success();
@@ -519,11 +590,12 @@ public:
     IS.CmdList->Dispatch(P.DispatchSize[0], P.DispatchSize[1],
                          P.DispatchSize[2]);
 
-    for (auto &Out : IS.Resources) {
-      addReadbackBeginBarrier(IS, Out.Buffer);
-      IS.CmdList->CopyResource(Out.Readback, Out.Buffer);
-      addReadbackEndBarrier(IS, Out.Buffer);
-    }
+    for (auto &Out : IS.Resources)
+      if (Out.Readback != nullptr) {
+        addReadbackBeginBarrier(IS, Out.Buffer);
+        IS.CmdList->CopyResource(Out.Readback, Out.Buffer);
+        addReadbackEndBarrier(IS, Out.Buffer);
+      }
   }
 
   llvm::Error readBack(Pipeline &P, InvocationState &IS) {
