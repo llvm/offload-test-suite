@@ -54,7 +54,7 @@ private:
     VkDeviceMemory Memory;
   };
 
-  struct UAVRef {
+  struct ResourceRef {
     BufferRef Host;
     BufferRef Device;
     uint64_t Size;
@@ -72,7 +72,7 @@ private:
     VkPipeline Pipeline;
 
     llvm::SmallVector<VkDescriptorSetLayout> DescriptorSetLayouts;
-    llvm::SmallVector<UAVRef> UAVs;
+    llvm::SmallVector<ResourceRef> Buffers;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
   };
@@ -286,8 +286,8 @@ public:
     return BufferRef{Buffer, Memory};
   }
 
-  llvm::Error createUAV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
+  llvm::Error createBuffer(Resource &R, InvocationState &IS,
+                           const uint32_t HeapIdx) {
     auto ExHostBuf = createBuffer(
         IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.Size, R.Data.get());
@@ -308,15 +308,9 @@ public:
     vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
                     &Copy);
 
-    IS.UAVs.push_back(UAVRef{*ExHostBuf, *ExDeviceBuf, R.Size});
+    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.Size});
 
     return llvm::Error::success();
-  }
-
-  llvm::Error createSRV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
-    return llvm::createStringError(std::errc::not_supported,
-                                   "VXDevice::createSRV not supported.");
   }
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
@@ -331,13 +325,11 @@ public:
       for (auto &R : D.Resources) {
         switch (R.Access) {
         case DataAccess::ReadOnly:
-          if (auto Err = createSRV(R, IS, HeapIndex++))
-            return Err;
-          break;
         case DataAccess::ReadWrite:
-          if (auto Err = createUAV(R, IS, HeapIndex++))
+          if (auto Err = createBuffer(R, IS, HeapIndex++))
             return Err;
           break;
+
         case DataAccess::Constant:
           if (auto Err = createCBV(R, IS, HeapIndex++))
             return Err;
@@ -384,12 +376,10 @@ public:
     uint32_t StorageBufferCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
-        if (R.Access == DataAccess::ReadWrite) {
-          if (R.isRaw())
-            StorageBufferCount += 1;
-          else
-            TexelBufferCount += 1;
-        }
+        if (R.isRaw())
+          StorageBufferCount += 1;
+        else
+          TexelBufferCount += 1;
       }
     }
     assert(TexelBufferCount + StorageBufferCount == P.getDescriptorCount() &&
@@ -489,11 +479,11 @@ public:
                   : getVKFormat(P.Sets[SetIdx].Resources[RIdx].Format,
                                 P.Sets[SetIdx].Resources[RIdx].Channels);
         ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-        ViewCreateInfo.buffer = IS.UAVs[UAVIdx].Device.Buffer;
+        ViewCreateInfo.buffer = IS.Buffers[UAVIdx].Device.Buffer;
         ViewCreateInfo.format = Format;
         ViewCreateInfo.range = VK_WHOLE_SIZE;
         if (IsRaw) {
-          VkDescriptorBufferInfo BI = {IS.UAVs[UAVIdx].Device.Buffer, 0,
+          VkDescriptorBufferInfo BI = {IS.Buffers[UAVIdx].Device.Buffer, 0,
                                        VK_WHOLE_SIZE};
           RawBufferInfos.push_back(BI);
         } else {
@@ -564,7 +554,7 @@ public:
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    for (auto &UAV : IS.UAVs) {
+    for (auto &UAV : IS.Buffers) {
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
       Barrier.buffer = UAV.Device.Buffer;
@@ -586,7 +576,7 @@ public:
     vkCmdDispatch(IS.CmdBuffer, P.DispatchSize[0], P.DispatchSize[1],
                   P.DispatchSize[2]);
 
-    for (auto &UAV : IS.UAVs) {
+    for (auto &UAV : IS.Buffers) {
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
       Barrier.buffer = UAV.Device.Buffer;
@@ -624,16 +614,16 @@ public:
         if (R.Access != DataAccess::ReadWrite)
           continue;
         void *Mapped = nullptr;
-        vkMapMemory(IS.Device, IS.UAVs[UAVIdx].Host.Memory, 0, VK_WHOLE_SIZE, 0,
-                    &Mapped);
+        vkMapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory, 0, VK_WHOLE_SIZE,
+                    0, &Mapped);
         VkMappedMemoryRange Range = {};
         Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        Range.memory = IS.UAVs[UAVIdx].Host.Memory;
+        Range.memory = IS.Buffers[UAVIdx].Host.Memory;
         Range.offset = 0;
         Range.size = VK_WHOLE_SIZE;
         vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
         memcpy(R.Data.get(), Mapped, R.Size);
-        vkUnmapMemory(IS.Device, IS.UAVs[UAVIdx].Host.Memory);
+        vkUnmapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory);
         UAVIdx++;
       }
     }
@@ -645,7 +635,7 @@ public:
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(IS.Device, V, nullptr);
 
-    for (auto &R : IS.UAVs) {
+    for (auto &R : IS.Buffers) {
       vkDestroyBuffer(IS.Device, R.Device.Buffer, nullptr);
       vkFreeMemory(IS.Device, R.Device.Memory, nullptr);
       vkDestroyBuffer(IS.Device, R.Host.Buffer, nullptr);

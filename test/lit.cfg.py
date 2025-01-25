@@ -48,14 +48,18 @@ if config.offloadtest_test_warp:
 else:
   tools.append(ToolSubst("%offloader", FindTool("offloader")))
 
+HLSLCompiler = ''
 if config.offloadtest_test_clang:
   if os.path.exists(config.offloadtest_dxc_dir):
     tools.append(ToolSubst("dxc", FindTool("clang-dxc"), extra_args=["--dxv-path=%s" % config.offloadtest_dxc_dir]))
   else:
     tools.append(ToolSubst("dxc", FindTool("clang-dxc")))
-  config.available_features.add("Clang")
+  HLSLCompiler = 'Clang'
 else:
   tools.append(ToolSubst("dxc", config.offloadtest_dxc))
+  HLSLCompiler = 'DXC'
+
+config.available_features.add(HLSLCompiler)
 
 llvm_config.add_tool_substitutions(tools, config.llvm_tools_dir)
 
@@ -66,12 +70,15 @@ devices = yaml.safe_load(query_string)
 for device in devices['Devices']:
   if device['API'] == "DirectX" and config.offloadtest_enable_d3d12:
     config.available_features.add("DirectX")
+    config.available_features.add(HLSLCompiler + "-DirectX")
     if "Intel" in device['Description']:
       config.available_features.add("DirectX-Intel")
   if device['API'] == "Metal" and config.offloadtest_enable_metal:
     config.available_features.add("Metal")
+    config.available_features.add(HLSLCompiler + "-Metal")
   if device['API'] == "Vulkan" and config.offloadtest_enable_vulkan:
     config.available_features.add("Vulkan")
+    config.available_features.add(HLSLCompiler + "-Vulkan")
     if "NVIDIA" in device['Description']:
       config.available_features.add("Vulkan-NV")
 
