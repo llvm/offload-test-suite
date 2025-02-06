@@ -464,8 +464,71 @@ public:
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    return llvm::createStringError(std::errc::not_supported,
-                                   "DXDevice::createSRV not supported.");
+    llvm::outs() << "Creating CBV: { Size = " << R.Size << ", Register = b"
+                 << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
+                 << " }\n";
+    CComPtr<ID3D12Resource> Buffer;
+    CComPtr<ID3D12Resource> UploadBuffer;
+
+    const D3D12_HEAP_PROPERTIES HeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const D3D12_RESOURCE_DESC ResDesc = {
+        D3D12_RESOURCE_DIMENSION_BUFFER,
+        0,
+        R.Size,
+        1,
+        1,
+        1,
+        DXGI_FORMAT_UNKNOWN,
+        {1, 0},
+        D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
+
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
+                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                   IID_PPV_ARGS(&Buffer)),
+                               "Failed to create committed resource (buffer)."))
+      return Err;
+
+    const D3D12_HEAP_PROPERTIES UploadHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    const D3D12_RESOURCE_DESC UploadResDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(R.Size);
+
+    if (auto Err =
+            HR::toError(Device->CreateCommittedResource(
+                            &UploadHeapProp, D3D12_HEAP_FLAG_NONE,
+                            &UploadResDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
+                            nullptr, IID_PPV_ARGS(&UploadBuffer)),
+                        "Failed to create committed resource (upload buffer)."))
+      return Err;
+
+    // Initialize the CBV data
+    void *ResDataPtr = nullptr;
+    if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
+                               "Failed to acquire UAV data pointer."))
+      return Err;
+    memcpy(ResDataPtr, R.Data.get(), R.Size);
+    UploadBuffer->Unmap(0, nullptr);
+
+    addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+
+    DXGI_FORMAT EltFormat = DXGI_FORMAT_UNKNOWN;
+    const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
+        Buffer->GetGPUVirtualAddress(), static_cast<unsigned int>(R.RawSize)};
+
+    llvm::outs() << "CBV: HeapIdx = " << HeapIdx << "\n";
+    D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle =
+        IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
+    CBVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
+                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    Device->CreateConstantBufferView(&CBVDesc, CBVHandle);
+
+    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
+    IS.Resources.push_back(Resources);
+
+    return llvm::Error::success();
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
