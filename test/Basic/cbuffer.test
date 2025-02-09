@@ -2,7 +2,7 @@
 RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 
-cbuffer CB0 {
+cbuffer CB0 : register(b0) {
   int Constant;
 }
 
