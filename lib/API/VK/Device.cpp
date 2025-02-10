@@ -39,6 +39,15 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
   }
   return VK_FORMAT_UNDEFINED;
 }
+
+static VkDescriptorType getDescriptorType(const Resource &R) {
+  if (R.Access == DataAccess::Constant)
+    return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  if (R.isRaw())
+    return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  else
+    return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+}
 namespace {
 
 class VKDevice : public offloadtest::Device {
@@ -315,8 +324,28 @@ public:
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    return llvm::createStringError(std::errc::not_supported,
-                                   "VXDevice::createCBV not supported.");
+    auto ExHostBuf = createBuffer(
+        IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.Size, R.Data.get());
+    if (!ExHostBuf)
+      return ExHostBuf.takeError();
+
+    auto ExDeviceBuf = createBuffer(
+        IS,
+        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.Size);
+    if (!ExDeviceBuf)
+      return ExDeviceBuf.takeError();
+
+    VkBufferCopy Copy = {};
+    Copy.size = R.Size;
+    vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
+                    &Copy);
+
+    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.Size});
+
+    return llvm::Error::success();
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
@@ -374,15 +403,19 @@ public:
   llvm::Error createDescriptorPool(Pipeline &P, InvocationState &IS) {
     uint32_t TexelBufferCount = 0;
     uint32_t StorageBufferCount = 0;
+    uint32_t UniformBufferCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
-        if (R.isRaw())
+        if (R.Access == DataAccess::Constant)
+          UniformBufferCount += 1;
+        else if (R.isRaw())
           StorageBufferCount += 1;
         else
           TexelBufferCount += 1;
       }
     }
-    assert(TexelBufferCount + StorageBufferCount == P.getDescriptorCount() &&
+    assert(TexelBufferCount + StorageBufferCount + UniformBufferCount ==
+               P.getDescriptorCount() &&
            "Mismatch in descriptor type identification.");
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
     if (TexelBufferCount > 0) {
@@ -396,6 +429,13 @@ public:
       VkDescriptorPoolSize PoolSize = {};
       PoolSize.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
       PoolSize.descriptorCount = StorageBufferCount;
+      PoolSizes.push_back(PoolSize);
+    }
+
+    if (UniformBufferCount > 0) {
+      VkDescriptorPoolSize PoolSize = {};
+      PoolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+      PoolSize.descriptorCount = UniformBufferCount;
       PoolSizes.push_back(PoolSize);
     }
 
@@ -418,9 +458,7 @@ public:
         (void)R; // Todo: set this correctly for the data type.
         VkDescriptorSetLayoutBinding Binding = {};
         Binding.binding = BindingIdx++;
-        Binding.descriptorType = R.isRaw()
-                                     ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-                                     : VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+        Binding.descriptorType = getDescriptorType(R);
         Binding.descriptorCount = 1;
         Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         Bindings.push_back(Binding);
@@ -467,23 +505,22 @@ public:
     assert(IS.BufferViews.empty());
     llvm::SmallVector<VkDescriptorBufferInfo> RawBufferInfos;
 
-    uint32_t UAVIdx = 0;
+    uint32_t BufIdx = 0;
     for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
-           ++RIdx, ++UAVIdx) {
+           ++RIdx, ++BufIdx) {
+        const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         // This is a hack... need a better way to do this.
         VkBufferViewCreateInfo ViewCreateInfo = {};
-        bool IsRaw = P.Sets[SetIdx].Resources[RIdx].isRaw();
-        VkFormat Format =
-            IsRaw ? VK_FORMAT_UNDEFINED
-                  : getVKFormat(P.Sets[SetIdx].Resources[RIdx].Format,
-                                P.Sets[SetIdx].Resources[RIdx].Channels);
+        bool IsRawOrUniform = R.isRaw() || R.Access == DataAccess::Constant;
+        VkFormat Format = IsRawOrUniform ? VK_FORMAT_UNDEFINED
+                                         : getVKFormat(R.Format, R.Channels);
         ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-        ViewCreateInfo.buffer = IS.Buffers[UAVIdx].Device.Buffer;
+        ViewCreateInfo.buffer = IS.Buffers[BufIdx].Device.Buffer;
         ViewCreateInfo.format = Format;
         ViewCreateInfo.range = VK_WHOLE_SIZE;
-        if (IsRaw) {
-          VkDescriptorBufferInfo BI = {IS.Buffers[UAVIdx].Device.Buffer, 0,
+        if (IsRawOrUniform) {
+          VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer, 0,
                                        VK_WHOLE_SIZE};
           RawBufferInfos.push_back(BI);
         } else {
@@ -498,14 +535,12 @@ public:
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = RIdx;
         WDS.descriptorCount = 1;
-        if (IsRaw) {
-          WDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        WDS.descriptorType = getDescriptorType(R);
+        if (IsRawOrUniform)
           WDS.pBufferInfo = &RawBufferInfos.back();
-        } else {
-          WDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+        else
           WDS.pTexelBufferView = &IS.BufferViews.back();
-        }
-        llvm::outs() << "Updating Descriptor [" << UAVIdx << "] { " << SetIdx
+        llvm::outs() << "Updating Descriptor [" << BufIdx << "] { " << SetIdx
                      << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
       }
