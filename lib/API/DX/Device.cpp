@@ -520,7 +520,6 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    DXGI_FORMAT EltFormat = DXGI_FORMAT_UNKNOWN;
     const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
         Buffer->GetGPUVirtualAddress(), static_cast<uint32_t>(CBVSize)};
 
