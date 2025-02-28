@@ -50,6 +50,19 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   return MTL::PixelFormatInvalid;
 }
 
+bool IsTexture(offloadtest::ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::RWBuffer:
+  return true;
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::ConstantBuffer:
+  return false;
+  }
+  llvm_unreachable("All cases handled");
+}
+
 namespace {
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
@@ -107,7 +120,7 @@ class MTLDevice : public offloadtest::Device {
                                const uint32_t HeapIdx) {
     auto *TablePtr = (IRDescriptorTableEntry *)IS.ArgBuffer->contents();
 
-    if (R.isRaw() || R.Access == DataAccess::Constant) {
+    if (R.isRaw()) {
       MTL::Buffer *Buf = Device->newBuffer(R.Data.get(), R.Size,
                                            MTL::ResourceStorageModeManaged);
       IRBufferView View = {};
@@ -119,7 +132,7 @@ class MTLDevice : public offloadtest::Device {
     } else {
       uint64_t Width = R.Size / R.getElementSize();
       MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
-      if (R.Access == DataAccess::ReadWrite)
+      if (R.isReadWrite())
         UsageFlags |= MTL::ResourceUsageWrite;
       MTL::TextureDescriptor *Desc =
           MTL::TextureDescriptor::textureBufferDescriptor(
@@ -194,9 +207,7 @@ class MTLDevice : public offloadtest::Device {
     uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        switch (R.Access) {
-
-        case DataAccess::ReadWrite: {
+        if (R.isReadWrite()) {
           if (R.isRaw()) {
             memcpy(R.Data.get(), IS.Buffers[BufferIndex++]->contents(), R.Size);
           } else {
@@ -204,18 +215,11 @@ class MTLDevice : public offloadtest::Device {
             IS.Textures[TextureIndex++]->getBytes(
                 R.Data.get(), 0, MTL::Region(0, 0, Width, 1), 0);
           }
-          break;
-        }
-        case DataAccess::ReadOnly:
-          // Nothing to copy back, just increment the appropriate index.
+        } else {
           if (R.isRaw())
             ++BufferIndex;
           else
             ++TextureIndex;
-          break;
-        case DataAccess::Constant:
-          ++BufferIndex; // CBVs are always raw, so increment the count and move on.
-          break;
         }
       }
     }

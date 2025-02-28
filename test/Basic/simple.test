@@ -18,14 +18,14 @@ void main(uint GI : SV_GroupIndex) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWBuffer
       Format: Float32
       Channels: 4
       Data: [ 2, 4, 6, 8]
       DirectXBinding:
         Register: 0
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWBuffer
       Format: Float32
       Channels: 4
       ZeroInitSize: 16

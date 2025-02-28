@@ -15,14 +15,14 @@ void main(uint GI : SV_GroupIndex) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadOnly
+    - Kind: StructuredBuffer
       Format: Hex32
       RawSize: 16
       Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003]
       DirectXBinding:
         Register: 0
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Hex32
       RawSize: 16
       ZeroInitSize: 16
@@ -42,7 +42,7 @@ DescriptorSets:
 # RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
 # RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s %}
 
-# CHECK: Access: ReadOnly
+# CHECK: Kind: StructuredBuffer
 # CHECK: Data: [
 # CHECK: 0x0,
 # CHECK: 0x1,
@@ -50,7 +50,7 @@ DescriptorSets:
 # CHECK: 0x3
 # CHECK: ]
 
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWStructuredBuffer
 # CHECK: Data: [
 # CHECK: 0x0,
 # CHECK: 0x2,

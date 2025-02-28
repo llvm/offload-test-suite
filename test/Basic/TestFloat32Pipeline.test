@@ -12,13 +12,13 @@ void main(uint3 TID : SV_GroupThreadID) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWBuffer
       Format: Float32
       Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 ]
       DirectXBinding:
         Register: 0
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWBuffer
       Format: Float32
       Data: [ 9.9, 10.1, 11.1, 12.2, 13.3, 14.4, 15.5, 16.6]
       DirectXBinding:
@@ -37,9 +37,9 @@ DescriptorSets:
 # RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
 # RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s %}
 
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWBuffer
 # CHECK: Format: Float32
 # CHECK: Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 ]
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWBuffer
 # CHECK: Format: Float32
 # CHECK: Data: [ 5.4, 6.5, 7.6, 8.7, 9.8, 10.9, 12, 13.1 ]

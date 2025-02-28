@@ -21,9 +21,9 @@
 #undef max
 #undef min
 
-#include "DXFeatures.h"
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "DXFeatures.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
 
@@ -61,6 +61,24 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
 }
 
 namespace {
+
+enum DXResourceKind { UAV, SRV, CBV };
+
+DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::StructuredBuffer:
+    return SRV;
+
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::RWBuffer:
+    return UAV;
+
+  case ResourceKind::ConstantBuffer:
+    return CBV;
+  }
+  llvm_unreachable("All cases handled");
+}
 
 std::string StringFromWString(const std::wstring &In) {
   using convert_type = std::codecvt_utf8<wchar_t>;
@@ -173,14 +191,14 @@ public:
       uint32_t DescriptorIdx = 0;
       uint32_t StartRangeIdx = RangeIdx;
       for (const auto &R : D.Resources) {
-        switch (R.Access) {
-        case DataAccess::ReadOnly:
+        switch (getDXKind(R.Kind)) {
+        case SRV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
           break;
-        case DataAccess::ReadWrite:
+        case UAV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
           break;
-        case DataAccess::Constant:
+        case CBV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
         }
@@ -283,7 +301,7 @@ public:
                                  CComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
     IS.CmdList->CopyBufferRegion(Destination, 0, Source, 0, R.Size);
-    addUploadEndBarrier(IS, Destination, R.Access == DataAccess::ReadWrite);
+    addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
   llvm::Error createSRV(Resource &R, InvocationState &IS,
@@ -515,7 +533,7 @@ public:
     if (R.Size < CBVSize) {
       void *ExtraData = static_cast<char *>(ResDataPtr) + R.Size;
       memset(ExtraData, 0, CBVSize - R.Size - 1);
-    }      
+    }
     UploadBuffer->Unmap(0, nullptr);
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
@@ -540,16 +558,16 @@ public:
     uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        switch (R.Access) {
-        case DataAccess::ReadOnly:
+        switch (getDXKind(R.Kind)) {
+        case SRV:
           if (auto Err = createSRV(R, IS, HeapIndex++))
             return Err;
           break;
-        case DataAccess::ReadWrite:
+        case UAV:
           if (auto Err = createUAV(R, IS, HeapIndex++))
             return Err;
           break;
-        case DataAccess::Constant:
+        case CBV:
           if (auto Err = createCBV(R, IS, HeapIndex++))
             return Err;
           break;
@@ -648,7 +666,8 @@ public:
 
     uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle{IS.DescHeap->GetGPUDescriptorHandleForHeapStart()};
+    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle{
+        IS.DescHeap->GetGPUDescriptorHandleForHeapStart()};
 
     for (uint32_t Idx = 0; Idx < P.Sets.size(); ++Idx) {
       IS.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
@@ -674,7 +693,7 @@ public:
           return llvm::createStringError(
               std::errc::no_such_device_or_address,
               "Internal error: created resources doesn't match pipeline");
-        if (R.Access == DataAccess::ReadWrite) {
+        if (R.isReadWrite()) {
           void *DataPtr;
           if (auto Err = HR::toError(
                   ResourcesIterator->Readback->Map(0, nullptr, &DataPtr),

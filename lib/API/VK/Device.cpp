@@ -40,13 +40,31 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
   return VK_FORMAT_UNDEFINED;
 }
 
-static VkDescriptorType getDescriptorType(const Resource &R) {
-  if (R.Access == DataAccess::Constant)
-    return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  if (R.isRaw())
-    return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  else
+static VkDescriptorType getDescriptorType(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::RWStructuredBuffer:
+    return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  case ResourceKind::ConstantBuffer:
+    return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  }
+  llvm_unreachable("All cases handled");
+}
+
+static bool isUniform(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::RWBuffer:
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::RWStructuredBuffer:
+    return false;
+  case ResourceKind::ConstantBuffer:
+    return true;
+  }
+  llvm_unreachable("All cases handled");
 }
 namespace {
 
@@ -352,17 +370,12 @@ public:
     uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        switch (R.Access) {
-        case DataAccess::ReadOnly:
-        case DataAccess::ReadWrite:
+        if (isUniform(R.Kind)) {
           if (auto Err = createBuffer(R, IS, HeapIndex++))
             return Err;
-          break;
-
-        case DataAccess::Constant:
+        } else {
           if (auto Err = createCBV(R, IS, HeapIndex++))
             return Err;
-          break;
         }
       }
     }
@@ -406,7 +419,7 @@ public:
     uint32_t UniformBufferCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
-        if (R.Access == DataAccess::Constant)
+        if (isUniform(R.Kind))
           UniformBufferCount += 1;
         else if (R.isRaw())
           StorageBufferCount += 1;
@@ -458,7 +471,7 @@ public:
         (void)R; // Todo: set this correctly for the data type.
         VkDescriptorSetLayoutBinding Binding = {};
         Binding.binding = BindingIdx++;
-        Binding.descriptorType = getDescriptorType(R);
+        Binding.descriptorType = getDescriptorType(R.Kind);
         Binding.descriptorCount = 1;
         Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         Bindings.push_back(Binding);
@@ -512,7 +525,7 @@ public:
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         // This is a hack... need a better way to do this.
         VkBufferViewCreateInfo ViewCreateInfo = {};
-        bool IsRawOrUniform = R.isRaw() || R.Access == DataAccess::Constant;
+        bool IsRawOrUniform = R.isRaw();
         VkFormat Format = IsRawOrUniform ? VK_FORMAT_UNDEFINED
                                          : getVKFormat(R.Format, R.Channels);
         ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
@@ -535,7 +548,7 @@ public:
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = RIdx;
         WDS.descriptorCount = 1;
-        WDS.descriptorType = getDescriptorType(R);
+        WDS.descriptorType = getDescriptorType(R.Kind);
         if (IsRawOrUniform)
           WDS.pBufferInfo = &RawBufferInfos.back();
         else
@@ -646,7 +659,7 @@ public:
     uint32_t UAVIdx = 0;
     for (auto &S : P.Sets) {
       for (auto &R : S.Resources) {
-        if (R.Access != DataAccess::ReadWrite)
+        if (!R.isReadWrite())
           continue;
         void *Mapped = nullptr;
         vkMapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory, 0, VK_WHOLE_SIZE,
