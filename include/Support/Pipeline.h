@@ -36,10 +36,12 @@ enum class DataFormat {
   Float64,
 };
 
-enum class DataAccess {
-  ReadOnly,
-  ReadWrite,
-  Constant,
+enum class ResourceKind {
+  Buffer,
+  StructuredBuffer,
+  RWBuffer,
+  RWStructuredBuffer,
+  ConstantBuffer,
 };
 
 struct DirectXBinding {
@@ -58,13 +60,37 @@ struct Resource {
   DataFormat Format;
   int Channels;
   int RawSize;
-  DataAccess Access;
+  ResourceKind Kind;
   size_t Size;
   std::unique_ptr<char[]> Data;
   DirectXBinding DXBinding;
   OutputProperties OutputProps;
 
-  bool isRaw() const { return RawSize > 0; }
+  bool isRaw() const {
+      switch (Kind) {
+      case ResourceKind::Buffer:
+      case ResourceKind::RWBuffer:
+      return false;
+      case ResourceKind::StructuredBuffer:
+      case ResourceKind::RWStructuredBuffer:
+      case ResourceKind::ConstantBuffer:
+      return true;
+      }
+      llvm_unreachable("All cases handled");
+  }
+
+  bool isReadWrite() const {
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::ConstantBuffer:
+    return false;
+    case ResourceKind::RWBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    return true;
+    }
+    llvm_unreachable("All cases handled");
+}
 
   uint32_t getElementSize() const {
     if (isRaw())
@@ -157,12 +183,14 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   }
 };
 
-template <> struct ScalarEnumerationTraits<offloadtest::DataAccess> {
-  static void enumeration(IO &I, offloadtest::DataAccess &V) {
-#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataAccess::Val)
-    ENUM_CASE(ReadOnly);
-    ENUM_CASE(ReadWrite);
-    ENUM_CASE(Constant);
+template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
+  static void enumeration(IO &I, offloadtest::ResourceKind &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::ResourceKind::Val)
+    ENUM_CASE(Buffer);
+    ENUM_CASE(StructuredBuffer);
+    ENUM_CASE(RWBuffer);
+    ENUM_CASE(RWStructuredBuffer);
+    ENUM_CASE(ConstantBuffer);
 #undef ENUM_CASE
   }
 };

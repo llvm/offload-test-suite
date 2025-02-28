@@ -17,28 +17,28 @@ void main(uint3 TID : SV_GroupThreadID) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Float32
       RawSize: 4
       Data: [ nan, nan, nan, nan ]
       DirectXBinding:
         Register: 0
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Float32
       RawSize: 4
       Data: [ inf, inf, inf, inf ]
       DirectXBinding:
         Register: 1
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Float32
       RawSize: 4
       Data: [ -inf, -inf, -inf, -inf ]
       DirectXBinding:
         Register: 2
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Float32
       RawSize: 4
       Data: [ inf, -inf, nan, 0 ]
@@ -79,21 +79,21 @@ DescriptorSets:
 
 # XFAIL: DirectX-WARP
 
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWStructuredBuffer
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: RawSize: 4
 # METAL-NEXT: Data: [ 0, 0, 0, 0 ]
 # DX-NEXT: Data:
 # VULKAN-NEXT: Data:
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWStructuredBuffer
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWStructuredBuffer
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ 0, 0, 0, 0 ]
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWStructuredBuffer
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]

@@ -20,7 +20,7 @@ void main(uint GI : SV_GroupIndex) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Int32
       RawSize: 24
       Data: [ 0, 1, 2, 0, 4, 0, 1, 2, 3, 0, 4, 0]

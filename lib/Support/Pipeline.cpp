@@ -29,7 +29,7 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
 
 void MappingTraits<offloadtest::Resource>::mapping(IO &I,
                                                    offloadtest::Resource &R) {
-  I.mapRequired("Access", R.Access);
+  I.mapRequired("Kind", R.Kind);
   I.mapRequired("Format", R.Format);
   I.mapOptional("Channels", R.Channels, 1);
   I.mapOptional("RawSize", R.RawSize, 0);

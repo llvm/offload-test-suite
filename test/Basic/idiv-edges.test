@@ -16,21 +16,21 @@ void main(uint3 TID : SV_GroupThreadID) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Int32
       RawSize: 4
       Data: [ 1, -1, 2147483647, 0, -2147483648]
       DirectXBinding:
         Register: 0
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Int32
       RawSize: 4
       Data: [ 0, 0, 0, 0, 0]
       DirectXBinding:
         Register: 1
         Space: 0
-    - Access: ReadWrite
+    - Kind: RWStructuredBuffer
       Format: Int32
       RawSize: 4
       Data: [ -1, -1, -1, -1, -1]
@@ -52,9 +52,9 @@ DescriptorSets:
 
 # Divide by-zero behavior seems to be erradic enough to call it undefined...
 
-# CHECK: Access: ReadWrite
-# CHECK: Access: ReadWrite
-# CHECK: Access: ReadWrite
+# CHECK: Kind: RWStructuredBuffer
+# CHECK: Kind: RWStructuredBuffer
+# CHECK: Kind: RWStructuredBuffer
 # CHECK-NEXT: Format: Int32
 # CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ -1, 1, -2147483647, 0

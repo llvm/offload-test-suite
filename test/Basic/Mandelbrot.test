@@ -57,7 +57,7 @@ const static int Dimension = 4096;
 DispatchSize: [16384, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWBuffer
       Format: Float32
       Channels: 4
       ZeroInitSize: 268435456 # 1024 * 1024 * 4 channels / pixel * 4 bytes / channel

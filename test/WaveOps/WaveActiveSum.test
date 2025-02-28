@@ -20,7 +20,7 @@ void main(uint3 threadID : SV_DispatchThreadID) {
 DispatchSize: [1, 1, 1]
 DescriptorSets:
   - Resources:
-    - Access: ReadWrite
+    - Kind: RWBuffer
       Format: Int32
       Data: [ 0, 0, 1, 2]
       DirectXBinding:
