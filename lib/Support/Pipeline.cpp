@@ -19,7 +19,21 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   MutableArrayRef<int> MutableDispatchSize(P.DispatchSize);
   I.mapRequired("DispatchSize", MutableDispatchSize);
+  I.mapRequired("Buffers", P.Buffers);
   I.mapRequired("DescriptorSets", P.Sets);
+
+  if (!I.outputting()) {
+    for (auto &D : P.Sets) {
+      for (auto &R : D.Resources) {
+        for (auto &B : P.Buffers) {
+          if (R.Name == B.Name)
+            R.BufferPtr = &B;
+        }
+        if (!R.BufferPtr)
+          I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+      }
+    }
+  }
 }
 
 void MappingTraits<offloadtest::DescriptorSet>::mapping(
@@ -27,34 +41,32 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
-void MappingTraits<offloadtest::Resource>::mapping(IO &I,
-                                                   offloadtest::Resource &R) {
-  I.mapRequired("Kind", R.Kind);
-  I.mapRequired("Format", R.Format);
-  I.mapOptional("Channels", R.Channels, 1);
-  I.mapOptional("RawSize", R.RawSize, 0);
-  assert(R.RawSize >= 0 && "RawSize must be non-negative");
-  switch (R.Format) {
+void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
+                                                 offloadtest::Buffer &B) {
+  I.mapRequired("Name", B.Name);
+  I.mapRequired("Format", B.Format);
+  I.mapOptional("Channels", B.Channels, 1);
+  switch (B.Format) {
 #define DATA_CASE(Enum, Type)                                                  \
   case DataFormat::Enum: {                                                     \
     if (I.outputting()) {                                                      \
-      llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(R.Data.get()),  \
-                                      R.Size / sizeof(Type));                  \
+      llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
+                                      B.Size / sizeof(Type));                  \
       I.mapRequired("Data", Arr);                                              \
     } else {                                                                   \
       int64_t ZeroInitSize;                                                    \
       I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
       if (ZeroInitSize > 0) {                                                  \
-        R.Size = ZeroInitSize;                                                 \
-        R.Data.reset(new char[R.Size]);                                        \
-        memset(R.Data.get(), 0, R.Size);                                       \
+        B.Size = ZeroInitSize;                                                 \
+        B.Data.reset(new char[B.Size]);                                        \
+        memset(B.Data.get(), 0, B.Size);                                       \
         break;                                                                 \
       }                                                                        \
       llvm::SmallVector<Type, 64> Arr;                                         \
       I.mapRequired("Data", Arr);                                              \
-      R.Size = Arr.size() * sizeof(Type);                                      \
-      R.Data.reset(new char[R.Size]);                                          \
-      memcpy(R.Data.get(), Arr.data(), R.Size);                                \
+      B.Size = Arr.size() * sizeof(Type);                                      \
+      B.Data.reset(new char[B.Size]);                                          \
+      memcpy(B.Data.get(), Arr.data(), B.Size);                                \
     }                                                                          \
     break;                                                                     \
   }
@@ -72,8 +84,14 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
     DATA_CASE(Float64, double)
   }
 
+  I.mapOptional("OutputProps", B.OutputProps);
+}
+
+void MappingTraits<offloadtest::Resource>::mapping(IO &I,
+                                                   offloadtest::Resource &R) {
+  I.mapRequired("Name", R.Name);
+  I.mapRequired("Kind", R.Kind);
   I.mapRequired("DirectXBinding", R.DXBinding);
-  I.mapOptional("OutputProps", R.OutputProps);
 }
 
 void MappingTraits<offloadtest::DirectXBinding>::mapping(
@@ -84,7 +102,6 @@ void MappingTraits<offloadtest::DirectXBinding>::mapping(
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(
     IO &I, offloadtest::OutputProperties &P) {
-  I.mapRequired("Name", P.Name);
   I.mapRequired("Height", P.Height);
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);

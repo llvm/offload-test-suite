@@ -136,13 +136,11 @@ int run() {
       Out->keep();
       return 0;
     }
-    for (const auto &S : PipelineDesc.Sets) {
-      for (const auto &R : S.Resources) {
-        if (R.OutputProps.Name == ImageOutput) {
-          ImageRef Img = ImageRef(R);
-          ExitOnErr(Image::writePNG(Img, OutputFilename));
-          return 0;
-        }
+    for (const auto &B : PipelineDesc.Buffers) {
+      if (B.Name == ImageOutput) {
+        ImageRef Img = ImageRef(B);
+        ExitOnErr(Image::writePNG(Img, OutputFilename));
+        return 0;
       }
     }
 

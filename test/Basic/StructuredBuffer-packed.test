@@ -18,12 +18,14 @@ void main(uint GI : SV_GroupIndex) {
 //--- pipeline.yaml
 ---
 DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Buf
+    Format: Int32
+    Data: [ 0, 1, 2, 0, 4, 0, 1, 2, 3, 0, 4, 0]
 DescriptorSets:
   - Resources:
-    - Kind: RWStructuredBuffer
-      Format: Int32
-      RawSize: 24
-      Data: [ 0, 1, 2, 0, 4, 0, 1, 2, 3, 0, 4, 0]
+    - Name: Buf
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0

@@ -18,11 +18,14 @@ void main(uint3 threadID : SV_DispatchThreadID) {
 
 ---
 DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: value
+    Format: Int32
+    Data: [ 0, 0, 1, 2]
 DescriptorSets:
   - Resources:
-    - Kind: RWBuffer
-      Format: Int32
-      Data: [ 0, 0, 1, 2]
+    - Name: value
+      Kind: RWBuffer
       DirectXBinding:
         Register: 0
         Space: 0
