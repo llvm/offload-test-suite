@@ -9,12 +9,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <atlbase.h>
-#include <combaseapi.h>
+#include <wrl/client.h>
 #include <d3d12.h>
 #include <d3dx12.h>
-#include <dxgi1_4.h>
+#include <dxcore.h>
 #include <dxgiformat.h>
+
+#ifndef _WIN32
+#include <sys/eventfd.h>
+#include <unistd.h>
+#include <poll.h>
+#include <wsl/winadapter.h>
+#include <dxguids/dxguids.h>
+#endif
 
 // The windows headers define these macros which conflict with the C++ standard
 // library. Undefining them before including any LLVM C++ code prevents errors.
@@ -34,6 +41,7 @@
 #include <locale>
 
 using namespace offloadtest;
+using Microsoft::WRL::ComPtr;
 
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
@@ -80,42 +88,39 @@ DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-std::string StringFromWString(const std::wstring &In) {
-  using convert_type = std::codecvt_utf8<wchar_t>;
-  std::wstring_convert<convert_type, wchar_t> Converter;
-  return Converter.to_bytes(In);
-}
-
 class DXDevice : public offloadtest::Device {
 private:
-  CComPtr<IDXGIAdapter1> Adapter;
-  CComPtr<ID3D12Device> Device;
+  ComPtr<IDXCoreAdapter> Adapter;
+  ComPtr<ID3D12Device> Device;
   Capabilities Caps;
 
   struct ResourceSet {
-    CComPtr<ID3D12Resource> Upload;
-    CComPtr<ID3D12Resource> Buffer;
-    CComPtr<ID3D12Resource> Readback;
+    ComPtr<ID3D12Resource> Upload;
+    ComPtr<ID3D12Resource> Buffer;
+    ComPtr<ID3D12Resource> Readback;
   };
 
   struct InvocationState {
-    CComPtr<ID3D12RootSignature> RootSig;
-    CComPtr<ID3D12DescriptorHeap> DescHeap;
-    CComPtr<ID3D12PipelineState> PSO;
-    CComPtr<ID3D12CommandQueue> Queue;
-    CComPtr<ID3D12CommandAllocator> Allocator;
-    CComPtr<ID3D12GraphicsCommandList> CmdList;
-    CComPtr<ID3D12Fence> Fence;
+    ComPtr<ID3D12RootSignature> RootSig;
+    ComPtr<ID3D12DescriptorHeap> DescHeap;
+    ComPtr<ID3D12PipelineState> PSO;
+    ComPtr<ID3D12CommandQueue> Queue;
+    ComPtr<ID3D12CommandAllocator> Allocator;
+    ComPtr<ID3D12GraphicsCommandList> CmdList;
+    ComPtr<ID3D12Fence> Fence;
+#ifdef _WIN32
     HANDLE Event;
+#else // WSL
+    int Event;
+#endif
     llvm::SmallVector<ResourceSet> Resources;
   };
 
 public:
-  DXDevice(CComPtr<IDXGIAdapter1> A, CComPtr<ID3D12Device> D,
-           DXGI_ADAPTER_DESC1 Desc)
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D,
+           std::string Desc)
       : Adapter(A), Device(D) {
-    uint64_t StrSz = wcsnlen(Desc.Description, 128);
-    Description = StringFromWString(std::wstring(Desc.Description, StrSz));
+    Description = Desc;
   }
   DXDevice(const DXDevice &) = default;
 
@@ -124,20 +129,26 @@ public:
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
-  static llvm::Expected<DXDevice> Create(CComPtr<IDXGIAdapter1> Adapter) {
-    CComPtr<ID3D12Device> Device;
+  static llvm::Expected<DXDevice> Create(ComPtr<IDXCoreAdapter> Adapter) {
+    ComPtr<ID3D12Device> Device;
     if (auto Err =
-            HR::toError(D3D12CreateDevice(Adapter, D3D_FEATURE_LEVEL_11_0,
+            HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
                                           IID_PPV_ARGS(&Device)),
                         "Failed to create D3D device"))
       return Err;
-    DXGI_ADAPTER_DESC1 Desc;
-    if (auto Err = HR::toError(Adapter->GetDesc1(&Desc),
-                               "Failed to get device description"))
-      return Err;
+    assert(
+        Adapter->IsPropertySupported(DXCoreAdapterProperty::DriverDescription));
+    size_t BufferSize;
+    Adapter->GetPropertySize(DXCoreAdapterProperty::DriverDescription,
+                             &BufferSize);
+    std::vector<char> DescVec(BufferSize);
+    Adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, BufferSize,
+                         (void *)DescVec.data());
+#ifdef _WIN32
     if (auto Err = configureInfoQueue(Device))
       return Err;
-    return DXDevice(Adapter, Device, Desc);
+#endif
+    return DXDevice(Adapter, Device, std::string(DescVec.data()));
   }
 
   const Capabilities &getCapabilities() override {
@@ -148,7 +159,7 @@ public:
 
   void queryCapabilities() {
     CD3DX12FeatureSupport Features;
-    Features.Init(Device);
+    Features.Init(Device.Get());
 
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
@@ -167,14 +178,16 @@ public:
   }
 
   static llvm::Error configureInfoQueue(ID3D12Device *Device) {
+#ifdef _WIN32
 #ifndef NDEBUG
-    CComPtr<ID3D12InfoQueue> InfoQueue;
+    ComPtr<ID3D12InfoQueue> InfoQueue;
     if (auto Err = HR::toError(Device->QueryInterface(&InfoQueue),
                                "Error initializing info queue"))
       return Err;
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+#endif
 #endif
     return llvm::Error::success();
   }
@@ -222,8 +235,8 @@ public:
     Desc.Init(static_cast<uint32_t>(RootParams.size()), RootParams.data(), 0,
               nullptr, D3D12_ROOT_SIGNATURE_FLAG_NONE);
 
-    CComPtr<ID3DBlob> Signature;
-    CComPtr<ID3DBlob> Error;
+    ComPtr<ID3DBlob> Signature;
+    ComPtr<ID3DBlob> Error;
     if (auto Err = HR::toError(
             D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1,
                                         &Signature, &Error),
@@ -260,7 +273,7 @@ public:
   llvm::Error createPSO(Pipeline &P, llvm::StringRef DXIL,
                         InvocationState &State) {
     const D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {
-        State.RootSig,
+        State.RootSig.Get(),
         {DXIL.data(), DXIL.size()},
         0,
         {
@@ -287,20 +300,20 @@ public:
                                            IID_PPV_ARGS(&IS.Allocator)),
             "Failed to create command allocator."))
       return Err;
-    if (auto Err =
-            HR::toError(Device->CreateCommandList(
-                            0, D3D12_COMMAND_LIST_TYPE_DIRECT, IS.Allocator,
-                            nullptr, IID_PPV_ARGS(&IS.CmdList)),
-                        "Failed to create command list."))
+    if (auto Err = HR::toError(
+            Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                      IS.Allocator.Get(), nullptr,
+                                      IID_PPV_ARGS(&IS.CmdList)),
+            "Failed to create command list."))
       return Err;
     return llvm::Error::success();
   }
 
   void addResourceUploadCommands(Resource &R, InvocationState &IS,
-                                 CComPtr<ID3D12Resource> Destination,
-                                 CComPtr<ID3D12Resource> Source) {
+                                 ComPtr<ID3D12Resource> Destination,
+                                 ComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
-    IS.CmdList->CopyBufferRegion(Destination, 0, Source, 0, R.Size);
+    IS.CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0, R.Size);
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
@@ -309,8 +322,8 @@ public:
     llvm::outs() << "Creating SRV: { Size = " << R.Size << ", Register = t"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
-    CComPtr<ID3D12Resource> Buffer;
-    CComPtr<ID3D12Resource> UploadBuffer;
+    ComPtr<ID3D12Resource> Buffer;
+    ComPtr<ID3D12Resource> UploadBuffer;
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -373,7 +386,7 @@ public:
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     SRVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateShaderResourceView(Buffer, &SRVDesc, SRVHandle);
+    Device->CreateShaderResourceView(Buffer.Get(), &SRVDesc, SRVHandle);
 
     ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
     IS.Resources.push_back(Resources);
@@ -386,9 +399,9 @@ public:
     llvm::outs() << "Creating UAV: { Size = " << R.Size << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
-    CComPtr<ID3D12Resource> Buffer;
-    CComPtr<ID3D12Resource> UploadBuffer;
-    CComPtr<ID3D12Resource> ReadBackBuffer;
+    ComPtr<ID3D12Resource> Buffer;
+    ComPtr<ID3D12Resource> UploadBuffer;
+    ComPtr<ID3D12Resource> ReadBackBuffer;
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -472,7 +485,7 @@ public:
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     UAVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateUnorderedAccessView(Buffer, nullptr, &UAVDesc, UAVHandle);
+    Device->CreateUnorderedAccessView(Buffer.Get(), nullptr, &UAVDesc, UAVHandle);
 
     ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
     IS.Resources.push_back(Resources);
@@ -486,8 +499,8 @@ public:
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
-    CComPtr<ID3D12Resource> Buffer;
-    CComPtr<ID3D12Resource> UploadBuffer;
+    ComPtr<ID3D12Resource> Buffer;
+    ComPtr<ID3D12Resource> UploadBuffer;
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -577,39 +590,39 @@ public:
     return llvm::Error::success();
   }
 
-  void addUploadBeginBarrier(InvocationState &IS, CComPtr<ID3D12Resource> R) {
+  void addUploadBeginBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
     const D3D12_RESOURCE_BARRIER Barrier = {
         D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
         D3D12_RESOURCE_BARRIER_FLAG_NONE,
         {D3D12_RESOURCE_TRANSITION_BARRIER{
-            R, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
             D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST}}};
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  void addUploadEndBarrier(InvocationState &IS, CComPtr<ID3D12Resource> R,
+  void addUploadEndBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R,
                            bool IsUAV) {
     const D3D12_RESOURCE_BARRIER Barrier = {
         D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
         D3D12_RESOURCE_BARRIER_FLAG_NONE,
         {D3D12_RESOURCE_TRANSITION_BARRIER{
-            R, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+            R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
             D3D12_RESOURCE_STATE_COPY_DEST,
             IsUAV ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
                   : D3D12_RESOURCE_STATE_GENERIC_READ}}};
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  void addReadbackBeginBarrier(InvocationState &IS, CComPtr<ID3D12Resource> R) {
+  void addReadbackBeginBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        R, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+        R.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  void addReadbackEndBarrier(InvocationState &IS, CComPtr<ID3D12Resource> R) {
+  void addReadbackEndBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        R, D3D12_RESOURCE_STATE_COPY_SOURCE,
+        R.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
@@ -619,8 +632,13 @@ public:
                                                    IID_PPV_ARGS(&IS.Fence)),
                                "Failed to create fence."))
       return Err;
+#ifdef _WIN32
     IS.Event = CreateEventA(nullptr, false, false, nullptr);
     if (!IS.Event)
+#else // WSL
+    IS.Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (IS.Event == -1)
+#endif
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create event.");
     return llvm::Error::success();
@@ -631,16 +649,33 @@ public:
     static uint64_t FenceCounter = 0;
     uint64_t CurrentCounter = FenceCounter + 1;
 
-    if (auto Err = HR::toError(IS.Queue->Signal(IS.Fence, CurrentCounter),
+    if (auto Err = HR::toError(IS.Queue->Signal(IS.Fence.Get(), CurrentCounter),
                                "Failed to add signal."))
       return Err;
 
     if (IS.Fence->GetCompletedValue() < CurrentCounter) {
+#ifdef _WIN32
+      HANDLE Event = IS.Event;
+#else // WSL
+      HANDLE Event = reinterpret_cast<HANDLE>(IS.Event);
+#endif
       if (auto Err = HR::toError(
-              IS.Fence->SetEventOnCompletion(CurrentCounter, IS.Event),
+              IS.Fence->SetEventOnCompletion(CurrentCounter, Event),
               "Failed to register end event."))
         return Err;
+
+#ifdef _WIN32
       WaitForSingleObject(IS.Event, INFINITE);
+#else // WSL
+      pollfd pfd;
+      pfd.fd = IS.Event;
+      pfd.events = POLLIN;
+      pfd.revents = 0;
+      if (poll(&pfd, 1, -1) == -1)
+        return llvm::createStringError(
+            std::error_code(errno, std::system_category()),
+            strerror(errno));
+#endif
     }
     FenceCounter = CurrentCounter;
     return llvm::Error::success();
@@ -651,17 +686,17 @@ public:
             HR::toError(IS.CmdList->Close(), "Failed to close command list."))
       return Err;
 
-    ID3D12CommandList *CmdLists[] = {IS.CmdList};
+    ID3D12CommandList *CmdLists[] = {IS.CmdList.Get()};
     IS.Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
   }
 
   void createComputeCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdList->SetPipelineState(IS.PSO);
-    IS.CmdList->SetComputeRootSignature(IS.RootSig);
+    IS.CmdList->SetPipelineState(IS.PSO.Get());
+    IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
 
-    ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap};
+    ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
     IS.CmdList->SetDescriptorHeaps(1, Heaps);
 
     uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
@@ -680,7 +715,7 @@ public:
     for (auto &Out : IS.Resources)
       if (Out.Readback != nullptr) {
         addReadbackBeginBarrier(IS, Out.Buffer);
-        IS.CmdList->CopyResource(Out.Readback, Out.Buffer);
+        IS.CmdList->CopyResource(Out.Readback.Get(), Out.Buffer.Get());
         addReadbackEndBarrier(IS, Out.Buffer);
       }
   }
@@ -744,8 +779,9 @@ public:
 } // namespace
 
 llvm::Error InitializeDXDevices() {
+#ifdef _WIN32
 #ifndef NDEBUG
-  CComPtr<ID3D12Debug1> Debug1;
+  ComPtr<ID3D12Debug1> Debug1;
 
   if (auto Err = HR::toError(D3D12GetDebugInterface(IID_PPV_ARGS(&Debug1)),
                              "failed to create D3D12 Debug Interface"))
@@ -754,22 +790,32 @@ llvm::Error InitializeDXDevices() {
   Debug1->EnableDebugLayer();
   Debug1->SetEnableGPUBasedValidation(true);
 #endif
+#endif
 
-  CComPtr<IDXGIFactory2> Factory;
-  if (auto Err = HR::toError(CreateDXGIFactory2(0, IID_PPV_ARGS(&Factory)),
-                             "Failed to create DXGI Factory")) {
+  ComPtr<IDXCoreAdapterFactory> Factory;
+  if (auto Err = HR::toError(DXCoreCreateAdapterFactory(Factory.GetAddressOf()),
+                             "Failed to create DXCore Adapter Factory")) {
     return Err;
   }
-  for (unsigned AdapterIndex = 0;;) {
-    CComPtr<IDXGIAdapter1> Adapter;
 
-    HRESULT HR = Factory->EnumAdapters1(AdapterIndex++, &Adapter);
+  ComPtr<IDXCoreAdapterList> AdapterList;
+  GUID attributes[]{DXCORE_ADAPTER_ATTRIBUTE_D3D12_CORE_COMPUTE,
+                    DXCORE_ADAPTER_ATTRIBUTE_D3D12_GRAPHICS};
+  if (auto Err = HR::toError(
+          Factory->CreateAdapterList(_countof(attributes), attributes,
+                                     AdapterList.GetAddressOf()),
+          "Failed to acquire a list of adapters")) {
+    return Err;
+  }
 
-    if (DXGI_ERROR_NOT_FOUND == HR)
-      return llvm::Error::success();
-
-    if (auto Err = HR::toError(HR, ""))
+  for (unsigned AdapterIndex = 0; AdapterIndex < AdapterList->GetAdapterCount();
+       ++AdapterIndex) {
+    ComPtr<IDXCoreAdapter> Adapter;
+    if (auto Err = HR::toError(
+            AdapterList->GetAdapter(AdapterIndex, Adapter.GetAddressOf()),
+            "Failed to acquire adapter")) {
       return Err;
+    }
     auto ExDevice = DXDevice::Create(Adapter);
     if (!ExDevice)
       return ExDevice.takeError();
