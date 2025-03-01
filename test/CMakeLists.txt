@@ -166,7 +166,7 @@ if (NOT OFFLOADTEST_WARP_ONLY)
   endforeach()
 endif()
 
-if (OFFLOADTEST_ENABLE_D3D12)
+if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
   set(TEST_d3d12 True)
   set(FORCE_WARP True)
   add_offloadtest_lit_suite(warp-d3d12)

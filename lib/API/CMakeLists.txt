@@ -4,10 +4,18 @@ if (OFFLOADTEST_ENABLE_VULKAN)
   list(APPEND api_headers PRIVATE ${Vulkan_INCLUDE_DIRS})
 endif()
 
-if (OFFLOADTEST_ENABLE_D3D12)
+if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
   list(APPEND api_sources DX/Device.cpp DX/DXFeatures.cpp)
   list(APPEND api_libraries ${D3D12_LIBRARIES})
   list(APPEND api_headers PRIVATE ${DIRECTX_HEADERS_PATH}/include/directx)
+elseif (OFFLOADTEST_ENABLE_D3D12 AND D3D12_WSL_FOUND)
+  list(APPEND api_sources DX/WSLDevice.cpp DX/DXFeatures.cpp)
+  list(APPEND api_libraries ${D3D12_WSL_LIBRARIES})
+  list(APPEND api_headers PRIVATE
+    ${DIRECTX_HEADERS_PATH}/include
+    ${DIRECTX_HEADERS_PATH}/include/wsl/stubs
+    ${DIRECTX_HEADERS_PATH}/include/directx
+  )
 endif()
 
 if (APPLE)
