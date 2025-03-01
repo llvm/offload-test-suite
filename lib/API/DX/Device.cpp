@@ -300,13 +300,13 @@ public:
                                  CComPtr<ID3D12Resource> Destination,
                                  CComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
-    IS.CmdList->CopyBufferRegion(Destination, 0, Source, 0, R.Size);
+    IS.CmdList->CopyBufferRegion(Destination, 0, Source, 0, R.size());
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
   llvm::Error createSRV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    llvm::outs() << "Creating SRV: { Size = " << R.Size << ", Register = t"
+    llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
     CComPtr<ID3D12Resource> Buffer;
@@ -317,7 +317,7 @@ public:
     const D3D12_RESOURCE_DESC ResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.Size,
+        R.size(),
         1,
         1,
         1,
@@ -336,7 +336,7 @@ public:
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(R.Size);
+        CD3DX12_RESOURCE_DESC::Buffer(R.size());
 
     if (auto Err =
             HR::toError(Device->CreateCommittedResource(
@@ -351,20 +351,21 @@ public:
     if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
                                "Failed to acquire UAV data pointer."))
       return Err;
-    memcpy(ResDataPtr, R.Data.get(), R.Size);
+    memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
     UploadBuffer->Unmap(0, nullptr);
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
     const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.Size / EltSize;
+    const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT EltFormat =
-        R.isRaw() ? DXGI_FORMAT_UNKNOWN : getDXFormat(R.Format, R.Channels);
+        R.isRaw() ? DXGI_FORMAT_UNKNOWN
+                  : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {
         EltFormat,
         D3D12_SRV_DIMENSION_BUFFER,
         D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        {D3D12_BUFFER_SRV{0, NumElts, static_cast<uint32_t>(R.RawSize),
+        {D3D12_BUFFER_SRV{0, NumElts, static_cast<uint32_t>(R.size()),
                           D3D12_BUFFER_SRV_FLAG_NONE}}};
 
     llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
@@ -383,7 +384,7 @@ public:
 
   llvm::Error createUAV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    llvm::outs() << "Creating UAV: { Size = " << R.Size << ", Register = u"
+    llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
     CComPtr<ID3D12Resource> Buffer;
@@ -395,7 +396,7 @@ public:
     const D3D12_RESOURCE_DESC ResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.Size,
+        R.size(),
         1,
         1,
         1,
@@ -414,7 +415,7 @@ public:
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(R.Size);
+        CD3DX12_RESOURCE_DESC::Buffer(R.size());
 
     if (auto Err =
             HR::toError(Device->CreateCommittedResource(
@@ -429,7 +430,7 @@ public:
     const D3D12_RESOURCE_DESC ReadBackResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.Size,
+        R.size(),
         1,
         1,
         1,
@@ -451,19 +452,20 @@ public:
     if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
                                "Failed to acquire UAV data pointer."))
       return Err;
-    memcpy(ResDataPtr, R.Data.get(), R.Size);
+    memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
     UploadBuffer->Unmap(0, nullptr);
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
     const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.Size / EltSize;
+    const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT EltFormat =
-        R.isRaw() ? DXGI_FORMAT_UNKNOWN : getDXFormat(R.Format, R.Channels);
+        R.isRaw() ? DXGI_FORMAT_UNKNOWN
+                  : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
         EltFormat,
         D3D12_UAV_DIMENSION_BUFFER,
-        {D3D12_BUFFER_UAV{0, NumElts, static_cast<uint32_t>(R.RawSize), 0,
+        {D3D12_BUFFER_UAV{0, NumElts, static_cast<uint32_t>(R.size()), 0,
                           D3D12_BUFFER_UAV_FLAG_NONE}}};
 
     llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
@@ -482,7 +484,7 @@ public:
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    size_t CBVSize = (R.Size + 255u) & 0xFFFFFFFFFFFFFF00;
+    size_t CBVSize = (R.size() + 255u) & 0xFFFFFFFFFFFFFF00;
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -528,11 +530,11 @@ public:
     if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
                                "Failed to acquire UAV data pointer."))
       return Err;
-    memcpy(ResDataPtr, R.Data.get(), R.Size);
+    memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
     // Zero any remaining bytes
-    if (R.Size < CBVSize) {
-      void *ExtraData = static_cast<char *>(ResDataPtr) + R.Size;
-      memset(ExtraData, 0, CBVSize - R.Size - 1);
+    if (R.size() < CBVSize) {
+      void *ExtraData = static_cast<char *>(ResDataPtr) + R.size();
+      memset(ExtraData, 0, CBVSize - R.size() - 1);
     }
     UploadBuffer->Unmap(0, nullptr);
 
@@ -699,7 +701,7 @@ public:
                   ResourcesIterator->Readback->Map(0, nullptr, &DataPtr),
                   "Failed to map result."))
             return Err;
-          memcpy(R.Data.get(), DataPtr, R.Size);
+          memcpy(R.BufferPtr->Data.get(), DataPtr, R.size());
           ResourcesIterator->Readback->Unmap(0, nullptr);
         }
         ++ResourcesIterator;
