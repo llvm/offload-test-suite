@@ -17,12 +17,15 @@ DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Buf
     Format: Int32
+    Stride: 4
     Data: [ 1, -1, 2147483647, 0, -2147483648]
   - Name: Zeros
     Format: Int32
+    Stride: 4
     Data: [ 0, 0, 0, 0, 0]
   - Name: NegOnes
     Format: Int32
+    Stride: 4
     Data: [ -1, -1, -1, -1, -1]
 DescriptorSets:
   - Resources:
@@ -59,6 +62,7 @@ DescriptorSets:
 # CHECK: Name: Zeros
 # CHECK: Name: NegOnes
 # CHECK-NEXT: Format: Int32
+# CHECK-NEXT: Stride: 4
 # CHECK-NEXT: Data: [ -1, 1, -2147483647, 0
 
 # The last case here is definitly fun UB. -2147483648 / -1 on some GPUs returns

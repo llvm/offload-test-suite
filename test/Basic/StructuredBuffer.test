@@ -22,10 +22,12 @@ DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Hex32
+    Stride: 32
     Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003,
            0x00000000, 0x3f800000, 0x40000000, 0x40400000]
   - Name: Out
     Format: Hex32
+    Stride: 32
     ZeroInitSize: 32
 DescriptorSets:
   - Resources:

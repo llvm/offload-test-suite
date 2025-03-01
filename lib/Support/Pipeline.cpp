@@ -46,6 +46,9 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   I.mapRequired("Name", B.Name);
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
+  I.mapOptional("Stride", B.Stride, 0);
+  if (!I.outputting() && B.Stride != 0 && B.Channels != 1)
+    I.setError("Cannot set a structure stride and more than one channel.");
   switch (B.Format) {
 #define DATA_CASE(Enum, Type)                                                  \
   case DataFormat::Enum: {                                                     \

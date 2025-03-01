@@ -21,6 +21,7 @@ DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Buf
     Format: Int32
+    Stride: 24
     Data: [ 0, 1, 2, 0, 4, 0, 1, 2, 3, 0, 4, 0]
 DescriptorSets:
   - Resources:

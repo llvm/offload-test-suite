@@ -465,7 +465,7 @@ public:
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
         EltFormat,
         D3D12_UAV_DIMENSION_BUFFER,
-        {D3D12_BUFFER_UAV{0, NumElts, static_cast<uint32_t>(R.size()), 0,
+        {D3D12_BUFFER_UAV{0, NumElts, R.isRaw() ? R.getElementSize() : 0, 0,
                           D3D12_BUFFER_UAV_FLAG_NONE}}};
 
     llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize

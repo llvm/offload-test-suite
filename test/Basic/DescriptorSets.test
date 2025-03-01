@@ -64,5 +64,7 @@ DescriptorSets:
 # RUN: %if Metal %{ %offloader %t/DescriptorSets.yaml %t.metallib | FileCheck %s %}
 
 # CHECK: Data:
+# CHECK-LABEL: Name: Out1
 # CHECK: Data: [ 4, 16, 36, 64 ]
+# CHECK-LABEL: Name: Out2
 # CHECK: Data: [ 8, 64, 216, 512 ]

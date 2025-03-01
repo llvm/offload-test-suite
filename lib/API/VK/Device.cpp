@@ -54,6 +54,20 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::RWBuffer:
+    return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::RWStructuredBuffer:
+    return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  case ResourceKind::ConstantBuffer:
+    return VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+  }
+  llvm_unreachable("All cases handled");
+}
+
 static bool isUniform(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
@@ -321,38 +335,11 @@ public:
     if (!ExHostBuf)
       return ExHostBuf.takeError();
 
-    auto ExDeviceBuf = createBuffer(
-        IS,
-        (R.isRaw() ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-                   : VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT) |
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
-    if (!ExDeviceBuf)
-      return ExDeviceBuf.takeError();
-
-    VkBufferCopy Copy = {};
-    Copy.size = R.size();
-    vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                    &Copy);
-
-    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.size()});
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createCBV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
-    auto ExHostBuf = createBuffer(
-        IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), R.BufferPtr->Data.get());
-    if (!ExHostBuf)
-      return ExHostBuf.takeError();
-
-    auto ExDeviceBuf = createBuffer(
-        IS,
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+    auto ExDeviceBuf =
+        createBuffer(IS,
+                     getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
     if (!ExDeviceBuf)
       return ExDeviceBuf.takeError();
 
@@ -370,13 +357,8 @@ public:
     uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (isUniform(R.Kind)) {
-          if (auto Err = createBuffer(R, IS, HeapIndex++))
-            return Err;
-        } else {
-          if (auto Err = createCBV(R, IS, HeapIndex++))
-            return Err;
-        }
+        if (auto Err = createBuffer(R, IS, HeapIndex++))
+          return Err;
       }
     }
     return llvm::Error::success();

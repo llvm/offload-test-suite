@@ -59,13 +59,12 @@ struct Buffer {
   std::string Name;
   DataFormat Format;
   int Channels;
+  int Stride;
   std::unique_ptr<char[]> Data;
   size_t Size;
   OutputProperties OutputProps;
 
-  uint32_t size() const {
-    return Size;
-  }
+  uint32_t size() const { return Size; }
 
   uint32_t getSingleElementSize() const {
     switch (Format) {
@@ -90,6 +89,8 @@ struct Buffer {
   }
 
   uint32_t getElementSize() const {
+    if (Stride > 0)
+      return Stride;
     return getSingleElementSize() * Channels;
   }
 };
@@ -101,41 +102,34 @@ struct Resource {
   Buffer *BufferPtr = nullptr;
 
   bool isRaw() const {
-      switch (Kind) {
-      case ResourceKind::Buffer:
-      case ResourceKind::RWBuffer:
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
       return false;
-      case ResourceKind::StructuredBuffer:
-      case ResourceKind::RWStructuredBuffer:
-      case ResourceKind::ConstantBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ConstantBuffer:
       return true;
-      }
-      llvm_unreachable("All cases handled");
+    }
+    llvm_unreachable("All cases handled");
   }
 
-  uint32_t getElementSize() const {
-    if (isRaw())
-      return BufferPtr->Size;
-    return BufferPtr->getElementSize();
-  }
+  uint32_t getElementSize() const { return BufferPtr->getElementSize(); }
 
-  uint32_t size() const {
-    return BufferPtr->size();
-  }
+  uint32_t size() const { return BufferPtr->size(); }
 
   bool isReadWrite() const {
     switch (Kind) {
     case ResourceKind::Buffer:
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ConstantBuffer:
-    return false;
+      return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
-    return true;
+      return true;
     }
     llvm_unreachable("All cases handled");
-}
-
+  }
 };
 
 struct DescriptorSet {
