@@ -144,10 +144,8 @@ public:
     std::vector<char> DescVec(BufferSize);
     Adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, BufferSize,
                          (void *)DescVec.data());
-#ifdef _WIN32
-    if (auto Err = configureInfoQueue(Device))
+    if (auto Err = configureInfoQueue(Device.Get()))
       return Err;
-#endif
     return DXDevice(Adapter, Device, std::string(DescVec.data()));
   }
 
