@@ -570,7 +570,7 @@ public:
     StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     StageInfo.module = IS.Shader;
-    StageInfo.pName = P.Shaders[0].Entry;
+    StageInfo.pName = P.Shaders[0].Entry.c_str();
 
     VkComputePipelineCreateInfo PipelineCreateInfo = {};
     PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
