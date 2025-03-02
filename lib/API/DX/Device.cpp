@@ -14,13 +14,13 @@
 #include <d3dx12.h>
 #include <dxcore.h>
 #include <dxgiformat.h>
+#include <dxguids.h>
 
 #ifndef _WIN32
 #include <sys/eventfd.h>
 #include <unistd.h>
 #include <poll.h>
 #include <wsl/winadapter.h>
-#include <dxguids/dxguids.h>
 #endif
 
 // The windows headers define these macros which conflict with the C++ standard
@@ -179,7 +179,7 @@ public:
 #ifdef _WIN32
 #ifndef NDEBUG
     ComPtr<ID3D12InfoQueue> InfoQueue;
-    if (auto Err = HR::toError(Device->QueryInterface(&InfoQueue),
+    if (auto Err = HR::toError(Device->QueryInterface(InfoQueue.GetAddressOf()),
                                "Error initializing info queue"))
       return Err;
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);

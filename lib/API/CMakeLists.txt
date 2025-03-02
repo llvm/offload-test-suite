@@ -6,15 +6,15 @@ endif()
 
 if (OFFLOADTEST_ENABLE_D3D12)
   list(APPEND api_sources DX/Device.cpp DX/DXFeatures.cpp)
-  list(APPEND api_headers PRIVATE ${DIRECTX_HEADERS_PATH}/include/directx)
+  list(APPEND api_headers PRIVATE
+    ${DIRECTX_HEADERS_PATH}/include/directx
+    ${DIRECTX_HEADERS_PATH}/include/dxguids
+  )
   if (WIN32)
     list(APPEND api_libraries ${D3D12_LIBRARIES})
   elseif (D3D12_WSL_FOUND)
     list(APPEND api_libraries ${D3D12_WSL_LIBRARIES})
-    list(APPEND api_headers PRIVATE
-      ${DIRECTX_HEADERS_PATH}/include
-      ${DIRECTX_HEADERS_PATH}/include/wsl/stubs
-    )
+    list(APPEND api_headers PRIVATE ${DIRECTX_HEADERS_PATH}/include/wsl/stubs)
   endif()
 endif()
 
