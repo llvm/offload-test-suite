@@ -570,7 +570,7 @@ public:
     StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     StageInfo.module = IS.Shader;
-    StageInfo.pName = "main";
+    StageInfo.pName = P.Shaders[0].Entry.c_str();
 
     VkComputePipelineCreateInfo PipelineCreateInfo = {};
     PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -604,8 +604,10 @@ public:
     vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             IS.PipelineLayout, 0, IS.DescriptorSets.size(),
                             IS.DescriptorSets.data(), 0, 0);
-    vkCmdDispatch(IS.CmdBuffer, P.DispatchSize[0], P.DispatchSize[1],
-                  P.DispatchSize[2]);
+    llvm::ArrayRef<int> DispatchSize =
+        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
+    vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
+                  DispatchSize[2]);
 
     for (auto &UAV : IS.Buffers) {
       VkBufferMemoryBarrier Barrier = {};
@@ -691,7 +693,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeProgram(llvm::StringRef Program, Pipeline &P) override {
+  llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
     if (auto Err = createDevice(State))
       return Err;
@@ -714,7 +716,7 @@ public:
     if (auto Err = createDescriptorSets(P, State))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createShaderModule(Program, State))
+    if (auto Err = createShaderModule(P.Shaders[0].Shader->getBuffer(), State))
       return Err;
     llvm::outs() << "Shader module created.\n";
     if (auto Err = createPipeline(P, State))

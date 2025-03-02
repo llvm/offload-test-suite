@@ -17,7 +17,10 @@ void main(uint3 threadID : SV_DispatchThreadID) {
 //--- pipeline.yaml
 
 ---
-DispatchSize: [1, 1, 1]
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: value
     Format: Int32

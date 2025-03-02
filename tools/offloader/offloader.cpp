@@ -19,6 +19,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Regex.h"
@@ -32,9 +33,9 @@ static cl::opt<std::string>
     InputPipeline(cl::Positional, cl::desc("<input pipeline description>"),
                   cl::value_desc("filename"));
 
-static cl::opt<std::string> InputShader(cl::Positional,
-                                        cl::desc("<input compiled shader>"),
-                                        cl::value_desc("filename"));
+static cl::list<std::string> InputShader(cl::Positional,
+                                         cl::desc("<input compiled shader>"),
+                                         cl::value_desc("filename"));
 
 static cl::opt<GPUAPI>
     APIToUse("api", cl::desc("GPU API to use"), cl::init(GPUAPI::Unknown),
@@ -81,18 +82,32 @@ int run() {
   ExitOnError ExitOnErr("gpu-exec: error: ");
   ExitOnErr(Device::initialize());
 
-  std::unique_ptr<MemoryBuffer> ShaderBuf = readFile(InputShader);
+  std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
+  Pipeline PipelineDesc;
+  yaml::Input YIn(PipelineBuf->getBuffer());
+  YIn >> PipelineDesc;
+  ExitOnErr(llvm::errorCodeToError(YIn.error()));
+
+  // Read in the shaders
+  for (size_t I = 0; I < InputShader.size(); ++I)
+    PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+
+  if (InputShader.size() != PipelineDesc.Shaders.size())
+    ExitOnErr(createStringError(
+        std::errc::invalid_argument,
+        "Pipeline description expects %d shader(s) %d provided",
+        PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
   if (APIToUse == GPUAPI::Unknown) {
-    if (ShaderBuf->getBuffer().starts_with("DXBC")) {
+    if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("DXBC")) {
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
     } else if (*reinterpret_cast<const uint32_t *>(
-                   ShaderBuf->getBuffer().data()) == 0x07230203) {
+                   PipelineDesc.Shaders[0].Shader->getBuffer().data()) == 0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (ShaderBuf->getBuffer().starts_with("MTLB")) {
+    } else if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("MTLB")) {
       APIToUse = GPUAPI::Metal;
       outs() << "Using Metal API\n";
     }
@@ -107,18 +122,12 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
-  std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
-  Pipeline PipelineDesc;
-  yaml::Input YIn(PipelineBuf->getBuffer());
-  YIn >> PipelineDesc;
-  ExitOnErr(llvm::errorCodeToError(YIn.error()));
-
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
-    ExitOnErr(D->executeProgram(ShaderBuf->getBuffer(), PipelineDesc));
+    ExitOnErr(D->executeProgram(PipelineDesc));
 
     if (Quiet)
       return 0;
