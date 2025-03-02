@@ -15,33 +15,38 @@ void main(uint3 TID : SV_GroupThreadID) {
 
 ---
 DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Nans
+    Format: Float32
+    Data: [ nan, nan, nan, nan ]
+  - Name: Infs
+    Format: Float32
+    Data: [ inf, inf, inf, inf ]
+  - Name: NegInfs
+    Format: Float32
+    Data: [ -inf, -inf, -inf, -inf ]
+  - Name: Mix
+    Format: Float32
+    Data: [ inf, -inf, nan, 0 ]
 DescriptorSets:
   - Resources:
-    - Kind: RWStructuredBuffer
-      Format: Float32
-      RawSize: 4
-      Data: [ nan, nan, nan, nan ]
+    - Name: Nans
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
-    - Kind: RWStructuredBuffer
-      Format: Float32
-      RawSize: 4
-      Data: [ inf, inf, inf, inf ]
+    - Name: Infs
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
-    - Kind: RWStructuredBuffer
-      Format: Float32
-      RawSize: 4
-      Data: [ -inf, -inf, -inf, -inf ]
+    - Name: NegInfs
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
-    - Kind: RWStructuredBuffer
-      Format: Float32
-      RawSize: 4
-      Data: [ inf, -inf, nan, 0 ]
+    - Name: Mix
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
@@ -79,21 +84,17 @@ DescriptorSets:
 
 # XFAIL: DirectX-WARP
 
-# CHECK: Kind: RWStructuredBuffer
+# CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32
-# CHECK-NEXT: RawSize: 4
 # METAL-NEXT: Data: [ 0, 0, 0, 0 ]
 # DX-NEXT: Data:
 # VULKAN-NEXT: Data:
-# CHECK: Kind: RWStructuredBuffer
+# CHECK: Name: Infs
 # CHECK-NEXT: Format: Float32
-# CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
-# CHECK: Kind: RWStructuredBuffer
+# CHECK: Name: NegInfs
 # CHECK-NEXT: Format: Float32
-# CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ 0, 0, 0, 0 ]
-# CHECK: Kind: RWStructuredBuffer
+# CHECK: Name: Mix
 # CHECK-NEXT: Format: Float32
-# CHECK-NEXT: RawSize: 4
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]

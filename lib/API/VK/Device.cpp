@@ -54,6 +54,20 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::RWBuffer:
+    return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::RWStructuredBuffer:
+    return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+  case ResourceKind::ConstantBuffer:
+    return VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+  }
+  llvm_unreachable("All cases handled");
+}
+
 static bool isUniform(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
@@ -317,51 +331,24 @@ public:
                            const uint32_t HeapIdx) {
     auto ExHostBuf = createBuffer(
         IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.Size, R.Data.get());
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), R.BufferPtr->Data.get());
     if (!ExHostBuf)
       return ExHostBuf.takeError();
 
-    auto ExDeviceBuf = createBuffer(
-        IS,
-        (R.isRaw() ? VK_BUFFER_USAGE_STORAGE_BUFFER_BIT
-                   : VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT) |
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.Size);
+    auto ExDeviceBuf =
+        createBuffer(IS,
+                     getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
     if (!ExDeviceBuf)
       return ExDeviceBuf.takeError();
 
     VkBufferCopy Copy = {};
-    Copy.size = R.Size;
+    Copy.size = R.size();
     vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
                     &Copy);
 
-    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.Size});
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createCBV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
-    auto ExHostBuf = createBuffer(
-        IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.Size, R.Data.get());
-    if (!ExHostBuf)
-      return ExHostBuf.takeError();
-
-    auto ExDeviceBuf = createBuffer(
-        IS,
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.Size);
-    if (!ExDeviceBuf)
-      return ExDeviceBuf.takeError();
-
-    VkBufferCopy Copy = {};
-    Copy.size = R.Size;
-    vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                    &Copy);
-
-    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.Size});
+    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.size()});
 
     return llvm::Error::success();
   }
@@ -370,13 +357,8 @@ public:
     uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (isUniform(R.Kind)) {
-          if (auto Err = createBuffer(R, IS, HeapIndex++))
-            return Err;
-        } else {
-          if (auto Err = createCBV(R, IS, HeapIndex++))
-            return Err;
-        }
+        if (auto Err = createBuffer(R, IS, HeapIndex++))
+          return Err;
       }
     }
     return llvm::Error::success();
@@ -527,7 +509,8 @@ public:
         VkBufferViewCreateInfo ViewCreateInfo = {};
         bool IsRawOrUniform = R.isRaw();
         VkFormat Format = IsRawOrUniform ? VK_FORMAT_UNDEFINED
-                                         : getVKFormat(R.Format, R.Channels);
+                                         : getVKFormat(R.BufferPtr->Format,
+                                                       R.BufferPtr->Channels);
         ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
         ViewCreateInfo.buffer = IS.Buffers[BufIdx].Device.Buffer;
         ViewCreateInfo.format = Format;
@@ -670,7 +653,7 @@ public:
         Range.offset = 0;
         Range.size = VK_WHOLE_SIZE;
         vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-        memcpy(R.Data.get(), Mapped, R.Size);
+        memcpy(R.BufferPtr->Data.get(), Mapped, R.size());
         vkUnmapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory);
         UAVIdx++;
       }

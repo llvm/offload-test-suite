@@ -50,53 +50,21 @@ struct DirectXBinding {
 };
 
 struct OutputProperties {
-  std::string Name;
   int Height;
   int Width;
   int Depth;
 };
 
-struct Resource {
+struct Buffer {
+  std::string Name;
   DataFormat Format;
   int Channels;
-  int RawSize;
-  ResourceKind Kind;
-  size_t Size;
+  int Stride;
   std::unique_ptr<char[]> Data;
-  DirectXBinding DXBinding;
+  size_t Size;
   OutputProperties OutputProps;
 
-  bool isRaw() const {
-      switch (Kind) {
-      case ResourceKind::Buffer:
-      case ResourceKind::RWBuffer:
-      return false;
-      case ResourceKind::StructuredBuffer:
-      case ResourceKind::RWStructuredBuffer:
-      case ResourceKind::ConstantBuffer:
-      return true;
-      }
-      llvm_unreachable("All cases handled");
-  }
-
-  bool isReadWrite() const {
-    switch (Kind) {
-    case ResourceKind::Buffer:
-    case ResourceKind::StructuredBuffer:
-    case ResourceKind::ConstantBuffer:
-    return false;
-    case ResourceKind::RWBuffer:
-    case ResourceKind::RWStructuredBuffer:
-    return true;
-    }
-    llvm_unreachable("All cases handled");
-}
-
-  uint32_t getElementSize() const {
-    if (isRaw())
-      return RawSize;
-    return getSingleElementSize() * Channels;
-  }
+  uint32_t size() const { return Size; }
 
   uint32_t getSingleElementSize() const {
     switch (Format) {
@@ -119,6 +87,49 @@ struct Resource {
     }
     llvm_unreachable("All cases covered.");
   }
+
+  uint32_t getElementSize() const {
+    if (Stride > 0)
+      return Stride;
+    return getSingleElementSize() * Channels;
+  }
+};
+
+struct Resource {
+  ResourceKind Kind;
+  std::string Name;
+  DirectXBinding DXBinding;
+  Buffer *BufferPtr = nullptr;
+
+  bool isRaw() const {
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+      return false;
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ConstantBuffer:
+      return true;
+    }
+    llvm_unreachable("All cases handled");
+  }
+
+  uint32_t getElementSize() const { return BufferPtr->getElementSize(); }
+
+  uint32_t size() const { return BufferPtr->size(); }
+
+  bool isReadWrite() const {
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::ConstantBuffer:
+      return false;
+    case ResourceKind::RWBuffer:
+    case ResourceKind::RWStructuredBuffer:
+      return true;
+    }
+    llvm_unreachable("All cases handled");
+  }
 };
 
 struct DescriptorSet {
@@ -127,6 +138,7 @@ struct DescriptorSet {
 
 struct Pipeline {
   int DispatchSize[3];
+  llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<DescriptorSet> Sets;
 
   uint32_t getDescriptorCount() const {
@@ -140,6 +152,7 @@ struct Pipeline {
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
 
 namespace llvm {
 namespace yaml {
@@ -150,6 +163,10 @@ template <> struct MappingTraits<offloadtest::Pipeline> {
 
 template <> struct MappingTraits<offloadtest::DescriptorSet> {
   static void mapping(IO &I, offloadtest::DescriptorSet &D);
+};
+
+template <> struct MappingTraits<offloadtest::Buffer> {
+  static void mapping(IO &I, offloadtest::Buffer &R);
 };
 
 template <> struct MappingTraits<offloadtest::Resource> {

@@ -14,26 +14,33 @@ void main(uint3 TID : SV_GroupThreadID) {
 //--- pipeline.yaml
 ---
 DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Buf
+    Format: Int32
+    Stride: 4
+    Data: [ 1, -1, 2147483647, 0, -2147483648]
+  - Name: Zeros
+    Format: Int32
+    Stride: 4
+    Data: [ 0, 0, 0, 0, 0]
+  - Name: NegOnes
+    Format: Int32
+    Stride: 4
+    Data: [ -1, -1, -1, -1, -1]
 DescriptorSets:
   - Resources:
-    - Kind: RWStructuredBuffer
-      Format: Int32
-      RawSize: 4
-      Data: [ 1, -1, 2147483647, 0, -2147483648]
+    - Name: Buf
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
-    - Kind: RWStructuredBuffer
-      Format: Int32
-      RawSize: 4
-      Data: [ 0, 0, 0, 0, 0]
+    - Name: Zeros
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
-    - Kind: RWStructuredBuffer
-      Format: Int32
-      RawSize: 4
-      Data: [ -1, -1, -1, -1, -1]
+    - Name: NegOnes
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
@@ -52,11 +59,10 @@ DescriptorSets:
 
 # Divide by-zero behavior seems to be erradic enough to call it undefined...
 
-# CHECK: Kind: RWStructuredBuffer
-# CHECK: Kind: RWStructuredBuffer
-# CHECK: Kind: RWStructuredBuffer
+# CHECK: Name: Zeros
+# CHECK: Name: NegOnes
 # CHECK-NEXT: Format: Int32
-# CHECK-NEXT: RawSize: 4
+# CHECK-NEXT: Stride: 4
 # CHECK-NEXT: Data: [ -1, 1, -2147483647, 0
 
 # The last case here is definitly fun UB. -2147483648 / -1 on some GPUs returns
