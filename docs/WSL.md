@@ -18,7 +18,7 @@ Alternatively, build and install the DirectX-Headers from the [original repo](ht
   - Good luck debugging!
 - PSOs can fail to be created due to unsigned shaders
   - Fix: Use a newer version of DXC that includes the validator binary `dxv`
-- `double free or corruption (!prev)` may occur when running `api-query` and/or `offloader`, which follows with in an infinite stall
+- `double free or corruption (!prev)` may occur when `api-query` and `offloader` exit, which then follows with an infinite stall instead of program termination
   - A workaround is implemented which avoids this issue on normal program exit (i.e., `return 0;` from main)
   - This issue appears to occur whenever `DeviceContext::Devices` from `lib/API/Device.cpp` contains more than one device. 
     When `api-query` or `offloader` exit, some memory resources are failing to automatically free themselves. 
