@@ -189,7 +189,8 @@ class MTLDevice : public offloadtest::Device {
                               MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
 
     NS::UInteger TGS = IS.PipelineState->maxTotalThreadsPerThreadgroup();
-    ArrayRef<int> DispatchSize = ArrayRef<int>(P.Shaders[0].DispatchSize);
+    llvm::ArrayRef<int> DispatchSize =
+        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
     MTL::Size GridSize =
         MTL::Size(TGS * DispatchSize[0], DispatchSize[1], DispatchSize[2]);
     MTL::Size GroupSize(TGS, 1, 1);

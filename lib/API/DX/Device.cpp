@@ -676,7 +676,8 @@ public:
       Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
     }
 
-    ArrayRef<int> DispatchSize = ArrayRef<int>(P.Shaders[0].DispatchSize);
+    llvm::ArrayRef<int> DispatchSize =
+        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
 
     IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
 

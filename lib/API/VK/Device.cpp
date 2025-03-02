@@ -604,7 +604,8 @@ public:
     vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             IS.PipelineLayout, 0, IS.DescriptorSets.size(),
                             IS.DescriptorSets.data(), 0, 0);
-    ArrayRef<int> DispatchSize = ArrayRef<int>(P.Shaders[0].DispatchSize);
+    llvm::ArrayRef<int> DispatchSize =
+        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
     vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
                   DispatchSize[2]);
 
