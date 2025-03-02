@@ -13,19 +13,24 @@ void main(uint GI : SV_GroupIndex) {
 //--- pipeline.yaml
 ---
 DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Hex32
+    Stride: 16
+    Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003]
+  - Name: Out
+    Format: Hex32
+    Stride: 16
+    ZeroInitSize: 16
 DescriptorSets:
   - Resources:
-    - Kind: StructuredBuffer
-      Format: Hex32
-      RawSize: 16
-      Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003]
+    - Name: In
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
-    - Kind: RWStructuredBuffer
-      Format: Hex32
-      RawSize: 16
-      ZeroInitSize: 16
+    - Name: Out
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
@@ -42,7 +47,7 @@ DescriptorSets:
 # RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
 # RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s %}
 
-# CHECK: Kind: StructuredBuffer
+# CHECK: Name: In
 # CHECK: Data: [
 # CHECK: 0x0,
 # CHECK: 0x1,
@@ -50,7 +55,7 @@ DescriptorSets:
 # CHECK: 0x3
 # CHECK: ]
 
-# CHECK: Kind: RWStructuredBuffer
+# CHECK: Name: Out
 # CHECK: Data: [
 # CHECK: 0x0,
 # CHECK: 0x2,

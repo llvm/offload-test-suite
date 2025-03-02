@@ -85,12 +85,12 @@ public:
     assert(Data.size() == size() && "Data size does not match properties");
   }
 
-  ImageRef(const Resource &R)
-      : ImageRef(R.OutputProps.Height, R.OutputProps.Width,
-                 R.getSingleElementSize(), R.Channels,
-                 R.Format == DataFormat::Float32 ||
-                     R.Format == DataFormat::Float64,
-                 llvm::StringRef(R.Data.get(), R.Size)) {}
+  ImageRef(const Buffer &B)
+      : ImageRef(
+            B.OutputProps.Height, B.OutputProps.Width,
+            B.getSingleElementSize(), B.Channels,
+            B.Format == DataFormat::Float32 || B.Format == DataFormat::Float64,
+            llvm::StringRef(B.Data.get(), B.size())) {}
 
   uint32_t getHeight() const { return Height; }
   uint32_t getWidth() const { return Width; }

@@ -54,11 +54,11 @@ bool IsTexture(offloadtest::ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
-  return true;
+    return true;
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
-  return false;
+    return false;
   }
   llvm_unreachable("All cases handled");
 }
@@ -121,26 +121,27 @@ class MTLDevice : public offloadtest::Device {
     auto *TablePtr = (IRDescriptorTableEntry *)IS.ArgBuffer->contents();
 
     if (R.isRaw()) {
-      MTL::Buffer *Buf = Device->newBuffer(R.Data.get(), R.Size,
+      MTL::Buffer *Buf = Device->newBuffer(R.BufferPtr->Data.get(), R.size(),
                                            MTL::ResourceStorageModeManaged);
       IRBufferView View = {};
       View.buffer = Buf;
-      View.bufferSize = R.Size;
+      View.bufferSize = R.size();
 
       IRDescriptorTableSetBufferView(&TablePtr[HeapIdx], &View);
       IS.Buffers.push_back(Buf);
     } else {
-      uint64_t Width = R.Size / R.getElementSize();
+      uint64_t Width = R.size() / R.getElementSize();
       MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
       if (R.isReadWrite())
         UsageFlags |= MTL::ResourceUsageWrite;
       MTL::TextureDescriptor *Desc =
           MTL::TextureDescriptor::textureBufferDescriptor(
-              getMTLFormat(R.Format, R.Channels), Width,
+              getMTLFormat(R.BufferPtr->Format, R.BufferPtr->Channels), Width,
               MTL::ResourceStorageModeManaged, UsageFlags);
 
       MTL::Texture *NewTex = Device->newTexture(Desc);
-      NewTex->replaceRegion(MTL::Region(0, 0, Width, 1), 0, R.Data.get(), 0);
+      NewTex->replaceRegion(MTL::Region(0, 0, Width, 1), 0,
+                            R.BufferPtr->Data.get(), 0);
 
       IS.Textures.push_back(NewTex);
 
@@ -209,11 +210,12 @@ class MTLDevice : public offloadtest::Device {
       for (auto &R : D.Resources) {
         if (R.isReadWrite()) {
           if (R.isRaw()) {
-            memcpy(R.Data.get(), IS.Buffers[BufferIndex++]->contents(), R.Size);
+            memcpy(R.BufferPtr->Data.get(),
+                   IS.Buffers[BufferIndex++]->contents(), R.size());
           } else {
-            uint64_t Width = R.Size / R.getElementSize();
+            uint64_t Width = R.size() / R.getElementSize();
             IS.Textures[TextureIndex++]->getBytes(
-                R.Data.get(), 0, MTL::Region(0, 0, Width, 1), 0);
+                R.BufferPtr->Data.get(), 0, MTL::Region(0, 0, Width, 1), 0);
           }
         } else {
           if (R.isRaw())
