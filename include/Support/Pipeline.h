@@ -23,7 +23,9 @@
 namespace offloadtest {
 
 enum class Stages {
-  Compute
+  Compute,
+  Vertex,
+  Pixel
 };
 
 enum class DataFormat {
@@ -46,6 +48,7 @@ enum class ResourceKind {
   StructuredBuffer,
   RWBuffer,
   RWStructuredBuffer,
+  Texture2D,
   ConstantBuffer,
 };
 
@@ -110,6 +113,7 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
+    case ResourceKind::Texture2D:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -127,6 +131,7 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Buffer:
     case ResourceKind::StructuredBuffer:
+    case ResourceKind::Texture2D:
     case ResourceKind::ConstantBuffer:
       return false;
     case ResourceKind::RWBuffer:
@@ -141,6 +146,11 @@ struct DescriptorSet {
   llvm::SmallVector<Resource> Resources;
 };
 
+struct IOBindings {
+  std::string VertexBuffer;
+  Buffer *VertexBufferPtr;
+};
+
 struct Shader {
   Stages Stage;
   std::string Entry;
@@ -151,6 +161,7 @@ struct Shader {
 struct Pipeline {
   llvm::SmallVector<Shader> Shaders;
 
+  IOBindings Bindings;
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<DescriptorSet> Sets;
 
@@ -159,6 +170,14 @@ struct Pipeline {
     for (auto &D : Sets)
       DescriptorCount += D.Resources.size();
     return DescriptorCount;
+  }
+
+  Buffer *findBuffer(llvm::StringRef Name) {
+    for (auto &B : Buffers) {
+      if (B.Name == Name)
+        return &B;
+    }
+    return nullptr;
   }
 };
 } // namespace offloadtest
@@ -189,6 +208,10 @@ template <> struct MappingTraits<offloadtest::Resource> {
 
 template <> struct MappingTraits<offloadtest::DirectXBinding> {
   static void mapping(IO &I, offloadtest::DirectXBinding &B);
+};
+
+template <> struct MappingTraits<offloadtest::IOBindings> {
+  static void mapping(IO &I, offloadtest::IOBindings &B);
 };
 
 template <> struct MappingTraits<offloadtest::OutputProperties> {
@@ -225,6 +248,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
+    ENUM_CASE(Texture2D);
     ENUM_CASE(ConstantBuffer);
 #undef ENUM_CASE
   }
@@ -234,6 +258,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
   static void enumeration(IO &I, offloadtest::Stages &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
     ENUM_CASE(Compute);
+    ENUM_CASE(Vertex);
+    ENUM_CASE(Pixel);
 #undef ENUM_CASE
   }
 };

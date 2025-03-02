@@ -54,6 +54,7 @@ bool IsTexture(offloadtest::ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
+  case ResourceKind::Texture2D:
     return true;
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
