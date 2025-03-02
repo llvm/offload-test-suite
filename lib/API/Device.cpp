@@ -47,6 +47,7 @@ public:
   }
 
   void registerDevice(std::shared_ptr<Device> D) { Devices.push_back(D); }
+  void unregisterDevices() { Devices.clear(); }
 
   DeviceIterator begin() { return Devices.begin(); }
 
@@ -74,6 +75,10 @@ llvm::Error Device::initialize() {
     return Err;
 #endif
   return llvm::Error::success();
+}
+
+void Device::uninitialize() {
+  DeviceContext::Instance().unregisterDevices();
 }
 
 Device::DeviceIterator Device::begin() {

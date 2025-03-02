@@ -45,6 +45,7 @@ public:
 
   static void registerDevice(std::shared_ptr<Device> D);
   static llvm::Error initialize();
+  static void uninitialize();
 
   using DeviceArray = llvm::SmallVector<std::shared_ptr<Device>>;
   using DeviceIterator = DeviceArray::iterator;

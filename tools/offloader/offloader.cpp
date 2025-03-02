@@ -74,6 +74,7 @@ int main(int ArgC, char **ArgV) {
     errs() << "No device available.";
     return 1;
   }
+  Device::uninitialize();
   return 0;
 }
 
