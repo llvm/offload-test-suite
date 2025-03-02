@@ -97,8 +97,9 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Buffer *> Buffers;
   };
 
-  llvm::Error loadShaders(InvocationState &IS, llvm::StringRef Program) {
+  llvm::Error loadShaders(InvocationState &IS, const Shader &P) {
     NS::Error *Error = nullptr;
+    llvm::StringRef Program = P.Shader->getBuffer();
     dispatch_data_t data = dispatch_data_create(Program.data(), Program.size(),
                                                 dispatch_get_main_queue(),
                                                 ^{
@@ -108,7 +109,7 @@ class MTLDevice : public offloadtest::Device {
       return toError(Error);
 
     IS.Fn =
-        IS.Lib->newFunction(NS::String::string("main", NS::UTF8StringEncoding));
+        IS.Lib->newFunction(NS::String::string(P.Entry.c_str(), NS::UTF8StringEncoding));
     IS.PipelineState = Device->newComputePipelineState(IS.Fn, &Error);
     if (Error)
       return toError(Error);
@@ -241,10 +242,10 @@ public:
   llvm::StringRef getAPIName() const override { return "Metal"; };
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
-  llvm::Error executeProgram(llvm::StringRef Program, Pipeline &P) override {
+  llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
     IS.Queue = Device->newCommandQueue();
-    if (auto Err = loadShaders(IS, Program))
+    if (auto Err = loadShaders(IS, P.Shaders[0]))
       return Err;
 
     if (auto Err = createBuffers(P, IS))

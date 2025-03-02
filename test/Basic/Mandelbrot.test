@@ -54,6 +54,9 @@ const static int Dimension = 4096;
 
 //--- pipeline.yaml
 ---
+Shaders:
+  - Stage: Compute
+    Entry: main
 DispatchSize: [16384, 1, 1]
 Buffers:
   - Name: Tex

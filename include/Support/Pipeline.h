@@ -15,11 +15,16 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
 #include <memory>
 #include <string>
 
 namespace offloadtest {
+
+enum class Stages {
+  Compute
+};
 
 enum class DataFormat {
   Hex8,
@@ -136,7 +141,15 @@ struct DescriptorSet {
   llvm::SmallVector<Resource> Resources;
 };
 
+struct Shader {
+  Stages Stage;
+  std::string Entry;
+  std::unique_ptr<llvm::MemoryBuffer> Shader;
+};
+
 struct Pipeline {
+  llvm::SmallVector<Shader> Shaders;
+
   int DispatchSize[3];
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -153,6 +166,7 @@ struct Pipeline {
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 
 namespace llvm {
 namespace yaml {
@@ -179,6 +193,10 @@ template <> struct MappingTraits<offloadtest::DirectXBinding> {
 
 template <> struct MappingTraits<offloadtest::OutputProperties> {
   static void mapping(IO &I, offloadtest::OutputProperties &P);
+};
+
+template <> struct MappingTraits<offloadtest::Shader> {
+  static void mapping(IO &I, offloadtest::Shader &B);
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
@@ -208,6 +226,14 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
     ENUM_CASE(ConstantBuffer);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
+  static void enumeration(IO &I, offloadtest::Stages &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
+    ENUM_CASE(Compute);
 #undef ENUM_CASE
   }
 };

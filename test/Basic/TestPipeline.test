@@ -3,13 +3,16 @@ RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 
 [numthreads(8,1,1)]
-void main(uint3 TID : SV_GroupThreadID) {
+void CSMain(uint3 TID : SV_GroupThreadID) {
   Out[TID.x] = In[TID.x];
 }
 
 //--- pipeline.yaml
 
 ---
+Shaders:
+  - Stage: Compute
+    Entry: CSMain
 DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
@@ -35,11 +38,11 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
-# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
+# RUN: %if DirectX %{ dxc -T cs_6_0 -E CSMain -Fo %t.dxil %t/source.hlsl %}
 # RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil | FileCheck %s %}
-# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -Fo %t.spv %t/source.hlsl %}
+# RUN: %if Vulkan %{ dxc -T cs_6_0 -E CSMain -spirv -Fo %t.spv %t/source.hlsl %}
 # RUN: %if Vulkan %{ %offloader %t/pipeline.yaml %t.spv | FileCheck %s %}
-# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
+# RUN: %if Metal %{ dxc -T cs_6_0 -E CSMain -Fo %t.dxil %t/source.hlsl %}
 # RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
 # RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s %}
 

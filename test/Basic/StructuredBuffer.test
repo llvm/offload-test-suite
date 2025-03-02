@@ -18,6 +18,9 @@ void main(uint GI : SV_GroupIndex) {
 }
 //--- pipeline.yaml
 ---
+Shaders:
+  - Stage: Compute
+    Entry: main
 DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In

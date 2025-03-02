@@ -710,7 +710,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeProgram(llvm::StringRef Program, Pipeline &P) override {
+  llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
     if (auto Err = createRootSignature(P, State))
@@ -719,7 +719,7 @@ public:
     if (auto Err = createDescriptorHeap(P, State))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
-    if (auto Err = createPSO(P, Program, State))
+    if (auto Err = createPSO(P, P.Shaders[0]->getBuffer(), State))
       return Err;
     llvm::outs() << "PSO created.\n";
     if (auto Err = createCommandStructures(State))

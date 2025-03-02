@@ -570,7 +570,7 @@ public:
     StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     StageInfo.module = IS.Shader;
-    StageInfo.pName = "main";
+    StageInfo.pName = P.Shaders[0].Entry;
 
     VkComputePipelineCreateInfo PipelineCreateInfo = {};
     PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -691,7 +691,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeProgram(llvm::StringRef Program, Pipeline &P) override {
+  llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
     if (auto Err = createDevice(State))
       return Err;
@@ -714,7 +714,7 @@ public:
     if (auto Err = createDescriptorSets(P, State))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createShaderModule(Program, State))
+    if (auto Err = createShaderModule(P.Shaders[0]->getBuffer(), State))
       return Err;
     llvm::outs() << "Shader module created.\n";
     if (auto Err = createPipeline(P, State))

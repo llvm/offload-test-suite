@@ -18,9 +18,13 @@ namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   MutableArrayRef<int> MutableDispatchSize(P.DispatchSize);
-  I.mapRequired("DispatchSize", MutableDispatchSize);
+  I.mapRequired("Shaders", P.Shaders);
   I.mapRequired("Buffers", P.Buffers);
   I.mapRequired("DescriptorSets", P.Sets);
+
+  // Stage-specific data, not sure if this should be optional
+  // or moved into the Shaders structure.
+  I.mapRequired("DispatchSize", MutableDispatchSize);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
@@ -108,6 +112,12 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Height", P.Height);
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
+}
+
+void MappingTraits<offloadtest::Shader>::mapping(IO &I,
+  offloadtest::Shader &S) {
+    I.mapRequired("Stage", S.Stage);
+    I.mapRequired("Entry", S.Entry);
 }
 } // namespace yaml
 } // namespace llvm
