@@ -604,8 +604,9 @@ public:
     vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             IS.PipelineLayout, 0, IS.DescriptorSets.size(),
                             IS.DescriptorSets.data(), 0, 0);
-    vkCmdDispatch(IS.CmdBuffer, P.DispatchSize[0], P.DispatchSize[1],
-                  P.DispatchSize[2]);
+    ArrayRef<int> DispatchSize = ArrayRef<int>(P.Shaders[0].DispatchSize);
+    vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
+                  DispatchSize[2]);
 
     for (auto &UAV : IS.Buffers) {
       VkBufferMemoryBarrier Barrier = {};
@@ -714,7 +715,7 @@ public:
     if (auto Err = createDescriptorSets(P, State))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createShaderModule(P.Shaders[0]->getBuffer(), State))
+    if (auto Err = createShaderModule(P.Shaders[0].Shader->getBuffer(), State))
       return Err;
     llvm::outs() << "Shader module created.\n";
     if (auto Err = createPipeline(P, State))

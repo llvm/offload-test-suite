@@ -12,7 +12,7 @@ void main(uint3 TID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-DispatchSize: [1, 1, 1]
+    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float32

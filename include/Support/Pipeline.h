@@ -145,12 +145,12 @@ struct Shader {
   Stages Stage;
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
+  int DispatchSize[3];
 };
 
 struct Pipeline {
   llvm::SmallVector<Shader> Shaders;
 
-  int DispatchSize[3];
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<DescriptorSet> Sets;
 

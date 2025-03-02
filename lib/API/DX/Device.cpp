@@ -676,8 +676,9 @@ public:
       Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
     }
 
-    IS.CmdList->Dispatch(P.DispatchSize[0], P.DispatchSize[1],
-                         P.DispatchSize[2]);
+    ArrayRef<int> DispatchSize = ArrayRef<int>(P.Shaders[0].DispatchSize);
+
+    IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
 
     for (auto &Out : IS.Resources)
       if (Out.Readback != nullptr) {
@@ -719,7 +720,7 @@ public:
     if (auto Err = createDescriptorHeap(P, State))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
-    if (auto Err = createPSO(P, P.Shaders[0]->getBuffer(), State))
+    if (auto Err = createPSO(P, P.Shaders[0].Shader->getBuffer(), State))
       return Err;
     llvm::outs() << "PSO created.\n";
     if (auto Err = createCommandStructures(State))

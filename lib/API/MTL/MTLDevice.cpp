@@ -108,8 +108,8 @@ class MTLDevice : public offloadtest::Device {
     if (Error)
       return toError(Error);
 
-    IS.Fn =
-        IS.Lib->newFunction(NS::String::string(P.Entry.c_str(), NS::UTF8StringEncoding));
+    IS.Fn = IS.Lib->newFunction(
+        NS::String::string(P.Entry.c_str(), NS::UTF8StringEncoding));
     IS.PipelineState = Device->newComputePipelineState(IS.Fn, &Error);
     if (Error)
       return toError(Error);
@@ -189,8 +189,9 @@ class MTLDevice : public offloadtest::Device {
                               MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
 
     NS::UInteger TGS = IS.PipelineState->maxTotalThreadsPerThreadgroup();
-    MTL::Size GridSize = MTL::Size(TGS * P.DispatchSize[0], P.DispatchSize[1],
-                                   P.DispatchSize[2]);
+    ArrayRef<int> DispatchSize = ArrayRef<int>(P.Shaders[0].DispatchSize);
+    MTL::Size GridSize =
+        MTL::Size(TGS * DispatchSize[0], DispatchSize[1], DispatchSize[2]);
     MTL::Size GroupSize(TGS, 1, 1);
 
     CmdEncoder->dispatchThreads(GridSize, GroupSize);
