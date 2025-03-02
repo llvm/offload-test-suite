@@ -57,14 +57,12 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
-# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/DescriptorSets.hlsl %}
-# RUN: %if DirectX %{ %offloader %t/DescriptorSets.yaml %t.dxil | FileCheck %s %}
-# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -Fo %t.spv %t/DescriptorSets.hlsl %}
-# RUN: %if Vulkan %{ %offloader %t/DescriptorSets.yaml %t.spv | FileCheck %s %}
 
-# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/DescriptorSets.hlsl %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
-# RUN: %if Metal %{ %offloader %t/DescriptorSets.yaml %t.metallib | FileCheck %s %}
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/DescriptorSets.hlsl
+# RUN: %if Metal %{ mv %t.o %t.dxil %}
+# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
+# RUN: %offloader %t/DescriptorSets.yaml %t.o | FileCheck %s
 
 # CHECK: Data:
 # CHECK-LABEL: Name: Out1

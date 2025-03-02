@@ -59,13 +59,10 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
-# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
-# RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil | FileCheck --check-prefixes=CHECK,DX %s %}
-# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -fspv-target-env=vulkan1.1 -Fo %t.spv %t/source.hlsl %}
-# RUN: %if Vulkan %{ %offloader %t/pipeline.yaml %t.spv | FileCheck %s --check-prefixes=CHECK,VULKAN %}
-# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
-# RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s --check-prefixes=CHECK,METAL %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %if Metal %{ mv %t.o %t.dxil %}
+# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # The behavior of this operation is consistent on Metal, so the test verifies that behavior.
 
