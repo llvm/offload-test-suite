@@ -38,14 +38,11 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
-# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
-# RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil | FileCheck %s %}
-# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.spv %t/source.hlsl %}
-# RUN: %if Vulkan %{ %offloader %t/pipeline.yaml %t.spv | FileCheck %s %}
-
-# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
-# RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib | FileCheck %s %}
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %if Metal %{ mv %t.o %t.dxil %}
+# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 
 # CHECK: Data: [ 0, 1, 2, 3, 4, 0, 1, 2, 3, 6, 4, 0 ]

@@ -99,11 +99,8 @@ DescriptorSets:
 # REQUIRES: goldenimage
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
-# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
-# RUN: %if DirectX %{ %offloader %t/pipeline.yaml %t.dxil -r Tex -o %t/output.png %}
-# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -Fo %t.spv %t/source.hlsl %}
-# RUN: %if Vulkan %{ %offloader %t/pipeline.yaml %t.spv -r Tex -o %t/output.png %}
-# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/source.hlsl %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
-# RUN: %if Metal %{ %offloader %t/pipeline.yaml %t.metallib -r Tex -o %t/output.png %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %if Metal %{ mv %t.o %t.dxil %}
+# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
+# RUN: %offloader %t/pipeline.yaml %t.o -r Tex -o %t/output.png
 # RUN: imgdiff %t/output.png %goldenimage_dir/hlsl/Basic/Mandelbrot.png -rules %t/rules.yaml

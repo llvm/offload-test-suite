@@ -44,14 +44,10 @@ DescriptorSets:
 #--- end
 
 # RUN: split-file %s %t
-# RUN: %if DirectX %{ dxc -T cs_6_0 -Fo %t.dxil %t/simple.hlsl %}
-# RUN: %if DirectX %{ %offloader %t/simple.yaml %t.dxil | FileCheck %s %}
-# RUN: %if Vulkan %{ dxc -T cs_6_0 -spirv -Fo %t.spv %t/simple.hlsl %}
-# RUN: %if Vulkan %{ %offloader %t/simple.yaml %t.spv | FileCheck %s %}
-
-# RUN: %if Metal %{ dxc -T cs_6_0 -Fo %t.dxil %t/simple.hlsl %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.metallib %}
-# RUN: %if Metal %{ %offloader %t/simple.yaml %t.metallib | FileCheck %s %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/simple.hlsl
+# RUN: %if Metal %{ mv %t.o %t.dxil %}
+# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
+# RUN: %offloader %t/simple.yaml %t.o | FileCheck %s
 
 # CHECK: Data:
 # CHECK: Data: [ 4, 16, 36, 64 ]

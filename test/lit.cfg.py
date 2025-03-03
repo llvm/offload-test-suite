@@ -48,15 +48,20 @@ if config.offloadtest_test_warp:
 else:
   tools.append(ToolSubst("%offloader", FindTool("offloader")))
 
+ExtraCompilerArgs = []
+if config.offloadtest_enable_vulkan:
+  ExtraCompilerArgs = ['-spirv']
+
 HLSLCompiler = ''
 if config.offloadtest_test_clang:
   if os.path.exists(config.offloadtest_dxc_dir):
-    tools.append(ToolSubst("dxc", FindTool("clang-dxc"), extra_args=["--dxv-path=%s" % config.offloadtest_dxc_dir]))
+    ExtraCompilerArgs.append("--dxv-path=%s" % config.offloadtest_dxc_dir)
+    tools.append(ToolSubst("%dxc_target", FindTool("clang-dxc"), extra_args=ExtraCompilerArgs))
   else:
-    tools.append(ToolSubst("dxc", FindTool("clang-dxc")))
+    tools.append(ToolSubst("%dxc_target", FindTool("clang-dxc"), extra_args=ExtraCompilerArgs))
   HLSLCompiler = 'Clang'
 else:
-  tools.append(ToolSubst("dxc", config.offloadtest_dxc))
+  tools.append(ToolSubst("%dxc_target", config.offloadtest_dxc, extra_args=ExtraCompilerArgs))
   HLSLCompiler = 'DXC'
 
 config.available_features.add(HLSLCompiler)
