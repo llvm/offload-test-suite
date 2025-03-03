@@ -667,11 +667,11 @@ public:
 #ifdef _WIN32
       WaitForSingleObject(IS.Event, INFINITE);
 #else // WSL
-      pollfd pfd;
-      pfd.fd = IS.Event;
-      pfd.events = POLLIN;
-      pfd.revents = 0;
-      if (poll(&pfd, 1, -1) == -1)
+      pollfd PollEvent;
+      PollEvent.fd = IS.Event;
+      PollEvent.events = POLLIN;
+      PollEvent.revents = 0;
+      if (poll(&PollEvent, 1, -1) == -1)
         return llvm::createStringError(
             std::error_code(errno, std::system_category()),
             strerror(errno));
@@ -799,12 +799,12 @@ llvm::Error InitializeDXDevices() {
   }
 
   ComPtr<IDXCoreAdapterList> AdapterList;
-  GUID attributes[]{DXCORE_ADAPTER_ATTRIBUTE_D3D12_CORE_COMPUTE,
-                    DXCORE_ADAPTER_ATTRIBUTE_D3D12_GRAPHICS};
-  if (auto Err = HR::toError(
-          Factory->CreateAdapterList(_countof(attributes), attributes,
-                                     AdapterList.GetAddressOf()),
-          "Failed to acquire a list of adapters")) {
+  GUID AdapterAttributes[]{DXCORE_ADAPTER_ATTRIBUTE_D3D12_CORE_COMPUTE,
+                           DXCORE_ADAPTER_ATTRIBUTE_D3D12_GRAPHICS};
+  if (auto Err = HR::toError(Factory->CreateAdapterList(
+                                 _countof(AdapterAttributes), AdapterAttributes,
+                                 AdapterList.GetAddressOf()),
+                             "Failed to acquire a list of adapters")) {
     return Err;
   }
 
