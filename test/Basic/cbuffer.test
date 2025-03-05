@@ -1,15 +1,9 @@
 #--- source.hlsl
 
-#if defined(__spirv__) || defined(__SPIRV__)
-#define REGISTER(Idx)
-#else
-#define REGISTER(Idx) : register(Idx, space0)
-#endif
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Out : register(u1);
 
-RWBuffer<int> In REGISTER(u0);
-RWBuffer<int> Out REGISTER(u1);
-
-cbuffer CB0 REGISTER(b0) {
+cbuffer CB0 : register(b2) {
   int Constant;
 }
 
