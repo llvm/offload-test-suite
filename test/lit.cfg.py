@@ -51,6 +51,8 @@ else:
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
   ExtraCompilerArgs = ['-spirv']
+if config.offloadtest_enable_metal:
+  ExtraCompilerArgs = ['-metal']
 
 HLSLCompiler = ''
 if config.offloadtest_test_clang:

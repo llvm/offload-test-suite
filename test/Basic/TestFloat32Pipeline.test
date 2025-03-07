@@ -38,8 +38,6 @@ DescriptorSets:
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %if Metal %{ mv %t.o %t.dxil %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: In

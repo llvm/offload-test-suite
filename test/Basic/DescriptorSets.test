@@ -60,8 +60,6 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/DescriptorSets.hlsl
-# RUN: %if Metal %{ mv %t.o %t.dxil %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
 # RUN: %offloader %t/DescriptorSets.yaml %t.o | FileCheck %s
 
 # CHECK: Data:
