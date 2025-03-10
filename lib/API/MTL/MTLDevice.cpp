@@ -97,7 +97,7 @@ class MTLDevice : public offloadtest::Device {
   llvm::Error loadShaders(InvocationState &IS, const Pipeline &P) {
     NS::Error *Error = nullptr;
     if (P.Shaders.size() == 1 && P.Shaders[0].Stage == Stages::Compute) {
-      llvm::StringRef Program = P.Shader->getBuffer();
+      llvm::StringRef Program = P.Shaders[0].Shader->getBuffer();
       dispatch_data_t data = dispatch_data_create(
           Program.data(), Program.size(), dispatch_get_main_queue(),
           ^{
@@ -107,8 +107,8 @@ class MTLDevice : public offloadtest::Device {
         return toError(Error);
       IS.Pool->addObject(Lib);
 
-      MTL::Function *Fn = Lib->newFunction(
-          NS::String::string(P.Entry.c_str(), NS::UTF8StringEncoding));
+      MTL::Function *Fn = Lib->newFunction(NS::String::string(
+          P.Shaders[0].Entry.c_str(), NS::UTF8StringEncoding));
       IS.ComputePipeline = Device->newComputePipelineState(Fn, &Error);
       if (Error)
         return toError(Error);
@@ -118,7 +118,7 @@ class MTLDevice : public offloadtest::Device {
           MTL::RenderPipelineDescriptor::alloc()->init();
       IS.Pool->addObject(Desc);
       for (const auto &S : P.Shaders) {
-        llvm::StringRef Program = P.Shader->getBuffer();
+        llvm::StringRef Program = S.Shader->getBuffer();
         dispatch_data_t data = dispatch_data_create(
             Program.data(), Program.size(), dispatch_get_main_queue(),
             ^{
@@ -129,7 +129,7 @@ class MTLDevice : public offloadtest::Device {
         IS.Pool->addObject(Lib);
 
         MTL::Function *Fn = Lib->newFunction(
-            NS::String::string(P.Entry.c_str(), NS::UTF8StringEncoding));
+            NS::String::string(S.Entry.c_str(), NS::UTF8StringEncoding));
         switch (S.Stage) {
         case Stages::Vertex:
           Desc->setVertexFunction(Fn);
@@ -234,9 +234,9 @@ class MTLDevice : public offloadtest::Device {
       CmdEncoder->endEncoding();
     } else {
       assert(IS.RenderPipeline && "If not compute... render!");
-      MTL::RenderCommandEncoder *CmdEncoder = CmdBuffer->renderCommandEncoder();
-      CmdEncoder->setVertexBuffer()
-      //CmdEncoder->setBuffer(IS.ArgBuffer, 0,)
+      //MTL::RenderCommandEncoder *CmdEncoder = CmdBuffer->renderCommandEncoder();
+      // CmdEncoder->setVertexBuffer()
+      // CmdEncoder->setBuffer(IS.ArgBuffer, 0,)
     }
 
     CmdBuffer->commit();
@@ -286,7 +286,7 @@ public:
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
     IS.Queue = Device->newCommandQueue();
-    if (auto Err = loadShaders(IS, P.Shaders[0]))
+    if (auto Err = loadShaders(IS, P))
       return Err;
 
     if (auto Err = createBuffers(P, IS))
