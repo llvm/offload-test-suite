@@ -100,7 +100,5 @@ DescriptorSets:
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %if Metal %{ mv %t.o %t.dxil %}
-# RUN: %if Metal %{ metal-shaderconverter %t.dxil -o=%t.o %}
 # RUN: %offloader %t/pipeline.yaml %t.o -r Tex -o %t/output.png
 # RUN: imgdiff %t/output.png %goldenimage_dir/hlsl/Basic/Mandelbrot.png -rules %t/rules.yaml
