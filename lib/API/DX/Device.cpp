@@ -29,6 +29,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Object/DXContainer.h"
 
 #include <codecvt>
 #include <locale>
@@ -180,6 +181,29 @@ public:
   }
 
   llvm::Error createRootSignature(Pipeline &P, InvocationState &State) {
+    // Try pulling a root signature from the DXIL first
+
+    auto ExContainer = llvm::object::DXContainer::create(
+        P.Shaders[0].Shader->getMemBufferRef());
+    // If this fails we really have a problem...
+    if (!ExContainer)
+      return ExContainer.takeError();
+
+    bool HasRootSigPart = false;
+    for (const auto &Part : *ExContainer)
+      if (memcmp(Part.Part.Name, "RTS0", 4) == 0)
+        HasRootSigPart = true;
+
+    if (HasRootSigPart) {
+      llvm::StringRef Binary = P.Shaders[0].Shader->getBuffer();
+      if (auto Err = HR::toError(
+              Device->CreateRootSignature(0, Binary.data(), Binary.size(),
+                                          IID_PPV_ARGS(&State.RootSig)),
+              "Failed to create root signature."))
+        return Err;
+      return llvm::Error::success();
+    }
+
     std::vector<D3D12_ROOT_PARAMETER> RootParams;
     uint32_t DescriptorCount = P.getDescriptorCount();
     std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges =
