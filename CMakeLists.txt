@@ -53,6 +53,11 @@ if (D3D12_INCLUDE_DIRS)
   set(OFFLOADTEST_ENABLE_D3D12 On)
 endif ()
 
+find_package(D3D12_WSL)
+if (D3D12_WSL_FOUND)
+  set(OFFLOADTEST_ENABLE_D3D12 On)
+endif ()
+
 if (APPLE)
   set(METAL_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/third-party/metal-cpp
                          ${CMAKE_CURRENT_SOURCE_DIR}/third-party/metal_irconverter_runtime)

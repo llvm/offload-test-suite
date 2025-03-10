@@ -41,5 +41,6 @@ int main(int ArgC, char **ArgV) {
     }
     D->printExtra(outs());
   }
+  Device::uninitialize();
   return 0;
 }
