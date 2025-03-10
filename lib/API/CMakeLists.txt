@@ -35,7 +35,7 @@ add_offloadtest_library(API
 
 target_include_directories(OffloadTestAPI SYSTEM BEFORE ${api_headers})
 
-target_link_libraries(OffloadTestAPI INTERFACE OffloadTestSupport ${api_libraries})
+target_link_libraries(OffloadTestAPI INTERFACE LLVMSupport LLVMObject OffloadTestSupport ${api_libraries})
 if (TARGET DIRECTX_HEADERS)
   add_dependencies(OffloadTestAPI DIRECTX_HEADERS)
 endif()
