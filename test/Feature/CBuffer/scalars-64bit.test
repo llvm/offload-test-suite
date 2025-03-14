@@ -1,0 +1,63 @@
+#--- source.hlsl
+
+cbuffer CBScalars : register(b0) {
+  double a1;
+  uint64_t a2;
+  int64_t a3;
+}
+
+struct Scalars {
+  double a1;
+  uint64_t a2;
+  int64_t a3;
+};
+
+RWStructuredBuffer<Scalars> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0].a1 = a1;
+  Out[0].a2 = a2;
+  Out[0].a3 = a3;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: CBScalars
+    Format: Hex64
+    Data: [ 0xbff0000000000000, 0x0000000000000001, 0xffffffffffffffff ]
+  - Name: Out
+    Format: Hex64
+    Stride: 24
+    ZeroInitSize: 24
+DescriptorSets:
+  - Resources:
+    - Name: CBScalars
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# REQUIRES: Double, Int64
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: CBScalars
+# CHECK: Format: Hex64
+# CHECK: Name: Out
+# CHECK: Format: Hex64
+# CHECK: Data: [ 0xBFF0000000000000, 0x1, 0xFFFFFFFFFFFFFFFF ]

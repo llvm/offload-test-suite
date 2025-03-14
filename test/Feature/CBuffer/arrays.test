@@ -1,0 +1,103 @@
+#--- source.hlsl
+
+cbuffer CBArrays : register(b0) {
+  float c1[2];
+  int4 c2[2][2];
+  bool c3[2];
+}
+
+struct Arrays {
+  float c1[2];
+  int4 c2[2][2];
+  bool c3[2];
+};
+
+RWStructuredBuffer<Arrays> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0].c1 = c1;
+  Out[0].c2 = c2;
+  Out[0].c3 = c3;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: CBArrays
+    Format: Hex32
+    Data: [
+      0x3f800000, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x40800000, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x00000001, 0x00000002, 0x00000003, 0x00000004,
+      0x00000005, 0x00000006, 0x00000007, 0x00000008,
+      0x00000009, 0x0000000A, 0x0000000B, 0x0000000C,
+      0x0000000D, 0x0000000E, 0x0000000F, 0x00000010,
+      0x00000000, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x00000001, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+    ]
+  - Name: Out
+    Format: Hex32
+    Stride: 80
+    ZeroInitSize: 80
+DescriptorSets:
+  - Resources:
+    - Name: CBArrays
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# DXC's vulkan support does not layout cbuffers compatibly with DXIL
+# UNSUPPORTED: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: - Name: CBArrays
+# CHECK:   Format: Hex32
+
+# CHECK: - Name: Out
+# CHECK:   Format: Hex32
+# CHECK:   Data: [
+
+# CHECK:     0x3F800000,
+# CHECK-NOT: 0x5A5A5A5A,
+
+# CHECK:     0x1,
+# CHECK:     0x2,
+# CHECK:     0x3,
+# CHECK:     0x4,
+# CHECK:     0x5,
+# CHECK:     0x6,
+# CHECK:     0x7,
+# CHECK:     0x8,
+# CHECK:     0x9,
+# CHECK:     0xA,
+# CHECK:     0xB,
+# CHECK:     0xC,
+# CHECK:     0xD,
+# CHECK:     0xE,
+# CHECK:     0xF,
+# CHECK:     0x10,
+
+# CHECK:     0x0,
+# CHECK-NOT: 0x5A5A5A5A,
+
+# CHECK:     0x1
+# CHECK-NOT: 0x5A5A5A5A
+
+# CHECK:   ]
