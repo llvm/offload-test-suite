@@ -415,7 +415,8 @@ public:
         EltFormat,
         D3D12_SRV_DIMENSION_BUFFER,
         D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        {D3D12_BUFFER_SRV{0, NumElts, static_cast<uint32_t>(R.size()),
+        {D3D12_BUFFER_SRV{0, NumElts,
+                          static_cast<uint32_t>(R.BufferPtr->Stride),
                           D3D12_BUFFER_SRV_FLAG_NONE}}};
 
     llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
