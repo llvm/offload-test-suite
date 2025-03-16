@@ -32,7 +32,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
       }
     }
-    int DescriptorTableCount = 0;
+    uint32_t DescriptorTableCount = 0;
     int RootTables = 0;
     for (auto &R : P.Settings.DX.RootParams) {
       if (R.Kind == dx::RootParamKind::DescriptorTable) {
