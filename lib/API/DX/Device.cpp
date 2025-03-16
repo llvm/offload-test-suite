@@ -103,6 +103,12 @@ private:
     ComPtr<ID3D12Resource> Readback;
   };
 
+  struct DescriptorTable {
+    bool IsRoot = false;
+    using ResourcePair = std::pair<offloadtest::Resource *, ResourceSet>;
+    llvm::SmallVector<ResourcePair> Resources;
+  };
+
   struct InvocationState {
     ComPtr<ID3D12RootSignature> RootSig;
     ComPtr<ID3D12DescriptorHeap> DescHeap;
@@ -116,7 +122,7 @@ private:
 #else // WSL
     int Event;
 #endif
-    llvm::SmallVector<ResourceSet> Resources;
+    llvm::SmallVector<DescriptorTable> DescTables;
   };
 
 public:
@@ -342,7 +348,7 @@ public:
   }
 
   llvm::Error createSRV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
+                        const uint32_t HeapIdx, DescriptorTable &Table) {
     llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -396,7 +402,7 @@ public:
     bindSRV(R, IS, HeapIdx, Buffer);
 
     ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
-    IS.Resources.push_back(Resources);
+    Table.Resources.push_back(std::make_pair(&R, Resources));
 
     return llvm::Error::success();
   }
@@ -425,7 +431,7 @@ public:
   }
 
   llvm::Error createUAV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
+                        const uint32_t HeapIdx, DescriptorTable &Table) {
     llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -502,7 +508,7 @@ public:
     bindUAV(R, IS, HeapIdx, Buffer);
 
     ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
-    IS.Resources.push_back(Resources);
+    Table.Resources.push_back(std::make_pair(&R, Resources));
 
     return llvm::Error::success();
   }
@@ -535,7 +541,7 @@ public:
   }
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
+                        const uint32_t HeapIdx, DescriptorTable &Table) {
     size_t CBVSize = getCBVSize(R.size());
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
@@ -595,7 +601,7 @@ public:
     bindCBV(R, IS, HeapIdx, Buffer);
 
     ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
-    IS.Resources.push_back(Resources);
+    Table.Resources.push_back(std::make_pair(&R, Resources));
 
     return llvm::Error::success();
   }
@@ -617,18 +623,20 @@ public:
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
+      IS.DescTables.emplace_back(DescriptorTable());
+      DescriptorTable &Table = IS.DescTables.back();
       for (auto &R : D.Resources) {
         switch (getDXKind(R.Kind)) {
         case SRV:
-          if (auto Err = createSRV(R, IS, HeapIndex++))
+          if (auto Err = createSRV(R, IS, HeapIndex++, Table))
             return Err;
           break;
         case UAV:
-          if (auto Err = createUAV(R, IS, HeapIndex++))
+          if (auto Err = createUAV(R, IS, HeapIndex++, Table))
             return Err;
           break;
         case CBV:
-          if (auto Err = createCBV(R, IS, HeapIndex++))
+          if (auto Err = createCBV(R, IS, HeapIndex++, Table))
             return Err;
           break;
         }
@@ -782,32 +790,29 @@ public:
 
     IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
 
-    for (auto &Out : IS.Resources)
-      if (Out.Readback != nullptr) {
-        addReadbackBeginBarrier(IS, Out.Buffer);
-        IS.CmdList->CopyResource(Out.Readback.Get(), Out.Buffer.Get());
-        addReadbackEndBarrier(IS, Out.Buffer);
+    for (auto &Table : IS.DescTables) {
+      for (auto &R : Table.Resources) {
+        if (R.second.Readback == nullptr)
+          continue;
+        addReadbackBeginBarrier(IS, R.second.Buffer);
+        IS.CmdList->CopyResource(R.second.Readback.Get(),
+                                 R.second.Buffer.Get());
+        addReadbackEndBarrier(IS, R.second.Buffer);
       }
+    }
   }
 
   llvm::Error readBack(Pipeline &P, InvocationState &IS) {
-    auto ResourcesIterator = IS.Resources.begin();
-    for (auto &S : P.Sets) {
-      for (auto &R : S.Resources) {
-        if (ResourcesIterator == IS.Resources.end())
-          return llvm::createStringError(
-              std::errc::no_such_device_or_address,
-              "Internal error: created resources doesn't match pipeline");
-        if (R.isReadWrite()) {
-          void *DataPtr;
-          if (auto Err = HR::toError(
-                  ResourcesIterator->Readback->Map(0, nullptr, &DataPtr),
-                  "Failed to map result."))
-            return Err;
-          memcpy(R.BufferPtr->Data.get(), DataPtr, R.size());
-          ResourcesIterator->Readback->Unmap(0, nullptr);
-        }
-        ++ResourcesIterator;
+    for (auto &Table : IS.DescTables) {
+      for (auto &R : Table.Resources) {
+        if (!R.first->isReadWrite())
+          continue;
+        void *DataPtr;
+        if (auto Err = HR::toError(R.second.Readback->Map(0, nullptr, &DataPtr),
+                                   "Failed to map result."))
+          return Err;
+        memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
+        R.second.Readback->Unmap(0, nullptr);
       }
     }
     return llvm::Error::success();
