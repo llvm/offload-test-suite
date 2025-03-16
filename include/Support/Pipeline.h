@@ -22,9 +22,7 @@
 
 namespace offloadtest {
 
-enum class Stages {
-  Compute
-};
+enum class Stages { Compute };
 
 enum class DataFormat {
   Hex8,

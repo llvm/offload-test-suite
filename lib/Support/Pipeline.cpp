@@ -110,16 +110,16 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
 }
 
 void MappingTraits<offloadtest::Shader>::mapping(IO &I,
-  offloadtest::Shader &S) {
-    I.mapRequired("Stage", S.Stage);
-    I.mapRequired("Entry", S.Entry);
+                                                 offloadtest::Shader &S) {
+  I.mapRequired("Stage", S.Stage);
+  I.mapRequired("Entry", S.Entry);
 
-    if (S.Stage == Stages::Compute) {
-      // Stage-specific data, not sure if this should be optional
-      // or moved into the Shaders structure.
-      MutableArrayRef<int> MutableDispatchSize(S.DispatchSize);
-      I.mapRequired("DispatchSize", MutableDispatchSize);
-    }
+  if (S.Stage == Stages::Compute) {
+    // Stage-specific data, not sure if this should be optional
+    // or moved into the Shaders structure.
+    MutableArrayRef<int> MutableDispatchSize(S.DispatchSize);
+    I.mapRequired("DispatchSize", MutableDispatchSize);
+  }
 }
 } // namespace yaml
 } // namespace llvm
