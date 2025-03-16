@@ -9,18 +9,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <wrl/client.h>
 #include <d3d12.h>
 #include <d3dx12.h>
 #include <dxcore.h>
 #include <dxgiformat.h>
 #include <dxguids.h>
+#include <wrl/client.h>
+
 
 #ifndef _WIN32
+#include <poll.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
-#include <poll.h>
 #include <wsl/winadapter.h>
+
 #endif
 
 // The windows headers define these macros which conflict with the C++ standard
@@ -35,8 +37,9 @@
 #include "Support/WinError.h"
 
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Error.h"
 #include "llvm/Object/DXContainer.h"
+#include "llvm/Support/Error.h"
+
 
 #include <codecvt>
 #include <locale>
@@ -118,8 +121,7 @@ private:
   };
 
 public:
-  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D,
-           std::string Desc)
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, std::string Desc)
       : Adapter(A), Device(D) {
     Description = Desc;
   }
@@ -335,7 +337,8 @@ public:
                                  ComPtr<ID3D12Resource> Destination,
                                  ComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
-    IS.CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0, R.size());
+    IS.CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
+                                 R.size());
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
@@ -509,7 +512,8 @@ public:
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     UAVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateUnorderedAccessView(Buffer.Get(), nullptr, &UAVDesc, UAVHandle);
+    Device->CreateUnorderedAccessView(Buffer.Get(), nullptr, &UAVDesc,
+                                      UAVHandle);
 
     ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
     IS.Resources.push_back(Resources);
@@ -683,9 +687,9 @@ public:
 #else // WSL
       HANDLE Event = reinterpret_cast<HANDLE>(IS.Event);
 #endif
-      if (auto Err = HR::toError(
-              IS.Fence->SetEventOnCompletion(CurrentCounter, Event),
-              "Failed to register end event."))
+      if (auto Err =
+              HR::toError(IS.Fence->SetEventOnCompletion(CurrentCounter, Event),
+                          "Failed to register end event."))
         return Err;
 
 #ifdef _WIN32
@@ -697,8 +701,7 @@ public:
       PollEvent.revents = 0;
       if (poll(&PollEvent, 1, -1) == -1)
         return llvm::createStringError(
-            std::error_code(errno, std::system_category()),
-            strerror(errno));
+            std::error_code(errno, std::system_category()), strerror(errno));
 #endif
     }
     FenceCounter = CurrentCounter;
