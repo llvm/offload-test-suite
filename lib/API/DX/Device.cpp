@@ -348,7 +348,7 @@ public:
   }
 
   llvm::Error createSRV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx, DescriptorTable &Table) {
+                        DescriptorTable &Table) {
     llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -399,8 +399,6 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    bindSRV(R, IS, HeapIdx, Buffer);
-
     ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
     Table.Resources.push_back(std::make_pair(&R, Resources));
 
@@ -431,7 +429,7 @@ public:
   }
 
   llvm::Error createUAV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx, DescriptorTable &Table) {
+                        DescriptorTable &Table) {
     llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -505,8 +503,6 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    bindUAV(R, IS, HeapIdx, Buffer);
-
     ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
     Table.Resources.push_back(std::make_pair(&R, Resources));
 
@@ -541,7 +537,7 @@ public:
   }
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx, DescriptorTable &Table) {
+                        DescriptorTable &Table) {
     size_t CBVSize = getCBVSize(R.size());
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
@@ -598,8 +594,6 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    bindCBV(R, IS, HeapIdx, Buffer);
-
     ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
     Table.Resources.push_back(std::make_pair(&R, Resources));
 
@@ -621,23 +615,53 @@ public:
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       IS.DescTables.emplace_back(DescriptorTable());
       DescriptorTable &Table = IS.DescTables.back();
       for (auto &R : D.Resources) {
         switch (getDXKind(R.Kind)) {
         case SRV:
-          if (auto Err = createSRV(R, IS, HeapIndex++, Table))
+          if (auto Err = createSRV(R, IS, Table))
             return Err;
           break;
         case UAV:
-          if (auto Err = createUAV(R, IS, HeapIndex++, Table))
+          if (auto Err = createUAV(R, IS, Table))
             return Err;
           break;
         case CBV:
-          if (auto Err = createCBV(R, IS, HeapIndex++, Table))
+          if (auto Err = createCBV(R, IS, Table))
             return Err;
+          break;
+        }
+      }
+    }
+    // If we have explicit root parameters we may have root descriptors.
+    if (P.Settings.DX.RootParams.size() > 0) {
+      for (auto &P : P.Settings.DX.RootParams) {
+        // We only need to check the first descriptor table entry, becuse that
+        // is the only one that can be used for root descriptors.
+        if (P.Kind == dx::RootParamKind::DescriptorTable) {
+          IS.DescTables[0].IsRoot = P.IsRoot;
+          break;
+        }
+      }
+    }
+    // Bind descriptors in descriptor tables.
+    uint32_t HeapIndex = 0;
+    for (auto &T : IS.DescTables) {
+      // Don't bind root descriptors here.
+      if (T.IsRoot)
+        continue;
+      for (auto &R : T.Resources) {
+        switch (getDXKind(R.first->Kind)) {
+        case SRV:
+          bindSRV(*(R.first), IS, HeapIndex++, R.second.Buffer);
+          break;
+        case UAV:
+          bindUAV(*(R.first), IS, HeapIndex++, R.second.Buffer);
+          break;
+        case CBV:
+          bindCBV(*(R.first), IS, HeapIndex++, R.second.Buffer);
           break;
         }
       }
@@ -760,19 +784,40 @@ public:
 
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0;
-      for (uint32_t Idx = 0u; Idx < P.Settings.DX.RootParams.size(); ++Idx) {
-        const auto &Param = P.Settings.DX.RootParams[Idx];
+      uint32_t RootParamIndex = 0u;
+      for (const auto &Param : P.Settings.DX.RootParams) {
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
           uint32_t NumValues = Param.BufferPtr->size() / sizeof(uint32_t);
-          IS.CmdList->SetComputeRoot32BitConstants(
-              Idx, NumValues, Param.BufferPtr->Data.get(), ConstantOffset);
+          IS.CmdList->SetComputeRoot32BitConstants(RootParamIndex++, NumValues,
+                                                   Param.BufferPtr->Data.get(),
+                                                   ConstantOffset);
           ConstantOffset += NumValues;
         } break;
-        case dx::RootParamKind::DescriptorTable:
-          // TODO: Handle root descriptors!
-          IS.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
-          Handle.Offset(P.Sets[Param.Index].Resources.size(), Inc);
+        case dx::RootParamKind::DescriptorTable: {
+          if (!Param.IsRoot) {
+            // TODO: Handle root descriptors!
+            IS.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
+            Handle.Offset(P.Sets[Param.Index].Resources.size(), Inc);
+            break;
+          }
+          for (auto &R : IS.DescTables[0].Resources) {
+            switch (getDXKind(R.first->Kind)) {
+            case SRV:
+              IS.CmdList->SetComputeRootShaderResourceView(
+                  RootParamIndex++, R.second.Buffer->GetGPUVirtualAddress());
+              break;
+            case UAV:
+              IS.CmdList->SetComputeRootUnorderedAccessView(
+                  RootParamIndex++, R.second.Buffer->GetGPUVirtualAddress());
+              break;
+            case CBV:
+              IS.CmdList->SetComputeRootConstantBufferView(
+                  RootParamIndex++, R.second.Buffer->GetGPUVirtualAddress());
+              break;
+            }
+          }
+        }
         }
       }
     } else {
