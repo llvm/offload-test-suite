@@ -1,0 +1,75 @@
+#--- source.hlsl
+
+cbuffer RootConstants : register(b2) {
+  float4 C;
+};
+
+struct Input {
+  float4 A;
+  float4 B;
+};
+
+struct Output {
+  float4 A;
+};
+
+StructuredBuffer<Input> In : register(t2, space0);
+RWStructuredBuffer<Output> Out : register(u1, space4);
+
+[RootSignature("CBV(b2), SRV(t2), UAV(u1, space=4)")]
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI].A = In[GI].A * In[GI].B * C;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: DescriptorTable
+        IsRoot: True
+        Index: 0
+Buffers:
+  - Name: cbuffer
+    Format: Float32
+    Data: [ 2, 4, 6, 8 ]
+  - Name: In
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: cbuffer
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 4
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK-LABEL: Name: Out
+# CHECK: Data: [ 40, 192, 504, 1024 ]

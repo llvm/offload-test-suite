@@ -9,13 +9,13 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <cstdint>
 #include <d3d12.h>
 #include <d3dx12.h>
 #include <dxcore.h>
 #include <dxgiformat.h>
 #include <dxguids.h>
 #include <wrl/client.h>
-
 
 #ifndef _WIN32
 #include <poll.h>
@@ -39,7 +39,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
-
 
 #include <codecvt>
 #include <locale>
@@ -394,6 +393,16 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
+    bindSRV(R, IS, HeapIdx, Buffer);
+
+    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
+    IS.Resources.push_back(Resources);
+
+    return llvm::Error::success();
+  }
+
+  void bindSRV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
+               ComPtr<ID3D12Resource> Buffer) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT EltFormat =
@@ -413,11 +422,6 @@ public:
     SRVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     Device->CreateShaderResourceView(Buffer.Get(), &SRVDesc, SRVHandle);
-
-    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
-    IS.Resources.push_back(Resources);
-
-    return llvm::Error::success();
   }
 
   llvm::Error createUAV(Resource &R, InvocationState &IS,
@@ -495,6 +499,16 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
+    bindUAV(R, IS, HeapIdx, Buffer);
+
+    ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
+    IS.Resources.push_back(Resources);
+
+    return llvm::Error::success();
+  }
+
+  void bindUAV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
+               ComPtr<ID3D12Resource> Buffer) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT EltFormat =
@@ -514,16 +528,15 @@ public:
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     Device->CreateUnorderedAccessView(Buffer.Get(), nullptr, &UAVDesc,
                                       UAVHandle);
+  }
 
-    ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
-    IS.Resources.push_back(Resources);
-
-    return llvm::Error::success();
+  static size_t getCBVSize(size_t Sz) {
+    return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
   llvm::Error createCBV(Resource &R, InvocationState &IS,
                         const uint32_t HeapIdx) {
-    size_t CBVSize = (R.size() + 255u) & 0xFFFFFFFFFFFFFF00;
+    size_t CBVSize = getCBVSize(R.size());
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -579,6 +592,17 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
+    bindCBV(R, IS, HeapIdx, Buffer);
+
+    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
+    IS.Resources.push_back(Resources);
+
+    return llvm::Error::success();
+  }
+
+  void bindCBV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
+               ComPtr<ID3D12Resource> Buffer) {
+    size_t CBVSize = getCBVSize(R.size());
     const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
         Buffer->GetGPUVirtualAddress(), static_cast<uint32_t>(CBVSize)};
 
@@ -588,11 +612,6 @@ public:
     CBVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     Device->CreateConstantBufferView(&CBVDesc, CBVHandle);
-
-    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
-    IS.Resources.push_back(Resources);
-
-    return llvm::Error::success();
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
@@ -731,9 +750,31 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle{
         IS.DescHeap->GetGPUDescriptorHandleForHeapStart()};
 
-    for (uint32_t Idx = 0; Idx < P.Sets.size(); ++Idx) {
-      IS.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
-      Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
+    if (P.Settings.DX.RootParams.size() > 0) {
+      uint32_t ConstantOffset = 0;
+      for (uint32_t Idx = 0u; Idx < P.Settings.DX.RootParams.size(); ++Idx) {
+        const auto &Param = P.Settings.DX.RootParams[Idx];
+        switch (Param.Kind) {
+        case dx::RootParamKind::Constant: {
+          uint32_t NumValues = Param.BufferPtr->size() / sizeof(uint32_t);
+          IS.CmdList->SetComputeRoot32BitConstants(
+              Idx, NumValues, Param.BufferPtr->Data.get(), ConstantOffset);
+          ConstantOffset += NumValues;
+        } break;
+        case dx::RootParamKind::DescriptorTable:
+          // TODO: Handle root descriptors!
+          IS.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
+          Handle.Offset(P.Sets[Param.Index].Resources.size(), Inc);
+        }
+      }
+    } else {
+      // If no explicit root parameters are provided, fall back to using the
+      // descriptor set layout. This is to make it easier to write tests that
+      // don't need complicated root signatures.
+      for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
+        IS.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
+        Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
+      }
     }
 
     llvm::ArrayRef<int> DispatchSize =

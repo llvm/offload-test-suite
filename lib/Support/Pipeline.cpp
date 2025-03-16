@@ -18,18 +18,52 @@ namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
+  // Runtime-specific settings.
+  I.mapOptional("RuntimeSettings", P.Settings);
+
   I.mapRequired("Buffers", P.Buffers);
   I.mapRequired("DescriptorSets", P.Sets);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        for (auto &B : P.Buffers) {
-          if (R.Name == B.Name)
-            R.BufferPtr = &B;
-        }
+        R.BufferPtr = P.getBuffer(R.Name);
         if (!R.BufferPtr)
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+      }
+    }
+    int DescriptorTableCount = 0;
+    int RootTables = 0;
+    for (auto &R : P.Settings.DX.RootParams) {
+      if (R.Kind == dx::RootParamKind::DescriptorTable) {
+        DescriptorTableCount++;
+        if (R.IsRoot)
+          RootTables += 1;
+      }
+      if (R.Kind != dx::RootParamKind::Constant)
+        continue;
+      R.BufferPtr = P.getBuffer(R.Name);
+      if (!R.BufferPtr)
+        I.setError(Twine("Referenced buffer in root constant ") + R.Name +
+                   " not found!");
+    }
+    if (P.Settings.DX.RootParams.size() != 0) {
+      if (DescriptorTableCount != P.Sets.size())
+        I.setError(Twine("Expected ") + std::to_string(P.Sets.size()) +
+                   " DescriptorTable root parameters, found " +
+                   std::to_string(DescriptorTableCount));
+      if (RootTables > 1)
+        I.setError("Can only specify one descriptor set as containing root "
+                   "descriptors");
+      else if (RootTables == 1) {
+        for (auto &R : P.Settings.DX.RootParams) {
+          if (R.Kind == dx::RootParamKind::DescriptorTable) {
+            if (!R.IsRoot)
+              I.setError("Descriptor table for root descriptors must be the "
+                         "first descriptor table.");
+            break;
+          }
+        }
       }
     }
   }
@@ -107,6 +141,31 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Height", P.Height);
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
+}
+
+void MappingTraits<offloadtest::dx::RootParameter>::mapping(
+    IO &I, offloadtest::dx::RootParameter &P) {
+  I.mapRequired("Kind", P.Kind);
+  switch (P.Kind) {
+  case dx::RootParamKind::Constant:
+    I.mapRequired("Name", P.Name);
+    I.mapRequired("Binding", P.Binding);
+    break;
+  case dx::RootParamKind::DescriptorTable:
+    I.mapRequired("Index", P.Index);
+    I.mapOptional("IsRoot", P.IsRoot, false);
+    break;
+  }
+}
+
+void MappingTraits<offloadtest::dx::Settings>::mapping(
+    IO &I, offloadtest::dx::Settings &S) {
+  I.mapOptional("RootParameters", S.RootParams);
+}
+
+void MappingTraits<offloadtest::RuntimeSettings>::mapping(
+    IO &I, offloadtest::RuntimeSettings &S) {
+  I.mapOptional("DirectX", S.DX);
 }
 
 void MappingTraits<offloadtest::Shader>::mapping(IO &I,
