@@ -4,7 +4,7 @@
 
 By default the test suite will use a root signature if it is present in the
 shader binary. If the shader binary does not contain a precompiled root
-signature, a root signature is generated from the DescriptorSets and the
+signature, a root signature is generated from the `DescriptorSets` and the
 `DXBinding` YAML data.
 
 For example the YAML below:
