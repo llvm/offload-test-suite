@@ -30,9 +30,18 @@ Shaders:
 RuntimeSettings:
   DirectX:
     RootParameters:
-      - Kind: DescriptorTable
-        IsRoot: True
-        Index: 0
+      - Kind: RootDescriptor
+        Resource:
+            Name: cbuffer
+            Kind: ConstantBuffer
+      - Kind: RootDescriptor
+        Resource:
+            Name: In
+            Kind: StructuredBuffer
+      - Kind: RootDescriptor
+        Resource:
+            Name: Out
+            Kind: RWStructuredBuffer
 Buffers:
   - Name: cbuffer
     Format: Float32
@@ -45,23 +54,7 @@ Buffers:
     Format: Float32
     Channels: 4
     ZeroInitSize: 16
-DescriptorSets:
-  - Resources:
-    - Name: cbuffer
-      Kind: ConstantBuffer
-      DirectXBinding:
-        Register: 2
-        Space: 0
-    - Name: In
-      Kind: StructuredBuffer
-      DirectXBinding:
-        Register: 2
-        Space: 0
-    - Name: Out
-      Kind: RWBuffer
-      DirectXBinding:
-        Register: 1
-        Space: 4
+DescriptorSets: []
 ...
 #--- end
 

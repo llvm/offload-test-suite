@@ -103,9 +103,9 @@ private:
     ComPtr<ID3D12Resource> Readback;
   };
 
+  using ResourcePair = std::pair<offloadtest::Resource *, ResourceSet>;
+
   struct DescriptorTable {
-    bool IsRoot = false;
-    using ResourcePair = std::pair<offloadtest::Resource *, ResourceSet>;
     llvm::SmallVector<ResourcePair> Resources;
   };
 
@@ -123,6 +123,7 @@ private:
     int Event;
 #endif
     llvm::SmallVector<DescriptorTable> DescTables;
+    llvm::SmallVector<ResourcePair> RootResources;
   };
 
 public:
@@ -289,6 +290,8 @@ public:
   }
 
   llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
+    if (P.getDescriptorCount() == 0)
+      return llvm::Error::success();
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, P.getDescriptorCount(),
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
@@ -347,8 +350,7 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-  llvm::Error createSRV(Resource &R, InvocationState &IS,
-                        DescriptorTable &Table) {
+  llvm::Expected<ResourceSet> createSRV(Resource &R, InvocationState &IS) {
     llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -399,10 +401,7 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
-    Table.Resources.push_back(std::make_pair(&R, Resources));
-
-    return llvm::Error::success();
+    return ResourceSet{UploadBuffer, Buffer, nullptr};
   }
 
   void bindSRV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
@@ -428,8 +427,7 @@ public:
     Device->CreateShaderResourceView(Buffer.Get(), &SRVDesc, SRVHandle);
   }
 
-  llvm::Error createUAV(Resource &R, InvocationState &IS,
-                        DescriptorTable &Table) {
+  llvm::Expected<ResourceSet> createUAV(Resource &R, InvocationState &IS) {
     llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -503,10 +501,7 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    ResourceSet Resources = {UploadBuffer, Buffer, ReadBackBuffer};
-    Table.Resources.push_back(std::make_pair(&R, Resources));
-
-    return llvm::Error::success();
+    return ResourceSet{UploadBuffer, Buffer, ReadBackBuffer};
   }
 
   void bindUAV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
@@ -536,8 +531,7 @@ public:
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  llvm::Error createCBV(Resource &R, InvocationState &IS,
-                        DescriptorTable &Table) {
+  llvm::Expected<ResourceSet> createCBV(Resource &R, InvocationState &IS) {
     size_t CBVSize = getCBVSize(R.size());
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
@@ -594,10 +588,7 @@ public:
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-    ResourceSet Resources = {UploadBuffer, Buffer, nullptr};
-    Table.Resources.push_back(std::make_pair(&R, Resources));
-
-    return llvm::Error::success();
+    return ResourceSet{UploadBuffer, Buffer, nullptr};
   }
 
   void bindCBV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
@@ -620,38 +611,33 @@ public:
       DescriptorTable &Table = IS.DescTables.back();
       for (auto &R : D.Resources) {
         switch (getDXKind(R.Kind)) {
-        case SRV:
-          if (auto Err = createSRV(R, IS, Table))
-            return Err;
-          break;
-        case UAV:
-          if (auto Err = createUAV(R, IS, Table))
-            return Err;
-          break;
-        case CBV:
-          if (auto Err = createCBV(R, IS, Table))
-            return Err;
+        case SRV: {
+          auto ExRes = createSRV(R, IS);
+          if (!ExRes)
+            return ExRes.takeError();
+          Table.Resources.push_back(std::make_pair(&R, *ExRes));
           break;
         }
-      }
-    }
-    // If we have explicit root parameters we may have root descriptors.
-    if (P.Settings.DX.RootParams.size() > 0) {
-      for (auto &P : P.Settings.DX.RootParams) {
-        // We only need to check the first descriptor table entry, becuse that
-        // is the only one that can be used for root descriptors.
-        if (P.Kind == dx::RootParamKind::DescriptorTable) {
-          IS.DescTables[0].IsRoot = P.IsRoot;
+        case UAV: {
+          auto ExRes = createUAV(R, IS);
+          if (!ExRes)
+            return ExRes.takeError();
+          Table.Resources.push_back(std::make_pair(&R, *ExRes));
           break;
+        }
+        case CBV: {
+          auto ExRes = createCBV(R, IS);
+          if (!ExRes)
+            return ExRes.takeError();
+          Table.Resources.push_back(std::make_pair(&R, *ExRes));
+          break;
+        }
         }
       }
     }
     // Bind descriptors in descriptor tables.
     uint32_t HeapIndex = 0;
     for (auto &T : IS.DescTables) {
-      // Don't bind root descriptors here.
-      if (T.IsRoot)
-        continue;
       for (auto &R : T.Resources) {
         switch (getDXKind(R.first->Kind)) {
         case SRV:
@@ -664,6 +650,35 @@ public:
           bindCBV(*(R.first), IS, HeapIndex++, R.second.Buffer);
           break;
         }
+      }
+    }
+
+    // Setup root descriptors
+    for (auto &R : P.Settings.DX.RootParams) {
+      if (R.Kind != dx::RootParamKind::RootDescriptor)
+        continue;
+      switch (getDXKind(R.Resource.Kind)) {
+      case SRV: {
+        auto ExRes = createSRV(R.Resource, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        IS.RootResources.push_back(std::make_pair(&R.Resource, *ExRes));
+        break;
+      }
+      case UAV: {
+        auto ExRes = createUAV(R.Resource, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        IS.RootResources.push_back(std::make_pair(&R.Resource, *ExRes));
+        break;
+      }
+      case CBV: {
+        auto ExRes = createCBV(R.Resource, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        IS.RootResources.push_back(std::make_pair(&R.Resource, *ExRes));
+        break;
+      }
       }
     }
     return llvm::Error::success();
@@ -774,17 +789,20 @@ public:
     IS.CmdList->SetPipelineState(IS.PSO.Get());
     IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
 
-    ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-    IS.CmdList->SetDescriptorHeaps(1, Heaps);
-
     uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle{
-        IS.DescHeap->GetGPUDescriptorHandleForHeapStart()};
+    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
+
+    if (IS.DescHeap) {
+      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
+      IS.CmdList->SetDescriptorHeaps(1, Heaps);
+      Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
+    }
 
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0;
       uint32_t RootParamIndex = 0u;
+      auto RootDescIt = IS.RootResources.begin();
       for (const auto &Param : P.Settings.DX.RootParams) {
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
@@ -795,28 +813,32 @@ public:
           ConstantOffset += NumValues;
         } break;
         case dx::RootParamKind::DescriptorTable: {
-          if (!Param.IsRoot) {
-            // TODO: Handle root descriptors!
-            IS.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
-            Handle.Offset(P.Sets[Param.Index].Resources.size(), Inc);
+          // TODO: Handle root descriptors!
+          IS.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
+          Handle.Offset(P.Sets[Param.Index].Resources.size(), Inc);
+          break;
+        case dx::RootParamKind::RootDescriptor: {
+          assert(RootDescIt != IS.RootResources.end());
+          switch (getDXKind(RootDescIt->first->Kind)) {
+          case SRV:
+            IS.CmdList->SetComputeRootShaderResourceView(
+                RootParamIndex++,
+                RootDescIt->second.Buffer->GetGPUVirtualAddress());
+            break;
+          case UAV:
+            IS.CmdList->SetComputeRootUnorderedAccessView(
+                RootParamIndex++,
+                RootDescIt->second.Buffer->GetGPUVirtualAddress());
+            break;
+          case CBV:
+            IS.CmdList->SetComputeRootConstantBufferView(
+                RootParamIndex++,
+                RootDescIt->second.Buffer->GetGPUVirtualAddress());
             break;
           }
-          for (auto &R : IS.DescTables[0].Resources) {
-            switch (getDXKind(R.first->Kind)) {
-            case SRV:
-              IS.CmdList->SetComputeRootShaderResourceView(
-                  RootParamIndex++, R.second.Buffer->GetGPUVirtualAddress());
-              break;
-            case UAV:
-              IS.CmdList->SetComputeRootUnorderedAccessView(
-                  RootParamIndex++, R.second.Buffer->GetGPUVirtualAddress());
-              break;
-            case CBV:
-              IS.CmdList->SetComputeRootConstantBufferView(
-                  RootParamIndex++, R.second.Buffer->GetGPUVirtualAddress());
-              break;
-            }
-          }
+          ++RootDescIt;
+          break;
+        }
         }
         }
       }
@@ -835,31 +857,43 @@ public:
 
     IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
 
-    for (auto &Table : IS.DescTables) {
-      for (auto &R : Table.Resources) {
-        if (R.second.Readback == nullptr)
-          continue;
-        addReadbackBeginBarrier(IS, R.second.Buffer);
-        IS.CmdList->CopyResource(R.second.Readback.Get(),
-                                 R.second.Buffer.Get());
-        addReadbackEndBarrier(IS, R.second.Buffer);
-      }
-    }
+    auto CopyBackResource = [&IS, this](ResourcePair &R) {
+      if (R.second.Readback == nullptr)
+        return;
+      addReadbackBeginBarrier(IS, R.second.Buffer);
+      IS.CmdList->CopyResource(R.second.Readback.Get(), R.second.Buffer.Get());
+      addReadbackEndBarrier(IS, R.second.Buffer);
+    };
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        CopyBackResource(R);
+
+    for (auto &R : IS.RootResources)
+      CopyBackResource(R);
   }
 
   llvm::Error readBack(Pipeline &P, InvocationState &IS) {
-    for (auto &Table : IS.DescTables) {
-      for (auto &R : Table.Resources) {
-        if (!R.first->isReadWrite())
-          continue;
-        void *DataPtr;
-        if (auto Err = HR::toError(R.second.Readback->Map(0, nullptr, &DataPtr),
-                                   "Failed to map result."))
+    auto MemCpyBack = [](ResourcePair &R) -> llvm::Error {
+      if (!R.first->isReadWrite())
+        return llvm::Error::success();
+      void *DataPtr;
+      if (auto Err = HR::toError(R.second.Readback->Map(0, nullptr, &DataPtr),
+                                 "Failed to map result."))
+        return Err;
+      memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
+      R.second.Readback->Unmap(0, nullptr);
+      return llvm::Error::success();
+    };
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        if (auto Err = MemCpyBack(R))
           return Err;
-        memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
-        R.second.Readback->Unmap(0, nullptr);
-      }
-    }
+
+    for (auto &R : IS.RootResources)
+      if (auto Err = MemCpyBack(R))
+        return Err;
     return llvm::Error::success();
   }
 

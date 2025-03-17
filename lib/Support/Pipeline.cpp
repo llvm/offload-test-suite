@@ -33,39 +33,30 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       }
     }
     uint32_t DescriptorTableCount = 0;
-    int RootTables = 0;
     for (auto &R : P.Settings.DX.RootParams) {
-      if (R.Kind == dx::RootParamKind::DescriptorTable) {
-        DescriptorTableCount++;
-        if (R.IsRoot)
-          RootTables += 1;
-      }
-      if (R.Kind != dx::RootParamKind::Constant)
-        continue;
-      R.BufferPtr = P.getBuffer(R.Name);
-      if (!R.BufferPtr)
-        I.setError(Twine("Referenced buffer in root constant ") + R.Name +
-                   " not found!");
-    }
-    if (P.Settings.DX.RootParams.size() != 0) {
-      if (DescriptorTableCount != P.Sets.size())
-        I.setError(Twine("Expected ") + std::to_string(P.Sets.size()) +
-                   " DescriptorTable root parameters, found " +
-                   std::to_string(DescriptorTableCount));
-      if (RootTables > 1)
-        I.setError("Can only specify one descriptor set as containing root "
-                   "descriptors");
-      else if (RootTables == 1) {
-        for (auto &R : P.Settings.DX.RootParams) {
-          if (R.Kind == dx::RootParamKind::DescriptorTable) {
-            if (!R.IsRoot)
-              I.setError("Descriptor table for root descriptors must be the "
-                         "first descriptor table.");
-            break;
-          }
-        }
+      switch (R.Kind) {
+      case dx::RootParamKind::DescriptorTable:
+        ++DescriptorTableCount;
+        break;
+      case dx::RootParamKind::Constant:
+        R.BufferPtr = P.getBuffer(R.Name);
+        if (!R.BufferPtr)
+          I.setError(Twine("Referenced buffer in root constant ") + R.Name +
+                     " not found!");
+        break;
+      case dx::RootParamKind::RootDescriptor:
+        R.Resource.BufferPtr = P.getBuffer(R.Resource.Name);
+        if (!R.Resource.BufferPtr)
+          I.setError(Twine("Referenced buffer in root descriptor ") +
+                     R.Resource.Name + " not found!");
+        break;
       }
     }
+    if (P.Settings.DX.RootParams.size() != 0 &&
+        DescriptorTableCount != P.Sets.size())
+      I.setError(Twine("Expected ") + std::to_string(P.Sets.size()) +
+                 " DescriptorTable root parameters, found " +
+                 std::to_string(DescriptorTableCount));
   }
 }
 
@@ -143,6 +134,15 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Depth", P.Depth);
 }
 
+void MappingTraits<offloadtest::dx::RootResource>::mapping(
+    IO &I, offloadtest::dx::RootResource &R) {
+  I.mapRequired("Name", R.Name);
+  I.mapRequired("Kind", R.Kind);
+  R.DXBinding = {0, 0};
+  if (!I.outputting() && !R.isRaw())
+    I.setError("Root descriptors must be raw resource types.");
+}
+
 void MappingTraits<offloadtest::dx::RootParameter>::mapping(
     IO &I, offloadtest::dx::RootParameter &P) {
   I.mapRequired("Kind", P.Kind);
@@ -153,8 +153,9 @@ void MappingTraits<offloadtest::dx::RootParameter>::mapping(
     break;
   case dx::RootParamKind::DescriptorTable:
     I.mapRequired("Index", P.Index);
-    I.mapOptional("IsRoot", P.IsRoot, false);
     break;
+  case dx::RootParamKind::RootDescriptor:
+    I.mapRequired("Resource", P.Resource);
   }
 }
 

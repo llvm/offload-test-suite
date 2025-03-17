@@ -143,7 +143,10 @@ namespace dx {
 enum class RootParamKind {
   Constant,
   DescriptorTable,
+  RootDescriptor,
 };
+
+struct RootResource : public Resource {};
 
 struct RootParameter {
   RootParamKind Kind;
@@ -156,7 +159,9 @@ struct RootParameter {
 
   // For DescriptorTables
   int Index;
-  bool IsRoot;
+  
+  // For Root Descriptor
+  RootResource Resource;
 };
 struct Settings {
   llvm::SmallVector<RootParameter> RootParams;
@@ -233,6 +238,10 @@ template <> struct MappingTraits<offloadtest::Shader> {
   static void mapping(IO &I, offloadtest::Shader &B);
 };
 
+template <> struct MappingTraits<offloadtest::dx::RootResource> {
+  static void mapping(IO &I, offloadtest::dx::RootResource &R);
+};
+
 template <> struct MappingTraits<offloadtest::dx::RootParameter> {
   static void mapping(IO &I, offloadtest::dx::RootParameter &S);
 };
@@ -289,6 +298,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::dx::RootParamKind::Val)
     ENUM_CASE(Constant);
     ENUM_CASE(DescriptorTable);
+    ENUM_CASE(RootDescriptor);
 #undef ENUM_CASE
   }
 };
