@@ -151,11 +151,11 @@ void MappingTraits<offloadtest::dx::RootParameter>::mapping(
     I.mapRequired("Name", P.Name);
     I.mapRequired("Binding", P.Binding);
     break;
-  case dx::RootParamKind::DescriptorTable:
-    I.mapRequired("Index", P.Index);
-    break;
   case dx::RootParamKind::RootDescriptor:
     I.mapRequired("Resource", P.Resource);
+    break;
+  case dx::RootParamKind::DescriptorTable:
+    break;
   }
 }
 

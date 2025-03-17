@@ -30,7 +30,6 @@ RuntimeSettings:
         Name: Root
         Binding: 2
       - Kind: DescriptorTable
-        Index: 0
 Buffers:
   - Name: Root
     Format: Float32

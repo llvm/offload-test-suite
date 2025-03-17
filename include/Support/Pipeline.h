@@ -157,11 +157,10 @@ struct RootParameter {
   Buffer *BufferPtr;
   std::string Name;
 
-  // For DescriptorTables
-  int Index;
-  
   // For Root Descriptor
   RootResource Resource;
+
+  // DescriptorTables have no additional data
 };
 struct Settings {
   llvm::SmallVector<RootParameter> RootParams;

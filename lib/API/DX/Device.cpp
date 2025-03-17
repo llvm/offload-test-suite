@@ -802,6 +802,7 @@ public:
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0;
       uint32_t RootParamIndex = 0u;
+      uint32_t DescriptorTableIndex = 0u;
       auto RootDescIt = IS.RootResources.begin();
       for (const auto &Param : P.Settings.DX.RootParams) {
         switch (Param.Kind) {
@@ -815,7 +816,7 @@ public:
         case dx::RootParamKind::DescriptorTable: {
           // TODO: Handle root descriptors!
           IS.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
-          Handle.Offset(P.Sets[Param.Index].Resources.size(), Inc);
+          Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
           break;
         case dx::RootParamKind::RootDescriptor: {
           assert(RootDescIt != IS.RootResources.end());
