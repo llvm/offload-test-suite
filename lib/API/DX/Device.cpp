@@ -788,7 +788,7 @@ public:
     }
 
     if (P.Settings.DX.RootParams.size() > 0) {
-      uint32_t ConstantOffset = 0;
+      uint32_t ConstantOffset = 0u;
       uint32_t RootParamIndex = 0u;
       uint32_t DescriptorTableIndex = 0u;
       auto RootDescIt = IS.RootResources.begin();
