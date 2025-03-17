@@ -606,35 +606,44 @@ public:
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
+    auto CreateBuffer =
+        [&IS,
+         this](Resource &R,
+               llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
+      switch (getDXKind(R.Kind)) {
+      case SRV: {
+        auto ExRes = createSRV(R, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        Resources.push_back(std::make_pair(&R, *ExRes));
+        break;
+      }
+      case UAV: {
+        auto ExRes = createUAV(R, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        Resources.push_back(std::make_pair(&R, *ExRes));
+        break;
+      }
+      case CBV: {
+        auto ExRes = createCBV(R, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        Resources.push_back(std::make_pair(&R, *ExRes));
+        break;
+      }
+      }
+      return llvm::Error::success();
+    };
+
     for (auto &D : P.Sets) {
       IS.DescTables.emplace_back(DescriptorTable());
       DescriptorTable &Table = IS.DescTables.back();
-      for (auto &R : D.Resources) {
-        switch (getDXKind(R.Kind)) {
-        case SRV: {
-          auto ExRes = createSRV(R, IS);
-          if (!ExRes)
-            return ExRes.takeError();
-          Table.Resources.push_back(std::make_pair(&R, *ExRes));
-          break;
-        }
-        case UAV: {
-          auto ExRes = createUAV(R, IS);
-          if (!ExRes)
-            return ExRes.takeError();
-          Table.Resources.push_back(std::make_pair(&R, *ExRes));
-          break;
-        }
-        case CBV: {
-          auto ExRes = createCBV(R, IS);
-          if (!ExRes)
-            return ExRes.takeError();
-          Table.Resources.push_back(std::make_pair(&R, *ExRes));
-          break;
-        }
-        }
-      }
+      for (auto &R : D.Resources)
+        if (auto Err = CreateBuffer(R, Table.Resources))
+          return Err;
     }
+    
     // Bind descriptors in descriptor tables.
     uint32_t HeapIndex = 0;
     for (auto &T : IS.DescTables) {
@@ -657,29 +666,8 @@ public:
     for (auto &R : P.Settings.DX.RootParams) {
       if (R.Kind != dx::RootParamKind::RootDescriptor)
         continue;
-      switch (getDXKind(R.Resource.Kind)) {
-      case SRV: {
-        auto ExRes = createSRV(R.Resource, IS);
-        if (!ExRes)
-          return ExRes.takeError();
-        IS.RootResources.push_back(std::make_pair(&R.Resource, *ExRes));
-        break;
-      }
-      case UAV: {
-        auto ExRes = createUAV(R.Resource, IS);
-        if (!ExRes)
-          return ExRes.takeError();
-        IS.RootResources.push_back(std::make_pair(&R.Resource, *ExRes));
-        break;
-      }
-      case CBV: {
-        auto ExRes = createCBV(R.Resource, IS);
-        if (!ExRes)
-          return ExRes.takeError();
-        IS.RootResources.push_back(std::make_pair(&R.Resource, *ExRes));
-        break;
-      }
-      }
+      if (auto Err = CreateBuffer(R.Resource, IS.RootResources))
+        return Err;
     }
     return llvm::Error::success();
   }
