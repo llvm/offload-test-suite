@@ -153,7 +153,6 @@ struct RootParameter {
 
   // TODO: Make this a variant
   // For Root Constants
-  int Binding;
   Buffer *BufferPtr;
   std::string Name;
 

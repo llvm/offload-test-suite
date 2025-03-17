@@ -149,7 +149,6 @@ void MappingTraits<offloadtest::dx::RootParameter>::mapping(
   switch (P.Kind) {
   case dx::RootParamKind::Constant:
     I.mapRequired("Name", P.Name);
-    I.mapRequired("Binding", P.Binding);
     break;
   case dx::RootParamKind::RootDescriptor:
     I.mapRequired("Resource", P.Resource);

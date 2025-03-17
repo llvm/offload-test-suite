@@ -28,7 +28,6 @@ RuntimeSettings:
     RootParameters:
       - Kind: Constant
         Name: Root
-        Binding: 2
       - Kind: DescriptorTable
 Buffers:
   - Name: Root
