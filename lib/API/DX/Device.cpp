@@ -802,13 +802,13 @@ public:
               RootParamIndex++, NumValues, Constant.BufferPtr->Data.get(),
               ConstantOffset);
           ConstantOffset += NumValues;
-        } break;
-        case dx::RootParamKind::DescriptorTable: {
-          // TODO: Handle root descriptors!
+          break;
+        }
+        case dx::RootParamKind::DescriptorTable:
           IS.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
           Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
           break;
-        case dx::RootParamKind::RootDescriptor: {
+        case dx::RootParamKind::RootDescriptor:
           assert(RootDescIt != IS.RootResources.end());
           switch (getDXKind(RootDescIt->first->Kind)) {
           case SRV:
@@ -829,8 +829,6 @@ public:
           }
           ++RootDescIt;
           break;
-        }
-        }
         }
       }
     } else {
