@@ -19,6 +19,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include <memory>
 #include <string>
+#include <variant>
 
 namespace offloadtest {
 
@@ -139,6 +140,34 @@ struct DescriptorSet {
   llvm::SmallVector<Resource> Resources;
 };
 
+namespace dx {
+enum class RootParamKind {
+  Constant,
+  DescriptorTable,
+  RootDescriptor,
+};
+
+struct RootResource : public Resource {};
+
+struct RootConstant {
+  Buffer *BufferPtr;
+  std::string Name;
+};
+
+struct RootParameter {
+  RootParamKind Kind;
+
+  std::variant<RootConstant, RootResource> Data;
+};
+struct Settings {
+  llvm::SmallVector<RootParameter> RootParams;
+};
+}; // namespace dx
+
+struct RuntimeSettings {
+  dx::Settings DX;
+};
+
 struct Shader {
   Stages Stage;
   std::string Entry;
@@ -148,7 +177,7 @@ struct Shader {
 
 struct Pipeline {
   llvm::SmallVector<Shader> Shaders;
-
+  RuntimeSettings Settings;
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<DescriptorSet> Sets;
 
@@ -158,6 +187,13 @@ struct Pipeline {
       DescriptorCount += D.Resources.size();
     return DescriptorCount;
   }
+
+  Buffer *getBuffer(llvm::StringRef Name) {
+    for (auto &B : Buffers)
+      if (Name == B.Name)
+        return &B;
+    return nullptr;
+  }
 };
 } // namespace offloadtest
 
@@ -165,6 +201,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 
 namespace llvm {
 namespace yaml {
@@ -195,6 +232,22 @@ template <> struct MappingTraits<offloadtest::OutputProperties> {
 
 template <> struct MappingTraits<offloadtest::Shader> {
   static void mapping(IO &I, offloadtest::Shader &B);
+};
+
+template <> struct MappingTraits<offloadtest::dx::RootResource> {
+  static void mapping(IO &I, offloadtest::dx::RootResource &R);
+};
+
+template <> struct MappingTraits<offloadtest::dx::RootParameter> {
+  static void mapping(IO &I, offloadtest::dx::RootParameter &S);
+};
+
+template <> struct MappingTraits<offloadtest::dx::Settings> {
+  static void mapping(IO &I, offloadtest::dx::Settings &S);
+};
+
+template <> struct MappingTraits<offloadtest::RuntimeSettings> {
+  static void mapping(IO &I, offloadtest::RuntimeSettings &S);
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
@@ -232,6 +285,16 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
   static void enumeration(IO &I, offloadtest::Stages &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
     ENUM_CASE(Compute);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
+  static void enumeration(IO &I, offloadtest::dx::RootParamKind &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::dx::RootParamKind::Val)
+    ENUM_CASE(Constant);
+    ENUM_CASE(DescriptorTable);
+    ENUM_CASE(RootDescriptor);
 #undef ENUM_CASE
   }
 };

@@ -18,20 +18,49 @@ namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
+  // Runtime-specific settings.
+  I.mapOptional("RuntimeSettings", P.Settings);
+
   I.mapRequired("Buffers", P.Buffers);
   I.mapRequired("DescriptorSets", P.Sets);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        for (auto &B : P.Buffers) {
-          if (R.Name == B.Name)
-            R.BufferPtr = &B;
-        }
+        R.BufferPtr = P.getBuffer(R.Name);
         if (!R.BufferPtr)
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
       }
     }
+    uint32_t DescriptorTableCount = 0;
+    for (auto &R : P.Settings.DX.RootParams) {
+      switch (R.Kind) {
+      case dx::RootParamKind::DescriptorTable:
+        ++DescriptorTableCount;
+        break;
+      case dx::RootParamKind::Constant: {
+        auto &Constant = std::get<dx::RootConstant>(R.Data);
+        Constant.BufferPtr = P.getBuffer(Constant.Name);
+        if (!Constant.BufferPtr)
+          I.setError(Twine("Referenced buffer in root constant ") +
+                     Constant.Name + " not found!");
+        break;
+      }
+      case dx::RootParamKind::RootDescriptor: {
+        auto &Resource = std::get<dx::RootResource>(R.Data);
+        Resource.BufferPtr = P.getBuffer(Resource.Name);
+        if (!Resource.BufferPtr)
+          I.setError(Twine("Referenced buffer in root descriptor ") +
+                     Resource.Name + " not found!");
+        break;
+      }
+      }
+    }
+    if (P.Settings.DX.RootParams.size() != 0 &&
+        DescriptorTableCount != P.Sets.size())
+      I.setError(Twine("Expected ") + std::to_string(P.Sets.size()) +
+                 " DescriptorTable root parameters, found " +
+                 std::to_string(DescriptorTableCount));
   }
 }
 
@@ -107,6 +136,44 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Height", P.Height);
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
+}
+
+void MappingTraits<offloadtest::dx::RootResource>::mapping(
+    IO &I, offloadtest::dx::RootResource &R) {
+  I.mapRequired("Name", R.Name);
+  I.mapRequired("Kind", R.Kind);
+  R.DXBinding = {0, 0};
+  if (!I.outputting() && !R.isRaw())
+    I.setError("Root descriptors must be raw resource types.");
+}
+
+void MappingTraits<offloadtest::dx::RootParameter>::mapping(
+    IO &I, offloadtest::dx::RootParameter &P) {
+  I.mapRequired("Kind", P.Kind);
+  switch (P.Kind) {
+  case dx::RootParamKind::Constant:
+    if (!I.outputting())
+      P.Data = dx::RootConstant();
+    I.mapRequired("Name", std::get<dx::RootConstant>(P.Data).Name);
+    break;
+  case dx::RootParamKind::RootDescriptor:
+    if (!I.outputting())
+      P.Data = dx::RootResource();
+    I.mapRequired("Resource", std::get<dx::RootResource>(P.Data));
+    break;
+  case dx::RootParamKind::DescriptorTable:
+    break;
+  }
+}
+
+void MappingTraits<offloadtest::dx::Settings>::mapping(
+    IO &I, offloadtest::dx::Settings &S) {
+  I.mapOptional("RootParameters", S.RootParams);
+}
+
+void MappingTraits<offloadtest::RuntimeSettings>::mapping(
+    IO &I, offloadtest::RuntimeSettings &S) {
+  I.mapOptional("DirectX", S.DX);
 }
 
 void MappingTraits<offloadtest::Shader>::mapping(IO &I,
