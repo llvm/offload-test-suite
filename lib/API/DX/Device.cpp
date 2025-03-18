@@ -643,7 +643,7 @@ public:
         if (auto Err = CreateBuffer(R, Table.Resources))
           return Err;
     }
-    
+
     // Bind descriptors in descriptor tables.
     uint32_t HeapIndex = 0;
     for (auto &T : IS.DescTables) {
@@ -666,7 +666,8 @@ public:
     for (auto &R : P.Settings.DX.RootParams) {
       if (R.Kind != dx::RootParamKind::RootDescriptor)
         continue;
-      if (auto Err = CreateBuffer(R.Resource, IS.RootResources))
+      auto &Resource = std::get<dx::RootResource>(R.Data);
+      if (auto Err = CreateBuffer(Resource, IS.RootResources))
         return Err;
     }
     return llvm::Error::success();
@@ -795,10 +796,11 @@ public:
       for (const auto &Param : P.Settings.DX.RootParams) {
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
-          uint32_t NumValues = Param.BufferPtr->size() / sizeof(uint32_t);
-          IS.CmdList->SetComputeRoot32BitConstants(RootParamIndex++, NumValues,
-                                                   Param.BufferPtr->Data.get(),
-                                                   ConstantOffset);
+          auto &Constant = std::get<dx::RootConstant>(Param.Data);
+          uint32_t NumValues = Constant.BufferPtr->size() / sizeof(uint32_t);
+          IS.CmdList->SetComputeRoot32BitConstants(
+              RootParamIndex++, NumValues, Constant.BufferPtr->Data.get(),
+              ConstantOffset);
           ConstantOffset += NumValues;
         } break;
         case dx::RootParamKind::DescriptorTable: {

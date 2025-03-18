@@ -38,18 +38,22 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       case dx::RootParamKind::DescriptorTable:
         ++DescriptorTableCount;
         break;
-      case dx::RootParamKind::Constant:
-        R.BufferPtr = P.getBuffer(R.Name);
-        if (!R.BufferPtr)
-          I.setError(Twine("Referenced buffer in root constant ") + R.Name +
-                     " not found!");
+      case dx::RootParamKind::Constant: {
+        auto &Constant = std::get<dx::RootConstant>(R.Data);
+        Constant.BufferPtr = P.getBuffer(Constant.Name);
+        if (!Constant.BufferPtr)
+          I.setError(Twine("Referenced buffer in root constant ") +
+                     Constant.Name + " not found!");
         break;
-      case dx::RootParamKind::RootDescriptor:
-        R.Resource.BufferPtr = P.getBuffer(R.Resource.Name);
-        if (!R.Resource.BufferPtr)
+      }
+      case dx::RootParamKind::RootDescriptor: {
+        auto &Resource = std::get<dx::RootResource>(R.Data);
+        Resource.BufferPtr = P.getBuffer(Resource.Name);
+        if (!Resource.BufferPtr)
           I.setError(Twine("Referenced buffer in root descriptor ") +
-                     R.Resource.Name + " not found!");
+                     Resource.Name + " not found!");
         break;
+      }
       }
     }
     if (P.Settings.DX.RootParams.size() != 0 &&
@@ -148,10 +152,14 @@ void MappingTraits<offloadtest::dx::RootParameter>::mapping(
   I.mapRequired("Kind", P.Kind);
   switch (P.Kind) {
   case dx::RootParamKind::Constant:
-    I.mapRequired("Name", P.Name);
+    if (!I.outputting())
+      P.Data = dx::RootConstant();
+    I.mapRequired("Name", std::get<dx::RootConstant>(P.Data).Name);
     break;
   case dx::RootParamKind::RootDescriptor:
-    I.mapRequired("Resource", P.Resource);
+    if (!I.outputting())
+      P.Data = dx::RootResource();
+    I.mapRequired("Resource", std::get<dx::RootResource>(P.Data));
     break;
   case dx::RootParamKind::DescriptorTable:
     break;

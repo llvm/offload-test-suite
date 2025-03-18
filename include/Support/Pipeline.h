@@ -19,6 +19,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include <memory>
 #include <string>
+#include <variant>
 
 namespace offloadtest {
 
@@ -148,18 +149,15 @@ enum class RootParamKind {
 
 struct RootResource : public Resource {};
 
+struct RootConstant {
+  Buffer *BufferPtr;
+  std::string Name;
+};
+
 struct RootParameter {
   RootParamKind Kind;
 
-  // TODO: Make this a variant
-  // For Root Constants
-  Buffer *BufferPtr;
-  std::string Name;
-
-  // For Root Descriptor
-  RootResource Resource;
-
-  // DescriptorTables have no additional data
+  std::variant<RootConstant, RootResource> Data;
 };
 struct Settings {
   llvm::SmallVector<RootParameter> RootParams;
