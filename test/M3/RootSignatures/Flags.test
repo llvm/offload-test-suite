@@ -27,13 +27,10 @@ RWStructuredBuffer<Output> Out2 : register(u2);
   "  ALLOW_STREAM_OUTPUT  "                                                    \
   "), "                                                                        \
   "DescriptorTable( "                                                          \
-  "  SRV(t0, flags = 0), "                                                     \
+  "  SRV(t0, flags = DATA_STATIC), "                                           \
   "  SRV(t1, flags = DATA_STATIC_WHILE_SET_AT_EXECUTE), "                      \
   "  UAV(u1, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE), "                  \
-  "  UAV(u2, "                                                                 \
-  "    flags = DESCRIPTORS_STATIC_KEEPING_BUFFER_BOUNDS_CHECKS "               \
-  "          |  DATA_STATIC "                                                  \
-  "  ) "                                                                       \
+  "  UAV(u2, flags = 0)"                                                       \
   ")"
 
 [RootSignature(RootSig)]
