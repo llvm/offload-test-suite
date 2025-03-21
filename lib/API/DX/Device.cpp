@@ -39,6 +39,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/Signals.h"
 
 #include <codecvt>
 #include <locale>
@@ -887,6 +888,33 @@ public:
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
+
+    llvm::sys::AddSignalHandler(
+        [](void *Cookie) {
+          ID3D12Device *Device = (ID3D12Device *)Cookie;
+
+          ComPtr<ID3D12InfoQueue> InfoQueue;
+          HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
+          if (FAILED(HR)) {
+            llvm::errs() << "Failed to query D3D info queue\n";
+            return;
+          }
+          for (int I = 0, E = InfoQueue->GetNumStoredMessages(); I < E; ++I) {
+            SIZE_T Len = 0;
+            HR = InfoQueue->GetMessage(I, NULL, &Len);
+            if (FAILED(HR)) {
+              llvm::errs() << "Failed to get message " << I
+                           << " from D3D info queue\n";
+            } else {
+              D3D12_MESSAGE *Msg = (D3D12_MESSAGE *)malloc(Len);
+              HR = InfoQueue->GetMessage(I, Msg, &Len);
+              llvm::errs() << "D3D: " << Msg->pDescription << "\n";
+              free(Msg);
+            }
+          }
+        },
+        (void *)Device.Get());
+
     InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
     if (auto Err = createRootSignature(P, State))
