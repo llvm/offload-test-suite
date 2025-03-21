@@ -8,7 +8,7 @@ struct OutputStruct {
 
 RWStructuredBuffer<OutputStruct> Output;
 
-[numthreads(8,1,1)]
+[numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
     if (WaveIsFirstLane())
       Flag = 0;
@@ -29,7 +29,7 @@ Buffers:
   - Name: Output
     Format: Int32
     Stride: 4
-    ZeroInitSize: 32
+    ZeroInitSize: 16
 DescriptorSets:
   - Resources:
     - Name: Output
@@ -47,4 +47,4 @@ DescriptorSets:
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: Output
-# CHECK: Data: [ 8, 8, 8, 8, 8, 8, 8, 8 ]
+# CHECK: Data: [ 4, 4, 4, 4 ]
