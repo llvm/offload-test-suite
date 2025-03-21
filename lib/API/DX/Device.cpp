@@ -231,7 +231,6 @@ public:
 
     uint32_t RangeIdx = 0;
     for (const auto &D : P.Sets) {
-      uint32_t DescriptorIdx = 0;
       uint32_t StartRangeIdx = RangeIdx;
       for (const auto &R : D.Resources) {
         switch (getDXKind(R.Kind)) {
@@ -248,10 +247,11 @@ public:
         Ranges.get()[RangeIdx].NumDescriptors = 1;
         Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
         Ranges.get()[RangeIdx].RegisterSpace = R.DXBinding.Space;
-        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
-            DescriptorIdx;
+        // D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND = -1.
+        // TODO: include proper enum when it is merged to main
+        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart
+           = unsigned(-1);
         RangeIdx++;
-        DescriptorIdx++;
       }
       RootParams.push_back(
           D3D12_ROOT_PARAMETER{D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,

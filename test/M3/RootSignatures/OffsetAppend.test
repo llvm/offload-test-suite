@@ -1,0 +1,75 @@
+#--- source.hlsl
+
+struct Input {
+  float4 A;
+  float4 B;
+};
+
+StructuredBuffer<Input> In : register(t2, space0);
+RWBuffer<float4> Out1 : register(u1, space4);
+RWBuffer<float4> Out2 : register(u2, space4);
+
+// This test doesn't provide a root signature and generates it in Device.cpp.
+// When generating the root signature we specify
+// `OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND`
+// (equivalently `unsigned(-1)``).
+//
+// With this noted: this test demonstrates that do not need to (and hence for
+// compatibility, should not) compute the offset before serializing and
+// passing it to the D3D api
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out1[GI] = In[GI].A * In[GI].B;
+  Out2[GI] = In[GI].A * In[GI].B * 2;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out1
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+  - Name: Out2
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+    - Name: Out1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 4
+    - Name: Out2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 4
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Data:
+# CHECK-LABEL: Name: Out1
+# CHECK: Data: [ 20, 48, 84, 128 ]
+# CHECK-LABEL: Name: Out2
+# CHECK: Data: [ 40, 96, 168, 256 ]
