@@ -13,6 +13,7 @@ void main(uint GI : SV_GroupIndex) {
     if (WaveIsFirstLane())
       Flag = 0;
     OutputStruct Val = {0};
+    GroupMemoryBarrierWithGroupSync();
     if (Flag == 0) {
         Val.ActiveLanes = WaveActiveSum(1);
         Flag = 1;
