@@ -17,7 +17,8 @@ StructuredBuffer<Input> In : register(t0);
 RWStructuredBuffer<Output> Out1 : register(u1);
 RWStructuredBuffer<Output> Out2 : register(u2);
 
-// Root signature to sanity test default values optional values
+// Root signature to sanity test the default values that are given to optional
+// parameters (`space = 0`, `offset = DESCRIPTOR_RANGE_OFFSET_APPEND`, etc)
 
 #define RootSig                                                                \
   "RootConstants(num32BitConstants = 4, b0), "                                 \
