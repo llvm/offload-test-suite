@@ -80,14 +80,38 @@ for device in devices['Devices']:
     config.available_features.add(HLSLCompiler + "-DirectX")
     if "Intel" in device['Description']:
       config.available_features.add("DirectX-Intel")
+
+    if device['Features'].get('Native16BitShaderOpsSupported', False):
+      config.available_features.add("Int16")
+      config.available_features.add("Half")
+    if device['Features'].get('DoublePrecisionFloatShaderOps', False):
+      config.available_features.add("Double")
+    if device['Features'].get('Int64ShaderOps', False):
+      config.available_features.add("Int64")
+
   if device['API'] == "Metal" and config.offloadtest_enable_metal:
     config.available_features.add("Metal")
     config.available_features.add(HLSLCompiler + "-Metal")
+
+    config.available_features.add("Int16")
+    config.available_features.add("Half")
+
   if device['API'] == "Vulkan" and config.offloadtest_enable_vulkan:
     config.available_features.add("Vulkan")
     config.available_features.add(HLSLCompiler + "-Vulkan")
     if "NVIDIA" in device['Description']:
       config.available_features.add("Vulkan-NV")
+    if "Intel" in device['Description']:
+      config.available_features.add("Vulkan-Intel")
+
+    if device['Features'].get('shaderInt16', False):
+      config.available_features.add("Int16")
+    if device['Features'].get('shaderFloat16', False):
+      config.available_features.add("Half")
+    if device['Features'].get('shaderFloat64', False):
+      config.available_features.add("Double")
+    if device['Features'].get('shaderInt64', False):
+      config.available_features.add("Int64")
 
 if os.path.exists(config.goldenimage_dir):
   config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))

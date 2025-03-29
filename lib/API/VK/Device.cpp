@@ -166,8 +166,17 @@ public:
 
 private:
   void queryCapabilities() {
-    VkPhysicalDeviceFeatures Features;
-    vkGetPhysicalDeviceFeatures(Device, &Features);
+
+    VkPhysicalDeviceFeatures2 Features{};
+    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan11Features Features11{};
+    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    VkPhysicalDeviceVulkan12Features Features12{};
+    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+
+    Features.pNext = &Features11;
+    Features11.pNext = &Features12;
+    vkGetPhysicalDeviceFeatures2(Device, &Features);
 
     Caps.insert(std::make_pair(
         "APIMajorVersion",
@@ -180,8 +189,15 @@ private:
                                   VK_API_VERSION_MINOR(Props.apiVersion))));
 
 #define VULKAN_FEATURE_BOOL(Name)                                              \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, make_capability<bool>(#Name, Features.features.Name)));
+#define VULKAN11_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
-      std::make_pair(#Name, make_capability<bool>(#Name, Features.Name)));
+      std::make_pair(#Name, make_capability<bool>(#Name, Features11.Name)));
+#include "VKFeatures.def"
+#define VULKAN12_FEATURE_BOOL(Name)                                            \
+  Caps.insert(                                                                 \
+      std::make_pair(#Name, make_capability<bool>(#Name, Features12.Name)));
 #include "VKFeatures.def"
   }
 
