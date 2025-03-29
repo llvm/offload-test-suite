@@ -75,6 +75,7 @@ DescriptorSets:
 # CHECK:   Data: [
 
 # CHECK:     0x3F800000,
+# CHECK:     0x40800000,
 # CHECK-NOT: 0x5A5A5A5A,
 
 # CHECK:     0x1,

@@ -33,11 +33,13 @@ Buffers:
     Format: Hex64
     Data: [
       0x3ff0000000000000, 0x4008000000000000,
+      0x5ff0000000000000, 0x6008000000000000,
       0x1234123412341234, 0x4321432143214321,
       0x0000000000000001, 0x5A5A5A5A5A5A5A5A,
       0x0000000000000001, 0x1234123412341234,
       0x4321432143214321, 0x5A5A5A5A5A5A5A5A,
-      0x0000000000000001, 0x0000000000000002
+      0x0000000000000001, 0x5A5A5A5A5A5A5A5A,
+      0x0000000000000002, 0x5A5A5A5A5A5A5A5A
     ]
   - Name: Out
     Format: Hex64
@@ -58,7 +60,9 @@ DescriptorSets:
 ...
 #--- end
 
-# XFAIL: DXC
+# DXC's vulkan support does not layout cbuffers compatibly with DXIL
+# UNSUPPORTED: Vulkan
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
@@ -72,6 +76,8 @@ DescriptorSets:
 
 # CHECK:     0x3FF0000000000000,
 # CHECK:     0x4008000000000000,
+# CHECK:     0x5FF0000000000000,
+# CHECK:     0x6008000000000000,
 
 # CHECK:     0x1234123412341234,
 # CHECK:     0x4321432143214321,
@@ -84,5 +90,6 @@ DescriptorSets:
 
 # CHECK:     0x1,
 # CHECK:     0x2
+# CHECK-NOT: 0x5A5A5A5A5A5A5A5A
 
 # CHECK:   ]
