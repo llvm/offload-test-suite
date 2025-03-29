@@ -86,11 +86,11 @@ public:
   }
 
   ImageRef(const Buffer &B)
-      : ImageRef(
-            B.OutputProps.Height, B.OutputProps.Width,
-            B.getSingleElementSize(), B.Channels,
-            B.Format == DataFormat::Float32 || B.Format == DataFormat::Float64,
-            llvm::StringRef(B.Data.get(), B.size())) {}
+      : ImageRef(B.OutputProps.Height, B.OutputProps.Width,
+                 B.getSingleElementSize(), B.Channels,
+                 B.Format == DataFormat::Float32 ||
+                     B.Format == DataFormat::Float64,
+                 llvm::StringRef(B.Data.get(), B.size())) {}
 
   uint32_t getHeight() const { return Height; }
   uint32_t getWidth() const { return Width; }
