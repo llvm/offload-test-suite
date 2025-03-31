@@ -1,0 +1,85 @@
+#--- source.hlsl
+
+cbuffer RootConstants : register(b0, space2) {
+  float4 C;
+};
+
+struct Input {
+  float4 A;
+  float4 B;
+};
+
+struct Output {
+  float4 A;
+};
+
+StructuredBuffer<Input> In : register(t0);
+RWStructuredBuffer<Output> Out : register(u1);
+
+// Root signature to demonstrate:
+//  - All keywords and enums are case in-sensitive
+//  - Registers are case sensitive
+//  - Mandatory and optional arguments can be specified in any order
+
+#define RootSig                                                                \
+  "rootflags(allow_input_assembler_input_layout),"                             \
+  "rootconstants(space = 2, b0, num32bitconstants = 4), "                      \
+  "DESCRIPTORTABLE( "                                                          \
+  "  SRV(FLAGS = DATA_STATIC, t0, SPACE = 0), "                                \
+  "  VisibilitY = ShadeR_VisibilitY_AlL, "                                     \
+  "  uav(u1, NumDescriptors = UNBOUNDED) "                                     \
+  ")"
+
+[RootSignature(RootSig)]
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI].A = In[GI].A * In[GI].B * C;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: Constant
+        Name: Root
+      - Kind: DescriptorTable
+Buffers:
+  - Name: Root
+    Format: Float32
+    Data: [ 2, 4, 6, 8 ]
+  - Name: In
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK-LABEL: Name: Out
+# CHECK: Data: [ 40, 192, 504, 1024 ]

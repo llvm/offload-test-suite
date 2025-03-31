@@ -1,0 +1,94 @@
+#--- source.hlsl
+
+cbuffer RootConstants : register(b0) {
+  float4 C;
+};
+
+struct Input {
+  float4 A;
+  float4 B;
+};
+
+struct Output {
+  float4 A;
+};
+
+StructuredBuffer<Input> In : register(t0);
+RWStructuredBuffer<Output> Out1 : register(u1);
+RWStructuredBuffer<Output> Out2 : register(u2);
+
+// Root signature to sanity test the default values that are given to optional
+// parameters (`space = 0`, `offset = DESCRIPTOR_RANGE_OFFSET_APPEND`, etc)
+
+#define RootSig                                                                \
+  "RootConstants(num32BitConstants = 4, b0), "                                 \
+  "DescriptorTable( "                                                          \
+  "  SRV(t0), "                                                                \
+  "  UAV(u1) "                                                                 \
+  "), "                                                                        \
+  "UAV(u2) "
+
+[RootSignature(RootSig)]
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out1[GI].A = In[GI].A * In[GI].B * C;
+  Out2[GI].A = In[GI].A * In[GI].B * C * 2;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: Constant
+        Name: Root
+      - Kind: DescriptorTable
+      - Kind: RootDescriptor
+        Resource:
+            Name: Out2
+            Kind: RWStructuredBuffer
+Buffers:
+  - Name: Root
+    Format: Float32
+    Data: [ 2, 4, 6, 8 ]
+  - Name: In
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out1
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+  - Name: Out2
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK-LABEL: Name: Out1
+# CHECK: Data: [ 40, 192, 504, 1024 ]
+# CHECK-LABEL: Name: Out2
+# CHECK: Data: [ 80, 384, 1008, 2048 ]

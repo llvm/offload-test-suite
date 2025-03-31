@@ -162,7 +162,7 @@ struct RootParameter {
 struct Settings {
   llvm::SmallVector<RootParameter> RootParams;
 };
-}; // namespace dx
+} // namespace dx
 
 struct RuntimeSettings {
   dx::Settings DX;

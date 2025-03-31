@@ -29,6 +29,9 @@ D3D_FEATURE_ENUM(directx::RootSignature, HighestRootSignatureVersion)
 #endif
 
 #ifdef D3D_FEATURE_BOOL
+D3D_FEATURE_BOOL(Native16BitShaderOpsSupported)
+D3D_FEATURE_BOOL(Int64ShaderOps)
+D3D_FEATURE_BOOL(DoublePrecisionFloatShaderOps)
 D3D_FEATURE_BOOL(WaveOps)
 #undef D3D_FEATURE_BOOL
 #endif

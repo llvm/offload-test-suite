@@ -1,0 +1,104 @@
+#--- source.hlsl
+
+struct Input {
+  float4 A;
+  float4 B;
+};
+
+struct Output {
+  float4 A;
+};
+
+StructuredBuffer<Input> In : register(t0);
+StructuredBuffer<Input> InExtra : register(t1);
+RWStructuredBuffer<Output> Out1 : register(u1);
+RWStructuredBuffer<Output> Out2 : register(u2);
+
+// Root signature to test specifying various flags:
+//  - Edge-case value of '0'
+//  - Demonstrate setting of non-sampler root flags
+//  - Demonstrate setting of all descriptor flags
+//  - Demonstrate '|' of applicable flags
+
+#define RootSig                                                                \
+  "RootFlags( "                                                                \
+  "  ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT | "                                    \
+  "  CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED  | "                                    \
+  "  ALLOW_STREAM_OUTPUT  "                                                    \
+  "), "                                                                        \
+  "DescriptorTable( "                                                          \
+  "  SRV(t0, flags = DATA_STATIC), "                                           \
+  "  SRV(t1, flags = DATA_STATIC_WHILE_SET_AT_EXECUTE), "                      \
+  "  UAV(u1, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE), "                  \
+  "  UAV(u2, flags = 0)"                                                       \
+  ")"
+
+[RootSignature(RootSig)]
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out1[GI].A = In[GI].A * InExtra[GI].B;
+  Out2[GI].A = In[GI].A * InExtra[GI].B * 2;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: DescriptorTable
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: InExtra
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out1
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+  - Name: Out2
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: InExtra
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK-LABEL: Name: Out1
+# CHECK: Data: [ 20, 48, 84, 128 ]
+# CHECK-LABEL: Name: Out2
+# CHECK: Data: [ 40, 96, 168, 256 ]

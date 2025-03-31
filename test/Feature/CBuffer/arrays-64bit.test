@@ -1,0 +1,95 @@
+#--- source.hlsl
+
+cbuffer CBArrays : register(b0) {
+  double2 c1[2];
+  uint64_t3 c2[2];
+  int64_t c3[2];
+}
+
+struct Arrays {
+  double2 c1[2];
+  uint64_t3 c2[2];
+  int64_t c3[2];
+};
+
+RWStructuredBuffer<Arrays> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0].c1 = c1;
+  Out[0].c2 = c2;
+  Out[0].c3 = c3;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: CBArrays
+    Format: Hex64
+    Data: [
+      0x3ff0000000000000, 0x4008000000000000,
+      0x5ff0000000000000, 0x6008000000000000,
+      0x1234123412341234, 0x4321432143214321,
+      0x0000000000000001, 0x5A5A5A5A5A5A5A5A,
+      0x0000000000000001, 0x1234123412341234,
+      0x4321432143214321, 0x5A5A5A5A5A5A5A5A,
+      0x0000000000000001, 0x5A5A5A5A5A5A5A5A,
+      0x0000000000000002, 0x5A5A5A5A5A5A5A5A
+    ]
+  - Name: Out
+    Format: Hex64
+    Stride: 96
+    ZeroInitSize: 96
+DescriptorSets:
+  - Resources:
+    - Name: CBArrays
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# DXC's vulkan support does not layout cbuffers compatibly with DXIL
+# UNSUPPORTED: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: - Name: CBArrays
+# CHECK:   Format: Hex64
+
+# CHECK: - Name: Out
+# CHECK:   Format: Hex64
+# CHECK:   Data: [
+
+# CHECK:     0x3FF0000000000000,
+# CHECK:     0x4008000000000000,
+# CHECK:     0x5FF0000000000000,
+# CHECK:     0x6008000000000000,
+
+# CHECK:     0x1234123412341234,
+# CHECK:     0x4321432143214321,
+# CHECK:     0x1,
+# CHECK-NOT: 0x5A5A5A5A5A5A5A5A,
+# CHECK:     0x1,
+# CHECK:     0x1234123412341234,
+# CHECK:     0x4321432143214321,
+# CHECK-NOT: 0x5A5A5A5A5A5A5A5A,
+
+# CHECK:     0x1,
+# CHECK:     0x2
+# CHECK-NOT: 0x5A5A5A5A5A5A5A5A
+
+# CHECK:   ]

@@ -1,0 +1,100 @@
+#--- source.hlsl
+
+struct Input {
+  float4 A;
+  float4 B;
+};
+
+struct Output {
+  float4 A;
+};
+
+StructuredBuffer<Input> In : register(t0);
+StructuredBuffer<Input> InExtra : register(t1);
+RWStructuredBuffer<Output> Out1 : register(u1);
+RWStructuredBuffer<Output> Out2 : register(u2);
+
+// Root signature to test manual `offset` and `numDescriptor` specification:
+//  - Demonstrate manually describing the offsets and numDescriptors
+//  - Edge-case value of `offset` = `DESCRIPTOR_RANGE_OFFSET_APPEND`
+//  - Edge-case value of `numDescriptors` = `unbounded`
+
+#define RootSig                                                                \
+  "DescriptorTable( "                                                          \
+  "  UAV(u2, offset = 3, numDescriptors = unbounded), "                        \
+  "  SRV(t0, offset = 0, numDescriptors = 2), "                                \
+  "  UAV(u1, "                                                                 \
+  "    offset = DESCRIPTOR_RANGE_OFFSET_APPEND, "                              \
+  "    numDescriptors = 1 "                                                    \
+  "  ) "                                                                       \
+  ")"
+
+[RootSignature(RootSig)]
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out1[GI].A = In[GI].A * InExtra[GI].B;
+  Out2[GI].A = In[GI].A * InExtra[GI].B * 2;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: DescriptorTable
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: InExtra
+    Format: Float32
+    Stride: 32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out1
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+  - Name: Out2
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: InExtra
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK-LABEL: Name: Out1
+# CHECK: Data: [ 20, 48, 84, 128 ]
+# CHECK-LABEL: Name: Out2
+# CHECK: Data: [ 40, 96, 168, 256 ]
