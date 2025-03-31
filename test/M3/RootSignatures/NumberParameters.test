@@ -19,7 +19,7 @@ RWStructuredBuffer<Output> Out2 : register(u2);
 
 // Root signature to test edge-cases of specify number arguments:
 //  - Maximum valid register value (0xfffffffe = 4294967294)
-//  - Maximum valid register space value (0x7fffffff = 2147483647)
+//  - Maximum valid register space value (0xffffffef = 4294967279)
 //  - Maximum valid num32BitConstants value
 //    (61 = 64 - # of used DWORDS for other params)
 //  - Using (un)signed integer parameter values
