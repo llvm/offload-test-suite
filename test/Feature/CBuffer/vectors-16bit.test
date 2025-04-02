@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-cbuffer CBVectors {
+cbuffer CBVectors : register(b0) {
   float16_t2 b1;
   uint16_t3 b2;
 }
