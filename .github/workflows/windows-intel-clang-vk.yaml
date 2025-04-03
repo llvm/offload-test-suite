@@ -9,6 +9,10 @@ on:
   schedule:
     - cron: '0 * * * *' # run every 30 minutes
 
+  pull_request:
+    branches:
+      - main
+
 jobs:
   Windows-VK-Intel-Clang:
     uses: ./.github/workflows/test-all.yaml
