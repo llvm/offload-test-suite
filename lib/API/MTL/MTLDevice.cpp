@@ -50,19 +50,6 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   return MTL::PixelFormatInvalid;
 }
 
-bool IsTexture(offloadtest::ResourceKind RK) {
-  switch (RK) {
-  case ResourceKind::Buffer:
-  case ResourceKind::RWBuffer:
-    return true;
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::RWStructuredBuffer:
-  case ResourceKind::ConstantBuffer:
-    return false;
-  }
-  llvm_unreachable("All cases handled");
-}
-
 namespace {
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
@@ -150,12 +137,6 @@ class MTLDevice : public offloadtest::Device {
     }
 
     return llvm::Error::success();
-  }
-
-  llvm::Error createCBV(Resource &R, InvocationState &IS,
-                        const uint32_t HeapIdx) {
-    return llvm::createStringError(std::errc::not_supported,
-                                   "MTLDevice::createCBV not supported.");
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
