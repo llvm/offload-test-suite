@@ -9,12 +9,6 @@ cbuffer CB { // gets b0
   int a;
 }
 
-// TEST GAPS:
-// Need to add tests for:
-// - arrays of resources (array descriptors are not yet supported by the offload test suite)
-// - resources in user-defined structs
-// - combination of the above
-
 [numthreads(4,2,1)]
 void main(uint GI : SV_GroupIndex) {
   D[GI] = 2 * A[GI] + B[GI] + a;
