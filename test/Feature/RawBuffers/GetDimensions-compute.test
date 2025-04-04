@@ -13,9 +13,6 @@ RWStructuredBuffer<S> B : register(u0);
 AppendStructuredBuffer<R> C : register(u1);
 ConsumeStructuredBuffer<S> D : register(u2);
 
-// FIXME: add test case for RasterizerOrderedStructuredBuffer
-// (needs offload-test-suite support for pixel shaders)
-
 RWBuffer<uint> Out : register(u0, space1);
 
 [numthreads(4,1,1)]
