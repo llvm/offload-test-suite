@@ -55,9 +55,6 @@ DescriptorSets:
 
 # REQUIRES: Half, Int16
 
-# See https://github.com/llvm-beanz/offload-test-suite/issues/52
-# XFAIL: Vulkan-Intel
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
