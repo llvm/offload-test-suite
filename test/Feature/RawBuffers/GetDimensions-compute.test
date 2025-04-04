@@ -1,5 +1,10 @@
 #--- source.hlsl
 
+// This test checks that we will get the expected values from invoking
+// `GetDimension`s on various structured buffer types. We are checking
+// that `stride` denotes the total number of bytes of a single struct,
+// and `numStructs` denote how many of the structs are in the buffer.
+
 struct R {
     int4 a;
 };
