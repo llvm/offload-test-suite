@@ -1,0 +1,59 @@
+#--- source.hlsl
+#if defined(__spirv__) || defined(__SPIRV__)
+#define REGISTER(Idx)
+#else
+#define REGISTER(Idx) : register(Idx, space0)
+#endif
+
+RWBuffer<int> In REGISTER(u0);
+RWBuffer<int> Out REGISTER(u1);
+
+
+[numthreads(8,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+    [flatten] 
+    if (TID.x) {
+        int X = In[TID.x];
+        Out[TID.x] = -X;
+    }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 0, 4, 9, 16, 25, 36, 49, 64]
+  - Name: Out
+    Format: Int32
+    Data: [ 0, 10, 11, 12, 13, 14, 15, 17 ]
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: In
+# CHECK: Format: Int32
+# CHECK: Data: [ 0, 4, 9, 16, 25, 36, 49, 64 ]
+# CHECK: Name: Out
+# CHECK: Format: Int32
+# CHECK: Data: [ 0, -4, -9, -16, -25, -36, -49, -64 ]
