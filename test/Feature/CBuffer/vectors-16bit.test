@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-cbuffer CBVectors {
+cbuffer CBVectors : register(b0) {
   float16_t2 b1;
   uint16_t3 b2;
 }
@@ -54,9 +54,6 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Half, Int16
-
-# See https://github.com/llvm-beanz/offload-test-suite/issues/52
-# XFAIL: Vulkan-Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
