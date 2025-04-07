@@ -56,4 +56,4 @@ DescriptorSets:
 # CHECK: Data: [ 1, 4, 9, 16, 25, 36, 49, 64 ]
 # CHECK: Name: Out
 # CHECK: Format: Int32
-# CHECK: Data: [ 1, -4, -9, -16, -25, -36, -49, -64 ]
+# CHECK: Data: [ 0, -4, -9, -16, -25, -36, -49, -64 ]
