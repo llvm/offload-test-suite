@@ -77,12 +77,6 @@ static DXGI_FORMAT getRawDXFormat(Resource &R) {
     return DXGI_FORMAT_UNKNOWN;
 
   switch (R.BufferPtr->Format) {
-  case DataFormat::Hex8:
-    return DXGI_FORMAT_R8_TYPELESS;
-  case DataFormat::Hex16:
-  case DataFormat::UInt16:
-  case DataFormat::Int16:
-    return DXGI_FORMAT_R16_TYPELESS;
   case DataFormat::Hex32:
   case DataFormat::UInt32:
   case DataFormat::Int32:
