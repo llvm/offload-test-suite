@@ -1,0 +1,69 @@
+#--- source.hlsl
+
+RWBuffer<int> A : register(u1);
+RWBuffer<int> B;                 // gets u0
+RWBuffer<int> C: register(u2);   // unused
+RWBuffer<int> D;                 // gets u2
+
+cbuffer CB { // gets b0
+  int a;
+}
+
+[numthreads(4,2,1)]
+void main(uint GI : SV_GroupIndex) {
+  D[GI] = 2 * A[GI] + B[GI] + a;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: BufA
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8]
+  - Name: BufB
+    Format: Int32
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: BufD
+    Format: Int32
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0]
+  - Name: CB
+    Format: Int32
+    Data: [ 100 ]
+DescriptorSets:
+  - Resources:
+    - Name: BufA
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: BufB
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: BufD
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+    - Name: CB
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang, Vulkan
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: BufD
+# CHECK-NEXT: Format: Int32
+# CHECK-NEXT: Data: [ 104, 108, 112, 116, 120, 124, 128, 132 ]
