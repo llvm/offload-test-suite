@@ -1,0 +1,88 @@
+#--- source.hlsl
+
+// This test checks that we will get the expected values from invoking
+// various `Load*` and `Store` methods on `[RW]ByteAddressBuffer`.
+
+ByteAddressBuffer In : register(t0);
+RWByteAddressBuffer Out : register(u0);
+RWBuffer<uint> MappedBuf : register(u0, space1);
+
+[numthreads(4,1,1)]
+void main() {
+  uint status;
+
+  uint u1 = In.Load(0, status);
+  MappedBuf[0] = CheckAccessFullyMapped(status);
+  Out.Store(0, u1);
+
+  uint2 u2 = In.Load2(16, status);
+  MappedBuf[1] = CheckAccessFullyMapped(status);
+  Out.Store2(16, u2);
+
+  uint3 u3 = In.Load3(32, status);
+  MappedBuf[2] = CheckAccessFullyMapped(status);
+  Out.Store3(32, u3);
+
+  uint4 u4 = In.Load4(48, status);
+  MappedBuf[3] = CheckAccessFullyMapped(status);
+  Out.Store4(48, u4);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+
+Buffers:
+  - Name: InBuf
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+
+  - Name: OutBuf
+    Format: Int32
+    ZeroInitSize: 64
+
+  - Name: MappedBuf
+    Format: Int32
+    ZeroInitSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: InBuf
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+
+    - Name: OutBuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+
+    - Name: MappedBuf
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# REQUIRES: DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: - Name: OutBuf
+# CHECK-NEXT: Format: Int32
+# CHECK-NEXT: Data: [ 1, 0, 0, 0, 5, 6, 0, 0, 9, 10, 11, 0, 13, 14, 15,
+# CHECK-NEXT: 16 ]
+
+# CHECK: - Name: MappedBuf
+# CHECK-NEXT: Format: Int32
+# CHECK-NEXT:  Data: [ 1, 1, 1, 1 ]
