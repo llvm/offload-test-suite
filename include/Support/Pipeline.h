@@ -43,8 +43,10 @@ enum class DataFormat {
 enum class ResourceKind {
   Buffer,
   StructuredBuffer,
+  ByteAddressBuffer,
   RWBuffer,
   RWStructuredBuffer,
+  RWByteAddressBuffer,
   ConstantBuffer,
 };
 
@@ -112,10 +114,32 @@ struct Resource {
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
       return true;
     }
     llvm_unreachable("All cases handled");
+  }
+
+  bool isByteAddressBuffer() const {
+    switch (Kind) {
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  bool isStructuredBuffer() const {
+    switch (Kind) {
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+      return true;
+    default:
+      return false;
+    }
   }
 
   uint32_t getElementSize() const { return BufferPtr->getElementSize(); }
@@ -126,10 +150,12 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Buffer:
     case ResourceKind::StructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
       return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::RWByteAddressBuffer:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -274,8 +300,10 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::ResourceKind::Val)
     ENUM_CASE(Buffer);
     ENUM_CASE(StructuredBuffer);
+    ENUM_CASE(ByteAddressBuffer);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
+    ENUM_CASE(RWByteAddressBuffer);
     ENUM_CASE(ConstantBuffer);
 #undef ENUM_CASE
   }

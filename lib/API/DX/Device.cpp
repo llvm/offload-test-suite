@@ -72,6 +72,22 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
+static DXGI_FORMAT getRawDXFormat(Resource &R) {
+  if (!R.isByteAddressBuffer())
+    return DXGI_FORMAT_UNKNOWN;
+
+  switch (R.BufferPtr->Format) {
+  case DataFormat::Hex32:
+  case DataFormat::UInt32:
+  case DataFormat::Int32:
+  case DataFormat::Float32:
+    return DXGI_FORMAT_R32_TYPELESS;
+  default:
+    llvm_unreachable("Unsupported Resource format specified");
+  }
+  return DXGI_FORMAT_UNKNOWN;
+}
+
 namespace {
 
 enum DXResourceKind { UAV, SRV, CBV };
@@ -80,10 +96,12 @@ DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::StructuredBuffer:
+  case ResourceKind::ByteAddressBuffer:
     return SRV;
 
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
+  case ResourceKind::RWByteAddressBuffer:
     return UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -410,15 +428,16 @@ public:
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT EltFormat =
-        R.isRaw() ? DXGI_FORMAT_UNKNOWN
+        R.isRaw() ? getRawDXFormat(R)
                   : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {
         EltFormat,
         D3D12_SRV_DIMENSION_BUFFER,
         D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        {D3D12_BUFFER_SRV{0, NumElts,
-                          static_cast<uint32_t>(R.BufferPtr->Stride),
-                          D3D12_BUFFER_SRV_FLAG_NONE}}};
+        {D3D12_BUFFER_SRV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0,
+                          R.isByteAddressBuffer()
+                              ? D3D12_BUFFER_SRV_FLAG_RAW
+                              : D3D12_BUFFER_SRV_FLAG_NONE}}};
 
     llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
                  << " NumElts = " << NumElts << "\n";
@@ -511,13 +530,15 @@ public:
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT EltFormat =
-        R.isRaw() ? DXGI_FORMAT_UNKNOWN
+        R.isRaw() ? getRawDXFormat(R)
                   : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
         EltFormat,
         D3D12_UAV_DIMENSION_BUFFER,
-        {D3D12_BUFFER_UAV{0, NumElts, R.isRaw() ? R.getElementSize() : 0, 0,
-                          D3D12_BUFFER_UAV_FLAG_NONE}}};
+        {D3D12_BUFFER_UAV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0, 0,
+                          R.isByteAddressBuffer()
+                              ? D3D12_BUFFER_UAV_FLAG_RAW
+                              : D3D12_BUFFER_UAV_FLAG_NONE}}};
 
     llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
                  << " NumElts = " << NumElts << "\n";
