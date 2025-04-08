@@ -110,6 +110,7 @@ DescriptorSets:
 #--- end
 
 # UNSUPPORTED: Clang
+# UNSUPPORTED: Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
