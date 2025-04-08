@@ -32,6 +32,8 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
 ...
 #--- end
 

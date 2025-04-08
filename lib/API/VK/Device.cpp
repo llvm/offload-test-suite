@@ -464,11 +464,13 @@ public:
   llvm::Error createDescriptorSets(Pipeline &P, InvocationState &IS) {
     for (const auto &S : P.Sets) {
       std::vector<VkDescriptorSetLayoutBinding> Bindings;
-      uint32_t BindingIdx = 0;
       for (const auto &R : S.Resources) {
-        (void)R; // Todo: set this correctly for the data type.
         VkDescriptorSetLayoutBinding Binding = {};
-        Binding.binding = BindingIdx++;
+        if (!R.VKBinding.has_value())
+          return llvm::createStringError(std::errc::invalid_argument,
+                                         "No VulkanBinding provided for '%s'",
+                                         R.Name.c_str());
+        Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
         Binding.descriptorCount = 1;
         Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -657,23 +659,23 @@ public:
   }
 
   llvm::Error readBackData(Pipeline &P, InvocationState &IS) {
-    uint32_t UAVIdx = 0;
+    uint32_t BufIdx = 0;
     for (auto &S : P.Sets) {
-      for (auto &R : S.Resources) {
+      for (int I = 0, E = S.Resources.size(); I < E; ++I, ++BufIdx) {
+        Resource &R = S.Resources[I];
         if (!R.isReadWrite())
           continue;
         void *Mapped = nullptr;
-        vkMapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory, 0, VK_WHOLE_SIZE,
+        vkMapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory, 0, VK_WHOLE_SIZE,
                     0, &Mapped);
         VkMappedMemoryRange Range = {};
         Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        Range.memory = IS.Buffers[UAVIdx].Host.Memory;
+        Range.memory = IS.Buffers[BufIdx].Host.Memory;
         Range.offset = 0;
         Range.size = VK_WHOLE_SIZE;
         vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
         memcpy(R.BufferPtr->Data.get(), Mapped, R.size());
-        vkUnmapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory);
-        UAVIdx++;
+        vkUnmapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory);
       }
     }
     return llvm::Error::success();

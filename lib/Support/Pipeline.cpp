@@ -124,12 +124,18 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
   I.mapRequired("Name", R.Name);
   I.mapRequired("Kind", R.Kind);
   I.mapRequired("DirectXBinding", R.DXBinding);
+  I.mapOptional("VulkanBinding", R.VKBinding);
 }
 
 void MappingTraits<offloadtest::DirectXBinding>::mapping(
     IO &I, offloadtest::DirectXBinding &B) {
   I.mapRequired("Register", B.Register);
   I.mapRequired("Space", B.Space);
+}
+
+void MappingTraits<offloadtest::VulkanBinding>::mapping(
+    IO &I, offloadtest::VulkanBinding &B) {
+  I.mapRequired("Binding", B.Binding);
 }
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(
@@ -144,6 +150,7 @@ void MappingTraits<offloadtest::dx::RootResource>::mapping(
   I.mapRequired("Name", R.Name);
   I.mapRequired("Kind", R.Kind);
   R.DXBinding = {0, 0};
+  R.VKBinding = std::nullopt;
   if (!I.outputting() && !R.isRaw())
     I.setError("Root descriptors must be raw resource types.");
 }

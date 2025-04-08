@@ -1,17 +1,17 @@
 #--- source.hlsl
 
-RWBuffer<int> A : register(u1);
-RWBuffer<int> B;                 // gets u0
-RWBuffer<int> C: register(u2);   // unused
-RWBuffer<int> D;                 // gets u2
+RWBuffer<int> A; // dx: u0, vk: 0
+StructuredBuffer<int> B; // dx: t0, vk: 1
 
-cbuffer CB { // gets b0
+cbuffer CB { // dx: b0, vk: 2
   int a;
 }
 
+RWStructuredBuffer<int> C; // dx: u1, vk: 3
+
 [numthreads(4,2,1)]
 void main(uint GI : SV_GroupIndex) {
-  D[GI] = 2 * A[GI] + B[GI] + a;
+  C[GI].x = 2 * A[GI] + B[GI].x + a;
 }
 
 //--- pipeline.yaml
@@ -26,10 +26,12 @@ Buffers:
     Data: [ 1, 2, 3, 4, 5, 6, 7, 8]
   - Name: BufB
     Format: Int32
+    Stride: 4
     Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
-  - Name: BufD
+  - Name: BufC
     Format: Int32
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0]
+    Stride: 4
+    ZeroInitSize: 32
   - Name: CB
     Format: Int32
     Data: [ 100 ]
@@ -38,28 +40,28 @@ DescriptorSets:
     - Name: BufA
       Kind: RWBuffer
       DirectXBinding:
-        Register: 1
-        Space: 0
-      VulkanBinding:
-        Binding: 1
-    - Name: BufB
-      Kind: RWBuffer
-      DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: BufD
-      Kind: RWBuffer
+    - Name: BufB
+      Kind: StructuredBuffer
       DirectXBinding:
-        Register: 2
+        Register: 0
         Space: 0
       VulkanBinding:
-        Binding: 2
+        Binding: 1
     - Name: CB
       Kind: ConstantBuffer
       DirectXBinding:
         Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: BufC
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
         Space: 0
       VulkanBinding:
         Binding: 3
@@ -68,15 +70,12 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 
-# DXC's vulkan backend doesn't drop unused bindings, so it isn't possible to
-# specify descriptor sets that are valid for both DirectX and Vulkan there.
-# UNSUPPORTED: DXC-Vulkan
-
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
 # RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
-# CHECK: Name: BufD
+# CHECK: Name: BufC
 # CHECK-NEXT: Format: Int32
+# CHECK-NEXT: Stride: 4
 # CHECK-NEXT: Data: [ 104, 108, 112, 116, 120, 124, 128, 132 ]

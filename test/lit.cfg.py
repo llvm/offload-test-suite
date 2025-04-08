@@ -50,7 +50,7 @@ else:
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
-  ExtraCompilerArgs = ['-spirv']
+  ExtraCompilerArgs = ['-spirv', '-fspv-target-env=vulkan1.3']
 if config.offloadtest_enable_metal:
   ExtraCompilerArgs = ['-metal']
 
