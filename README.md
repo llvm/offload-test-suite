@@ -21,6 +21,8 @@ This project requires being able to locally build LLVM and leverages LLVM's buil
 pip3 install pyyaml
 ```
 
+On Windows, the [Graphics Tools](https://learn.microsoft.com/en-us/windows/uwp/gaming/use-the-directx-runtime-and-visual-studio-graphics-diagnostic-features) optional feature is additionally required to run the test suite.
+
 # Adding to LLVM Build
 
 Add the following to the CMake options:
