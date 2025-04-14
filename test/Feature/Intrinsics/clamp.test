@@ -1,0 +1,134 @@
+#--- source.hlsl
+
+// Testing Int Uint and Float
+StructuredBuffer<float4> In1 : register(t0);
+StructuredBuffer<int4> In2 : register(t1);
+StructuredBuffer<uint4> In3 : register(t2);
+
+RWStructuredBuffer<float> Out1 : register(u0);
+RWStructuredBuffer<int> Out2 : register(u1);
+RWStructuredBuffer<uint> Out3 : register(u2);
+
+void FloatTest() {
+  float4 Tmp1 = clamp(In1[0], 0.0.xxxx, 3.0.xxxx); // testing the function with float4
+  Out1[0] = Tmp1[0]; Out1[1] = Tmp1[1]; Out1[2] = Tmp1[2]; Out1[3] = Tmp1[3];
+  float3 Tmp2 = clamp(In1[1].yzw, 1.0.xxx, 10.0.xxx); // testing the function with float3
+  Out1[4] = Tmp2[0]; Out1[5] = Tmp2[1]; Out1[6] = Tmp2[2];
+  float2 Tmp3 = clamp(In1[1].xy, -2.0.xx, 5.0.xx); // testing the function with float2
+  Out1[7] = Tmp3[0]; Out1[8] = Tmp3[1];
+  Out1[9] = clamp(In1[1].x, 10.0, 29.0); // testing the function with float
+}
+
+void IntTest() {
+  int4 Tmp1 = clamp(In2[0], 0.xxxx, 3.xxxx); // testing the function with int4
+  Out2[0] = Tmp1[0]; Out2[1] = Tmp1[1]; Out2[2] = Tmp1[2]; Out2[3] = Tmp1[3];
+  int3 Tmp2 = clamp(In2[1].yzw, 1.xxx, 10.xxx); // testing the function with int3
+  Out2[4] = Tmp2[0]; Out2[5] = Tmp2[1]; Out2[6] = Tmp2[2];
+  int2 Tmp3 = clamp(In2[1].xy, -2.xx, 5.xx); // testing the function with int2
+  Out2[7] = Tmp3[0]; Out2[8] = Tmp3[1];
+  Out2[9] = clamp(In2[1].x, 10, 29); // testing the function with int
+}
+
+void UintTest() {
+  uint4 Tmp1 = clamp(In3[0], 0u.xxxx, 3u.xxxx); // testing the function with uint4
+  Out3[0] = Tmp1[0]; Out3[1] = Tmp1[1]; Out3[2] = Tmp1[2]; Out3[3] = Tmp1[3];
+  uint3 Tmp2 = clamp(In3[1].yzw, 1u.xxx, 10u.xxx); // testing the function with uint3
+  Out3[4] = Tmp2[0]; Out3[5] = Tmp2[1]; Out3[6] = Tmp2[2];
+  uint2 Tmp3 = clamp(In3[1].xy, 2u.xx, 5u.xx); // testing the function with uint2
+  Out3[7] = Tmp3[0]; Out3[8] = Tmp3[1];
+  Out3[9] = clamp(In3[1].x, 10u, 29u); // testing the function with int
+} 
+
+[numthreads(1,1,1)]
+void main() {
+  // Testing with float
+  FloatTest();
+  // Testing with int
+  IntTest();
+  // Testing with uint
+  UintTest();
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In1
+    Format: Float32
+    Stride: 16 # Size of a float4 in bytes
+    Data: [ 4, 4, 4, 4, 3.14159, 0, 5, 12 ] # 4.xxxx and {3.14159, 0, 5, 12}
+  - Name: In2
+    Format: Int32
+    Stride: 16 # Size of an int4 in bytes
+    Data: [ 4, 4, 4, 4, 3, 0, 5, 12 ] # 4.xxxx and {3, 0, 5, 12}
+  - Name: In3
+    Format: UInt32
+    Stride: 16 # Size of a uint4 in bytes
+    Data: [1, 2, 3, 4, 5, 6, 7, 8]
+  - Name: Out1
+    Format: Float32
+    Stride: 4 # Size of a float in bytes
+    ZeroInitSize: 40 # 40 bytes to store our 10 float results
+  - Name: Out2
+    Format: Int32
+    Stride: 4 # Size of an int in bytes
+    ZeroInitSize: 40 # 40 bytes to store our 10 int results 
+  - Name: Out3
+    Format: UInt32
+    Stride: 4 # Size of a uint in bytes
+    ZeroInitSize: 40 # 40 bytes to store our 10 uint results 
+DescriptorSets:
+  - Resources:
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: In3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: - Name: Out1
+# CHECK:   Format: Float32
+# CHECK:   Data: [ 3, 3, 3, 3, 1, 5, 10, 3.14159, 0, 10 ]
+
+# CHECK: - Name: Out2
+# CHECK:   Format: Int32
+# CHECK:   Data: [ 3, 3, 3, 3, 1, 5, 10, 3, 0, 10 ]
+
+# CHECK: - Name:  Out3
+# CHECK:   Format: UInt32
+# CHECK:   Data: [ 1, 2, 3, 3, 6, 7, 8, 5, 5, 10 ]
