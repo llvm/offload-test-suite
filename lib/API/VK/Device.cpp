@@ -45,6 +45,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -59,6 +61,8 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
     return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -72,6 +76,8 @@ static bool isUniform(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return false;
