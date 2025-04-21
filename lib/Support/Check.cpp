@@ -11,53 +11,30 @@
 
 #include "Support/Check.h"
 
-inline bool isdenorm(float f) {
-  return (std::numeric_limits<float>::denorm_min() <= f &&
-          f < std::numeric_limits<float>::min()) ||
-         (-std::numeric_limits<float>::min() < f &&
-          f <= -std::numeric_limits<float>::denorm_min());
+inline bool isDenorm(float F) {
+  return (std::numeric_limits<float>::denorm_min() <= F &&
+          F < std::numeric_limits<float>::min()) ||
+         (-std::numeric_limits<float>::min() < F &&
+          F <= -std::numeric_limits<float>::denorm_min());
 }
 
-bool compareFloatULP(const float &fsrc, const float &fref,
+bool compareFloatULP(const float &FSrc, const float &FRef,
                      unsigned ULPTolerance, offloadtest::DenormMode DM) {
-  if (fsrc == fref) {
+  if (FSrc == FRef)
     return true;
-  }
-  if (std::isnan(fsrc)) {
-    return std::isnan(fref);
-  }
+  if (std::isnan(FSrc))
+    return std::isnan(FRef);
   if (DM == offloadtest::DenormMode::Any) {
     // If denorm expected, output can be sign preserved zero. Otherwise output
     // should pass the regular ulp testing.
-    if (isdenorm(fref) && fsrc == 0 && std::signbit(fsrc) == std::signbit(fref))
+    if (isDenorm(FRef) && FSrc == 0 && std::signbit(FSrc) == std::signbit(FRef))
       return true;
   }
   // For FTZ or Preserve mode, we should get the expected number within
   // ULPTolerance for any operations.
-  int diff = *((const uint32_t *)&fsrc) - *((const uint32_t *)&fref);
+  int diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
   unsigned int uDiff = diff < 0 ? -diff : diff;
   return uDiff <= ULPTolerance;
-}
-
-bool compareDoubleULP(const double &fsrc, const double &fref,
-                      unsigned ULPTolerance, offloadtest::DenormMode DM) {
-  if (fsrc == fref) {
-    return true;
-  }
-  if (std::isnan(fsrc)) {
-    return std::isnan(fref);
-  }
-  if (DM == offloadtest::DenormMode::Any) {
-    // If denorm expected, output can be sign preserved zero. Otherwise output
-    // should pass the regular ulp testing.
-    if (isdenorm(fref) && fsrc == 0 && std::signbit(fsrc) == std::signbit(fref))
-      return true;
-  }
-  // For FTZ or Preserve mode, we should get the expected number within
-  // ULPTolerance for any operations.
-  int64_t diff = *((const uint64_t *)&fsrc) - *((const uint64_t *)&fref);
-  uint64_t uDiff = diff < 0 ? -diff : diff;
-  return uDiff <= (uint64_t)ULPTolerance;
 }
 
 bool getResult(offloadtest::Result R) {
@@ -95,21 +72,6 @@ bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
                                       B2->Size / sizeof(float));
     for (unsigned I = 0; I < Arr1.size(); ++I) {
       if (!compareFloatULP(Arr1[I], Arr2[I], ULPT, DM))
-        return false;
-    }
-    return true;
-  }
-  case offloadtest::DataFormat::Float64: {
-    if (B1->Size != B2->Size)
-      return false;
-    llvm::MutableArrayRef<double> Arr1(
-        reinterpret_cast<double *>(B1->Data.get()), B1->Size / sizeof(double));
-    assert(B2->Format == offloadtest::DataFormat::Float64 &&
-           "Buffer types must be the same");
-    llvm::MutableArrayRef<double> Arr2(
-        reinterpret_cast<double *>(B2->Data.get()), B2->Size / sizeof(double));
-    for (unsigned I = 0; I < Arr1.size(); ++I) {
-      if (!compareDoubleULP(Arr1[I], Arr2[I], ULPT, DM))
         return false;
     }
     return true;
