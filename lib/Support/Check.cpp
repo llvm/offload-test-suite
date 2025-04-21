@@ -32,19 +32,17 @@ bool compareFloatULP(const float &FSrc, const float &FRef,
   }
   // For FTZ or Preserve mode, we should get the expected number within
   // ULPTolerance for any operations.
-  int diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
-  unsigned int uDiff = diff < 0 ? -diff : diff;
-  return uDiff <= ULPTolerance;
+  int Diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
+  unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
+  return AbsDiff <= ULPTolerance;
 }
 
 bool getResult(offloadtest::Result R) {
   switch (R.Rule) {
-  case offloadtest::Rule::BufferExact: {
+  case offloadtest::Rule::BufferExact:
     return testBufferExact(R.ActualPtr, R.ExpectedPtr);
-  }
-  case offloadtest::Rule::BufferFuzzy: {
+  case offloadtest::Rule::BufferFuzzy:
     return testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM);
-  }
   }
 }
 
@@ -80,5 +78,4 @@ bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
     llvm_unreachable("Only float types are supported by the fuzzy test.");
   }
   return false;
-  // Call the appropriate function based on the type
 }

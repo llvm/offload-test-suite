@@ -72,11 +72,8 @@ int main(int ArgC, char **ArgV) {
   InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU Execution Tool");
 
-  if (run()) {
-    errs() << "No device available."; // todo fix this because it might just
-                                      // have failed because the tests failed.
+  if (run())
     return 1;
-  }
   Device::uninitialize();
   return 0;
 }
@@ -125,6 +122,11 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
+  if (Device::devices().empty()) {
+    errs() << "No device available.";
+    return 1;
+  }
+    
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
