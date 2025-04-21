@@ -199,21 +199,22 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
     I.mapRequired("DispatchSize", MutableDispatchSize);
   }
 }
-void MappingTraits<offloadtest::Result>::mapping(IO &I, offloadtest::Result &R) {
-    I.mapRequired("Result", R.Name);
-    I.mapRequired("Rule", R.Rule);
-    I.mapRequired("Actual", R.Actual);
-    I.mapRequired("Expected", R.Expected);
+void MappingTraits<offloadtest::Result>::mapping(IO &I,
+                                                 offloadtest::Result &R) {
+  I.mapRequired("Result", R.Name);
+  I.mapRequired("Rule", R.Rule);
+  I.mapRequired("Actual", R.Actual);
+  I.mapRequired("Expected", R.Expected);
 
-    switch (R.Rule) {
-        case Rule::BufferFuzzy: {
-          I.mapRequired("ULPT", R.ULPT);
-          I.mapOptional("DenormMode", R.DM);
-          break;
-        }
-        default:
-          break;
-    }
+  switch (R.Rule) {
+  case Rule::BufferFuzzy: {
+    I.mapRequired("ULPT", R.ULPT);
+    I.mapOptional("DenormMode", R.DM);
+    break;
+  }
+  default:
+    break;
+  }
 }
 } // namespace yaml
 } // namespace llvm

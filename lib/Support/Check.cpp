@@ -18,9 +18,8 @@ inline bool isdenorm(float f) {
           f <= -std::numeric_limits<float>::denorm_min());
 }
 
-bool compareFloatULP(
-    const float &fsrc, const float &fref, unsigned ULPTolerance,
-    offloadtest::DenormMode DM) {
+bool compareFloatULP(const float &fsrc, const float &fref,
+                     unsigned ULPTolerance, offloadtest::DenormMode DM) {
   if (fsrc == fref) {
     return true;
   }
@@ -40,9 +39,8 @@ bool compareFloatULP(
   return uDiff <= ULPTolerance;
 }
 
-bool compareDoubleULP(
-    const double &fsrc, const double &fref, unsigned ULPTolerance,
-    offloadtest::DenormMode DM) {
+bool compareDoubleULP(const double &fsrc, const double &fref,
+                      unsigned ULPTolerance, offloadtest::DenormMode DM) {
   if (fsrc == fref) {
     return true;
   }
@@ -64,21 +62,21 @@ bool compareDoubleULP(
 
 bool getResult(offloadtest::Result R) {
   switch (R.Rule) {
-	  case offloadtest::Rule::BufferExact: {
-	    return testBufferExact(R.ActualPtr, R.ExpectedPtr);
-	  }
-	  case offloadtest::Rule::BufferFuzzy: {
-	    return testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM);
-	  }
+  case offloadtest::Rule::BufferExact: {
+    return testBufferExact(R.ActualPtr, R.ExpectedPtr);
+  }
+  case offloadtest::Rule::BufferFuzzy: {
+    return testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM);
+  }
   }
 }
 
 bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
   if (B1->size() != B2->size())
     return false;
-  for(uint32_t I = 0; I < B1->size(); ++I) {
+  for (uint32_t I = 0; I < B1->size(); ++I) {
     if (B1->Data[I] != B2->Data[I])
-	  return false;
+      return false;
   }
   return true;
 }
@@ -89,12 +87,13 @@ bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   case offloadtest::DataFormat::Float32: {
     if (B1->Size != B2->Size)
       return false;
-    llvm::MutableArrayRef<float> Arr1(reinterpret_cast<float*>(B1->Data.get()), 
+    llvm::MutableArrayRef<float> Arr1(reinterpret_cast<float *>(B1->Data.get()),
                                       B1->Size / sizeof(float));
-    assert(B2->Format == offloadtest::DataFormat::Float32 && "Buffer types must be the same");
-    llvm::MutableArrayRef<float> Arr2(reinterpret_cast<float*>(B2->Data.get()),
+    assert(B2->Format == offloadtest::DataFormat::Float32 &&
+           "Buffer types must be the same");
+    llvm::MutableArrayRef<float> Arr2(reinterpret_cast<float *>(B2->Data.get()),
                                       B2->Size / sizeof(float));
-    for(unsigned I = 0; I < Arr1.size(); ++I) {
+    for (unsigned I = 0; I < Arr1.size(); ++I) {
       if (!compareFloatULP(Arr1[I], Arr2[I], ULPT, DM))
         return false;
     }
@@ -103,12 +102,13 @@ bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   case offloadtest::DataFormat::Float64: {
     if (B1->Size != B2->Size)
       return false;
-    llvm::MutableArrayRef<double> Arr1(reinterpret_cast<double*>(B1->Data.get()),
-                                       B1->Size / sizeof(double));
-    assert(B2->Format == offloadtest::DataFormat::Float64 && "Buffer types must be the same");
-    llvm::MutableArrayRef<double> Arr2(reinterpret_cast<double*>(B2->Data.get()),
-                                       B2->Size / sizeof(double));
-    for(unsigned I = 0; I < Arr1.size(); ++I) {
+    llvm::MutableArrayRef<double> Arr1(
+        reinterpret_cast<double *>(B1->Data.get()), B1->Size / sizeof(double));
+    assert(B2->Format == offloadtest::DataFormat::Float64 &&
+           "Buffer types must be the same");
+    llvm::MutableArrayRef<double> Arr2(
+        reinterpret_cast<double *>(B2->Data.get()), B2->Size / sizeof(double));
+    for (unsigned I = 0; I < Arr1.size(); ++I) {
       if (!compareDoubleULP(Arr1[I], Arr2[I], ULPT, DM))
         return false;
     }
@@ -119,5 +119,4 @@ bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   }
   return false;
   // Call the appropriate function based on the type
-
 }
