@@ -126,7 +126,7 @@ int run() {
     errs() << "No device available.";
     return 1;
   }
-    
+
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
