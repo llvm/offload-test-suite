@@ -1,0 +1,71 @@
+#--- source.hlsl
+
+RWStructuredBuffer<float> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = 20.3;
+  Out[1] = 30.3;
+  Out[2] = 40.3;
+  Out[3] = 50.3;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: Expected1
+    Format: Float32
+    Stride: 4
+    Data: [ 1.5, 2.5, 3.5, 4.5 ]
+Results:
+  - Result: Test1
+    Rule: BufferFuzzy
+    ULPT: 1
+    Actual: Out
+    Expected: Expected1
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Test failed: Test1
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.5, 2.5, 3.5, 4.5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20.3, 30.3, 40.3, 50.3 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0

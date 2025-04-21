@@ -14,6 +14,7 @@
 #include "Config.h"
 #include "Image/Image.h"
 #include "Support/Pipeline.h"
+#include "Support/Check.h"
 
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -72,7 +73,7 @@ int main(int ArgC, char **ArgV) {
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU Execution Tool");
 
   if (run()) {
-    errs() << "No device available.";
+    errs() << "No device available."; // todo fix this because it might just have failed because the tests failed.
     return 1;
   }
   Device::uninitialize();
@@ -129,6 +130,22 @@ int run() {
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
+
+    // check the results
+    bool TestFail = false;
+    for (const auto &R : PipelineDesc.Results) {
+      if(!getResult(R)) {
+        TestFail = true;
+        errs() << "Test failed: " << R.Name << "\nExpected:\n";
+        yaml::Output Yerr(errs());
+        Yerr << *R.ExpectedPtr;
+        errs() << "Got:\n";
+        Yerr << *R.ActualPtr;
+      }
+    }
+
+    if (TestFail)
+      return 1;
 
     if (Quiet)
       return 0;
