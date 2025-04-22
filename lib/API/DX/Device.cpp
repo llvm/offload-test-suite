@@ -449,8 +449,9 @@ public:
   }
 
   llvm::Expected<ResourceSet> createUAV(Resource &R, InvocationState &IS) {
-    llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
+    llvm::outs() << "Creating UAV: { Size = " << R.bufferSize() << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
+                 << ", HasCounter = " << R.HasCounter
                  << " }\n";
     ComPtr<ID3D12Resource> Buffer;
     ComPtr<ID3D12Resource> UploadBuffer;
@@ -461,7 +462,7 @@ public:
     const D3D12_RESOURCE_DESC ResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.size(),
+        R.bufferSize(),
         1,
         1,
         1,
@@ -480,7 +481,7 @@ public:
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(R.size());
+        CD3DX12_RESOURCE_DESC::Buffer(R.bufferSize());
 
     if (auto Err =
             HR::toError(Device->CreateCommittedResource(
@@ -495,7 +496,7 @@ public:
     const D3D12_RESOURCE_DESC ReadBackResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.size(),
+        R.bufferSize(),
         1,
         1,
         1,
@@ -518,6 +519,7 @@ public:
                                "Failed to acquire UAV data pointer."))
       return Err;
     memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
+    //memset(ResDataPtr, R.BufferPtr->Data.get(), R.size());
     UploadBuffer->Unmap(0, nullptr);
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
@@ -529,24 +531,26 @@ public:
                ComPtr<ID3D12Resource> Buffer) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
+    ID3D12Resource * CounterBuffer = R.HasCounter ? Buffer.Get() : nullptr;
+    const uint32_t CounterOffset = R.HasCounter ? R.bufferSize() - 4 : 0;
     DXGI_FORMAT EltFormat =
         R.isRaw() ? getRawDXFormat(R)
                   : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
         EltFormat,
         D3D12_UAV_DIMENSION_BUFFER,
-        {D3D12_BUFFER_UAV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0, 0,
+        {D3D12_BUFFER_UAV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0, CounterOffset,
                           R.isByteAddressBuffer()
                               ? D3D12_BUFFER_UAV_FLAG_RAW
                               : D3D12_BUFFER_UAV_FLAG_NONE}}};
 
     llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                 << " NumElts = " << NumElts << "\n";
+                 << " NumElts = " << NumElts << " HasCounter = " << R.HasCounter << "\n";
     D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     UAVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
                                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateUnorderedAccessView(Buffer.Get(), nullptr, &UAVDesc,
+    Device->CreateUnorderedAccessView(Buffer.Get(), CounterBuffer, &UAVDesc,
                                       UAVHandle);
   }
 

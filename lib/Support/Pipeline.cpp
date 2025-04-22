@@ -122,6 +122,7 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
                                                    offloadtest::Resource &R) {
   I.mapRequired("Name", R.Name);
   I.mapRequired("Kind", R.Kind);
+  I.mapOptional("HasCounter", R.HasCounter);
   I.mapRequired("DirectXBinding", R.DXBinding);
 }
 

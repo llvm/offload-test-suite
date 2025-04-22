@@ -106,6 +106,7 @@ struct Resource {
   std::string Name;
   DirectXBinding DXBinding;
   Buffer *BufferPtr = nullptr;
+  bool HasCounter = false;
 
   bool isRaw() const {
     switch (Kind) {
@@ -145,6 +146,8 @@ struct Resource {
   uint32_t getElementSize() const { return BufferPtr->getElementSize(); }
 
   uint32_t size() const { return BufferPtr->size(); }
+
+  uint32_t bufferSize() const { return HasCounter ? llvm::alignTo(size(), 4) + 4 : size(); }
 
   bool isReadWrite() const {
     switch (Kind) {
