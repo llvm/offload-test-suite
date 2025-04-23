@@ -9,13 +9,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <wrl/client.h>
+
 #include <cstdint>
 #include <d3d12.h>
 #include <d3dx12.h>
 #include <dxcore.h>
 #include <dxgiformat.h>
 #include <dxguids.h>
-#include <wrl/client.h>
 
 #ifndef _WIN32
 #include <poll.h>

@@ -38,6 +38,7 @@ enum class DataFormat {
   Int64,
   Float32,
   Float64,
+  Bool,
 };
 
 enum class ResourceKind {
@@ -85,6 +86,7 @@ struct Buffer {
     case DataFormat::UInt32:
     case DataFormat::Int32:
     case DataFormat::Float32:
+    case DataFormat::Bool:
       return 4;
     case DataFormat::Hex64:
     case DataFormat::UInt64:
@@ -293,6 +295,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
     ENUM_CASE(Int64);
     ENUM_CASE(Float32);
     ENUM_CASE(Float64);
+    ENUM_CASE(Bool);
 #undef ENUM_CASE
   }
 };

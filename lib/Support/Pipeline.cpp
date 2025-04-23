@@ -114,6 +114,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     DATA_CASE(Int64, int64_t)
     DATA_CASE(Float32, float)
     DATA_CASE(Float64, double)
+    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a bool using 4 bytes.
   }
 
   I.mapOptional("OutputProps", B.OutputProps);
