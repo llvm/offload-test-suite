@@ -1,21 +1,14 @@
 #--- source.hlsl
-struct S1 {
-  int4 i;
-  float4 f;
-};
-struct S2 {
-  float4 f;
-  int4 i;
-};
-
-StructuredBuffer<S1> In : register(t0);
-RWStructuredBuffer<S2> Out : register(u0);
+RWStructuredBuffer<int> Out : register(u0);
 
 [numthreads(1,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  Out[GI].f = In[GI].f;
-  Out[GI].i = In[GI].i;
+  Out.IncrementCounter();
+  Out.IncrementCounter();
+  Out.IncrementCounter();
+  Out[GI] = Out.IncrementCounter();
 }
+
 //--- pipeline.yaml
 ---
 Shaders:
@@ -23,22 +16,13 @@ Shaders:
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-  - Name: In
-    Format: Hex32
-    Stride: 32
-    Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003,
-           0x00000000, 0x3f800000, 0x40000000, 0x40400000]
   - Name: Out
     Format: Hex32
-    Stride: 32
-    ZeroInitSize: 32
+    Stride: 4
+    ZeroInitSize: 4
+    Counter: 5
 DescriptorSets:
   - Resources:
-    - Name: In
-      Kind: StructuredBuffer
-      DirectXBinding:
-        Register: 0
-        Space: 0
     - Name: Out
       Kind: RWStructuredBuffer
       HasCounter: true
@@ -55,26 +39,11 @@ DescriptorSets:
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
-# CHECK: Name: In
-# CHECK: Data: [
-# CHECK: 0x0,
-# CHECK: 0x1,
-# CHECK: 0x2,
-# CHECK: 0x3,
-# CHECK: 0x0,
-# CHECK: 0x3F800000,
-# CHECK: 0x40000000,
-# CHECK: 0x40400000
-# CHECK: ]
+# CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
+# CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
 
 # CHECK: Name: Out
+# CHECK: Counter: 4
 # CHECK: Data: [
-# CHECK: 0x0,
-# CHECK: 0x3F800000,
-# CHECK: 0x40000000,
-# CHECK: 0x40400000,
-# CHECK: 0x0,
-# CHECK: 0x1,
-# CHECK: 0x2,
 # CHECK: 0x3
 # CHECK: ]

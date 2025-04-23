@@ -75,6 +75,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
   I.mapOptional("Stride", B.Stride, 0);
+  I.mapOptional("Counter", B.Counter, 0);
   if (!I.outputting() && B.Stride != 0 && B.Channels != 1)
     I.setError("Cannot set a structure stride and more than one channel.");
   switch (B.Format) {
@@ -122,7 +123,7 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
                                                    offloadtest::Resource &R) {
   I.mapRequired("Name", R.Name);
   I.mapRequired("Kind", R.Kind);
-  I.mapOptional("HasCounter", R.HasCounter);
+  I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapRequired("DirectXBinding", R.DXBinding);
 }
 

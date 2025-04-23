@@ -88,6 +88,14 @@ static DXGI_FORMAT getRawDXFormat(Resource &R) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
+static uint32_t getUAVBufferSize(Resource &R) {
+  return R.HasCounter ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) + sizeof(uint32_t) : R.size();
+}
+
+static uint32_t getUAVBufferCounterOffset(Resource &R) {
+  return R.HasCounter ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) : 0;
+}
+
 namespace {
 
 enum DXResourceKind { UAV, SRV, CBV };
@@ -449,7 +457,8 @@ public:
   }
 
   llvm::Expected<ResourceSet> createUAV(Resource &R, InvocationState &IS) {
-    llvm::outs() << "Creating UAV: { Size = " << R.bufferSize() << ", Register = u"
+    uint32_t BufferSize = getUAVBufferSize(R);
+    llvm::outs() << "Creating UAV: { Size = " << BufferSize << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << ", HasCounter = " << R.HasCounter
                  << " }\n";
@@ -462,7 +471,7 @@ public:
     const D3D12_RESOURCE_DESC ResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.bufferSize(),
+        BufferSize,
         1,
         1,
         1,
@@ -481,7 +490,7 @@ public:
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(R.bufferSize());
+        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
 
     if (auto Err =
             HR::toError(Device->CreateCommittedResource(
@@ -496,7 +505,7 @@ public:
     const D3D12_RESOURCE_DESC ReadBackResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        R.bufferSize(),
+        BufferSize,
         1,
         1,
         1,
@@ -519,7 +528,8 @@ public:
                                "Failed to acquire UAV data pointer."))
       return Err;
     memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
-    //memset(ResDataPtr, R.BufferPtr->Data.get(), R.size());
+    if (R.HasCounter)
+      memcpy((char*)ResDataPtr + getUAVBufferCounterOffset(R), &R.BufferPtr->Counter, sizeof(uint32_t));
     UploadBuffer->Unmap(0, nullptr);
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
@@ -532,7 +542,7 @@ public:
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     ID3D12Resource * CounterBuffer = R.HasCounter ? Buffer.Get() : nullptr;
-    const uint32_t CounterOffset = R.HasCounter ? R.bufferSize() - 4 : 0;
+    const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
     DXGI_FORMAT EltFormat =
         R.isRaw() ? getRawDXFormat(R)
                   : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
@@ -898,6 +908,8 @@ public:
                                  "Failed to map result."))
         return Err;
       memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
+      if (R.first->HasCounter)
+        memcpy(&R.first->BufferPtr->Counter, (char*)DataPtr + getUAVBufferCounterOffset(*R.first), sizeof(uint32_t));
       R.second.Readback->Unmap(0, nullptr);
       return llvm::Error::success();
     };
