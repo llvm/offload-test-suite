@@ -1,13 +1,16 @@
 #--- source.hlsl
 
-RWStructuredBuffer<float> Out : register(u0);
+RWStructuredBuffer<float> Out1 : register(u0);
+RWStructuredBuffer<float> Out2 : register(u1);
+RWStructuredBuffer<float> Out3 : register(u2);
+RWStructuredBuffer<float> Out4 : register(u3);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0] = 20.3;
-  Out[1] = 30.3;
-  Out[2] = 40.3;
-  Out[3] = 50.3;
+  Out1[0] = 0.0;
+  Out2[0] = 3.14159265;
+  Out3[0] = asfloat(0x7fffffff); // Should be NaN
+  Out4[0] = 5.4;
 }
 
 //--- pipeline.yaml
@@ -18,26 +21,81 @@ Shaders:
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-  - Name: Out
+  - Name: Out1
     Format: Float32
     Stride: 4
-    ZeroInitSize: 16
+    ZeroInitSize: 4
   - Name: Expected1
     Format: Float32
     Stride: 4
-    Data: [ 1.5, 2.5, 3.5, 4.5 ]
+    Data: [ 0.0000000000000000000000000000000000000112 ] # isDenorm will return true for this value
+  - Name: Out2
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected2
+    Format: Float32
+    Stride: 4
+    Data: [ 3.14159265 ]
+  - Name: Out3
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected3
+    Format: Float32
+    Stride: 4
+    Data: [ NaN ]
+  - Name: Out4
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected4
+    Format: Float32
+    Stride: 4
+    Data: [ 5.399999 ] # Should be 2 ulp away
 Results:
-  - Result: Test1
+  - Result: Test1 # Testing Expected is Denorm and Out is zero, and both have same sign bit
     Rule: BufferFuzzy
     ULPT: 1
-    Actual: Out
+    DenormMode: Any 
+    Actual: Out1
     Expected: Expected1
+  - Result: Test2 # Test two values are exactly the same
+    Rule: BufferFuzzy
+    ULPT: 0 # ulp shouldn't matter for this test
+    Actual: Out2
+    Expected: Expected2
+  - Result: Test3 # Test both are NaN
+    Rule: BufferFuzzy
+    ULPT: 0 # ulp shouldn't matter for this test
+    Actual: Out3
+    Expected: Expected3
+  - Result: Test4 # Actual and Expected are not the same but they are within the ULPT
+    Rule: BufferFuzzy
+    ULPT: 2
+    Actual: Out4
+    Expected: Expected4
 DescriptorSets:
   - Resources:
-    - Name: Out
+    - Name: Out1
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
+        Space: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
         Space: 0
 ...
 #--- end
@@ -45,27 +103,4 @@ DescriptorSets:
 # UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
-
-# CHECK: Test failed: Test1
-# CHECK: Expected:
-# CHECK: ---
-# CHECK: Name:            Expected1
-# CHECK: Format:          Float32
-# CHECK: Stride:          4
-# CHECK: Data:            [ 1.5, 2.5, 3.5, 4.5 ]
-# CHECK: OutputProps:
-# CHECK: Height:          0
-# CHECK: Width:           0
-# CHECK: Depth:           0
-# CHECK:  ...
-# CHECK: Got:
-# CHECK: ---
-# CHECK: Name:            Out
-# CHECK: Format:          Float32
-# CHECK: Stride:          4
-# CHECK: Data:            [ 20.3, 30.3, 40.3, 50.3 ]
-# CHECK: OutputProps:
-# CHECK: Height:          0
-# CHECK: Width:           0
-# CHECK: Depth:           0
+# RUN: %offloader %t/pipeline.yaml %t.o
