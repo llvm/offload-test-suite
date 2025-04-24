@@ -44,7 +44,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       if (R.Rule == offloadtest::Rule::BufferFuzzy) {
         if (R.ActualPtr->Format != offloadtest::DataFormat::Float32 ||
             R.ExpectedPtr->Format != offloadtest::DataFormat::Float32)
-          I.setError(Twine("BufferFuzzy only accepts Float buffers");
+          I.setError(Twine("BufferFuzzy only accepts Float buffers"));
       }
     }
 
