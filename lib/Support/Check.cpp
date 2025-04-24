@@ -11,15 +11,15 @@
 
 #include "Support/Check.h"
 
-inline bool isDenorm(float F) {
+static bool isDenorm(float F) {
   return (std::numeric_limits<float>::denorm_min() <= F &&
           F < std::numeric_limits<float>::min()) ||
          (-std::numeric_limits<float>::min() < F &&
           F <= -std::numeric_limits<float>::denorm_min());
 }
 
-bool compareFloatULP(const float &FSrc, const float &FRef,
-                     unsigned ULPTolerance, offloadtest::DenormMode DM) {
+static bool compareFloatULP(const float &FSrc, const float &FRef,
+                            unsigned ULPTolerance, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc))
@@ -37,16 +37,7 @@ bool compareFloatULP(const float &FSrc, const float &FRef,
   return AbsDiff <= ULPTolerance;
 }
 
-bool getResult(offloadtest::Result R) {
-  switch (R.Rule) {
-  case offloadtest::Rule::BufferExact:
-    return testBufferExact(R.ActualPtr, R.ExpectedPtr);
-  case offloadtest::Rule::BufferFuzzy:
-    return testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM);
-  }
-}
-
-bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
+static bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
   if (B1->size() != B2->size())
     return false;
   for (uint32_t I = 0; I < B1->size(); ++I) {
@@ -56,8 +47,8 @@ bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
   return true;
 }
 
-bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
-                     unsigned ULPT, offloadtest::DenormMode DM) {
+static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
+                            unsigned ULPT, offloadtest::DenormMode DM) {
   switch (B1->Format) {
   case offloadtest::DataFormat::Float32: {
     if (B1->Size != B2->Size)
@@ -78,4 +69,13 @@ bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
     llvm_unreachable("Only float types are supported by the fuzzy test.");
   }
   return false;
+}
+
+bool getResult(offloadtest::Result R) {
+  switch (R.Rule) {
+  case offloadtest::Rule::BufferExact:
+    return testBufferExact(R.ActualPtr, R.ExpectedPtr);
+  case offloadtest::Rule::BufferFuzzy:
+    return testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM);
+  }
 }

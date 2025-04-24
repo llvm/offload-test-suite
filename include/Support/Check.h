@@ -17,9 +17,4 @@
 
 bool getResult(offloadtest::Result R);
 
-bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2);
-
-bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
-                     unsigned ULPT, offloadtest::DenormMode DM);
-
 #endif // OFFLOADTEST_SUPPORT_CHECK_H
