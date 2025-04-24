@@ -41,6 +41,11 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       R.ExpectedPtr = P.getBuffer(R.Expected);
       if (!R.ExpectedPtr)
         I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
+      if (R.Rule == offloadtest::Rule::BufferFuzzy) {
+        if (R.ActualPtr->Format != offloadtest::DataFormat::Float32 ||
+            R.ExpectedPtr->Format != offloadtest::DataFormat::Float32)
+          I.setError(Twine("BufferFuzzy only accepts Float buffers");
+      }
     }
 
     uint32_t DescriptorTableCount = 0;
