@@ -60,7 +60,8 @@ list(APPEND OFFLOADTEST_DEPS
   FileCheck
   split-file
   imgdiff
-  OffloadTestUnit)
+  OffloadTestUnit
+  not)
 
 if (OFFLOADTEST_TEST_CLANG)
   list(APPEND OFFLOADTEST_DEPS clang)
