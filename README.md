@@ -21,6 +21,8 @@ This project requires being able to locally build LLVM and leverages LLVM's buil
 pip3 install pyyaml
 ```
 
+On Windows, the [Graphics Tools](https://learn.microsoft.com/en-us/windows/win32/direct3d12/directx-12-programming-environment-set-up#debug-layer) optional feature is additionally required to run the test suite.
+
 # Adding to LLVM Build
 
 Add the following to the CMake options:
