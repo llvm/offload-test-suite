@@ -70,6 +70,10 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 
+# CBuffer bindings seem to be broken under metal
+# https://github.com/llvm-beanz/offload-test-suite/issues/55
+# UNSUPPORTED: Metal
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
 # RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
