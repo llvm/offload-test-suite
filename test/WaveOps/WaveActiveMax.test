@@ -38,21 +38,29 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
     - Name: Infs
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
+      VulkanBinding:
+        Binding: 1
     - Name: NegInfs
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
+      VulkanBinding:
+        Binding: 2
     - Name: Mix
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 
 #--- end

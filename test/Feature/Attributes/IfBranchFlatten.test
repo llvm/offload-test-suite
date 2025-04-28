@@ -1,17 +1,10 @@
 #--- source.hlsl
-#if defined(__spirv__) || defined(__SPIRV__)
-#define REGISTER(Idx)
-#else
-#define REGISTER(Idx) : register(Idx, space0)
-#endif
-
-RWBuffer<int> In REGISTER(u0);
-RWBuffer<int> Out REGISTER(u1);
-
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Out : register(u1);
 
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
-    [branch] 
+    [branch]
     if (TID.x) {
         int X = In[TID.x];
         Out[TID.x] = -X;
@@ -39,11 +32,15 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
     - Name: Out
       Kind: RWBuffer
       DirectXBinding:
         Register: 1
         Space: 0
+      VulkanBinding:
+        Binding: 1
 ...
 #--- end
 

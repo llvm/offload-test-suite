@@ -10,7 +10,7 @@ struct Arrays {
   float16_t c2[1];
 };
 
-RWStructuredBuffer<Arrays> Out : register(u0);
+RWStructuredBuffer<Arrays> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
@@ -50,7 +50,7 @@ DescriptorSets:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 0
+        Register: 1
         Space: 0
 ...
 #--- end

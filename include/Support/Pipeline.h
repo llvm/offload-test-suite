@@ -56,6 +56,10 @@ struct DirectXBinding {
   uint32_t Space;
 };
 
+struct VulkanBinding {
+  uint32_t Binding;
+};
+
 struct OutputProperties {
   int Height;
   int Width;
@@ -107,6 +111,7 @@ struct Resource {
   ResourceKind Kind;
   std::string Name;
   DirectXBinding DXBinding;
+  std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
 
   bool isRaw() const {
@@ -252,6 +257,10 @@ template <> struct MappingTraits<offloadtest::Resource> {
 
 template <> struct MappingTraits<offloadtest::DirectXBinding> {
   static void mapping(IO &I, offloadtest::DirectXBinding &B);
+};
+
+template <> struct MappingTraits<offloadtest::VulkanBinding> {
+  static void mapping(IO &I, offloadtest::VulkanBinding &B);
 };
 
 template <> struct MappingTraits<offloadtest::OutputProperties> {

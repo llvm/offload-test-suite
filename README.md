@@ -65,16 +65,22 @@ DescriptorSets:
       DirectXBinding:
         Register: 0 # implies b0 due to Access being Constant
         Space: 0
+      VKBinding:
+        Binding: 0 # [[vk::binding(0, 0)]]
     - Name: In1
       Kind: Buffer
       DirectXBinding:
         Register: 0 # implies t0 due to Access being RO
         Space: 0
+      VKBinding:
+        Binding: 10
   - Resources:
     - Name: In2
       Kind: Buffer
       DirectXBinding:
         Register: 1 # implies t1 due to Access being RO
         Space: 0
+      VKBinding:
+        Binding: 0 # [[vk::binding(0, 1)]]
 ...
 ```
