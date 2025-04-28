@@ -8,6 +8,7 @@ void main() {
   Out[0] = saturate(In[0]);
   Out[1].x = saturate(In[1].x);
   Out[1].yzw = saturate(In[1].yzw);
+  Out[2].xy = saturate(In[0].xy);
 }
 
 //--- pipeline.yaml
@@ -25,7 +26,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 16
-    ZeroInitSize: 32
+    ZeroInitSize: 48
 DescriptorSets:
   - Resources:
     - Name: In
@@ -55,4 +56,4 @@ DescriptorSets:
 
 # CHECK: - Name: Out
 # CHECK:   Format: Float32
-# CHECK:   Data: [ 0, 1, 0, 0, 1, 0, 0, 1 ]
+# CHECK:   Data: [ 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0 ]
