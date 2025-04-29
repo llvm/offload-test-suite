@@ -56,6 +56,25 @@ Buffers:
   - Name: In2
     Format: Hex16
     Data: [ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8]
+  - Name: Out1 # Buffer where our output will go
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 8
+  - Name: Expected1 # Buffer which stores the expected result of our test
+    Format: Float32
+    Stride: 4
+    Data: [ 0.0, 1.0 ]
+Results: # Using Result can verify test values without filecheck
+  - Result: Test1
+    Rule: BufferFuzzy # Rule which can be used to compare Float Buffers; They are compared within a ULP range
+    ULPT: 1 # ULP to use
+    DenormMode: Any # if DenormMode Field is not Specified, 'Any' is the default; FTZ and Preserve are the other options.
+    Actual: Out1 # First buffer to compare
+    Expected: Expected1 # Second buffer to compare against first
+  - Result: Test2
+    Rule: BufferExact # Compares Two Buffers for == equality between each value elementwise
+    Actual: Out1
+    Expected: Expected1
 DescriptorSets:
   - Resources:
     - Name: Constants

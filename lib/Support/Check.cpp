@@ -13,9 +13,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
-static bool isDenorm(float F) {
-  return std::fpclassify(F) == FP_SUBNORMAL;
-}
+static bool isDenorm(float F) { return std::fpclassify(F) == FP_SUBNORMAL; }
 
 static bool compareFloatULP(const float &FSrc, const float &FRef,
                             unsigned ULPTolerance, offloadtest::DenormMode DM) {
