@@ -10,6 +10,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Check.h"
+#include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 
 static bool isDenorm(float F) {
   return (std::numeric_limits<float>::denorm_min() <= F &&
@@ -71,11 +73,31 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
-bool getResult(offloadtest::Result R) {
+llvm::Error verifyResult(offloadtest::Result R) {
   switch (R.Rule) {
-  case offloadtest::Rule::BufferExact:
-    return testBufferExact(R.ActualPtr, R.ExpectedPtr);
-  case offloadtest::Rule::BufferFuzzy:
-    return testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM);
+  case offloadtest::Rule::BufferExact: {
+    if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
+      return llvm::Error::success();
+    std::string str;
+    llvm::raw_string_ostream oss(str);
+    oss << "Test failed: " << R.Name << "\nExpected:\n";
+    llvm::yaml::Output Yoss(oss);
+    Yoss << *R.ExpectedPtr;
+    oss << "Got:\n";
+    Yoss << *R.ActualPtr;
+    return llvm::createStringError(str.c_str());
+  }
+  case offloadtest::Rule::BufferFuzzy: {
+    if (testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
+      return llvm::Error::success();
+    std::string str;
+    llvm::raw_string_ostream oss(str);
+    oss << "Test failed: " << R.Name << "\nExpected:\n";
+    llvm::yaml::Output Yoss(oss);
+    Yoss << *R.ExpectedPtr;
+    oss << "Got:\n";
+    Yoss << *R.ActualPtr;
+    return llvm::createStringError(str.c_str());
+  }
   }
 }

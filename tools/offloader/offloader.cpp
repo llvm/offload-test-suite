@@ -136,19 +136,14 @@ int run() {
 
     // check the results
     bool TestFail = false;
-    for (const auto &R : PipelineDesc.Results) {
-      if (!getResult(R)) {
-        TestFail = true;
-        errs() << "Test failed: " << R.Name << "\nExpected:\n";
-        yaml::Output Yerr(errs());
-        Yerr << *R.ExpectedPtr;
-        errs() << "Got:\n";
-        Yerr << *R.ActualPtr;
-      }
-    }
+    llvm::Error ResultErr = Error::success();
+    for (const auto &R : PipelineDesc.Results)
+      ResultErr = llvm::joinErrors(std::move(ResultErr), verifyResult(R));
 
-    if (TestFail)
+    if (ResultErr) {
+      logAllUnhandledErrors(std::move(ResultErr), errs());
       return 1;
+    }
 
     if (Quiet)
       return 0;
