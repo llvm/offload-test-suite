@@ -14,10 +14,7 @@
 #include "llvm/Support/raw_ostream.h"
 
 static bool isDenorm(float F) {
-  return (std::numeric_limits<float>::denorm_min() <= F &&
-          F < std::numeric_limits<float>::min()) ||
-         (-std::numeric_limits<float>::min() < F &&
-          F <= -std::numeric_limits<float>::denorm_min());
+  return std::fpclassify(F) == FP_SUBNORMAL;
 }
 
 static bool compareFloatULP(const float &FSrc, const float &FRef,
@@ -78,26 +75,26 @@ llvm::Error verifyResult(offloadtest::Result R) {
   case offloadtest::Rule::BufferExact: {
     if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
       return llvm::Error::success();
-    std::string str;
-    llvm::raw_string_ostream oss(str);
-    oss << "Test failed: " << R.Name << "\nExpected:\n";
-    llvm::yaml::Output Yoss(oss);
-    Yoss << *R.ExpectedPtr;
-    oss << "Got:\n";
-    Yoss << *R.ActualPtr;
-    return llvm::createStringError(str.c_str());
+    llvm::SmallString<256> Str;
+    llvm::raw_svector_ostream OS(Str);
+    OS << "Test failed: " << R.Name << "\nExpected:\n";
+    llvm::yaml::Output YAMLOS(OS);
+    YAMLOS << *R.ExpectedPtr;
+    OS << "Got:\n";
+    YAMLOS << *R.ActualPtr;
+    return llvm::createStringError(Str.c_str());
   }
   case offloadtest::Rule::BufferFuzzy: {
     if (testBufferFuzzy(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
       return llvm::Error::success();
-    std::string str;
-    llvm::raw_string_ostream oss(str);
-    oss << "Test failed: " << R.Name << "\nExpected:\n";
-    llvm::yaml::Output Yoss(oss);
-    Yoss << *R.ExpectedPtr;
-    oss << "Got:\n";
-    Yoss << *R.ActualPtr;
-    return llvm::createStringError(str.c_str());
+    llvm::SmallString<256> Str;
+    llvm::raw_svector_ostream OS(Str);
+    OS << "Test failed: " << R.Name << "\nExpected:\n";
+    llvm::yaml::Output YAMLOS(OS);
+    YAMLOS << *R.ExpectedPtr;
+    OS << "Got:\n";
+    YAMLOS << *R.ActualPtr;
+    return llvm::createStringError(Str.c_str());
   }
   }
 }
