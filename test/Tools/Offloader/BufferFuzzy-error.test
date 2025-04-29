@@ -33,7 +33,7 @@ Buffers:
   - Name: Expected2
     Format: Float32
     Stride: 4
-    Data: [ 0.0000000000000000000000000000000000000112 ] # isDenorm will return true for this value
+    Data: [ 0x1.e7d42cp-127 ] # isDenorm will return true for this value: 1.12e-38
 Results:
   - Result: Test1
     Rule: BufferFuzzy
