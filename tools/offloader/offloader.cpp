@@ -13,6 +13,7 @@
 #include "API/Device.h"
 #include "Config.h"
 #include "Image/Image.h"
+#include "Support/Check.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/Support/CommandLine.h"
@@ -71,10 +72,8 @@ int main(int ArgC, char **ArgV) {
   InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU Execution Tool");
 
-  if (run()) {
-    errs() << "No device available.";
+  if (run())
     return 1;
-  }
   Device::uninitialize();
   return 0;
 }
@@ -123,12 +122,28 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
+  if (Device::devices().empty()) {
+    errs() << "No device available.";
+    return 1;
+  }
+
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
+
+    // check the results
+    bool TestFail = false;
+    llvm::Error ResultErr = Error::success();
+    for (const auto &R : PipelineDesc.Results)
+      ResultErr = llvm::joinErrors(std::move(ResultErr), verifyResult(R));
+
+    if (ResultErr) {
+      logAllUnhandledErrors(std::move(ResultErr), errs());
+      return 1;
+    }
 
     if (Quiet)
       return 0;

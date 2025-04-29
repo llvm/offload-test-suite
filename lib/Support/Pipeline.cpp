@@ -22,6 +22,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("RuntimeSettings", P.Settings);
 
   I.mapRequired("Buffers", P.Buffers);
+  I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
 
   if (!I.outputting()) {
@@ -32,6 +33,21 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
       }
     }
+    // Initialize result Buffers
+    for (auto &R : P.Results) {
+      R.ActualPtr = P.getBuffer(R.Actual);
+      if (!R.ActualPtr)
+        I.setError(Twine("Reference buffer ") + R.Actual + " not found!");
+      R.ExpectedPtr = P.getBuffer(R.Expected);
+      if (!R.ExpectedPtr)
+        I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
+      if (R.Rule == offloadtest::Rule::BufferFuzzy) {
+        if (R.ActualPtr->Format != offloadtest::DataFormat::Float32 ||
+            R.ExpectedPtr->Format != offloadtest::DataFormat::Float32)
+          I.setError(Twine("BufferFuzzy only accepts Float buffers"));
+      }
+    }
+
     uint32_t DescriptorTableCount = 0;
     for (auto &R : P.Settings.DX.RootParams) {
       switch (R.Kind) {
@@ -194,6 +210,23 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
     // or moved into the Shaders structure.
     MutableArrayRef<int> MutableDispatchSize(S.DispatchSize);
     I.mapRequired("DispatchSize", MutableDispatchSize);
+  }
+}
+void MappingTraits<offloadtest::Result>::mapping(IO &I,
+                                                 offloadtest::Result &R) {
+  I.mapRequired("Result", R.Name);
+  I.mapRequired("Rule", R.Rule);
+  I.mapRequired("Actual", R.Actual);
+  I.mapRequired("Expected", R.Expected);
+
+  switch (R.Rule) {
+  case Rule::BufferFuzzy: {
+    I.mapRequired("ULPT", R.ULPT);
+    I.mapOptional("DenormMode", R.DM);
+    break;
+  }
+  default:
+    break;
   }
 }
 } // namespace yaml
