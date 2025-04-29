@@ -119,9 +119,7 @@ void main(uint3 dispatch_thread_id : SV_DispatchThreadID) {
 
     float3 color =  particle_type_to_color(particle.type);
 
-    // TODO: keep original...
-    // color = lerp(color, color * 0.1f, 1-saturate(hit));
-    color = lerp(color, color * 0.1f, (float3)1-saturate(hit));
+    color = lerp(color, color * 0.1f, 1-saturate(hit));
 
     Vertices[particle_id].color = float_to_abgr(color);
 
