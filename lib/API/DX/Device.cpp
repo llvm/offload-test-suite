@@ -158,7 +158,7 @@ public:
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
-  static llvm::Expected<DXDevice> Create(ComPtr<IDXCoreAdapter> Adapter) {
+  static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter) {
     ComPtr<ID3D12Device> Device;
     if (auto Err =
             HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
@@ -234,7 +234,7 @@ public:
         HasRootSigPart = true;
 
     if (HasRootSigPart) {
-      llvm::StringRef Binary = P.Shaders[0].Shader->getBuffer();
+      const llvm::StringRef Binary = P.Shaders[0].Shader->getBuffer();
       if (auto Err = HR::toError(
               Device->CreateRootSignature(0, Binary.data(), Binary.size(),
                                           IID_PPV_ARGS(&State.RootSig)),
@@ -244,15 +244,15 @@ public:
     }
 
     std::vector<D3D12_ROOT_PARAMETER> RootParams;
-    uint32_t DescriptorCount = P.getDescriptorCount();
-    std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges =
+    const uint32_t DescriptorCount = P.getDescriptorCount();
+    const std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges =
         std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]>(
             new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
 
     uint32_t RangeIdx = 0;
     for (const auto &D : P.Sets) {
       uint32_t DescriptorIdx = 0;
-      uint32_t StartRangeIdx = RangeIdx;
+      const uint32_t StartRangeIdx = RangeIdx;
       for (const auto &R : D.Resources) {
         switch (getDXKind(R.Kind)) {
         case SRV:
@@ -291,7 +291,7 @@ public:
             D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1,
                                         &Signature, &Error),
             "Failed to seialize root signature.")) {
-      std::string Msg =
+      const std::string Msg =
           std::string(reinterpret_cast<char *>(Error->GetBufferPointer()),
                       Error->GetBufferSize() / sizeof(char));
       return joinErrors(
@@ -428,7 +428,7 @@ public:
                ComPtr<ID3D12Resource> Buffer) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
-    DXGI_FORMAT EltFormat =
+    DXGI_FORMAT const EltFormat =
         R.isRaw() ? getRawDXFormat(R)
                   : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {
@@ -530,7 +530,7 @@ public:
                ComPtr<ID3D12Resource> Buffer) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
-    DXGI_FORMAT EltFormat =
+    DXGI_FORMAT const EltFormat =
         R.isRaw() ? getRawDXFormat(R)
                   : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
@@ -556,7 +556,7 @@ public:
   }
 
   llvm::Expected<ResourceSet> createCBV(Resource &R, InvocationState &IS) {
-    size_t CBVSize = getCBVSize(R.size());
+    const size_t CBVSize = getCBVSize(R.size());
     llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << " }\n";
@@ -617,7 +617,7 @@ public:
 
   void bindCBV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
                ComPtr<ID3D12Resource> Buffer) {
-    size_t CBVSize = getCBVSize(R.size());
+    const size_t CBVSize = getCBVSize(R.size());
     const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
         Buffer->GetGPUVirtualAddress(), static_cast<uint32_t>(CBVSize)};
 
@@ -754,7 +754,7 @@ public:
   llvm::Error waitForSignal(InvocationState &IS) {
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
-    uint64_t CurrentCounter = FenceCounter + 1;
+    const uint64_t CurrentCounter = FenceCounter + 1;
 
     if (auto Err = HR::toError(IS.Queue->Signal(IS.Fence.Get(), CurrentCounter),
                                "Failed to add signal."))
@@ -802,7 +802,7 @@ public:
     IS.CmdList->SetPipelineState(IS.PSO.Get());
     IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
 
-    uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
+    const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
 
@@ -816,12 +816,13 @@ public:
       uint32_t ConstantOffset = 0u;
       uint32_t RootParamIndex = 0u;
       uint32_t DescriptorTableIndex = 0u;
-      auto RootDescIt = IS.RootResources.begin();
+      auto *RootDescIt = IS.RootResources.begin();
       for (const auto &Param : P.Settings.DX.RootParams) {
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
           auto &Constant = std::get<dx::RootConstant>(Param.Data);
-          uint32_t NumValues = Constant.BufferPtr->size() / sizeof(uint32_t);
+          const uint32_t NumValues =
+              Constant.BufferPtr->size() / sizeof(uint32_t);
           IS.CmdList->SetComputeRoot32BitConstants(
               RootParamIndex++, NumValues, Constant.BufferPtr->Data.get(),
               ConstantOffset);
@@ -865,7 +866,7 @@ public:
       }
     }
 
-    llvm::ArrayRef<int> DispatchSize =
+    const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
 
     IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
@@ -1010,7 +1011,7 @@ llvm::Error Device::initializeDXDevices() {
             "Failed to acquire adapter")) {
       return Err;
     }
-    auto ExDevice = DXDevice::Create(Adapter);
+    auto ExDevice = DXDevice::create(Adapter);
     if (!ExDevice)
       return ExDevice.takeError();
     auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
