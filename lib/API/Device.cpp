@@ -69,9 +69,7 @@ llvm::Error Device::initialize() {
   return llvm::Error::success();
 }
 
-void Device::uninitialize() {
-  DeviceContext::instance().unregisterDevices();
-}
+void Device::uninitialize() { DeviceContext::instance().unregisterDevices(); }
 
 Device::DeviceIterator Device::begin() {
   return DeviceContext::instance().begin();

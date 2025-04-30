@@ -21,10 +21,10 @@ using namespace llvm;
 using namespace offloadtest;
 
 int main(int ArgC, char **ArgV) {
-  InitLLVM const X(ArgC, ArgV);
+  const InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU API Query Tool");
 
-  ExitOnError const ExitOnErr("api-query: error: ");
+  const ExitOnError ExitOnErr("api-query: error: ");
 
   if (auto Err = Device::initialize())
     logAllUnhandledErrors(std::move(Err), errs(), "api-query: error: ");

@@ -55,18 +55,18 @@ static double convertXYZ(double Val) {
 }
 
 static Color xyzToLab(const Color Old) {
-  double const X = convertXYZ(Old.R / D65WhitePoint.R);
-  double const Y = convertXYZ(Old.G / D65WhitePoint.G);
-  double const Z = convertXYZ(Old.B / D65WhitePoint.B);
+  const double X = convertXYZ(Old.R / D65WhitePoint.R);
+  const double Y = convertXYZ(Old.G / D65WhitePoint.G);
+  const double Z = convertXYZ(Old.B / D65WhitePoint.B);
 
-  double const L = fmax(0.0, 116.0 * Y - 16.0);
-  double const A = 500 * (X - Y);
-  double const B = 200 * (Y - Z);
+  const double L = fmax(0.0, 116.0 * Y - 16.0);
+  const double A = 500 * (X - Y);
+  const double B = 200 * (Y - Z);
   return Color(L, A, B, ColorSpace::LAB);
 }
 
 static double convertLAB(double Val) {
-  double const ValPow3 = pow(Val, 3.0);
+  const double ValPow3 = pow(Val, 3.0);
   if (ValPow3 > 0.008856)
     return ValPow3;
 
