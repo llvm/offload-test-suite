@@ -20,7 +20,6 @@ Buffers:
     Format: Hex32
     Stride: 4
     ZeroInitSize: 4
-    Counter: 5
 DescriptorSets:
   - Resources:
     - Name: Out

@@ -529,8 +529,6 @@ public:
                                "Failed to acquire UAV data pointer."))
       return Err;
     memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
-    if (R.HasCounter)
-      memcpy((char*)ResDataPtr + getUAVBufferCounterOffset(R), &R.BufferPtr->Counter, sizeof(uint32_t));
     UploadBuffer->Unmap(0, nullptr);
 
     addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
