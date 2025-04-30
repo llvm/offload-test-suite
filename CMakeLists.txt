@@ -96,6 +96,37 @@ set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS_BUILDTREE_ONLY png_static)
 
 include(Warp)
 
+# This must be after the third-party targets are generated so that we only apply
+# it to code in the offload-test-suite.
+option(OFFLOADTEST_USE_CLANG_TIDY "Use clang-tidy on offload test codebase" Off)
+option(OFFLOADTEST_CLANG_TIDY_APPLY_FIX "Automatically apply clang-tidy fixes" Off)
+
+if (OFFLOADTEST_USE_CLANG_TIDY)
+  find_program(CLANG_TIDY clang-tidy)
+  if (NOT CLANG_TIDY)
+    message(
+      FATAL_ERROR
+        "Clang-tidy not found in PATH, please specify CLANG_TIDY to CMake.")
+  endif ()
+  if (APPLE)
+    if (CMAKE_OSX_SYSROOT)
+      set(CLANG_TIDY_ARGS --extra-arg=-isysroot${CMAKE_OSX_SYSROOT})
+    elseif(NOT CMAKE_CROSSCOMPILING)
+      # xcrun -sdk macosx --show-sdk-path
+      execute_process(COMMAND xcrun -sdk macosx --show-sdk-path
+        OUTPUT_VARIABLE SYSROOT
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+      set(CLANG_TIDY_ARGS --extra-arg=-isysroot${SYSROOT})
+    endif()
+  endif()
+  if (OFFLOADTEST_CLANG_TIDY_APPLY_FIX)
+    set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS} --fix)
+  endif ()
+  set(CMAKE_C_CLANG_TIDY ${CLANG_TIDY} ${CLANG_TIDY_ARGS})
+  set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY} ${CLANG_TIDY_ARGS})
+endif ()
+
 add_subdirectory(lib)
 add_subdirectory(tools)
 

@@ -21,7 +21,7 @@ using namespace offloadtest;
 static llvm::Error toError(NS::Error *Err) {
   if (!Err)
     return llvm::Error::success();
-  std::error_code EC =
+  std::error_code const EC =
       std::error_code(static_cast<int>(Err->code()), std::system_category());
   llvm::SmallString<256> ErrMsg;
   llvm::raw_svector_ostream OS(ErrMsg);
@@ -58,9 +58,9 @@ class MTLDevice : public offloadtest::Device {
   struct InvocationState {
     InvocationState() { Pool = NS::AutoreleasePool::alloc()->init(); }
     ~InvocationState() {
-      for (auto T : Textures)
+      for (auto *T : Textures)
         T->release();
-      for (auto B : Buffers)
+      for (auto *B : Buffers)
         B->release();
       if (Fn)
         Fn->release();
@@ -86,12 +86,12 @@ class MTLDevice : public offloadtest::Device {
 
   llvm::Error loadShaders(InvocationState &IS, const Shader &P) {
     NS::Error *Error = nullptr;
-    llvm::StringRef Program = P.Shader->getBuffer();
-    dispatch_data_t data = dispatch_data_create(Program.data(), Program.size(),
+    llvm::StringRef const Program = P.Shader->getBuffer();
+    dispatch_data_t Data = dispatch_data_create(Program.data(), Program.size(),
                                                 dispatch_get_main_queue(),
                                                 ^{
                                                 });
-    IS.Lib = Device->newLibrary(data, &Error);
+    IS.Lib = Device->newLibrary(Data, &Error);
     if (Error)
       return toError(Error);
 
@@ -118,7 +118,7 @@ class MTLDevice : public offloadtest::Device {
       IRDescriptorTableSetBufferView(&TablePtr[HeapIdx], &View);
       IS.Buffers.push_back(Buf);
     } else {
-      uint64_t Width = R.size() / R.getElementSize();
+      uint64_t const Width = R.size() / R.getElementSize();
       MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
       if (R.isReadWrite())
         UsageFlags |= MTL::ResourceUsageWrite;
@@ -140,7 +140,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    size_t TableSize = sizeof(IRDescriptorTableEntry) * P.getDescriptorCount();
+    size_t const TableSize =
+        sizeof(IRDescriptorTableEntry) * P.getDescriptorCount();
     IS.ArgBuffer =
         Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
 
@@ -169,12 +170,12 @@ class MTLDevice : public offloadtest::Device {
       CmdEncoder->useResource(IS.Buffers[I],
                               MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
 
-    NS::UInteger TGS = IS.PipelineState->maxTotalThreadsPerThreadgroup();
-    llvm::ArrayRef<int> DispatchSize =
+    NS::UInteger const TGS = IS.PipelineState->maxTotalThreadsPerThreadgroup();
+    llvm::ArrayRef<int> const DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-    MTL::Size GridSize =
+    MTL::Size const GridSize =
         MTL::Size(TGS * DispatchSize[0], DispatchSize[1], DispatchSize[2]);
-    MTL::Size GroupSize(TGS, 1, 1);
+    MTL::Size const GroupSize(TGS, 1, 1);
 
     CmdEncoder->dispatchThreads(GridSize, GroupSize);
     CmdEncoder->memoryBarrier(MTL::BarrierScopeBuffers);
@@ -197,7 +198,7 @@ class MTLDevice : public offloadtest::Device {
             memcpy(R.BufferPtr->Data.get(),
                    IS.Buffers[BufferIndex++]->contents(), R.size());
           } else {
-            uint64_t Width = R.size() / R.getElementSize();
+            uint64_t const Width = R.size() / R.getElementSize();
             IS.Textures[TextureIndex++]->getBytes(
                 R.BufferPtr->Data.get(), 0, MTL::Region(0, 0, Width, 1), 0);
           }
@@ -272,6 +273,6 @@ public:
 
 } // namespace
 
-llvm::Error InitializeMTLDevices() {
+llvm::Error Device::initializeMtlDevices() {
   return MTLContext::instance().initialize();
 }

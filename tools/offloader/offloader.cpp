@@ -57,8 +57,8 @@ static cl::opt<bool>
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
-std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
-  ExitOnError ExitOnErr("gpu-exec: error: ");
+static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
+  ExitOnError const ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
       MemoryBuffer::getFileOrSTDIN(Path);
   ExitOnErr(errorCodeToError(FileOrErr.getError()));
@@ -66,10 +66,10 @@ std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   return std::move(FileOrErr.get());
 }
 
-int run();
+static int run();
 
 int main(int ArgC, char **ArgV) {
-  InitLLVM X(ArgC, ArgV);
+  InitLLVM const X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU Execution Tool");
 
   if (run())
@@ -79,7 +79,7 @@ int main(int ArgC, char **ArgV) {
 }
 
 int run() {
-  ExitOnError ExitOnErr("gpu-exec: error: ");
+  ExitOnError const ExitOnErr("gpu-exec: error: ");
   ExitOnErr(Device::initialize());
 
   std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
@@ -162,7 +162,7 @@ int run() {
     }
     for (const auto &B : PipelineDesc.Buffers) {
       if (B.Name == ImageOutput) {
-        ImageRef Img = ImageRef(B);
+        ImageRef const Img = ImageRef(B);
         ExitOnErr(Image::writePNG(Img, OutputFilename));
         return 0;
       }
