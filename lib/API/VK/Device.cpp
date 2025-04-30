@@ -127,7 +127,7 @@ private:
 public:
   VKDevice(VkPhysicalDevice D) : Device(D) {
     vkGetPhysicalDeviceProperties(Device, &Props);
-    uint64_t StrSz =
+    const uint64_t StrSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, StrSz);
   }
@@ -227,7 +227,7 @@ public:
     // Find a queue that supports compute
     uint32_t QueueCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, 0);
-    std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps =
+    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps =
         std::unique_ptr<VkQueueFamilyProperties[]>(
             new VkQueueFamilyProperties[QueueCount]);
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount,
@@ -241,7 +241,7 @@ public:
                                      "No compute queue found.");
 
     VkDeviceQueueCreateInfo QueueInfo = {};
-    float QueuePriority = 0.0f;
+    const float QueuePriority = 0.0f;
     QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     QueueInfo.queueFamilyIndex = QueueIdx;
     QueueInfo.queueCount = 1;
@@ -533,17 +533,18 @@ public:
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         // This is a hack... need a better way to do this.
         VkBufferViewCreateInfo ViewCreateInfo = {};
-        bool IsRawOrUniform = R.isRaw();
-        VkFormat Format = IsRawOrUniform ? VK_FORMAT_UNDEFINED
-                                         : getVKFormat(R.BufferPtr->Format,
-                                                       R.BufferPtr->Channels);
+        const bool IsRawOrUniform = R.isRaw();
+        const VkFormat Format =
+            IsRawOrUniform
+                ? VK_FORMAT_UNDEFINED
+                : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
         ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
         ViewCreateInfo.buffer = IS.Buffers[BufIdx].Device.Buffer;
         ViewCreateInfo.format = Format;
         ViewCreateInfo.range = VK_WHOLE_SIZE;
         if (IsRawOrUniform) {
-          VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer, 0,
-                                       VK_WHOLE_SIZE};
+          const VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer,
+                                             0, VK_WHOLE_SIZE};
           RawBufferInfos.push_back(BI);
         } else {
           IS.BufferViews.push_back(VkBufferView{0});
@@ -630,7 +631,7 @@ public:
     vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             IS.PipelineLayout, 0, IS.DescriptorSets.size(),
                             IS.DescriptorSets.data(), 0, 0);
-    llvm::ArrayRef<int> DispatchSize =
+    const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
     vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
                   DispatchSize[2]);
@@ -670,7 +671,7 @@ public:
     uint32_t BufIdx = 0;
     for (auto &S : P.Sets) {
       for (int I = 0, E = S.Resources.size(); I < E; ++I, ++BufIdx) {
-        Resource &R = S.Resources[I];
+        const Resource &R = S.Resources[I];
         if (!R.isReadWrite())
           continue;
         void *Mapped = nullptr;
@@ -793,11 +794,11 @@ public:
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     CreateInfo.pApplicationInfo = &AppInfo;
 
-    VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+    const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a compatible Vulkan device");
-    else if (Res)
+    if (Res)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unkown Vulkan initialization error");
 

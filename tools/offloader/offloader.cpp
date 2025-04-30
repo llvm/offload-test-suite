@@ -82,7 +82,7 @@ int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ExitOnErr(Device::initialize());
 
-  std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
+  const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
   yaml::Input YIn(PipelineBuf->getBuffer());
   YIn >> PipelineDesc;
@@ -104,10 +104,12 @@ int run() {
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
     } else if (*reinterpret_cast<const uint32_t *>(
-                   PipelineDesc.Shaders[0].Shader->getBuffer().data()) == 0x07230203) {
+                   PipelineDesc.Shaders[0].Shader->getBuffer().data()) ==
+               0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("MTLB")) {
+    } else if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with(
+                   "MTLB")) {
       APIToUse = GPUAPI::Metal;
       outs() << "Using Metal API\n";
     }
