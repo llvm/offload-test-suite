@@ -20,10 +20,10 @@ Alternatively, build and install the DirectX-Headers from the [original repo](ht
   - Fix: Use a newer version of DXC that includes the validator binary `dxv`
 - `double free or corruption (!prev)` may occur when `api-query` and `offloader` exit, which then follows with an infinite stall instead of program termination
   - A workaround is implemented which avoids this issue on normal program exit (i.e., `return 0;` from main)
-  - This issue appears to occur whenever `DeviceContext::Devices` from `lib/API/Device.cpp` contains more than one device. 
-    When `api-query` or `offloader` exit, some memory resources are failing to automatically free themselves. 
-    Valgrind output suggests the core issue stems from the implementation of `Microsoft::WRL::ComPtr::InternalRelease` in WSL. 
+  - This issue appears to occur whenever `DeviceContext::Devices` from `lib/API/Device.cpp` contains more than one device.
+    When `api-query` or `offloader` exit, some memory resources are failing to automatically free themselves.
+    Valgrind output suggests the core issue stems from the implementation of `Microsoft::WRL::ComPtr::InternalRelease` in WSL.
     Manually clearing `DeviceContext::Devices` before a program exit appears to eliminate the issue for the exit
-  - An additional workaround that would cover all possible program exit points is to only select one `DXDevice` by editing `lib/API/DX/Device.cpp` to `break;` at the end of the first iteration of the for-loop in the function `InitializeDXDevices()`
+  - An additional workaround that would cover all possible program exit points is to only select one `DXDevice` by editing `lib/API/DX/Device.cpp` to `break;` at the end of the first iteration of the for-loop in the function `initializeDXDevices()`
     - Before implementing this workaround, you can run `api-query` to list all GPU devices available. Afterwards, edit the `AdapterIndex` of the for-loop to select the index of the desired GPU
 

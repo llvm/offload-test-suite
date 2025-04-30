@@ -11,11 +11,9 @@
 
 #include "Image/Color.h"
 
-#include "llvm/Support/raw_ostream.h"
-
 #include "gtest/gtest.h"
 
-#include <algorithm>
+#include <cstdint>
 
 using namespace offloadtest;
 

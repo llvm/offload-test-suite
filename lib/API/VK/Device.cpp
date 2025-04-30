@@ -823,4 +823,6 @@ public:
 };
 } // namespace
 
-llvm::Error InitializeVXDevices() { return VKContext::instance().initialize(); }
+llvm::Error Device::initializeVXDevices() {
+  return VKContext::instance().initialize();
+}

@@ -972,7 +972,7 @@ public:
 };
 } // namespace
 
-llvm::Error InitializeDXDevices() {
+llvm::Error Device::initializeDXDevices() {
 #ifdef _WIN32
 #ifndef NDEBUG
   ComPtr<ID3D12Debug1> Debug1;
