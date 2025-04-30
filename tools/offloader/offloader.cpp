@@ -135,7 +135,6 @@ int run() {
     ExitOnErr(D->executeProgram(PipelineDesc));
 
     // check the results
-    bool TestFail = false;
     llvm::Error ResultErr = Error::success();
     for (const auto &R : PipelineDesc.Results)
       ResultErr = llvm::joinErrors(std::move(ResultErr), verifyResult(R));
