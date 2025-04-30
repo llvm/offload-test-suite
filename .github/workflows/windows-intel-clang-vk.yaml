@@ -21,4 +21,4 @@ jobs:
       SKU: GPU-Intel
       Test-Clang: On
       TestTarget: check-hlsl-clang-vk
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
