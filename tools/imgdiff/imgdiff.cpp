@@ -46,9 +46,9 @@ static cl::opt<std::string> RulesFilename("rules", cl::desc("Rules filename"),
                                           cl::value_desc("filename"));
 
 int main(int ArgC, char **ArgV) {
-  InitLLVM const X(ArgC, ArgV);
+  const InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "Image Comparison Tool");
-  ExitOnError const ExitOnErr("imgdiff: error: ");
+  const ExitOnError ExitOnErr("imgdiff: error: ");
 
   Image ExpectedImage = ExitOnErr(Image::loadPNG(ExpectedPath));
   Image ActualImage = ExitOnErr(Image::loadPNG(ActualPath));
