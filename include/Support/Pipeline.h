@@ -40,6 +40,7 @@ enum class DataFormat {
   Int16,
   Int32,
   Int64,
+  Float16,
   Float32,
   Float64,
   Bool,
@@ -88,6 +89,7 @@ struct Buffer {
     case DataFormat::Hex16:
     case DataFormat::UInt16:
     case DataFormat::Int16:
+    case DataFormat::Float16:
       return 2;
     case DataFormat::Hex32:
     case DataFormat::UInt32:
@@ -340,6 +342,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
     ENUM_CASE(Int16);
     ENUM_CASE(Int32);
     ENUM_CASE(Int64);
+    ENUM_CASE(Float16);
     ENUM_CASE(Float32);
     ENUM_CASE(Float64);
     ENUM_CASE(Bool);
