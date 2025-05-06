@@ -26,9 +26,10 @@
 using namespace offloadtest;
 
 template <typename DstType, typename SrcType>
-void TranslatePixelData(Image &Dst, ImageRef Src, bool ForWrite) {
-  uint64_t Pixels = Dst.getHeight() * Dst.getWidth();
-  uint32_t CopiedChannels = std::min(Dst.getChannels(), Src.getChannels());
+static void translatePixelData(Image &Dst, ImageRef Src, bool ForWrite) {
+  const uint64_t Pixels = Dst.getHeight() * Dst.getWidth();
+  const uint32_t CopiedChannels =
+      std::min(Dst.getChannels(), Src.getChannels());
   DstType *DstPtr = reinterpret_cast<DstType *>(Dst.data());
   const SrcType *SrcPtr = reinterpret_cast<const SrcType *>(Src.data());
   for (uint64_t I = 0; I < Pixels; ++I) {
@@ -53,35 +54,35 @@ void TranslatePixelData(Image &Dst, ImageRef Src, bool ForWrite) {
 }
 
 template <typename SrcType>
-void translatePixelSrc(Image &Dst, ImageRef Src, bool ForWrite) {
+static void translatePixelSrc(Image &Dst, ImageRef Src, bool ForWrite) {
 
   switch (Dst.getDepth()) {
   case 1:
     assert(!Dst.isFloat() && "No float8 support!");
-    TranslatePixelData<uint8_t, SrcType>(Dst, Src, ForWrite);
+    translatePixelData<uint8_t, SrcType>(Dst, Src, ForWrite);
     break;
   case 2:
     assert(!Dst.isFloat() && "No float16 support!");
-    TranslatePixelData<uint16_t, SrcType>(Dst, Src, ForWrite);
+    translatePixelData<uint16_t, SrcType>(Dst, Src, ForWrite);
     break;
   case 4:
     if (Dst.isFloat())
-      TranslatePixelData<float, SrcType>(Dst, Src, ForWrite);
+      translatePixelData<float, SrcType>(Dst, Src, ForWrite);
     else
-      TranslatePixelData<uint32_t, SrcType>(Dst, Src, ForWrite);
+      translatePixelData<uint32_t, SrcType>(Dst, Src, ForWrite);
     break;
   case 8:
     if (Dst.isFloat())
-      TranslatePixelData<double, SrcType>(Dst, Src, ForWrite);
+      translatePixelData<double, SrcType>(Dst, Src, ForWrite);
     else
-      TranslatePixelData<uint64_t, SrcType>(Dst, Src, ForWrite);
+      translatePixelData<uint64_t, SrcType>(Dst, Src, ForWrite);
     break;
   default:
     llvm_unreachable("Destination depth out of expected range.");
   }
 }
 
-void translatePixels(Image &Dst, ImageRef Src, bool ForWrite = false) {
+static void translatePixels(Image &Dst, ImageRef Src, bool ForWrite = false) {
   switch (Src.getDepth()) {
   case 1:
     assert(!Src.isFloat() && "No float8 support!");
@@ -116,7 +117,7 @@ Image Image::translateImage(ImageRef Src, uint8_t Depth, uint8_t Channels,
   return NewImage;
 }
 
-llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
+static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
   png_structp PNG =
       png_create_write_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
   if (!PNG)
@@ -136,7 +137,7 @@ llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
   F = fopen(OutputPath.data(), "wb");
   if (!F)
     return llvm::createStringError(std::errc::io_error, "Failed openiong file");
-  unsigned ImgFormat =
+  const unsigned ImgFormat =
       Img.getChannels() == 4 ? PNG_COLOR_TYPE_RGB_ALPHA : PNG_COLOR_TYPE_RGB;
   assert((Img.getChannels() == 3 || Img.getChannels() == 4) &&
          "Only support RGB and RGBA images.");
@@ -155,7 +156,7 @@ llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
 
   png_bytepp Rows =
       (png_bytepp)png_malloc(PNG, Img.getHeight() * sizeof(png_bytep));
-  uint64_t RowSize = Img.getWidth() * Img.getChannels() * Img.getDepth();
+  const uint64_t RowSize = Img.getWidth() * Img.getChannels() * Img.getDepth();
   // Step one row back from the end
   const uint8_t *Row = reinterpret_cast<const uint8_t *>(Img.data()) +
                        (RowSize * Img.getHeight()) - RowSize;
@@ -169,7 +170,7 @@ llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
 }
 
 llvm::Error Image::writePNG(ImageRef Img, llvm::StringRef Path) {
-  uint32_t NewDepth = std::min(static_cast<uint32_t>(Img.getDepth()), 2u);
+  const uint32_t NewDepth = std::min(static_cast<uint32_t>(Img.getDepth()), 2u);
 
   // If the image depth is > 1, we need to translate it to get the right
   // endianness.
@@ -194,7 +195,7 @@ llvm::Expected<Image> Image::loadPNG(llvm::StringRef Path) {
   auto ScopeExit = llvm::make_scope_exit([&PNG]() { png_image_free(&PNG); });
 
   PNG.format = PNG_FORMAT_RGB;
-  size_t Size = PNG_IMAGE_SIZE(PNG);
+  const size_t Size = PNG_IMAGE_SIZE(PNG);
   std::unique_ptr<char[]> Buffer = std::make_unique<char[]>(Size);
 
   if (png_image_finish_read(&PNG, NULL /*background*/,
@@ -202,9 +203,9 @@ llvm::Expected<Image> Image::loadPNG(llvm::StringRef Path) {
                             0 /*row_stride*/, NULL /*colormap*/) == 0)
     return llvm::createStringError(std::errc::io_error,
                                    "Failed reading PNG data from file");
-  uint32_t BytesPerPixel =
+  const uint32_t BytesPerPixel =
       static_cast<uint32_t>(Size / (PNG.height * PNG.width));
-  uint32_t Channels = 3;
+  const uint32_t Channels = 3;
   Image Result =
       Image(PNG.height, PNG.width, /*Depth*/ BytesPerPixel / Channels, Channels,
             false, std::move(Buffer));
@@ -222,8 +223,8 @@ Image::compareImages(ImageRef LHS, ImageRef RHS,
          "Cannot operate on images with less than 3 channels.");
   assert(RHS.getChannels() >= 3 &&
          "Cannot operate on images with less than 3 channels.");
-  uint32_t CmpDepth = 4;
-  uint32_t CmpChannels = 3u;
+  const uint32_t CmpDepth = 4;
+  const uint32_t CmpChannels = 3u;
 
   Image L = Image::translateImage(LHS, CmpDepth, CmpChannels, true);
   Image R = Image::translateImage(RHS, CmpDepth, CmpChannels, true);
@@ -231,11 +232,11 @@ Image::compareImages(ImageRef LHS, ImageRef RHS,
   const float *LPtr = reinterpret_cast<const float *>(L.data());
   const float *RPtr = reinterpret_cast<const float *>(R.data());
 
-  uint64_t PixelCt = static_cast<uint64_t>(LHS.getHeight()) *
-                     static_cast<uint64_t>(LHS.getWidth());
+  const uint64_t PixelCt = static_cast<uint64_t>(LHS.getHeight()) *
+                           static_cast<uint64_t>(LHS.getWidth());
   for (uint64_t I = 0; I < PixelCt; ++I, LPtr += 3, RPtr += 3) {
-    Color L = Color(LPtr[0], LPtr[1], LPtr[2]);
-    Color R = Color(RPtr[0], RPtr[1], RPtr[2]);
+    const Color L = Color(LPtr[0], LPtr[1], LPtr[2]);
+    const Color R = Color(RPtr[0], RPtr[1], RPtr[2]);
     for (auto &Cmp : Comparators)
       Cmp.processPixel(L, R);
   }
