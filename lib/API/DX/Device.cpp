@@ -458,7 +458,7 @@ public:
   }
 
   llvm::Expected<ResourceSet> createUAV(Resource &R, InvocationState &IS) {
-    uint32_t BufferSize = getUAVBufferSize(R);
+    const uint32_t BufferSize = getUAVBufferSize(R);
     llvm::outs() << "Creating UAV: { Size = " << BufferSize << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
                  << ", HasCounter = " << R.HasCounter
@@ -908,7 +908,7 @@ public:
         return Err;
       memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
       if (R.first->HasCounter)
-        memcpy(&R.first->BufferPtr->Counter, (char*)DataPtr + getUAVBufferCounterOffset(*R.first), sizeof(uint32_t));
+        memcpy(&R.first->BufferPtr->Counter, static_cast<char*>(DataPtr) + getUAVBufferCounterOffset(*R.first), sizeof(uint32_t));
       R.second.Readback->Unmap(0, nullptr);
       return llvm::Error::success();
     };
