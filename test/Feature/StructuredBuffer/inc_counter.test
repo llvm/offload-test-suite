@@ -32,6 +32,7 @@ DescriptorSets:
 #--- end
 
 # UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
 # UNSUPPORTED: Clang
 
 # RUN: split-file %s %t
