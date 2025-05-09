@@ -90,11 +90,16 @@ static DXGI_FORMAT getRawDXFormat(Resource &R) {
 }
 
 static uint32_t getUAVBufferSize(Resource &R) {
-  return R.HasCounter ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) + sizeof(uint32_t) : R.size();
+  return R.HasCounter
+             ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) +
+                   sizeof(uint32_t)
+             : R.size();
 }
 
 static uint32_t getUAVBufferCounterOffset(Resource &R) {
-  return R.HasCounter ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) : 0;
+  return R.HasCounter
+             ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT)
+             : 0;
 }
 
 namespace {
@@ -461,8 +466,7 @@ public:
     const uint32_t BufferSize = getUAVBufferSize(R);
     llvm::outs() << "Creating UAV: { Size = " << BufferSize << ", Register = u"
                  << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
-                 << ", HasCounter = " << R.HasCounter
-                 << " }\n";
+                 << ", HasCounter = " << R.HasCounter << " }\n";
     ComPtr<ID3D12Resource> Buffer;
     ComPtr<ID3D12Resource> UploadBuffer;
     ComPtr<ID3D12Resource> ReadBackBuffer;
@@ -540,7 +544,7 @@ public:
                ComPtr<ID3D12Resource> Buffer) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
-    ID3D12Resource * CounterBuffer = R.HasCounter ? Buffer.Get() : nullptr;
+    ID3D12Resource *CounterBuffer = R.HasCounter ? Buffer.Get() : nullptr;
     const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
     DXGI_FORMAT EltFormat =
         R.isRaw() ? getRawDXFormat(R)
@@ -548,13 +552,14 @@ public:
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
         EltFormat,
         D3D12_UAV_DIMENSION_BUFFER,
-        {D3D12_BUFFER_UAV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0, CounterOffset,
-                          R.isByteAddressBuffer()
-                              ? D3D12_BUFFER_UAV_FLAG_RAW
-                              : D3D12_BUFFER_UAV_FLAG_NONE}}};
+        {D3D12_BUFFER_UAV{
+            0, NumElts, R.isStructuredBuffer() ? EltSize : 0, CounterOffset,
+            R.isByteAddressBuffer() ? D3D12_BUFFER_UAV_FLAG_RAW
+                                    : D3D12_BUFFER_UAV_FLAG_NONE}}};
 
     llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                 << " NumElts = " << NumElts << " HasCounter = " << R.HasCounter << "\n";
+                 << " NumElts = " << NumElts << " HasCounter = " << R.HasCounter
+                 << "\n";
     D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     UAVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
@@ -908,7 +913,10 @@ public:
         return Err;
       memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
       if (R.first->HasCounter)
-        memcpy(&R.first->BufferPtr->Counter, static_cast<char*>(DataPtr) + getUAVBufferCounterOffset(*R.first), sizeof(uint32_t));
+        memcpy(&R.first->BufferPtr->Counter,
+               static_cast<char *>(DataPtr) +
+                   getUAVBufferCounterOffset(*R.first),
+               sizeof(uint32_t));
       R.second.Readback->Unmap(0, nullptr);
       return llvm::Error::success();
     };
