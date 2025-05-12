@@ -42,8 +42,10 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       if (!R.ExpectedPtr)
         I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
       if (R.Rule == offloadtest::Rule::BufferFuzzy) {
-        if (R.ActualPtr->Format != offloadtest::DataFormat::Float32 ||
-            R.ExpectedPtr->Format != offloadtest::DataFormat::Float32)
+        if ((R.ActualPtr->Format != offloadtest::DataFormat::Float32 ||
+             R.ExpectedPtr->Format != offloadtest::DataFormat::Float32) &&
+            (R.ActualPtr->Format != offloadtest::DataFormat::Float16 ||
+             R.ExpectedPtr->Format != offloadtest::DataFormat::Float16))
           I.setError(Twine("BufferFuzzy only accepts Float buffers"));
       }
     }

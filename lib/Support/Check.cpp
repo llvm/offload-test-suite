@@ -15,6 +15,10 @@
 
 static bool isDenorm(float F) { return std::fpclassify(F) == FP_SUBNORMAL; }
 
+static bool isnanFloat16(uint16_t val) {
+  return (val & 0x7c00) == 0x7c00 && (val & 0x03ff) != 0;
+}
+
 static bool compareFloatULP(const float &FSrc, const float &FRef,
                             unsigned ULPTolerance, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
@@ -30,6 +34,18 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
   // For FTZ or Preserve mode, we should get the expected number within
   // ULPTolerance for any operations.
   int Diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
+  unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
+  return AbsDiff <= ULPTolerance;
+}
+
+static bool compareHalfULP(const uint16_t &FSrc, const uint16_t &FRef,
+                           unsigned ULPTolerance) {
+  if (FSrc == FRef)
+    return true;
+  if (isnanFloat16(FSrc))
+    return isnanFloat16(FRef);
+  // 16-bit floating point numbers must preserve denorms
+  int Diff = FSrc - FRef;
   unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
   return AbsDiff <= ULPTolerance;
 }
@@ -58,6 +74,23 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
                                       B2->Size / sizeof(float));
     for (unsigned I = 0; I < Arr1.size(); ++I) {
       if (!compareFloatULP(Arr1[I], Arr2[I], ULPT, DM))
+        return false;
+    }
+    return true;
+  }
+  case offloadtest::DataFormat::Float16: {
+    if (B1->Size != B2->Size)
+      return false;
+    llvm::MutableArrayRef<uint16_t> Arr1(
+        reinterpret_cast<uint16_t *>(B1->Data.get()),
+        B1->Size / sizeof(uint16_t));
+    assert(B2->Format == offloadtest::DataFormat::Float16 &&
+           "Buffer types must be the same");
+    llvm::MutableArrayRef<uint16_t> Arr2(
+        reinterpret_cast<uint16_t *>(B2->Data.get()),
+        B2->Size / sizeof(uint16_t));
+    for (unsigned I = 0; I < Arr1.size(); ++I) {
+      if (!compareHalfULP(Arr1[I], Arr2[I], ULPT))
         return false;
     }
     return true;
