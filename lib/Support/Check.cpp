@@ -38,8 +38,8 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
   return AbsDiff <= ULPTolerance;
 }
 
-static bool compareHalfULP(const uint16_t &FSrc, const uint16_t &FRef,
-                           unsigned ULPTolerance) {
+static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
+                              unsigned ULPTolerance) {
   if (FSrc == FRef)
     return true;
   if (isnanFloat16(FSrc))
@@ -90,7 +90,7 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
         reinterpret_cast<uint16_t *>(B2->Data.get()),
         B2->Size / sizeof(uint16_t));
     for (unsigned I = 0; I < Arr1.size(); ++I) {
-      if (!compareHalfULP(Arr1[I], Arr2[I], ULPT))
+      if (!compareFloat16ULP(Arr1[I], Arr2[I], ULPT))
         return false;
     }
     return true;
