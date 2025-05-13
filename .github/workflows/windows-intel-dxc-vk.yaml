@@ -22,5 +22,5 @@ jobs:
       Test-Clang: Off
       BuildType: Debug
       TestTarget: check-hlsl-vk
-      OffloadTest-branch: ${{ github.ref }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
