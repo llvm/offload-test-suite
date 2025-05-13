@@ -43,7 +43,7 @@ Results:
   - Result: Test2 # Denorm value but mode isn't Any
     Rule: BufferFuzzy
     ULPT: 1
-    DenormMode: Preserve # same to use FTZ 
+    DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
 DescriptorSets:
@@ -65,7 +65,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
