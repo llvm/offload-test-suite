@@ -29,11 +29,11 @@ Buffers:
   - Name: Out2
     Format: Float16
     Stride: 2
-    ZeroInitSize: 2
+    ZeroInitSize: 4
   - Name: Expected2
     Format: Float16
     Stride: 2
-    Data: [ 0x0001 ]
+    Data: [ 0x0001, 0 ]
 Results:
   - Result: Test1
     Rule: BufferFuzzy
@@ -100,7 +100,7 @@ DescriptorSets:
 # CHECK: Name:            Expected2
 # CHECK: Format:          Float16
 # CHECK: Stride:          2
-# CHECK: Data:            [ 1 ]
+# CHECK: Data:            [ 1, 0 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -111,7 +111,7 @@ DescriptorSets:
 # CHECK: Name:            Out2
 # CHECK: Format:          Float16
 # CHECK: Stride:          2
-# CHECK: Data:            [ 0 ]
+# CHECK: Data:            [ 0, 0 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0

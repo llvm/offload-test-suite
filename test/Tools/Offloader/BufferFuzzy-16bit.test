@@ -24,35 +24,35 @@ Buffers:
   - Name: Out1
     Format: Float16
     Stride: 2
-    ZeroInitSize: 2
+    ZeroInitSize: 4
   - Name: Expected1
     Format: Float16
     Stride: 2
-    Data: [ 0x4248 ]
+    Data: [ 0x4248, 0 ]
   - Name: Out2
     Format: Float16
     Stride: 2
-    ZeroInitSize: 2
+    ZeroInitSize: 4
   - Name: Expected2
     Format: Float16
     Stride: 2
-    Data: [ 0x7e00 ] # Should be NaN
+    Data: [ 0x7e00, 0 ] # Should be NaN
   - Name: Out3
     Format: Float16
     Stride: 2
-    ZeroInitSize: 2
+    ZeroInitSize: 4
   - Name: Expected3
     Format: Float16
     Stride: 2
-    Data: [ 0x4566 ] # Should be 1 ulp away
+    Data: [ 0x4566, 0 ] # Should be 1 ulp away
   - Name: Out4
     Format: Float16
     Stride: 2
-    ZeroInitSize: 2
+    ZeroInitSize: 4
   - Name: Expected4
     Format: Float16
     Stride: 2
-    Data: [ 0x4665 ] # Should be 2 ulp away
+    Data: [ 0x4665, 0 ] # Should be 2 ulp away
 Results:
   - Result: Test1 # Test two values are exactly the same
     Rule: BufferFuzzy
