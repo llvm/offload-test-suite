@@ -21,4 +21,4 @@ jobs:
       SKU: macOS
       Test-Clang: On
       TestTarget: check-hlsl-clang-mtl
-      OffloadTest-branch: ${{ github.ref }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.ref }}

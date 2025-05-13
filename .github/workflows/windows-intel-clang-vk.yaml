@@ -21,4 +21,5 @@ jobs:
       SKU: GPU-Intel
       Test-Clang: On
       TestTarget: check-hlsl-clang-vk
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
