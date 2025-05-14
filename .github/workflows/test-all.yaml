@@ -113,7 +113,7 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted, "${{ inputs.SKU }}"]
+    runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
       - name: Checkout DXC
         uses: actions/checkout@v4

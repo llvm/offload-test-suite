@@ -6,16 +6,16 @@ permissions:
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '0 0-12 * * 1-5' # run every 30 minutes overnight
-    - cron: '0 * * * 0,6' # run every 30 minutes on weekends
+#  schedule:
+#    - cron: '0 0-12 * * 1-5' # run every 30 minutes overnight
+#    - cron: '0 * * * 0,6' # run every 30 minutes on weekends
 
 jobs:
   Windows-D3D12-NVIDIA-DXC:
     uses: ./.github/workflows/test-all.yaml
     with:
       OS: windows
-      SKU: GPU-NV
+      SKU: windows-nv
       Test-Clang: Off
       BuildType: Debug
       TestTarget: check-hlsl-d3d12

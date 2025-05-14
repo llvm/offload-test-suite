@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/test-all.yaml
     with:
       OS: windows
-      SKU: GPU-Intel
+      SKU: windows-intel
       Test-Clang: Off
       BuildType: Debug
       TestTarget: check-hlsl-warp-d3d12
