@@ -5,12 +5,10 @@ Experimental Runtime test suite for HLSL
 
 | Testing Machine | DXC | Clang |
 |-----------------|-----|-------|
-| Windows DirectX12 Intel GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 Warp | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-clang-warp-d3d12.yaml/badge.svg) |
-| Windows Vulkan Intel GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-clang-vk.yaml/badge.svg) |
-| Windows DirectX12 NVIDIA GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-clang-d3d12.yaml/badge.svg) |
-| Windows Vulkan NVIDIA GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-clang-vk.yaml/badge.svg) |
-| macOS Apple M1 | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
+| Windows DirectX12 Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg) |
+| Windows DirectX12 Warp | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-warp-d3d12.yaml/badge.svg) |
+| Windows Vulkan Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-vk.yaml/badge.svg) |
+| macOS Apple M1 | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
 
 
 # Prerequisites
