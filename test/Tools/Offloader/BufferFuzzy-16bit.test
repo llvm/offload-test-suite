@@ -36,7 +36,7 @@ Buffers:
   - Name: Expected2
     Format: Float16
     Stride: 2
-    Data: [ 0x7e00, 0 ] # Should be NaN
+    Data: [ 0x7E00, 0 ] # Should be NaN
   - Name: Out3
     Format: Float16
     Stride: 2
