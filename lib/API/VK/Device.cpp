@@ -170,6 +170,8 @@ public:
     }
   }
 
+  const VkPhysicalDeviceProperties &getProps() const { return Props; }
+
 private:
   void queryCapabilities() {
 
@@ -779,21 +781,17 @@ public:
   }
 
   llvm::Error initialize() {
+    // Create a Vulkan 1.1 instance to determine the API version
     VkApplicationInfo AppInfo = {};
     AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     AppInfo.pApplicationName = "OffloadTest";
+    // TODO: We should set this based on a command line flag, and simplify the
+    // code below to error if the requested version isn't supported.
     AppInfo.apiVersion = VK_API_VERSION_1_1;
 
     VkInstanceCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     CreateInfo.pApplicationInfo = &AppInfo;
-
-// TODO: This is a bit hacky but matches what I did in DX.
-#ifndef NDEBUG
-    const char *ValidationLayer = "VK_LAYER_KHRONOS_validation";
-    CreateInfo.ppEnabledLayerNames = &ValidationLayer;
-    CreateInfo.enabledLayerCount = 1;
-#endif
 
     VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
@@ -804,6 +802,36 @@ public:
                                      "Unkown Vulkan initialization error");
 
     uint32_t DeviceCount = 0;
+    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Failed to get device count");
+    std::vector<VkPhysicalDevice> PhysicalDevicesTmp(DeviceCount);
+    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                   PhysicalDevicesTmp.data()))
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Failed to enumerate devices");
+    {
+      auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
+      AppInfo.apiVersion = TmpDev->getProps().apiVersion;
+    }
+    vkDestroyInstance(Instance, NULL);
+
+// TODO: This is a bit hacky but matches what I did in DX.
+#ifndef NDEBUG
+    const char *ValidationLayer = "VK_LAYER_KHRONOS_validation";
+    CreateInfo.ppEnabledLayerNames = &ValidationLayer;
+    CreateInfo.enabledLayerCount = 1;
+#endif
+
+    Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Cannot find a compatible Vulkan device");
+    else if (Res)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Unkown Vulkan initialization error");
+
+    DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Failed to get device count");
