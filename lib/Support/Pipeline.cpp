@@ -13,6 +13,10 @@
 
 using namespace offloadtest;
 
+bool isFloatingPointFormat(DataFormat Format) {
+  return Format == DataFormat::Float16 || Format == DataFormat::Float32;
+}
+
 namespace llvm {
 namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
@@ -41,9 +45,9 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       R.ExpectedPtr = P.getBuffer(R.Expected);
       if (!R.ExpectedPtr)
         I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
-      if (R.Rule == offloadtest::Rule::BufferFuzzy) {
-        if (R.ActualPtr->Format != offloadtest::DataFormat::Float32 ||
-            R.ExpectedPtr->Format != offloadtest::DataFormat::Float32)
+      if (R.Rule == Rule::BufferFuzzy) {
+        if (!isFloatingPointFormat(R.ActualPtr->Format) ||
+            !isFloatingPointFormat(R.ExpectedPtr->Format))
           I.setError(Twine("BufferFuzzy only accepts Float buffers"));
       }
     }
@@ -127,7 +131,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     DATA_CASE(Int16, int16_t)
     DATA_CASE(Int32, int32_t)
     DATA_CASE(Int64, int64_t)
-    DATA_CASE(Float16, uint16_t)
+    DATA_CASE(Float16, llvm::yaml::Hex16)
     DATA_CASE(Float32, float)
     DATA_CASE(Float64, double)
     DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a bool using 4 bytes.
