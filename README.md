@@ -73,7 +73,7 @@ Buffers:
   - Name: Expected2 # Buffer which stores the expected result of our test
     Format: Float16
     Stride: 2
-    Data: [ 0.0, 1.0 ]
+    Data: [ 0x1, 0x2 ]
 Results: # Using Result can verify test values without filecheck
   - Result: Test1
     Rule: BufferFuzzy # Rule which can be used to compare Float Buffers; They are compared within a ULP range
