@@ -54,7 +54,7 @@ static double convertXYZ(double Val) {
   return Val > E ? pow(Val, 1.0 / 3.0) : (K * Val + 16.0) / 116.0;
 }
 
-static Color xyzToLab(const Color Old) {
+static Color convertXYZToLAB(const Color Old) {
   const double X = convertXYZ(Old.R / D65WhitePoint.R);
   const double Y = convertXYZ(Old.G / D65WhitePoint.G);
   const double Z = convertXYZ(Old.B / D65WhitePoint.B);
@@ -75,7 +75,7 @@ static double convertLAB(double Val) {
   return (Val - V) / K;
 }
 
-static Color labToXyz(const Color Old) {
+static Color convertLABToXYZ(const Color Old) {
   double Y = (Old.R + 16) / 116;
   double X = Old.G / 500 + Y;
   double Z = Y - Old.B / 200;
@@ -94,11 +94,11 @@ Color Color::translateSpaceImpl(ColorSpace NewCS) {
   if (Space == ColorSpace::RGB)
     Tmp = convertRGBToXYZ(*this);
   else if (Space == ColorSpace::LAB)
-    Tmp = labToXyz(*this);
+    Tmp = convertLABToXYZ(*this);
   // Tmp is now in XYZ space.
   if (NewCS == ColorSpace::RGB)
     return convertXYZToRGB(Tmp);
   if (NewCS == ColorSpace::LAB)
-    return xyzToLab(Tmp);
+    return convertXYZToLAB(Tmp);
   return Tmp;
 }
