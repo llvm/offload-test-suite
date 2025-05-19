@@ -22,7 +22,7 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [inf, -inf, 0x3f800000, 0x7fbfffff] # Inf, -Inf, 1, Nan
+    Data: [inf, -inf, 1.0, nan] # Inf, -Inf, 1, Nan
   - Name: Out
     Format: Bool
     Stride: 16
