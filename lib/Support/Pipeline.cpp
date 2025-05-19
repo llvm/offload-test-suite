@@ -13,7 +13,7 @@
 
 using namespace offloadtest;
 
-bool isFloatingPointFormat(DataFormat Format) {
+static bool isFloatingPointFormat(DataFormat Format) {
   return Format == DataFormat::Float16 || Format == DataFormat::Float32;
 }
 

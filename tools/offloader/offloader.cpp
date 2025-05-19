@@ -99,7 +99,7 @@ int run() {
         PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
-  StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
+  StringRef const Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
     if (Binary.starts_with("DXBC")) {
       APIToUse = GPUAPI::DirectX;
