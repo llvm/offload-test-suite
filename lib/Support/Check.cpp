@@ -33,8 +33,8 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
   }
   // For FTZ or Preserve mode, we should get the expected number within
   // ULPTolerance for any operations.
-  int const Diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
-  unsigned int const AbsDiff = Diff < 0 ? -Diff : Diff;
+  const int Diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
+  const unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
   return AbsDiff <= ULPTolerance;
 }
 
@@ -45,8 +45,8 @@ static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
   if (isFloat16NAN(FSrc) || isFloat16NAN(FRef))
     return isFloat16NAN(FRef) && isFloat16NAN(FSrc);
   // 16-bit floating point numbers must preserve denorms
-  int const Diff = FSrc - FRef;
-  unsigned int const AbsDiff = Diff < 0 ? -Diff : Diff;
+  const int Diff = FSrc - FRef;
+  const unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
   return AbsDiff <= ULPTolerance;
 }
 
@@ -66,12 +66,12 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   case offloadtest::DataFormat::Float32: {
     if (B1->Size != B2->Size)
       return false;
-    llvm::ArrayRef<float> const Arr1(reinterpret_cast<float *>(B1->Data.get()),
-                               B1->Size / sizeof(float));
+    const llvm::ArrayRef<float> Arr1(reinterpret_cast<float *>(B1->Data.get()),
+                                     B1->Size / sizeof(float));
     assert(B2->Format == offloadtest::DataFormat::Float32 &&
            "Buffer types must be the same");
-    llvm::ArrayRef<float> const Arr2(reinterpret_cast<float *>(B2->Data.get()),
-                               B2->Size / sizeof(float));
+    const llvm::ArrayRef<float> Arr2(reinterpret_cast<float *>(B2->Data.get()),
+                                     B2->Size / sizeof(float));
     for (unsigned I = 0, E = Arr1.size(); I < E; ++I) {
       if (!compareFloatULP(Arr1[I], Arr2[I], ULPT, DM))
         return false;
@@ -81,12 +81,14 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   case offloadtest::DataFormat::Float16: {
     if (B1->Size != B2->Size)
       return false;
-    llvm::ArrayRef<uint16_t> const Arr1(reinterpret_cast<uint16_t *>(B1->Data.get()),
-                                  B1->Size / sizeof(uint16_t));
+    const llvm::ArrayRef<uint16_t> Arr1(
+        reinterpret_cast<uint16_t *>(B1->Data.get()),
+        B1->Size / sizeof(uint16_t));
     assert(B2->Format == offloadtest::DataFormat::Float16 &&
            "Buffer types must be the same");
-    llvm::ArrayRef<uint16_t> const Arr2(reinterpret_cast<uint16_t *>(B2->Data.get()),
-                                  B2->Size / sizeof(uint16_t));
+    const llvm::ArrayRef<uint16_t> Arr2(
+        reinterpret_cast<uint16_t *>(B2->Data.get()),
+        B2->Size / sizeof(uint16_t));
     for (unsigned I = 0, E = Arr1.size(); I < E; ++I) {
       if (!compareFloat16ULP(Arr1[I], Arr2[I], ULPT))
         return false;
