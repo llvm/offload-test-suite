@@ -99,17 +99,16 @@ int run() {
         PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
+  StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
-    if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("DXBC")) {
+    if (Binary.starts_with("DXBC")) {
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
-    } else if (*reinterpret_cast<const uint32_t *>(
-                   PipelineDesc.Shaders[0].Shader->getBuffer().data()) ==
+    } else if (*reinterpret_cast<const uint32_t *>(Binary.data()) ==
                0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with(
-                   "MTLB")) {
+    } else if (Binary.starts_with("MTLB")) {
       APIToUse = GPUAPI::Metal;
       outs() << "Using Metal API\n";
     }

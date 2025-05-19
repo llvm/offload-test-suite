@@ -32,7 +32,7 @@ static Color clampColor(const Color C) {
                std::clamp(C.B, 0.0, 1.0), C.Space);
 }
 
-static Color rgbToXyz(const Color Old) {
+static Color convertRGBToXYZ(const Color Old) {
   // Matrix assumes D65 white point.
   // Source: http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
   double Mat[] = {0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522,
@@ -40,7 +40,7 @@ static Color rgbToXyz(const Color Old) {
   return multiply(Old, Mat, ColorSpace::XYZ);
 }
 
-static Color xyzToRgb(const Color Old) {
+static Color convertXYZToRGB(const Color Old) {
   // Matrix assumes D65 white point.
   // Source: http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
   double Mat[] = {3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108,
@@ -92,12 +92,12 @@ Color Color::translateSpaceImpl(ColorSpace NewCS) {
     return *this;
   Color Tmp = *this;
   if (Space == ColorSpace::RGB)
-    Tmp = rgbToXyz(*this);
+    Tmp = convertRGBToXYZ(*this);
   else if (Space == ColorSpace::LAB)
     Tmp = labToXyz(*this);
   // Tmp is now in XYZ space.
   if (NewCS == ColorSpace::RGB)
-    return xyzToRgb(Tmp);
+    return convertXYZToRGB(Tmp);
   if (NewCS == ColorSpace::LAB)
     return xyzToLab(Tmp);
   return Tmp;
