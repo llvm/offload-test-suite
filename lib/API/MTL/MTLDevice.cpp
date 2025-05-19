@@ -58,9 +58,9 @@ class MTLDevice : public offloadtest::Device {
   struct InvocationState {
     InvocationState() { Pool = NS::AutoreleasePool::alloc()->init(); }
     ~InvocationState() {
-      for (auto *T : Textures)
+      for (MTL::Texture *T : Textures)
         T->release();
-      for (auto *B : Buffers)
+      for (MTL::Buffer *B : Buffers)
         B->release();
       if (Fn)
         Fn->release();
