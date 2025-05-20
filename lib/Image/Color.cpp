@@ -11,6 +11,7 @@
 
 #include "Image/Color.h"
 
+#include <algorithm>
 #include <math.h>
 
 using namespace offloadtest;
@@ -31,7 +32,7 @@ static Color clampColor(const Color C) {
                std::clamp(C.B, 0.0, 1.0), C.Space);
 }
 
-static Color RGBToXYZ(const Color Old) {
+static Color convertRGBToXYZ(const Color Old) {
   // Matrix assumes D65 white point.
   // Source: http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
   double Mat[] = {0.4124564, 0.3575761, 0.1804375, 0.2126729, 0.7151522,
@@ -39,7 +40,7 @@ static Color RGBToXYZ(const Color Old) {
   return multiply(Old, Mat, ColorSpace::XYZ);
 }
 
-static Color XYZToRGB(const Color Old) {
+static Color convertXYZToRGB(const Color Old) {
   // Matrix assumes D65 white point.
   // Source: http://brucelindbloom.com/index.html?Eqn_RGB_XYZ_Matrix.html
   double Mat[] = {3.2404542, -1.5371385, -0.4985314, -0.9692660, 1.8760108,
@@ -53,19 +54,19 @@ static double convertXYZ(double Val) {
   return Val > E ? pow(Val, 1.0 / 3.0) : (K * Val + 16.0) / 116.0;
 }
 
-static Color XYZToLAB(const Color Old) {
-  double X = convertXYZ(Old.R / D65WhitePoint.R);
-  double Y = convertXYZ(Old.G / D65WhitePoint.G);
-  double Z = convertXYZ(Old.B / D65WhitePoint.B);
+static Color convertXYZToLAB(const Color Old) {
+  const double X = convertXYZ(Old.R / D65WhitePoint.R);
+  const double Y = convertXYZ(Old.G / D65WhitePoint.G);
+  const double Z = convertXYZ(Old.B / D65WhitePoint.B);
 
-  double L = fmax(0.0, 116.0 * Y - 16.0);
-  double A = 500 * (X - Y);
-  double B = 200 * (Y - Z);
+  const double L = fmax(0.0, 116.0 * Y - 16.0);
+  const double A = 500 * (X - Y);
+  const double B = 200 * (Y - Z);
   return Color(L, A, B, ColorSpace::LAB);
 }
 
 static double convertLAB(double Val) {
-  double ValPow3 = pow(Val, 3.0);
+  const double ValPow3 = pow(Val, 3.0);
   if (ValPow3 > 0.008856)
     return ValPow3;
 
@@ -74,7 +75,7 @@ static double convertLAB(double Val) {
   return (Val - V) / K;
 }
 
-static Color LABToXYZ(const Color Old) {
+static Color convertLABToXYZ(const Color Old) {
   double Y = (Old.R + 16) / 116;
   double X = Old.G / 500 + Y;
   double Z = Y - Old.B / 200;
@@ -91,13 +92,13 @@ Color Color::translateSpaceImpl(ColorSpace NewCS) {
     return *this;
   Color Tmp = *this;
   if (Space == ColorSpace::RGB)
-    Tmp = RGBToXYZ(*this);
+    Tmp = convertRGBToXYZ(*this);
   else if (Space == ColorSpace::LAB)
-    Tmp = LABToXYZ(*this);
+    Tmp = convertLABToXYZ(*this);
   // Tmp is now in XYZ space.
   if (NewCS == ColorSpace::RGB)
-    return XYZToRGB(Tmp);
+    return convertXYZToRGB(Tmp);
   if (NewCS == ColorSpace::LAB)
-    return XYZToLAB(Tmp);
+    return convertXYZToLAB(Tmp);
   return Tmp;
 }

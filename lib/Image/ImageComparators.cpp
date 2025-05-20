@@ -46,8 +46,8 @@ bool ImageComparatorDistance::evaluateCheck(const CompareCheck &C,
     }
     return true;
   case CompareCheck::PixelPercent: {
-    double DiffPercent = (static_cast<double>(VisibleDiffs) /
-                          static_cast<double>(Count) * 100.0);
+    const double DiffPercent = (static_cast<double>(VisibleDiffs) /
+                                static_cast<double>(Count) * 100.0);
     if (DiffPercent > C.Val) {
       Err << "PixelPercent check failed. Difference percent " << DiffPercent
           << " above threshold " << C.Val;
@@ -56,7 +56,7 @@ bool ImageComparatorDistance::evaluateCheck(const CompareCheck &C,
     return true;
   }
   case CompareCheck::Intervals: {
-    double DblCount = static_cast<double>(Count);
+    const double DblCount = static_cast<double>(Count);
     for (uint32_t I = 0; I < 10; ++I) {
       if (I >= C.Vals.size()) {
         if (Histogram[I] == 0)
@@ -66,7 +66,7 @@ bool ImageComparatorDistance::evaluateCheck(const CompareCheck &C,
         return false;
       }
 
-      double DiffPercent =
+      const double DiffPercent =
           (static_cast<double>(Histogram[I]) / DblCount * 100.0);
       if (DiffPercent > C.Vals[I]) {
         Err << "Interval[" << I << "]: Out of range. Maximum: " << C.Vals[I]

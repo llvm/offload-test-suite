@@ -10,22 +10,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+
 #include "Config.h"
+
 #include "llvm/Support/Error.h"
 
+#include <memory>
+
 using namespace offloadtest;
-
-#ifdef OFFLOADTEST_ENABLE_D3D12
-llvm::Error InitializeDXDevices();
-#endif
-
-#ifdef OFFLOADTEST_ENABLE_VULKAN
-llvm::Error InitializeVXDevices();
-#endif
-
-#ifdef OFFLOADTEST_ENABLE_METAL
-llvm::Error InitializeMTLDevices();
-#endif
 
 namespace {
 class DeviceContext {
@@ -41,7 +33,7 @@ private:
   DeviceContext(const DeviceContext &) = delete;
 
 public:
-  static DeviceContext &Instance() {
+  static DeviceContext &instance() {
     static DeviceContext Ctx;
     return Ctx;
   }
@@ -58,31 +50,29 @@ public:
 Device::~Device() {}
 
 void Device::registerDevice(std::shared_ptr<Device> D) {
-  DeviceContext::Instance().registerDevice(D);
+  DeviceContext::instance().registerDevice(D);
 }
 
 llvm::Error Device::initialize() {
 #ifdef OFFLOADTEST_ENABLE_D3D12
-  if (auto Err = InitializeDXDevices())
+  if (auto Err = initializeDXDevices())
     return Err;
 #endif
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = InitializeVXDevices())
+  if (auto Err = initializeVXDevices())
     return Err;
 #endif
 #ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = InitializeMTLDevices())
+  if (auto Err = initializeMtlDevices())
     return Err;
 #endif
   return llvm::Error::success();
 }
 
-void Device::uninitialize() {
-  DeviceContext::Instance().unregisterDevices();
-}
+void Device::uninitialize() { DeviceContext::instance().unregisterDevices(); }
 
 Device::DeviceIterator Device::begin() {
-  return DeviceContext::Instance().begin();
+  return DeviceContext::instance().begin();
 }
 
-Device::DeviceIterator Device::end() { return DeviceContext::Instance().end(); }
+Device::DeviceIterator Device::end() { return DeviceContext::instance().end(); }

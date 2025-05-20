@@ -57,8 +57,8 @@ static cl::opt<bool>
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
-std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
-  ExitOnError ExitOnErr("gpu-exec: error: ");
+static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
+  const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
       MemoryBuffer::getFileOrSTDIN(Path);
   ExitOnErr(errorCodeToError(FileOrErr.getError()));
@@ -66,10 +66,10 @@ std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   return std::move(FileOrErr.get());
 }
 
-int run();
+static int run();
 
 int main(int ArgC, char **ArgV) {
-  InitLLVM X(ArgC, ArgV);
+  const InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU Execution Tool");
 
   if (run())
@@ -79,10 +79,10 @@ int main(int ArgC, char **ArgV) {
 }
 
 int run() {
-  ExitOnError ExitOnErr("gpu-exec: error: ");
+  const ExitOnError ExitOnErr("gpu-exec: error: ");
   ExitOnErr(Device::initialize());
 
-  std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
+  const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
   yaml::Input YIn(PipelineBuf->getBuffer());
   YIn >> PipelineDesc;
@@ -99,15 +99,16 @@ int run() {
         PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
+  const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
-    if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("DXBC")) {
+    if (Binary.starts_with("DXBC")) {
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
-    } else if (*reinterpret_cast<const uint32_t *>(
-                   PipelineDesc.Shaders[0].Shader->getBuffer().data()) == 0x07230203) {
+    } else if (*reinterpret_cast<const uint32_t *>(Binary.data()) ==
+               0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("MTLB")) {
+    } else if (Binary.starts_with("MTLB")) {
       APIToUse = GPUAPI::Metal;
       outs() << "Using Metal API\n";
     }
@@ -162,7 +163,7 @@ int run() {
     }
     for (const auto &B : PipelineDesc.Buffers) {
       if (B.Name == ImageOutput) {
-        ImageRef Img = ImageRef(B);
+        const ImageRef Img = ImageRef(B);
         ExitOnErr(Image::writePNG(Img, OutputFilename));
         return 0;
       }
