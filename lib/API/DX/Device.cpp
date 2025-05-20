@@ -322,8 +322,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createPSO(llvm::StringRef DXIL,
-                        InvocationState &State) {
+  llvm::Error createPSO(llvm::StringRef DXIL, InvocationState &State) {
     const D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {
         State.RootSig.Get(),
         {DXIL.data(), DXIL.size()},
