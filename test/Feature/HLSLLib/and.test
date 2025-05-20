@@ -8,7 +8,7 @@ RWStructuredBuffer<bool4> Out : register(u1);
 void main() {
   Out[0] = and(In1[0], In2[0]);
   Out[1].xyz = and(In1[0].xyz, In2[0].xyz);
-  Out[1].w = and(In1[0].w, In1[0].w);
+  Out[1].w = and(In1[0].w, In2[0].w);
   Out[2].xy = and(In1[0].xy, In2[0].xy);
 }
 
