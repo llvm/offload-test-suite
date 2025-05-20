@@ -8,7 +8,7 @@ void main() {
   Out[0] = ldexp(In[0], In[1]);
   Out[1].x = ldexp(In[1].x, In[1].y);
   Out[1].yzw = ldexp(In[1].yzw, In[0].yzw);
-  Out[2].xy = ldexp(In[0].xz, In[1].yx);
+  Out[2].xy = ldexp(In[0].xy, In[1].yw);
 }
 
 //--- pipeline.yaml
@@ -22,7 +22,7 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ 3.14159, 0, 6, -1, 1, 1.5, -0.5, 2 ]
+    Data: [ 3.14159, 0, -inf, NaN, 1, 1.5, -0.5, inf ]
   - Name: Out
     Format: Float32
     Stride: 16
@@ -30,11 +30,11 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ 6.28318, 0, 4.24264, -4, 2.82843, 1.5, -32, 1, 8.88576, 12, 0, 0 ]
+    Data: [ 6.28318, 0, -inf, NaN, 2.828427, 1.5, -0, NaN, 8.885758, NaN, 0, 0 ]
 Results:
   - Result: Test1
     Rule: BufferFuzzy
-    ULPT: 12
+    ULPT: 1
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
