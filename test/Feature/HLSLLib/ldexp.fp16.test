@@ -1,0 +1,64 @@
+#--- source.hlsl
+
+StructuredBuffer<half4> In : register(t0);
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = ldexp(In[0], In[1]);
+  Out[1].x = ldexp(In[1].x, In[1].y);
+  Out[1].yzw = ldexp(In[1].yzw, In[0].yzw);
+  Out[2].xy = ldexp(In[0].xz, In[1].yx);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4248, 0x0000, 0x4600, 0xBC00, 0x3C00, 0x3E00, 0xB800, 0x4000 ]
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 24
+  - Name: ExpectedOut # The result we expect
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4648, 0x0, 0x443E, 0xC400, 0x41A8, 0x3E00, 0xD000, 0x3C00, 0x4871, 0x4A00, 0x0, 0x0 ]
+Results:
+  - Result: Test1
+    Rule: BufferFuzzy
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Half
+
+# UNSUPPORTED: Clang-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
