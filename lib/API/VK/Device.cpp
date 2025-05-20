@@ -377,7 +377,7 @@ public:
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    uint32_t HeapIndex = 0;
+    const uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         if (auto Err = createBuffer(R, IS))
