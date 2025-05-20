@@ -65,10 +65,9 @@ DescriptorSets:
 
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.1 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.2 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # The behavior of this operation is consistent on Metal, so the test verifies that behavior.

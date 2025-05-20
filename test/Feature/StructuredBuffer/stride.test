@@ -6,7 +6,7 @@ struct S {
 StructuredBuffer<float4> In : register(t0);
 RWStructuredBuffer<S> Out : register(u1);
 
-[numthreads(1,1,2)]
+[numthreads(2,1,1)]
 void main(uint GI : SV_GroupIndex) {
   Out[GI].i = In[GI];
 }
@@ -43,8 +43,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# UNSUPPORTED: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

@@ -57,7 +57,7 @@ Results:
   - Result: Test1 # Testing Expected is Denorm and Out is zero, and both have same sign bit
     Rule: BufferFuzzy
     ULPT: 1
-    DenormMode: Any 
+    DenormMode: Any
     Actual: Out1
     Expected: Expected1
   - Result: Test2 # Test two values are exactly the same
@@ -108,7 +108,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

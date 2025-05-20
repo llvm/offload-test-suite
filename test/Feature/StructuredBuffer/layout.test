@@ -87,6 +87,7 @@ DescriptorSets:
 ...
 #--- end
 
+# clang-dxc doesn't support the -fvk-use-scalar-layout flag yet
 # UNSUPPORTED: Clang-Vulkan
 
 # RUN: split-file %s %t

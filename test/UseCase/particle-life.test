@@ -350,6 +350,7 @@ DescriptorSets:
 ...
 #--- end
 
+# clang-dxc doesn't support the -fvk-use-scalar-layout flag yet
 # UNSUPPORTED: Clang-Vulkan
 
 # CBuffer bindings seem to be broken under metal
