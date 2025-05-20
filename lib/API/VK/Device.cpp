@@ -351,8 +351,7 @@ public:
     return BufferRef{Buffer, Memory};
   }
 
-  llvm::Error createBuffer(Resource &R, InvocationState &IS,
-                           const uint32_t HeapIdx) {
+  llvm::Error createBuffer(Resource &R, InvocationState &IS) {
     auto ExHostBuf = createBuffer(
         IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), R.BufferPtr->Data.get());
@@ -381,7 +380,7 @@ public:
     uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (auto Err = createBuffer(R, IS, HeapIndex++))
+        if (auto Err = createBuffer(R, IS))
           return Err;
       }
     }
@@ -828,7 +827,7 @@ public:
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a compatible Vulkan device");
-    else if (Res)
+    if (Res)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unkown Vulkan initialization error");
 

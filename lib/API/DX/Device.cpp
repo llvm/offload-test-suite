@@ -322,7 +322,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createPSO(Pipeline &P, llvm::StringRef DXIL,
+  llvm::Error createPSO(llvm::StringRef DXIL,
                         InvocationState &State) {
     const D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {
         State.RootSig.Get(),
@@ -887,7 +887,7 @@ public:
       CopyBackResource(R);
   }
 
-  llvm::Error readBack(Pipeline &P, InvocationState &IS) {
+  llvm::Error readBack(InvocationState &IS) {
     auto MemCpyBack = [](ResourcePair &R) -> llvm::Error {
       if (!R.first->isReadWrite())
         return llvm::Error::success();
@@ -947,7 +947,7 @@ public:
     if (auto Err = createDescriptorHeap(P, State))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
-    if (auto Err = createPSO(P, P.Shaders[0].Shader->getBuffer(), State))
+    if (auto Err = createPSO(P.Shaders[0].Shader->getBuffer(), State))
       return Err;
     llvm::outs() << "PSO created.\n";
     if (auto Err = createCommandStructures(State))
@@ -964,7 +964,7 @@ public:
     if (auto Err = executeCommandList(State))
       return Err;
     llvm::outs() << "Compute commands executed.\n";
-    if (auto Err = readBack(P, State))
+    if (auto Err = readBack(State))
       return Err;
     llvm::outs() << "Read data back.\n";
 
