@@ -5,10 +5,25 @@ RWStructuredBuffer<float4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
+  // X             Exp
+  // ------------------
+  // 3.14159       -0
+  // 0             1
+  // -inf          -0.5
+  // NaN           inf
+  // -0            1
+  // 1             0
+  // -0.5          -inf
+  // inf           NaN
+  // 3.14159       -0.5
+  // 0             inf
+  // 1             128 (overflow)
+  // 1             -150 (underflow)
   Out[0] = ldexp(In[0], In[1]);
   Out[1].x = ldexp(In[1].x, In[1].y);
   Out[1].yzw = ldexp(In[1].yzw, In[0].yzw);
-  Out[2].xy = ldexp(In[0].xy, In[1].yw);
+  Out[2].xy = ldexp(In[0].xy, In[1].zw);
+  Out[2].zw = ldexp(In[2].xy, In[2].zw);
 }
 
 //--- pipeline.yaml
@@ -22,7 +37,7 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ 3.14159, 0, -inf, NaN, 1, 1.5, -0.5, inf ]
+    Data: [ 3.14159, 0, -inf, NaN, -0, 1, -0.5, inf, 1, 1, 128, -150 ]
   - Name: Out
     Format: Float32
     Stride: 16
@@ -30,7 +45,7 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ 6.28318, 0, -inf, NaN, 2.828427, 1.5, -0, NaN, 8.885758, NaN, 0, 0 ]
+    Data: [ 3.14159, 0, -inf, NaN, -0, 1, -0, NaN, 2.2214396, NaN, inf, 0 ]
 Results:
   - Result: Test1
     Rule: BufferFuzzy
