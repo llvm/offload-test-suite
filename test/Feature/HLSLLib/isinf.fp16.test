@@ -55,7 +55,10 @@ DescriptorSets:
 ...
 #--- end
 
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7475
+# XFAIL: DXC-Vulkan
+
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o 
+# RUN: %offloader %t/pipeline.yaml %t.o
