@@ -13,15 +13,17 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
-template<typename T>
-static bool isDenorm(T F) { return std::fpclassify(F) == FP_SUBNORMAL; }
+template <typename T> static bool isDenorm(T F) {
+  return std::fpclassify(F) == FP_SUBNORMAL;
+}
 
 static bool isFloat16NAN(uint16_t Val) {
   return (Val & 0x7c00) == 0x7c00 && (Val & 0x03ff) != 0;
 }
 
 static bool compareDoubleULP(const double &FSrc, const double &FRef,
-			      unsigned ULPTolerance, offloadtest::DenormMode DM) {
+                             unsigned ULPTolerance,
+                             offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -40,7 +42,7 @@ static bool compareDoubleULP(const double &FSrc, const double &FRef,
 }
 
 static bool compareFloatULP(const float &FSrc, const float &FRef,
-			     unsigned ULPTolerance, offloadtest::DenormMode DM) {
+                            unsigned ULPTolerance, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -59,7 +61,7 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
 }
 
 static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
-			       unsigned ULPTolerance) {
+                              unsigned ULPTolerance) {
   if (FSrc == FRef)
     return true;
   if (isFloat16NAN(FSrc) || isFloat16NAN(FRef))
@@ -81,8 +83,8 @@ static bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
 }
 
 template <typename T>
-static bool testAll(std::function<bool(const T&, const T&)> fn,
-		    llvm::ArrayRef<T> Arr1, llvm::ArrayRef<T> Arr2) {
+static bool testAll(std::function<bool(const T &, const T &)> fn,
+                    llvm::ArrayRef<T> Arr1, llvm::ArrayRef<T> Arr2) {
   if (Arr1.size() != Arr2.size())
     return false;
 
@@ -98,12 +100,13 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   assert(B1->Format == B2->Format && "Buffer types must be the same");
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64: {
-    const llvm::ArrayRef<double> Arr1(reinterpret_cast<double *>(B1->Data.get()),
-				      B1->Size / sizeof(double));
-    const llvm::ArrayRef<double> Arr2(reinterpret_cast<double *>(B2->Data.get()),
-				      B2->Size / sizeof(double));
+    const llvm::ArrayRef<double> Arr1(
+        reinterpret_cast<double *>(B1->Data.get()), B1->Size / sizeof(double));
+    const llvm::ArrayRef<double> Arr2(
+        reinterpret_cast<double *>(B2->Data.get()), B2->Size / sizeof(double));
     auto fn = [ULPT, DM](const double &FS, const double &FR) {
-      return compareDoubleULP(FS, FR, ULPT, DM); };
+      return compareDoubleULP(FS, FR, ULPT, DM);
+    };
     return testAll<double>(fn, Arr1, Arr2);
   }
   case offloadtest::DataFormat::Float32: {
@@ -112,7 +115,8 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
     const llvm::ArrayRef<float> Arr2(reinterpret_cast<float *>(B2->Data.get()),
                                      B2->Size / sizeof(float));
     auto fn = [ULPT, DM](const float &FS, const float &FR) {
-      return compareFloatULP(FS, FR, ULPT, DM); };
+      return compareFloatULP(FS, FR, ULPT, DM);
+    };
     return testAll<float>(fn, Arr1, Arr2);
   }
   case offloadtest::DataFormat::Float16: {
@@ -123,7 +127,8 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
         reinterpret_cast<uint16_t *>(B2->Data.get()),
         B2->Size / sizeof(uint16_t));
     auto fn = [ULPT](const uint16_t &FS, const uint16_t &FR) {
-      return compareFloat16ULP(FS, FR, ULPT); };
+      return compareFloat16ULP(FS, FR, ULPT);
+    };
     return testAll<uint16_t>(fn, Arr1, Arr2);
   }
   default:

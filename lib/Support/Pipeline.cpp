@@ -15,7 +15,7 @@ using namespace offloadtest;
 
 static bool isFloatingPointFormat(DataFormat Format) {
   return Format == DataFormat::Float16 || Format == DataFormat::Float32 ||
-    Format == DataFormat::Float64;
+         Format == DataFormat::Float64;
 }
 
 namespace llvm {
@@ -50,8 +50,8 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
         if (!isFloatingPointFormat(R.ActualPtr->Format) ||
             !isFloatingPointFormat(R.ExpectedPtr->Format))
           I.setError(Twine("BufferFuzzy only accepts Float buffers"));
-	if (R.ActualPtr->Format != R.ExpectedPtr->Format)
-	  I.setError(Twine("Buffers must have the same type"));
+        if (R.ActualPtr->Format != R.ExpectedPtr->Format)
+          I.setError(Twine("Buffers must have the same type"));
       }
     }
 
