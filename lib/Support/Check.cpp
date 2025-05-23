@@ -13,6 +13,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
+// limited to float, double, and long double
 template <typename T> static bool isDenorm(T F) {
   return std::fpclassify(F) == FP_SUBNORMAL;
 }
@@ -83,13 +84,13 @@ static bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
 }
 
 template <typename T>
-static bool testAll(std::function<bool(const T &, const T &)> Fn,
+static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
                     llvm::ArrayRef<T> Arr1, llvm::ArrayRef<T> Arr2) {
   if (Arr1.size() != Arr2.size())
     return false;
 
-  for (unsigned I = 0, E = Arr1.size(); I < E; ++I) {
-    if (!Fn(Arr1[I], Arr2[I]))
+  for (size_t I = 0, E = Arr1.size(); I < E; ++I) {
+    if (!ComparisonFn(Arr1[I], Arr2[I]))
       return false;
   }
   return true;

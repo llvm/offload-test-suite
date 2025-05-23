@@ -2,12 +2,14 @@
 
 RWStructuredBuffer<double> Out1 : register(u0);
 RWStructuredBuffer<double> Out2 : register(u1);
+RWStructuredBuffer<double> Out3 : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
   Out1[0] = 20.3;
   Out1[1] = 5.0;
   Out2[0] = 0.0;
+  Out3[0] = asdouble(0x00000000, 0x7FF80000); // Should be NaN
 }
 
 //--- pipeline.yaml
@@ -30,10 +32,18 @@ Buffers:
     Format: Float64
     Stride: 8
     ZeroInitSize: 8
+  - Name: Out3
+    Format: Float64
+    Stride: 8
+    ZeroInitSize: 8
   - Name: Expected2
     Format: Float64
     Stride: 8
     Data: [ 0x0.fffffffffffffp-1022 ] # isDenorm will return true for this value: 2.22507385850720104E-308
+  - Name: Expected3
+    Format: Float64
+    Stride: 8
+    Data: [ 0.0 ] # not nan
 Results:
   - Result: Test1
     Rule: BufferFuzzy
@@ -46,6 +56,11 @@ Results:
     DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
+  - Result: Test3
+    Rule: BufferFuzzy
+    ULPT: 0
+    Actual: Out3
+    Expected: Expected3
 DescriptorSets:
   - Resources:
     - Name: Out1
@@ -62,6 +77,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
 ...
 #--- end
 
@@ -111,6 +133,29 @@ DescriptorSets:
 # CHECK: Format:          Float64
 # CHECK: Stride:          8
 # CHECK: Data:            [ 0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test3
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected3
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ 0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out3
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ nan ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
