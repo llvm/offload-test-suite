@@ -80,7 +80,7 @@ int main(int ArgC, char **ArgV) {
 
 int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
-  ExitOnErr(Device::initialize());
+  logAllUnhandledErrors(Device::initialize(), errs(), "gpu-exec: warning: ");
 
   const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
