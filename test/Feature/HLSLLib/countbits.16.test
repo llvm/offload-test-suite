@@ -1,0 +1,98 @@
+#--- source.hlsl
+
+StructuredBuffer<int16_t4> InInt : register(t0);
+StructuredBuffer<uint16_t4> InUInt : register(t1);
+
+RWStructuredBuffer<uint4> OutInt : register(u2);
+RWStructuredBuffer<uint4> OutUInt : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  // Int
+  OutInt[0] = countbits(InInt[0]);
+  OutInt[1].xyz = countbits(InInt[0].xyz);
+  OutInt[1].w = countbits(InInt[0].w);
+  OutInt[2].xy = countbits(InInt[0].xy);
+
+  // UInt
+  OutUInt[0] = countbits(InUInt[0]);
+  OutUInt[1].xyz = countbits(InUInt[0].xyz);
+  OutUInt[1].w = countbits(InUInt[0].w);
+  OutUInt[2].xy = countbits(InUInt[0].xy);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: InInt
+    Format: Int16
+    Stride: 8
+    Data: [42, 0, 3855, -1] # 0x2A, 0x0, 0x0f0f, 0xffff
+  - Name: InUInt
+    Format: UInt16
+    Stride: 8
+    Data: [42, 0, 3855, 65535] # 0x2A, 0x0, 0x0f0f, 0xffff
+  - Name: OutInt
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: OutUInt
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut # The result we expect
+    Format: UInt32
+    Stride: 16
+    Data: [3, 0, 8, 16, 3, 0, 8, 16, 3, 0, 0, 0]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: OutInt
+    Expected: ExpectedOut
+  - Result: Test2
+    Rule: BufferExact
+    Actual: OutUInt
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Int16
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
