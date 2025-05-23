@@ -8,9 +8,9 @@ RWStructuredBuffer<double> Out4 : register(u3);
 [numthreads(1,1,1)]
 void main() {
   Out1[0] = 0.0;
-  Out2[0] = 3.14159265;
+  Out2[0] = 3.14159265L; // Need L or clang will resolve this to a float and test will fail
   Out3[0] = asdouble(0x00000000, 0x7FF80000); // Should be NaN
-  Out4[0] = 5.4;
+  Out4[0] = 5.4L;   // Need L or clang will resolve this to a float and test will fail
 }
 
 //--- pipeline.yaml

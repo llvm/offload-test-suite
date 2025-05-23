@@ -83,13 +83,13 @@ static bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
 }
 
 template <typename T>
-static bool testAll(std::function<bool(const T &, const T &)> fn,
+static bool testAll(std::function<bool(const T &, const T &)> Fn,
                     llvm::ArrayRef<T> Arr1, llvm::ArrayRef<T> Arr2) {
   if (Arr1.size() != Arr2.size())
     return false;
 
   for (unsigned I = 0, E = Arr1.size(); I < E; ++I) {
-    if (!fn(Arr1[I], Arr2[I]))
+    if (!Fn(Arr1[I], Arr2[I]))
       return false;
   }
   return true;
@@ -104,20 +104,20 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
         reinterpret_cast<double *>(B1->Data.get()), B1->Size / sizeof(double));
     const llvm::ArrayRef<double> Arr2(
         reinterpret_cast<double *>(B2->Data.get()), B2->Size / sizeof(double));
-    auto fn = [ULPT, DM](const double &FS, const double &FR) {
+    auto Fn = [ULPT, DM](const double &FS, const double &FR) {
       return compareDoubleULP(FS, FR, ULPT, DM);
     };
-    return testAll<double>(fn, Arr1, Arr2);
+    return testAll<double>(Fn, Arr1, Arr2);
   }
   case offloadtest::DataFormat::Float32: {
     const llvm::ArrayRef<float> Arr1(reinterpret_cast<float *>(B1->Data.get()),
                                      B1->Size / sizeof(float));
     const llvm::ArrayRef<float> Arr2(reinterpret_cast<float *>(B2->Data.get()),
                                      B2->Size / sizeof(float));
-    auto fn = [ULPT, DM](const float &FS, const float &FR) {
+    auto Fn = [ULPT, DM](const float &FS, const float &FR) {
       return compareFloatULP(FS, FR, ULPT, DM);
     };
-    return testAll<float>(fn, Arr1, Arr2);
+    return testAll<float>(Fn, Arr1, Arr2);
   }
   case offloadtest::DataFormat::Float16: {
     const llvm::ArrayRef<uint16_t> Arr1(
@@ -126,10 +126,10 @@ static bool testBufferFuzzy(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
     const llvm::ArrayRef<uint16_t> Arr2(
         reinterpret_cast<uint16_t *>(B2->Data.get()),
         B2->Size / sizeof(uint16_t));
-    auto fn = [ULPT](const uint16_t &FS, const uint16_t &FR) {
+    auto Fn = [ULPT](const uint16_t &FS, const uint16_t &FR) {
       return compareFloat16ULP(FS, FR, ULPT);
     };
-    return testAll<uint16_t>(fn, Arr1, Arr2);
+    return testAll<uint16_t>(Fn, Arr1, Arr2);
   }
   default:
     llvm_unreachable("Only float types are supported by the fuzzy test.");
