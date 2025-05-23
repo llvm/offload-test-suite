@@ -12,6 +12,7 @@
 #include "Support/Check.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
+#include <cmath>
 
 static bool isDenorm(float F) { return std::fpclassify(F) == FP_SUBNORMAL; }
 
