@@ -18,14 +18,14 @@ constexpr uint16_t FLOAT16_BIT_SIGN = 0x8000;
 constexpr uint16_t FLOAT16_BIT_EXP = 0x7c00;
 constexpr uint16_t FLOAT16_BIT_MANTISSA = 0x03ff;
 
-
 // limited to float, double, and long double
 template <typename T> static bool isDenorm(T F) {
   return std::fpclassify(F) == FP_SUBNORMAL;
 }
 
 static bool isFloat16NAN(uint16_t Val) {
-  return (Val & FLOAT16_BIT_EXP) == FLOAT16_BIT_EXP && (Val & FLOAT16_BIT_MANTISSA) != 0;
+  return (Val & FLOAT16_BIT_EXP) == FLOAT16_BIT_EXP &&
+         (Val & FLOAT16_BIT_MANTISSA) != 0;
 }
 
 static bool compareDoubleULP(const double &FSrc, const double &FRef,
