@@ -9,14 +9,14 @@ RWStructuredBuffer<uint4> OutUInt : register(u3);
 void main() {
   // Int
   OutInt[0] = countbits(InInt[0]);
-  OutInt[1].xyz = countbits(InInt[0].xyz);
-  OutInt[1].w = countbits(InInt[0].w);
+  uint4 OutOne = {countbits(InInt[0].xyz), countbits(InInt[0].w)};
+  OutInt[1] = OutOne;
   OutInt[2].xy = countbits(InInt[0].xy);
 
   // UInt
   OutUInt[0] = countbits(InUInt[0]);
-  OutUInt[1].xyz = countbits(InUInt[0].xyz);
-  OutUInt[1].w = countbits(InUInt[0].w);
+  uint4 OutUOne = {countbits(InUInt[0].xyz), countbits(InUInt[0].w)};
+  OutUInt[1] = OutUOne;
   OutUInt[2].xy = countbits(InUInt[0].xy);
 }
 
