@@ -14,6 +14,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
 
+#define FLOAT16_BIT_SIGN 0x8000
+
 // limited to float, double, and long double
 template <typename T> static bool isDenorm(T F) {
   return std::fpclassify(F) == FP_SUBNORMAL;
@@ -64,13 +66,24 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
 
 static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
                               unsigned ULPTolerance) {
+  // Treat +0 and -0 as equal
+  if ((FSrc & ~FLOAT16_BIT_SIGN) == 0 && (FRef & ~FLOAT16_BIT_SIGN) == 0)
+    return true;
   if (FSrc == FRef)
     return true;
   if (isFloat16NAN(FSrc) || isFloat16NAN(FRef))
     return isFloat16NAN(FRef) && isFloat16NAN(FSrc);
+
+  // Map to monotonic ordering for correct ULP diff
+  auto toOrdered = [](uint16_t H) -> int {
+    return (H & FLOAT16_BIT_SIGN) ? (~H & 0xFFFF) : (H | 0x8000);
+  };
+
   // 16-bit floating point numbers must preserve denorms
-  const int Diff = FSrc - FRef;
-  const unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
+  int IntFSrc = toOrdered(FSrc);
+  int IntFRef = toOrdered(FRef);
+  int Diff = IntFSrc - IntFRef;
+  unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
   return AbsDiff <= ULPTolerance;
 }
 
