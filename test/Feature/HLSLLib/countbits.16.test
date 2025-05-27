@@ -32,11 +32,11 @@ Buffers:
   - Name: InInt
     Format: Int16
     Stride: 8
-    Data: [42, 0, 3855, -1] # 0x2A, 0x0, 0x0f0f, 0xffff
+    Data: [0x2A, 0, 0x0f0f, -1]
   - Name: InUInt
     Format: UInt16
     Stride: 8
-    Data: [42, 0, 3855, 65535] # 0x2A, 0x0, 0x0f0f, 0xffff
+    Data: [0x2A, 0, 0x0f0f, 0xffff]
   - Name: OutInt
     Format: UInt32
     Stride: 16

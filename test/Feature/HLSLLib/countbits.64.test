@@ -32,11 +32,11 @@ Buffers:
   - Name: InInt
     Format: Int64
     Stride: 32
-    Data: [42, 0, 1085102592571150095, -1] # 0x2A, 0x0, 0x0f...0f, 0xff ... ff
+    Data: [0x2A, 0, 0x0f0f0f0f0f0f0f0f, -1]
   - Name: InUInt
     Format: UInt64
     Stride: 32
-    Data: [42, 0, 1085102592571150095, 1844674407370955161]  # 0x2A, 0x0, 0x0f ... 0f, 0xff ... ff
+    Data: [0x2A, 0, 0x0f0f0f0f0f0f0f0f, 0xffffffffffffffff]
   - Name: OutInt
     Format: UInt32
     Stride: 16
