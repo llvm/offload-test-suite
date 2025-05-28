@@ -92,6 +92,11 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int16
+
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7494
+# XFAIL: DXC-Vulkan
+
+# Failure to materializeAll for 16 bit
 # XFAIL: Metal
 
 # RUN: split-file %s %t
