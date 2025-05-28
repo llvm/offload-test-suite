@@ -14,13 +14,18 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
 
+constexpr uint16_t Float16BitSign = 0x8000;
+constexpr uint16_t Float16BitExp = 0x7c00;
+constexpr uint16_t Float16BitMantissa = 0x03ff;
+
 // limited to float, double, and long double
 template <typename T> static bool isDenorm(T F) {
   return std::fpclassify(F) == FP_SUBNORMAL;
 }
 
 static bool isFloat16NAN(uint16_t Val) {
-  return (Val & 0x7c00) == 0x7c00 && (Val & 0x03ff) != 0;
+  return (Val & Float16BitExp) == Float16BitExp &&
+         (Val & Float16BitMantissa) != 0;
 }
 
 static bool compareDoubleULP(const double &FSrc, const double &FRef,
@@ -64,12 +69,23 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
 
 static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
                               unsigned ULPTolerance) {
+  // Treat +0 and -0 as equal
+  if ((FSrc & ~Float16BitSign) == 0 && (FRef & ~Float16BitSign) == 0)
+    return true;
   if (FSrc == FRef)
     return true;
   if (isFloat16NAN(FSrc) || isFloat16NAN(FRef))
     return isFloat16NAN(FRef) && isFloat16NAN(FSrc);
+
+  // Map to monotonic ordering for correct ULP diff
+  auto ToOrdered = [](uint16_t H) -> int {
+    return (H & Float16BitSign) ? (~H & 0xFFFF) : (H | Float16BitSign);
+  };
+
   // 16-bit floating point numbers must preserve denorms
-  const int Diff = FSrc - FRef;
+  const int IntFSrc = ToOrdered(FSrc);
+  const int IntFRef = ToOrdered(FRef);
+  const int Diff = IntFSrc - IntFRef;
   const unsigned int AbsDiff = Diff < 0 ? -Diff : Diff;
   return AbsDiff <= ULPTolerance;
 }

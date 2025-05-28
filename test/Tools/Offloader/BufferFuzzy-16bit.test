@@ -4,6 +4,7 @@ RWStructuredBuffer<half> Out1 : register(u0);
 RWStructuredBuffer<half> Out2 : register(u1);
 RWStructuredBuffer<half> Out3 : register(u2);
 RWStructuredBuffer<half> Out4 : register(u3);
+RWStructuredBuffer<half> Out5 : register(u4);
 
 [numthreads(1,1,1)]
 void main() {
@@ -11,6 +12,7 @@ void main() {
   Out2[0] = (half)(0.0 / 0.0); // Should be NaN
   Out3[0] = (half)5.40234375;
   Out4[0] = (half)6.40234375;
+  Out5[0] = (half)-0.0;
 }
 
 //--- pipeline.yaml
@@ -53,6 +55,14 @@ Buffers:
     Format: Float16
     Stride: 2
     Data: [ 0x4665, 0 ] # Should be 2 ulp away
+  - Name: Out5
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected5
+    Format: Float16
+    Stride: 2
+    Data: [ 0, 0 ] # compare negative and positive zero
 Results:
   - Result: Test1 # Test two values are exactly the same
     Rule: BufferFuzzy
@@ -74,6 +84,11 @@ Results:
     ULPT: 2
     Actual: Out4
     Expected: Expected4
+  - Result: Test5 # +0 and -0 should be equal
+    Rule: BufferFuzzy
+    ULPT: 0
+    Actual: Out5
+    Expected: Expected5
 DescriptorSets:
   - Resources:
     - Name: Out1
@@ -104,6 +119,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 3
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
 ...
 #--- end
 
