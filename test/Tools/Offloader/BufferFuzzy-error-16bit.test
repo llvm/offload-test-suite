@@ -1,0 +1,118 @@
+#--- source.hlsl
+
+RWStructuredBuffer<half> Out1 : register(u0);
+RWStructuredBuffer<half> Out2 : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out1[0] = (half)20.3;
+  Out1[1] = (half)5.0;
+  Out2[0] = (half)0.0;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out1
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected1
+    Format: Float16
+    Stride: 2
+    Data: [ 0x3E00, 0x4100 ]
+  - Name: Out2
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected2
+    Format: Float16
+    Stride: 2
+    Data: [ 0x0001, 0 ]
+Results:
+  - Result: Test1
+    Rule: BufferFuzzy
+    ULPT: 1
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test2 # Denorm value
+    Rule: BufferFuzzy
+    ULPT: 0
+    Actual: Out2
+    Expected: Expected2
+DescriptorSets:
+  - Resources:
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Half
+
+# UNSUPPORTED: Clang-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Test failed: Test1
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Float16
+# CHECK: Stride:          2
+# CHECK: Data:            [ 0x3E00, 0x4100 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out1
+# CHECK: Format:          Float16
+# CHECK: Stride:          2
+# CHECK: Data:            [ 0x4D13, 0x4500 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test2
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected2
+# CHECK: Format:          Float16
+# CHECK: Stride:          2
+# CHECK: Data:            [ 0x1, 0x0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out2
+# CHECK: Format:          Float16
+# CHECK: Stride:          2
+# CHECK: Data:            [ 0x0, 0x0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0

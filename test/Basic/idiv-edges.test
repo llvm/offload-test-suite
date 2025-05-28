@@ -37,20 +37,25 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
     - Name: Zeros
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
+      VulkanBinding:
+        Binding: 1
     - Name: NegOnes
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
+      VulkanBinding:
+        Binding: 2
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s

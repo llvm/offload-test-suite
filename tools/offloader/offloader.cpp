@@ -13,6 +13,7 @@
 #include "API/Device.h"
 #include "Config.h"
 #include "Image/Image.h"
+#include "Support/Check.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/Support/CommandLine.h"
@@ -56,8 +57,8 @@ static cl::opt<bool>
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
-std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
-  ExitOnError ExitOnErr("gpu-exec: error: ");
+static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
+  const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
       MemoryBuffer::getFileOrSTDIN(Path);
   ExitOnErr(errorCodeToError(FileOrErr.getError()));
@@ -65,25 +66,23 @@ std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   return std::move(FileOrErr.get());
 }
 
-int run();
+static int run();
 
 int main(int ArgC, char **ArgV) {
-  InitLLVM X(ArgC, ArgV);
+  const InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU Execution Tool");
 
-  if (run()) {
-    errs() << "No device available.";
+  if (run())
     return 1;
-  }
   Device::uninitialize();
   return 0;
 }
 
 int run() {
-  ExitOnError ExitOnErr("gpu-exec: error: ");
-  ExitOnErr(Device::initialize());
+  const ExitOnError ExitOnErr("gpu-exec: error: ");
+  logAllUnhandledErrors(Device::initialize(), errs(), "gpu-exec: warning: ");
 
-  std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
+  const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
   yaml::Input YIn(PipelineBuf->getBuffer());
   YIn >> PipelineDesc;
@@ -100,15 +99,16 @@ int run() {
         PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
+  const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
-    if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("DXBC")) {
+    if (Binary.starts_with("DXBC")) {
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
-    } else if (*reinterpret_cast<const uint32_t *>(
-                   PipelineDesc.Shaders[0].Shader->getBuffer().data()) == 0x07230203) {
+    } else if (*reinterpret_cast<const uint32_t *>(Binary.data()) ==
+               0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (PipelineDesc.Shaders[0].Shader->getBuffer().starts_with("MTLB")) {
+    } else if (Binary.starts_with("MTLB")) {
       APIToUse = GPUAPI::Metal;
       outs() << "Using Metal API\n";
     }
@@ -123,12 +123,27 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
+  if (Device::devices().empty()) {
+    errs() << "No device available.";
+    return 1;
+  }
+
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
+
+    // check the results
+    llvm::Error ResultErr = Error::success();
+    for (const auto &R : PipelineDesc.Results)
+      ResultErr = llvm::joinErrors(std::move(ResultErr), verifyResult(R));
+
+    if (ResultErr) {
+      logAllUnhandledErrors(std::move(ResultErr), errs());
+      return 1;
+    }
 
     if (Quiet)
       return 0;
@@ -148,7 +163,7 @@ int run() {
     }
     for (const auto &B : PipelineDesc.Buffers) {
       if (B.Name == ImageOutput) {
-        ImageRef Img = ImageRef(B);
+        const ImageRef Img = ImageRef(B);
         ExitOnErr(Image::writePNG(Img, OutputFilename));
         return 0;
       }

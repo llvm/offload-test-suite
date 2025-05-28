@@ -1,0 +1,116 @@
+#--- source.hlsl
+
+RWStructuredBuffer<float> Out1 : register(u0);
+RWStructuredBuffer<float> Out2 : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out1[0] = 20.3;
+  Out1[1] = 5.0;
+  Out2[0] = 0.0;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out1
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 8
+  - Name: Expected1
+    Format: Float32
+    Stride: 4
+    Data: [ 1.5, 2.5 ]
+  - Name: Out2
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected2
+    Format: Float32
+    Stride: 4
+    Data: [ 0x1.e7d42cp-127 ] # isDenorm will return true for this value: 1.12e-38
+Results:
+  - Result: Test1
+    Rule: BufferFuzzy
+    ULPT: 1
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test2 # Denorm value but mode isn't Any
+    Rule: BufferFuzzy
+    ULPT: 1
+    DenormMode: Preserve # same to use FTZ
+    Actual: Out2
+    Expected: Expected2
+DescriptorSets:
+  - Resources:
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Test failed: Test1
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.5, 2.5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20.3, 5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test2
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected2
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.12e-38 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out2
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0

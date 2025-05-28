@@ -25,6 +25,10 @@ namespace offloadtest {
 
 enum class Stages { Compute };
 
+enum class Rule { BufferExact, BufferFuzzy };
+
+enum class DenormMode { Any, FTZ, Preserve };
+
 enum class DataFormat {
   Hex8,
   Hex16,
@@ -36,6 +40,7 @@ enum class DataFormat {
   Int16,
   Int32,
   Int64,
+  Float16,
   Float32,
   Float64,
   Bool,
@@ -54,6 +59,10 @@ enum class ResourceKind {
 struct DirectXBinding {
   uint32_t Register;
   uint32_t Space;
+};
+
+struct VulkanBinding {
+  uint32_t Binding;
 };
 
 struct OutputProperties {
@@ -81,6 +90,7 @@ struct Buffer {
     case DataFormat::Hex16:
     case DataFormat::UInt16:
     case DataFormat::Int16:
+    case DataFormat::Float16:
       return 2;
     case DataFormat::Hex32:
     case DataFormat::UInt32:
@@ -104,10 +114,22 @@ struct Buffer {
   }
 };
 
+struct Result {
+  std::string Name;
+  Rule Rule;
+  std::string Actual;
+  std::string Expected;
+  Buffer *ActualPtr = nullptr;
+  Buffer *ExpectedPtr = nullptr;
+  DenormMode DM = DenormMode::Any;
+  unsigned ULPT; // ULP Tolerance
+};
+
 struct Resource {
   ResourceKind Kind;
   std::string Name;
   DirectXBinding DXBinding;
+  std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
   bool HasCounter;
 
@@ -209,6 +231,7 @@ struct Pipeline {
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
   llvm::SmallVector<Buffer> Buffers;
+  llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
 
   uint32_t getDescriptorCount() const {
@@ -232,6 +255,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 
 namespace llvm {
 namespace yaml {
@@ -248,12 +272,20 @@ template <> struct MappingTraits<offloadtest::Buffer> {
   static void mapping(IO &I, offloadtest::Buffer &R);
 };
 
+template <> struct MappingTraits<offloadtest::Result> {
+  static void mapping(IO &I, offloadtest::Result &R);
+};
+
 template <> struct MappingTraits<offloadtest::Resource> {
   static void mapping(IO &I, offloadtest::Resource &R);
 };
 
 template <> struct MappingTraits<offloadtest::DirectXBinding> {
   static void mapping(IO &I, offloadtest::DirectXBinding &B);
+};
+
+template <> struct MappingTraits<offloadtest::VulkanBinding> {
+  static void mapping(IO &I, offloadtest::VulkanBinding &B);
 };
 
 template <> struct MappingTraits<offloadtest::OutputProperties> {
@@ -280,6 +312,25 @@ template <> struct MappingTraits<offloadtest::RuntimeSettings> {
   static void mapping(IO &I, offloadtest::RuntimeSettings &S);
 };
 
+template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
+  static void enumeration(IO &I, offloadtest::Rule &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Rule::Val)
+    ENUM_CASE(BufferExact);
+    ENUM_CASE(BufferFuzzy);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::DenormMode> {
+  static void enumeration(IO &I, offloadtest::DenormMode &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DenormMode::Val)
+    ENUM_CASE(Any);
+    ENUM_CASE(FTZ);
+    ENUM_CASE(Preserve);
+#undef ENUM_CASE
+  }
+};
+
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   static void enumeration(IO &I, offloadtest::DataFormat &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataFormat::Val)
@@ -293,6 +344,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
     ENUM_CASE(Int16);
     ENUM_CASE(Int32);
     ENUM_CASE(Int64);
+    ENUM_CASE(Float16);
     ENUM_CASE(Float32);
     ENUM_CASE(Float64);
     ENUM_CASE(Bool);

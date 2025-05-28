@@ -1,0 +1,113 @@
+#--- source.hlsl
+
+RWStructuredBuffer<float> Out1 : register(u0);
+RWStructuredBuffer<float> Out2 : register(u1);
+RWStructuredBuffer<float> Out3 : register(u2);
+RWStructuredBuffer<float> Out4 : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out1[0] = 0.0;
+  Out2[0] = 3.14159265;
+  Out3[0] = asfloat(0x7fffffff); // Should be NaN
+  Out4[0] = 5.4;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out1
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected1
+    Format: Float32
+    Stride: 4
+    Data: [ 0x1.e7d42cp-127 ] # isDenorm will return true for this value: 1.12e-38
+  - Name: Out2
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected2
+    Format: Float32
+    Stride: 4
+    Data: [ 3.14159265 ]
+  - Name: Out3
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected3
+    Format: Float32
+    Stride: 4
+    Data: [ NaN ]
+  - Name: Out4
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 4
+  - Name: Expected4
+    Format: Float32
+    Stride: 4
+    Data: [ 5.399999 ] # Should be 2 ulp away
+Results:
+  - Result: Test1 # Testing Expected is Denorm and Out is zero, and both have same sign bit
+    Rule: BufferFuzzy
+    ULPT: 1
+    DenormMode: Any
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test2 # Test two values are exactly the same
+    Rule: BufferFuzzy
+    ULPT: 0 # ulp shouldn't matter for this test
+    Actual: Out2
+    Expected: Expected2
+  - Result: Test3 # Test both are NaN
+    Rule: BufferFuzzy
+    ULPT: 0 # ulp shouldn't matter for this test
+    Actual: Out3
+    Expected: Expected3
+  - Result: Test4 # Actual and Expected are not the same but they are within the ULPT
+    Rule: BufferFuzzy
+    ULPT: 2
+    Actual: Out4
+    Expected: Expected4
+DescriptorSets:
+  - Resources:
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

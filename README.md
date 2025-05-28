@@ -5,12 +5,10 @@ Experimental Runtime test suite for HLSL
 
 | Testing Machine | DXC | Clang |
 |-----------------|-----|-------|
-| Windows DirectX12 Intel GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 Warp | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-clang-warp-d3d12.yaml/badge.svg) |
-| Windows Vulkan Intel GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-intel-clang-vk.yaml/badge.svg) |
-| Windows DirectX12 NVIDIA GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-clang-d3d12.yaml/badge.svg) |
-| Windows Vulkan NVIDIA GPU | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/windows-nv-clang-vk.yaml/badge.svg) |
-| macOS Apple M1 | ![DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm-beanz/HLSLTEst/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
+| Windows DirectX12 Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg) |
+| Windows DirectX12 Warp | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-warp-d3d12.yaml/badge.svg) |
+| Windows Vulkan Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-vk.yaml/badge.svg) |
+| macOS Apple M1 | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
 
 
 # Prerequisites
@@ -20,6 +18,8 @@ This project requires being able to locally build LLVM and leverages LLVM's buil
 ```shell
 pip3 install pyyaml
 ```
+
+On Windows, the [Graphics Tools](https://learn.microsoft.com/en-us/windows/win32/direct3d12/directx-12-programming-environment-set-up#debug-layer) optional feature is additionally required to run the test suite.
 
 # Adding to LLVM Build
 
@@ -35,6 +35,12 @@ compiler to use by passing:
 ```shell
 -DDXC_DIR=<path to folder containing dxc & dxv>
 ```
+
+## Enabling clang-tidy
+
+The offload test suite's code is clang-tidy clean for a limited ruleset.
+If you have clang-tidy installed locally you can enable clang-tidy by adding `-DOFFLOADTEST_USE_CLANG_TIDY=On` to your CMake invocation.
+You can also add `-DOFFLOADTEST_CLANG_TIDY_APPLY_FIX=On` to enable automatically applying the clang-tidy fix-its for any warnings that have automated fixes.
 
 # YAML Pipeline Format
 
@@ -56,6 +62,33 @@ Buffers:
   - Name: In2
     Format: Hex16
     Data: [ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8]
+  - Name: Out1 # Buffer where our output will go
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 8
+  - Name: Expected1 # Buffer which stores the expected result of our test
+    Format: Float32
+    Stride: 4
+    Data: [ 0.0, 1.0 ]
+  - Name: Out2 # Buffer where our output will go
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4 # ZeroInitSize needs to be 4 bytes minimum
+  - Name: Expected2 # Buffer which stores the expected result of our test
+    Format: Float16
+    Stride: 2
+    Data: [ 0x1, 0x2 ]
+Results: # Using Result can verify test values without filecheck
+  - Result: Test1
+    Rule: BufferFuzzy # Rule which can be used to compare Float Buffers; They are compared within a ULP range
+    ULPT: 1 # ULP to use
+    DenormMode: Any # if DenormMode Field is not Specified, 'Any' is the default; FTZ and Preserve are the other options.
+    Actual: Out1 # First buffer to compare
+    Expected: Expected1 # Second buffer to compare against first
+  - Result: Test2
+    Rule: BufferExact # Compares Two Buffers for == equality between each value elementwise
+    Actual: Out1
+    Expected: Expected1
 DescriptorSets:
   - Resources:
     - Name: Constants
@@ -63,16 +96,22 @@ DescriptorSets:
       DirectXBinding:
         Register: 0 # implies b0 due to Access being Constant
         Space: 0
+      VulkanBinding:
+        Binding: 0 # [[vk::binding(0, 0)]]
     - Name: In1
       Kind: Buffer
       DirectXBinding:
         Register: 0 # implies t0 due to Access being RO
         Space: 0
+      VulkanBinding:
+        Binding: 10
   - Resources:
     - Name: In2
       Kind: Buffer
       DirectXBinding:
         Register: 1 # implies t1 due to Access being RO
         Space: 0
+      VulkanBinding:
+        Binding: 0 # [[vk::binding(0, 1)]]
 ...
 ```

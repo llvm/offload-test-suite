@@ -45,6 +45,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -59,6 +61,8 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
     return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
@@ -72,6 +76,8 @@ static bool isUniform(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return false;
@@ -121,7 +127,7 @@ private:
 public:
   VKDevice(VkPhysicalDevice D) : Device(D) {
     vkGetPhysicalDeviceProperties(Device, &Props);
-    uint64_t StrSz =
+    const uint64_t StrSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, StrSz);
   }
@@ -163,6 +169,8 @@ public:
       OS << "    LayerDesc: " << llvm::StringRef(Layer.description, Sz) << "\n";
     }
   }
+
+  const VkPhysicalDeviceProperties &getProps() const { return Props; }
 
 private:
   void queryCapabilities() {
@@ -219,7 +227,7 @@ public:
     // Find a queue that supports compute
     uint32_t QueueCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, 0);
-    std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps =
+    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps =
         std::unique_ptr<VkQueueFamilyProperties[]>(
             new VkQueueFamilyProperties[QueueCount]);
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount,
@@ -233,7 +241,7 @@ public:
                                      "No compute queue found.");
 
     VkDeviceQueueCreateInfo QueueInfo = {};
-    float QueuePriority = 0.0f;
+    const float QueuePriority = 0.0f;
     QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     QueueInfo.queueFamilyIndex = QueueIdx;
     QueueInfo.queueCount = 1;
@@ -343,8 +351,7 @@ public:
     return BufferRef{Buffer, Memory};
   }
 
-  llvm::Error createBuffer(Resource &R, InvocationState &IS,
-                           const uint32_t HeapIdx) {
+  llvm::Error createBuffer(Resource &R, InvocationState &IS) {
     auto ExHostBuf = createBuffer(
         IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), R.BufferPtr->Data.get());
@@ -370,10 +377,9 @@ public:
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    uint32_t HeapIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (auto Err = createBuffer(R, IS, HeapIndex++))
+        if (auto Err = createBuffer(R, IS))
           return Err;
       }
     }
@@ -464,11 +470,13 @@ public:
   llvm::Error createDescriptorSets(Pipeline &P, InvocationState &IS) {
     for (const auto &S : P.Sets) {
       std::vector<VkDescriptorSetLayoutBinding> Bindings;
-      uint32_t BindingIdx = 0;
       for (const auto &R : S.Resources) {
-        (void)R; // Todo: set this correctly for the data type.
         VkDescriptorSetLayoutBinding Binding = {};
-        Binding.binding = BindingIdx++;
+        if (!R.VKBinding.has_value())
+          return llvm::createStringError(std::errc::invalid_argument,
+                                         "No VulkanBinding provided for '%s'",
+                                         R.Name.c_str());
+        Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
         Binding.descriptorCount = 1;
         Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
@@ -523,17 +531,18 @@ public:
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         // This is a hack... need a better way to do this.
         VkBufferViewCreateInfo ViewCreateInfo = {};
-        bool IsRawOrUniform = R.isRaw();
-        VkFormat Format = IsRawOrUniform ? VK_FORMAT_UNDEFINED
-                                         : getVKFormat(R.BufferPtr->Format,
-                                                       R.BufferPtr->Channels);
+        const bool IsRawOrUniform = R.isRaw();
+        const VkFormat Format =
+            IsRawOrUniform
+                ? VK_FORMAT_UNDEFINED
+                : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
         ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
         ViewCreateInfo.buffer = IS.Buffers[BufIdx].Device.Buffer;
         ViewCreateInfo.format = Format;
         ViewCreateInfo.range = VK_WHOLE_SIZE;
         if (IsRawOrUniform) {
-          VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer, 0,
-                                       VK_WHOLE_SIZE};
+          const VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer,
+                                             0, VK_WHOLE_SIZE};
           RawBufferInfos.push_back(BI);
         } else {
           IS.BufferViews.push_back(VkBufferView{0});
@@ -620,7 +629,7 @@ public:
     vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                             IS.PipelineLayout, 0, IS.DescriptorSets.size(),
                             IS.DescriptorSets.data(), 0, 0);
-    llvm::ArrayRef<int> DispatchSize =
+    const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
     vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
                   DispatchSize[2]);
@@ -657,23 +666,23 @@ public:
   }
 
   llvm::Error readBackData(Pipeline &P, InvocationState &IS) {
-    uint32_t UAVIdx = 0;
+    uint32_t BufIdx = 0;
     for (auto &S : P.Sets) {
-      for (auto &R : S.Resources) {
+      for (int I = 0, E = S.Resources.size(); I < E; ++I, ++BufIdx) {
+        const Resource &R = S.Resources[I];
         if (!R.isReadWrite())
           continue;
         void *Mapped = nullptr;
-        vkMapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory, 0, VK_WHOLE_SIZE,
+        vkMapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory, 0, VK_WHOLE_SIZE,
                     0, &Mapped);
         VkMappedMemoryRange Range = {};
         Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        Range.memory = IS.Buffers[UAVIdx].Host.Memory;
+        Range.memory = IS.Buffers[BufIdx].Host.Memory;
         Range.offset = 0;
         Range.size = VK_WHOLE_SIZE;
         vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
         memcpy(R.BufferPtr->Data.get(), Mapped, R.size());
-        vkUnmapMemory(IS.Device, IS.Buffers[UAVIdx].Host.Memory);
-        UAVIdx++;
+        vkUnmapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory);
       }
     }
     return llvm::Error::success();
@@ -771,14 +780,40 @@ public:
   }
 
   llvm::Error initialize() {
+    // Create a Vulkan 1.1 instance to determine the API version
     VkApplicationInfo AppInfo = {};
     AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     AppInfo.pApplicationName = "OffloadTest";
+    // TODO: We should set this based on a command line flag, and simplify the
+    // code below to error if the requested version isn't supported.
     AppInfo.apiVersion = VK_API_VERSION_1_1;
 
     VkInstanceCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     CreateInfo.pApplicationInfo = &AppInfo;
+
+    VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Cannot find a compatible Vulkan device");
+    if (Res)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Unkown Vulkan initialization error");
+
+    uint32_t DeviceCount = 0;
+    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Failed to get device count");
+    std::vector<VkPhysicalDevice> PhysicalDevicesTmp(DeviceCount);
+    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                   PhysicalDevicesTmp.data()))
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Failed to enumerate devices");
+    {
+      auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
+      AppInfo.apiVersion = TmpDev->getProps().apiVersion;
+    }
+    vkDestroyInstance(Instance, NULL);
 
 // TODO: This is a bit hacky but matches what I did in DX.
 #ifndef NDEBUG
@@ -787,15 +822,15 @@ public:
     CreateInfo.enabledLayerCount = 1;
 #endif
 
-    VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+    Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a compatible Vulkan device");
-    else if (Res)
+    if (Res)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unkown Vulkan initialization error");
 
-    uint32_t DeviceCount = 0;
+    DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Failed to get device count");
@@ -815,4 +850,6 @@ public:
 };
 } // namespace
 
-llvm::Error InitializeVXDevices() { return VKContext::instance().initialize(); }
+llvm::Error Device::initializeVXDevices() {
+  return VKContext::instance().initialize();
+}

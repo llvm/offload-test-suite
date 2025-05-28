@@ -12,6 +12,8 @@
 #ifndef OFFLOADTEST_API_DEVICE_H
 #define OFFLOADTEST_API_DEVICE_H
 
+#include "Config.h"
+
 #include "API/API.h"
 #include "API/Capabilities.h"
 #include "llvm/ADT/StringRef.h"
@@ -54,6 +56,18 @@ public:
   static DeviceIterator begin();
   static DeviceIterator end();
   static inline DeviceRange devices() { return DeviceRange(begin(), end()); }
+
+#ifdef OFFLOADTEST_ENABLE_D3D12
+  static llvm::Error initializeDXDevices();
+#endif
+
+#ifdef OFFLOADTEST_ENABLE_VULKAN
+  static llvm::Error initializeVXDevices();
+#endif
+
+#ifdef OFFLOADTEST_ENABLE_METAL
+  static llvm::Error initializeMtlDevices();
+#endif
 };
 
 } // namespace offloadtest

@@ -1,0 +1,71 @@
+#--- source.hlsl
+
+RWStructuredBuffer<int> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = 20;
+  Out[1] = 30;
+  Out[2] = 40;
+  Out[3] = 50;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: Expected1
+    Format: Int32
+    Stride: 4
+    Data: [ 1, 2, 3, 4 ]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected1
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Test failed: Test1
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Int32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1, 2, 3, 4 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out
+# CHECK: Format:          Int32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20, 30, 40, 50 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0

@@ -35,7 +35,7 @@ struct S {
   int2 z2ya2;
 };
 
-RWStructuredBuffer<S> Out : register(u0);
+RWStructuredBuffer<S> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
@@ -89,7 +89,7 @@ DescriptorSets:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 0
+        Register: 1
         Space: 0
 ...
 #--- end

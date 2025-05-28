@@ -1,0 +1,137 @@
+#--- source.hlsl
+
+RWStructuredBuffer<half> Out1 : register(u0);
+RWStructuredBuffer<half> Out2 : register(u1);
+RWStructuredBuffer<half> Out3 : register(u2);
+RWStructuredBuffer<half> Out4 : register(u3);
+RWStructuredBuffer<half> Out5 : register(u4);
+
+[numthreads(1,1,1)]
+void main() {
+  Out1[0] = (half)3.14159265;
+  Out2[0] = (half)(0.0 / 0.0); // Should be NaN
+  Out3[0] = (half)5.40234375;
+  Out4[0] = (half)6.40234375;
+  Out5[0] = (half)-0.0;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out1
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected1
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4248, 0 ]
+  - Name: Out2
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected2
+    Format: Float16
+    Stride: 2
+    Data: [ 0x7E00, 0 ] # Should be NaN
+  - Name: Out3
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected3
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4566, 0 ] # Should be 1 ulp away
+  - Name: Out4
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected4
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4665, 0 ] # Should be 2 ulp away
+  - Name: Out5
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 4
+  - Name: Expected5
+    Format: Float16
+    Stride: 2
+    Data: [ 0, 0 ] # compare negative and positive zero
+Results:
+  - Result: Test1 # Test two values are exactly the same
+    Rule: BufferFuzzy
+    ULPT: 0 # ulp shouldn't matter for this test
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test2 # Test both are NaN
+    Rule: BufferFuzzy
+    ULPT: 0 # ulp shouldn't matter for this test
+    Actual: Out2
+    Expected: Expected2
+  - Result: Test3 # Actual and Expected are not the same but they are within the ULPT
+    Rule: BufferFuzzy
+    ULPT: 1
+    Actual: Out3
+    Expected: Expected3
+  - Result: Test4 # Actual and Expected are not the same but they are within the ULPT
+    Rule: BufferFuzzy
+    ULPT: 2
+    Actual: Out4
+    Expected: Expected4
+  - Result: Test5 # +0 and -0 should be equal
+    Rule: BufferFuzzy
+    ULPT: 0
+    Actual: Out5
+    Expected: Expected5
+DescriptorSets:
+  - Resources:
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# REQUIRES: Half
+
+# UNSUPPORTED: Clang-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

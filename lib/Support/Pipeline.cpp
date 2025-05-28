@@ -13,6 +13,11 @@
 
 using namespace offloadtest;
 
+static bool isFloatingPointFormat(DataFormat Format) {
+  return Format == DataFormat::Float16 || Format == DataFormat::Float32 ||
+         Format == DataFormat::Float64;
+}
+
 namespace llvm {
 namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
@@ -22,6 +27,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("RuntimeSettings", P.Settings);
 
   I.mapRequired("Buffers", P.Buffers);
+  I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
 
   if (!I.outputting()) {
@@ -32,6 +38,23 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
       }
     }
+    // Initialize result Buffers
+    for (auto &R : P.Results) {
+      R.ActualPtr = P.getBuffer(R.Actual);
+      if (!R.ActualPtr)
+        I.setError(Twine("Reference buffer ") + R.Actual + " not found!");
+      R.ExpectedPtr = P.getBuffer(R.Expected);
+      if (!R.ExpectedPtr)
+        I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
+      if (R.Rule == Rule::BufferFuzzy) {
+        if (!isFloatingPointFormat(R.ActualPtr->Format) ||
+            !isFloatingPointFormat(R.ExpectedPtr->Format))
+          I.setError(Twine("BufferFuzzy only accepts Float buffers"));
+        if (R.ActualPtr->Format != R.ExpectedPtr->Format)
+          I.setError(Twine("Buffers must have the same type"));
+      }
+    }
+
     uint32_t DescriptorTableCount = 0;
     for (auto &R : P.Settings.DX.RootParams) {
       switch (R.Kind) {
@@ -112,6 +135,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     DATA_CASE(Int16, int16_t)
     DATA_CASE(Int32, int32_t)
     DATA_CASE(Int64, int64_t)
+    DATA_CASE(Float16, llvm::yaml::Hex16)
     DATA_CASE(Float32, float)
     DATA_CASE(Float64, double)
     DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a bool using 4 bytes.
@@ -126,12 +150,18 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
   I.mapRequired("Kind", R.Kind);
   I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapRequired("DirectXBinding", R.DXBinding);
+  I.mapOptional("VulkanBinding", R.VKBinding);
 }
 
 void MappingTraits<offloadtest::DirectXBinding>::mapping(
     IO &I, offloadtest::DirectXBinding &B) {
   I.mapRequired("Register", B.Register);
   I.mapRequired("Space", B.Space);
+}
+
+void MappingTraits<offloadtest::VulkanBinding>::mapping(
+    IO &I, offloadtest::VulkanBinding &B) {
+  I.mapRequired("Binding", B.Binding);
 }
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(
@@ -146,6 +176,7 @@ void MappingTraits<offloadtest::dx::RootResource>::mapping(
   I.mapRequired("Name", R.Name);
   I.mapRequired("Kind", R.Kind);
   R.DXBinding = {0, 0};
+  R.VKBinding = std::nullopt;
   if (!I.outputting() && !R.isRaw())
     I.setError("Root descriptors must be raw resource types.");
 }
@@ -189,6 +220,23 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
     // or moved into the Shaders structure.
     MutableArrayRef<int> MutableDispatchSize(S.DispatchSize);
     I.mapRequired("DispatchSize", MutableDispatchSize);
+  }
+}
+void MappingTraits<offloadtest::Result>::mapping(IO &I,
+                                                 offloadtest::Result &R) {
+  I.mapRequired("Result", R.Name);
+  I.mapRequired("Rule", R.Rule);
+  I.mapRequired("Actual", R.Actual);
+  I.mapRequired("Expected", R.Expected);
+
+  switch (R.Rule) {
+  case Rule::BufferFuzzy: {
+    I.mapRequired("ULPT", R.ULPT);
+    I.mapOptional("DenormMode", R.DM);
+    break;
+  }
+  default:
+    break;
   }
 }
 } // namespace yaml

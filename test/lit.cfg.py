@@ -36,6 +36,9 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.offloadtest_obj_root, "test", config.offloadtest_suite)
 
+# Tweak the PATH to include the tools dir.
+llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
+
 tools = [
     ToolSubst("FileCheck", FindTool("FileCheck")),
     ToolSubst("split-file", FindTool("split-file")),
@@ -50,7 +53,7 @@ else:
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
-  ExtraCompilerArgs = ['-spirv']
+  ExtraCompilerArgs = ['-spirv', '-fspv-target-env=vulkan1.3']
 if config.offloadtest_enable_metal:
   ExtraCompilerArgs = ['-metal']
 

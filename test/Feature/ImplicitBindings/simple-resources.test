@@ -40,25 +40,38 @@ DescriptorSets:
       DirectXBinding:
         Register: 1
         Space: 0
+      VulkanBinding:
+        Binding: 1
     - Name: BufB
       Kind: RWBuffer
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
     - Name: BufD
       Kind: RWBuffer
       DirectXBinding:
         Register: 2
         Space: 0
+      VulkanBinding:
+        Binding: 2
     - Name: CB
       Kind: ConstantBuffer
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 
-# UNSUPPORTED: Clang, Vulkan
+# UNSUPPORTED: Clang
+
+# DXC's vulkan backend doesn't drop unused bindings, so it isn't possible to
+# specify descriptor sets that are valid for both DirectX and Vulkan there.
+# UNSUPPORTED: DXC-Vulkan
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
 # RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}

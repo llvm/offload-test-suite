@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *' # run every 30 minutes
+    - cron: '0 */2 * * *' # run every 2 hours
 
   pull_request:
     branches:
@@ -18,8 +18,8 @@ jobs:
     uses: ./.github/workflows/test-all.yaml
     with:
       OS: windows
-      SKU: GPU-Intel
+      SKU: windows-intel
       Test-Clang: On
       TestTarget: check-hlsl-clang-d3d12
-      OffloadTest-branch: ${{ github.ref }}
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
