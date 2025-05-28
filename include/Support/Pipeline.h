@@ -79,6 +79,7 @@ struct Buffer {
   std::unique_ptr<char[]> Data;
   size_t Size;
   OutputProperties OutputProps;
+  uint32_t Counter;
 
   uint32_t size() const { return Size; }
 
@@ -130,6 +131,7 @@ struct Resource {
   DirectXBinding DXBinding;
   std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
+  bool HasCounter;
 
   bool isRaw() const {
     switch (Kind) {
