@@ -1,0 +1,76 @@
+#--- source.hlsl
+
+StructuredBuffer<bool4> In1 : register(t0);
+StructuredBuffer<bool4> In2 : register(t1);
+RWStructuredBuffer<bool4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = and(In1[0], In2[0]);
+  bool4 Tmp = {and(In1[0].xyz, In2[0].xyz), and(In1[0].w, In2[0].w)};
+  Out[1] = Tmp;
+  Out[2].xy = and(In1[0].xy, In2[0].xy);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In1
+    Format: Bool
+    Stride: 16
+    Data: [1, 0, 1, 0]
+  - Name: In2
+    Format: Bool
+    Stride: 16
+    Data: [1, 0, 0, 1]
+  - Name: Out
+    Format: Bool
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut # The result we expect
+    Format: Bool
+    Stride: 16
+    Data: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0] # Last two are filler
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# https://github.com/llvm/llvm-project/issues/140824
+# XFAIL: Clang
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7475
+# XFAIL: DXC-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
