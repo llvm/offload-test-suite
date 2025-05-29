@@ -68,7 +68,8 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# Clang's Vulcan implicit binding is not yet implemented.
+# UNSUPPORTED: Clang-Vulkan
 
 # CBuffer bindings seem to be broken under metal
 # https://github.com/llvm-beanz/offload-test-suite/issues/55
