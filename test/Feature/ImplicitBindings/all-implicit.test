@@ -72,7 +72,7 @@ DescriptorSets:
 # UNSUPPORTED: Clang-Vulkan
 
 # CBuffer bindings seem to be broken under metal
-# https://github.com/llvm-beanz/offload-test-suite/issues/55
+# https://github.com/llvm/offload-test-suite/issues/55
 # UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
