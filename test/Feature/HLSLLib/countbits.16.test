@@ -93,11 +93,13 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
+# Bug in DXC-Vulkan
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7494
-# XFAIL: DXC-Vulkan
 
-# Failure to materializeAll for 16 bit
-# XFAIL: Metal
+# The rest all have inconsistent behaviours and require an HLK test
+# to ensure that they are behave as expected
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7499
+# XFAIL: *
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
