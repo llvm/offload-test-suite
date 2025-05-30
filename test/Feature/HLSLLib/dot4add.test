@@ -7,14 +7,16 @@ RWStructuredBuffer<uint32_t> Result : register(u2);
 [numthreads(1,1,1)]
 void main() {
   // dot4add({1, 1, 1, 1}, {1, 2, -128, -86}, 0) = -211 = 0xFF2D
-  Result[0] = dot4add_i8packed(X[0], Y[0], 0u);
+  uint32_t R0 = dot4add_i8packed(X[0], Y[0], 0u);
+  Result[0] = R0;
   // dot4add({2, 4, 8, -1}, {2, 2, 2, 1}, -211) = -184 = 0xFF48
-  Result[1] = dot4add_i8packed(X[1], Y[1], Result[0]);
+  Result[1] = dot4add_i8packed(X[1], Y[1], R0);
 
   // dot4add({1, 1, 1, 1}, {1, 2, 128, 170}, 0) = 301 = 0x012D
-  Result[2] = dot4add_u8packed(X[0], Y[0], 0u);
+  uint32_t R1 = dot4add_u8packed(X[0], Y[0], 0u);
+  Result[2] = R1;
   // dot4add({2, 4, 8, 255}, {2, 2, 2, 1}, 301) = 584 = 0x0248
-  Result[3] = dot4add_u8packed(X[1], Y[1], Result[2]);
+  Result[3] = dot4add_u8packed(X[1], Y[1], R1);
 }
 
 //--- pipeline.yaml
