@@ -65,27 +65,27 @@ Buffers:
     Data: [ 0, 0 ] # compare negative and positive zero
 Results:
   - Result: Test1 # Test two values are exactly the same
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 0 # ulp shouldn't matter for this test
     Actual: Out1
     Expected: Expected1
   - Result: Test2 # Test both are NaN
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 0 # ulp shouldn't matter for this test
     Actual: Out2
     Expected: Expected2
   - Result: Test3 # Actual and Expected are not the same but they are within the ULPT
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 1
     Actual: Out3
     Expected: Expected3
   - Result: Test4 # Actual and Expected are not the same but they are within the ULPT
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 2
     Actual: Out4
     Expected: Expected4
   - Result: Test5 # +0 and -0 should be equal
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 0
     Actual: Out5
     Expected: Expected5

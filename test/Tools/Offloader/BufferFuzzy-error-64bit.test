@@ -46,18 +46,18 @@ Buffers:
     Data: [ 0.0 ] # not nan
 Results:
   - Result: Test1
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 1
     Actual: Out1
     Expected: Expected1
   - Result: Test2 # Denorm value but mode isn't Any
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 1
     DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
   - Result: Test3
-    Rule: BufferFuzzy
+    Rule: BufferFuzzyULP
     ULPT: 0
     Actual: Out3
     Expected: Expected3
