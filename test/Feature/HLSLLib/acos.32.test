@@ -1,0 +1,67 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+
+RWStructuredBuffer<float4> Out : register(u0);
+RWStructuredBuffer<float> Out2 : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = acos(In[0]);
+  float4 Tmp = {acos(In[1].xyz), acos(In[1].w)};
+  Out[1] = Tmp;
+  float4 Tmp2 = {acos(In[2].xy), acos(In[2].zw)};
+  Out[2] = Tmp2;
+  Out[3] = acos(In[3]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [nan, -inf, inf, -0x1.e7d42cp-127, 0x1.e7d42cp-127, -0, 0, 1, -1, 1.5, -1.5, 0.3145926, -0.3145926, -0.9999999, 0.9999999, 0.5]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOut # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [nan, nan, nan, 0x1.921fb6p+0, 0x1.921fb6p+0, 0x1.921fb6p+0, 0x1.921fb6p+0, 0, 3.1415926, nan, nan, 0x1.403264p+0, 0x1.e40d06p+0, 0x1.920fb6p+1, 0x1.0p-11, 0x1.0c1524p+0]
+    #[nan, nan, nan, 1.570796, 1.570796, 1.570796, 1.570796, 0, 3.1415926, nan, nan,
+    # 1.2509766, 1.8909, 0.03125, 3.11034, 1.04720]
+Results:
+  - Result: Test1
+    Rule: BufferFuzzy
+    ULPT: 600
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
