@@ -3,6 +3,10 @@
 StructuredBuffer<int16_t4> InInt : register(t0);
 StructuredBuffer<uint16_t4> InUInt : register(t1);
 
+// Explicitly using a size 3 buffer illustrates an error when using warp
+StructuredBuffer<int16_t3> InIntWarp : register(t4);
+StructuredBuffer<uint16_t3> InUIntWarp : register(t5);
+
 RWStructuredBuffer<uint4> OutInt : register(u2);
 RWStructuredBuffer<uint4> OutUInt : register(u3);
 
@@ -10,13 +14,13 @@ RWStructuredBuffer<uint4> OutUInt : register(u3);
 void main() {
   // Int
   OutInt[0] = countbits(InInt[0]);
-  uint4 OutOne = {countbits(InInt[0].xyz), countbits(InInt[0].w)};
+  uint4 OutOne = {countbits(InIntWarp[0]), countbits(InUInt[0].w)};
   OutInt[1] = OutOne;
   OutInt[2].xy = countbits(InInt[0].xy);
 
   // UInt
   OutUInt[0] = countbits(InUInt[0]);
-  uint4 OutUOne = {countbits(InUInt[0].xyz), countbits(InUInt[0].w)};
+  uint4 OutUOne = {countbits(InUIntWarp[0]), countbits(InUInt[0].w)};
   OutUInt[1] = OutUOne;
   OutUInt[2].xy = countbits(InUInt[0].xy);
 }
@@ -37,6 +41,14 @@ Buffers:
     Format: UInt16
     Stride: 8
     Data: [0x2A, 0, 0x0f0f, 0xffff]
+  - Name: InIntWarp
+    Format: Int16
+    Stride: 6
+    Data: [0, 0x0f0f, -1]
+  - Name: InUIntWarp
+    Format: UInt16
+    Stride: 6
+    Data: [0, 0x0f0f, 0xffff]
   - Name: OutInt
     Format: UInt32
     Stride: 16
@@ -74,6 +86,20 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: InIntWarp
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: InUIntWarp
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
     - Name: OutInt
       Kind: RWStructuredBuffer
       DirectXBinding:
