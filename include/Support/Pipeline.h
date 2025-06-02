@@ -25,7 +25,7 @@ namespace offloadtest {
 
 enum class Stages { Compute };
 
-enum class Rule { BufferExact, BufferFuzzy };
+enum class Rule { BufferExact, BufferFuzzyULP, BufferFuzzyEpsilon };
 
 enum class DenormMode { Any, FTZ, Preserve };
 
@@ -123,6 +123,7 @@ struct Result {
   Buffer *ExpectedPtr = nullptr;
   DenormMode DM = DenormMode::Any;
   unsigned ULPT; // ULP Tolerance
+  double Epsilon;
 };
 
 struct Resource {
@@ -316,7 +317,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
   static void enumeration(IO &I, offloadtest::Rule &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Rule::Val)
     ENUM_CASE(BufferExact);
-    ENUM_CASE(BufferFuzzy);
+    ENUM_CASE(BufferFuzzyULP);
+    ENUM_CASE(BufferFuzzyEpsilon);
 #undef ENUM_CASE
   }
 };

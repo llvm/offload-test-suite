@@ -46,7 +46,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       R.ExpectedPtr = P.getBuffer(R.Expected);
       if (!R.ExpectedPtr)
         I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
-      if (R.Rule == Rule::BufferFuzzy) {
+      if (R.Rule == Rule::BufferFuzzyULP || R.Rule == Rule::BufferFuzzyEpsilon) {
         if (!isFloatingPointFormat(R.ActualPtr->Format) ||
             !isFloatingPointFormat(R.ExpectedPtr->Format))
           I.setError(Twine("BufferFuzzy only accepts Float buffers"));
@@ -230,8 +230,13 @@ void MappingTraits<offloadtest::Result>::mapping(IO &I,
   I.mapRequired("Expected", R.Expected);
 
   switch (R.Rule) {
-  case Rule::BufferFuzzy: {
+  case Rule::BufferFuzzyULP: {
     I.mapRequired("ULPT", R.ULPT);
+    I.mapOptional("DenormMode", R.DM);
+    break;
+  }
+  case Rule::BufferFuzzyEpsilon: {
+    I.mapRequired("Epsilon", R.Epsilon);
     I.mapOptional("DenormMode", R.DM);
     break;
   }
