@@ -6,8 +6,8 @@ RWStructuredBuffer<bool4> Out : register(u1);
 [numthreads(1,1,1)]
 void main() {
   Out[0] = isinf(In[0]);
-  Out[1].xyz = isinf(In[0].xyz);
-  Out[1].w = isinf(In[0].w);
+  bool4 Tmp = {isinf(In[0].xyz), isinf(In[0].w)};
+  Out[1] = Tmp;
   Out[2].xy = isinf(In[0].xy);
 }
 
