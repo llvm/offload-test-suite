@@ -1,13 +1,13 @@
 #--- source.hlsl
 
-RWStructuredBuffer<half> Out1 : register(u0);
-RWStructuredBuffer<half> Out2 : register(u1);
+RWStructuredBuffer<float> Out1 : register(u0);
+RWStructuredBuffer<float> Out2 : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out1[0] = (half)20.3;
-  Out1[1] = (half)5.0;
-  Out2[0] = (half)0.0;
+  Out1[0] = 20.3;
+  Out1[1] = 5.0;
+  Out2[0] = 0.0;
 }
 
 //--- pipeline.yaml
@@ -19,41 +19,43 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Out1
-    Format: Float16
-    Stride: 2
-    ZeroInitSize: 4
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 8
   - Name: Expected1
-    Format: Float16
-    Stride: 2
-    Data: [ 0x3E00, 0x4100 ]
+    Format: Float32
+    Stride: 4
+    Data: [ 1.5, 2.5 ]
   - Name: Out2
-    Format: Float16
-    Stride: 2
+    Format: Float32
+    Stride: 4
     ZeroInitSize: 4
   - Name: Expected2
-    Format: Float16
-    Stride: 2
-    Data: [ 0x0001, 0 ]
+    Format: Float32
+    Stride: 4
+    Data: [ 0x1.e7d42cp-127 ] # isDenorm will return true for this value: 1.12e-38
 Results:
   - Result: Test1
-    Rule: BufferFuzzyULP
+    Rule: BufferFloatULP
     ULPT: 1
     Actual: Out1
     Expected: Expected1
-  - Result: Test2 # Denorm value
-    Rule: BufferFuzzyULP
-    ULPT: 0
+  - Result: Test2 # Denorm value but mode isn't Any
+    Rule: BufferFloatULP
+    ULPT: 1
+    DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
-  # test BufferFuzzyEpsilon
+  # test BufferFloatEpsilon
   - Result: Test3
-    Rule: BufferFuzzyEpsilon
+    Rule: BufferFloatEpsilon
     Epsilon: 0.001
     Actual: Out1
     Expected: Expected1
-  - Result: Test4 # Denorm value
-    Rule: BufferFuzzyEpsilon
+  - Result: Test4 # Denorm value but mode isn't Any
+    Rule: BufferFloatEpsilon
     Epsilon: 0
+    DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
 DescriptorSets:
@@ -75,20 +77,17 @@ DescriptorSets:
 ...
 #--- end
 
-# REQUIRES: Half
-
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
 
 # CHECK: Test failed: Test1
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected1
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x3E00, 0x4100 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.5, 2.5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -97,9 +96,9 @@ DescriptorSets:
 # CHECK: Got:
 # CHECK: ---
 # CHECK: Name:            Out1
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x4D13, 0x4500 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20.3, 5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -109,9 +108,9 @@ DescriptorSets:
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected2
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x1, 0x0 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.12e-38 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -120,9 +119,9 @@ DescriptorSets:
 # CHECK: Got:
 # CHECK: ---
 # CHECK: Name:            Out2
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x0, 0x0 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 0 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -132,9 +131,9 @@ DescriptorSets:
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected1
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x3E00, 0x4100 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.5, 2.5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -143,9 +142,9 @@ DescriptorSets:
 # CHECK: Got:
 # CHECK: ---
 # CHECK: Name:            Out1
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x4D13, 0x4500 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20.3, 5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -155,9 +154,9 @@ DescriptorSets:
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected2
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x1, 0x0 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.12e-38 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -166,9 +165,9 @@ DescriptorSets:
 # CHECK: Got:
 # CHECK: ---
 # CHECK: Name:            Out2
-# CHECK: Format:          Float16
-# CHECK: Stride:          2
-# CHECK: Data:            [ 0x0, 0x0 ]
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 0 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0

@@ -301,12 +301,12 @@ Buffers:
     ]
 Results:
   - Result: CheckNewParticles
-    Rule: BufferFuzzyULP
+    Rule: BufferFloatULP
     ULPT: 1000
     Actual: NewParticles
     Expected: ExpectedParticles
   - Result: CheckVertices
-    Rule: BufferFuzzyULP
+    Rule: BufferFloatULP
     ULPT: 1000
     Actual: Vertices
     Expected: ExpectedVertices

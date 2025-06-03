@@ -24,7 +24,8 @@ static float convertFloat16ToFloat(const uint16_t F) {
   const llvm::APInt API(16, F);
   llvm::detail::IEEEFloat IEF(llvm::APFloat::IEEEhalf(), API);
   bool LostInfo;
-  IEF.convert(llvm::APFloat::IEEEsingle(), llvm::APFloatBase::rmTowardZero,
+  // rounding mode should not matter since we are up converting
+  IEF.convert(llvm::APFloat::IEEEsingle(), llvm::APFloatBase::rmNearestTiesToEven,
               &LostInfo);
   return IEF.convertToFloat();
 }
@@ -176,7 +177,7 @@ static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
 
 template <typename T>
 static bool
-testBufferFuzzy(std::function<bool(const T &, const T &)> ComparisonFn,
+testBufferFloat(std::function<bool(const T &, const T &)> ComparisonFn,
                 offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
   assert(B1->Format == B2->Format && "Buffer types must be the same");
   switch (B1->Format) {
@@ -209,7 +210,7 @@ testBufferFuzzy(std::function<bool(const T &, const T &)> ComparisonFn,
   return false;
 }
 
-static bool testBufferFuzzyEpsilon(offloadtest::Buffer *B1,
+static bool testBufferFloatEpsilon(offloadtest::Buffer *B1,
                                    offloadtest::Buffer *B2, double Epsilon,
                                    offloadtest::DenormMode DM) {
 
@@ -218,19 +219,19 @@ static bool testBufferFuzzyEpsilon(offloadtest::Buffer *B1,
     auto Fn = [Epsilon, DM](const double &FS, const double &FR) {
       return compareDoubleEpsilon(FS, FR, Epsilon, DM);
     };
-    return testBufferFuzzy<double>(Fn, B1, B2);
+    return testBufferFloat<double>(Fn, B1, B2);
   }
   case offloadtest::DataFormat::Float32: {
     auto Fn = [Epsilon, DM](const float &FS, const float &FR) {
       return compareFloatEpsilon(FS, FR, (float)Epsilon, DM);
     };
-    return testBufferFuzzy<float>(Fn, B1, B2);
+    return testBufferFloat<float>(Fn, B1, B2);
   }
   case offloadtest::DataFormat::Float16: {
     auto Fn = [Epsilon](const uint16_t &FS, const uint16_t &FR) {
       return compareFloat16Epsilon(FS, FR, (float)Epsilon);
     };
-    return testBufferFuzzy<uint16_t>(Fn, B1, B2);
+    return testBufferFloat<uint16_t>(Fn, B1, B2);
   }
   default:
     llvm_unreachable("Only float types are supported by the fuzzy test.");
@@ -238,7 +239,7 @@ static bool testBufferFuzzyEpsilon(offloadtest::Buffer *B1,
   return false;
 }
 
-static bool testBufferFuzzyULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
+static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
                                unsigned ULPT, offloadtest::DenormMode DM) {
 
   switch (B1->Format) {
@@ -246,19 +247,19 @@ static bool testBufferFuzzyULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
     auto Fn = [ULPT, DM](const double &FS, const double &FR) {
       return compareDoubleULP(FS, FR, ULPT, DM);
     };
-    return testBufferFuzzy<double>(Fn, B1, B2);
+    return testBufferFloat<double>(Fn, B1, B2);
   }
   case offloadtest::DataFormat::Float32: {
     auto Fn = [ULPT, DM](const float &FS, const float &FR) {
       return compareFloatULP(FS, FR, ULPT, DM);
     };
-    return testBufferFuzzy<float>(Fn, B1, B2);
+    return testBufferFloat<float>(Fn, B1, B2);
   }
   case offloadtest::DataFormat::Float16: {
     auto Fn = [ULPT](const uint16_t &FS, const uint16_t &FR) {
       return compareFloat16ULP(FS, FR, ULPT);
     };
-    return testBufferFuzzy<uint16_t>(Fn, B1, B2);
+    return testBufferFloat<uint16_t>(Fn, B1, B2);
   }
   default:
     llvm_unreachable("Only float types are supported by the fuzzy test.");
@@ -273,13 +274,13 @@ llvm::Error verifyResult(offloadtest::Result R) {
       return llvm::Error::success();
     break;
   }
-  case offloadtest::Rule::BufferFuzzyULP: {
-    if (testBufferFuzzyULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
+  case offloadtest::Rule::BufferFloatULP: {
+    if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
       return llvm::Error::success();
     break;
   }
-  case offloadtest::Rule::BufferFuzzyEpsilon: {
-    if (testBufferFuzzyEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
+  case offloadtest::Rule::BufferFloatEpsilon: {
+    if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
     break;
   }
