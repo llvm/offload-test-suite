@@ -25,7 +25,7 @@ static float convertFloat16ToFloat(const uint16_t F) {
   llvm::detail::IEEEFloat IEF(llvm::APFloat::IEEEhalf(), API);
   bool LostInfo;
   IEF.convert(llvm::APFloat::IEEEsingle(), llvm::APFloatBase::rmTowardZero,
-	      &LostInfo);
+              &LostInfo);
   return IEF.convertToFloat();
 }
 
@@ -40,8 +40,7 @@ static bool isFloat16NAN(uint16_t Val) {
 }
 
 static bool compareDoubleEpsilon(const double &FSrc, const double &FRef,
-				 double epsilon,
-				 offloadtest::DenormMode DM) {
+                                 double epsilon, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -78,7 +77,7 @@ static bool compareDoubleULP(const double &FSrc, const double &FRef,
 }
 
 static bool compareFloatEpsilon(const float &FSrc, const float &FRef,
-				float epsilon, offloadtest::DenormMode DM) {
+                                float epsilon, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -115,7 +114,7 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
 }
 
 static bool compareFloat16Epsilon(const uint16_t &FSrc, const uint16_t &FRef,
-				  float epsilon) {
+                                  float epsilon) {
   // Treat +0 and -0 as equal
   if ((FSrc & ~Float16BitSign) == 0 && (FRef & ~Float16BitSign) == 0)
     return true;
@@ -176,8 +175,9 @@ static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
 }
 
 template <typename T>
-static bool testBufferFuzzy(std::function<bool(const T &, const T &)> ComparisonFn,
-			    offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
+static bool
+testBufferFuzzy(std::function<bool(const T &, const T &)> ComparisonFn,
+                offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
   assert(B1->Format == B2->Format && "Buffer types must be the same");
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64: {
@@ -209,8 +209,9 @@ static bool testBufferFuzzy(std::function<bool(const T &, const T &)> Comparison
   return false;
 }
 
-static bool testBufferFuzzyEpsilon(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
-				   double Epsilon, offloadtest::DenormMode DM) {
+static bool testBufferFuzzyEpsilon(offloadtest::Buffer *B1,
+                                   offloadtest::Buffer *B2, double Epsilon,
+                                   offloadtest::DenormMode DM) {
 
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64: {
@@ -238,7 +239,7 @@ static bool testBufferFuzzyEpsilon(offloadtest::Buffer *B1, offloadtest::Buffer 
 }
 
 static bool testBufferFuzzyULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
-			       unsigned ULPT, offloadtest::DenormMode DM) {
+                               unsigned ULPT, offloadtest::DenormMode DM) {
 
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64: {
