@@ -125,7 +125,9 @@ DescriptorSets:
 # The rest all have inconsistent behaviours and require an HLK test
 # to ensure that they are behave as expected
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7499
-# UNSUPPORTED: *
+# UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
+# UNSUPPORTED: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
