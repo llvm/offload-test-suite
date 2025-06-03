@@ -23,6 +23,9 @@ constexpr uint16_t Float16BitMantissa = 0x03ff;
 static float convertFloat16ToFloat(const uint16_t F) {
   llvm::APInt API(16, F);
   llvm::detail::IEEEFloat IEF(llvm::APFloat::IEEEhalf(), API);
+  bool LostInfo;
+  IEF.convert(llvm::APFloat::IEEEsingle(), llvm::APFloatBase::rmTowardZero,
+	      &LostInfo);
   return IEF.convertToFloat();
 }
 

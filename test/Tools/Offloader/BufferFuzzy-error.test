@@ -46,6 +46,18 @@ Results:
     DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
+  # test BufferFuzzyEpsilon
+  - Result: Test3
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0.001
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test4 # Denorm value but mode isn't Any
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0
+    DenormMode: Preserve # same to use FTZ
+    Actual: Out2
+    Expected: Expected2
 DescriptorSets:
   - Resources:
     - Name: Out1
@@ -93,6 +105,52 @@ DescriptorSets:
 # CHECK: Depth:           0
 
 # CHECK: Test failed: Test2
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected2
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.12e-38 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out2
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test3
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.5, 2.5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20.3, 5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test4
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected2

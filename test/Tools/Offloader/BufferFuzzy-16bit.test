@@ -89,6 +89,32 @@ Results:
     ULPT: 0
     Actual: Out5
     Expected: Expected5
+  # test BufferFuzzyEpsilon
+  - Result: Test6 # Test two values are exactly the same
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test7 # Test both are NaN
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0 # epsilon shouldn't matter for this test
+    Actual: Out2
+    Expected: Expected2
+  - Result: Test8 # Actual and Expected are not the same but they are within the epsilon
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0.004
+    Actual: Out3
+    Expected: Expected3
+  - Result: Test9 # Actual and Expected are not the same but they are within the epsilon
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0.008
+    Actual: Out4
+    Expected: Expected4
+  - Result: Test10 # +0 and -0 should be equal
+    Rule: BufferFuzzyEpsilon
+    Epsilon: 0
+    Actual: Out5
+    Expected: Expected5
 DescriptorSets:
   - Resources:
     - Name: Out1
