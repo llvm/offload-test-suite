@@ -25,8 +25,8 @@ static float convertFloat16ToFloat(const uint16_t F) {
   llvm::detail::IEEEFloat IEF(llvm::APFloat::IEEEhalf(), API);
   bool LostInfo;
   // rounding mode should not matter since we are up converting
-  IEF.convert(llvm::APFloat::IEEEsingle(), llvm::APFloatBase::rmNearestTiesToEven,
-              &LostInfo);
+  IEF.convert(llvm::APFloat::IEEEsingle(),
+              llvm::APFloatBase::rmNearestTiesToEven, &LostInfo);
   return IEF.convertToFloat();
 }
 
