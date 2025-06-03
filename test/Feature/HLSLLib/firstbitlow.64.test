@@ -70,7 +70,7 @@ DescriptorSets:
         Register: 1
         Space: 0
       VulkanBinding:
-        Binding: 0
+        Binding: 2
 ...
 #--- end
 
