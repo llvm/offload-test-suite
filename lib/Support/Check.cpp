@@ -21,7 +21,7 @@ constexpr uint16_t Float16BitExp = 0x7c00;
 constexpr uint16_t Float16BitMantissa = 0x03ff;
 
 static float convertFloat16ToFloat(const uint16_t F) {
-  llvm::APInt API(16, F);
+  const llvm::APInt API(16, F);
   llvm::detail::IEEEFloat IEF(llvm::APFloat::IEEEhalf(), API);
   bool LostInfo;
   IEF.convert(llvm::APFloat::IEEEsingle(), llvm::APFloatBase::rmTowardZero,
@@ -40,7 +40,7 @@ static bool isFloat16NAN(uint16_t Val) {
 }
 
 static bool compareDoubleEpsilon(const double &FSrc, const double &FRef,
-                                 double epsilon, offloadtest::DenormMode DM) {
+                                 double Epsilon, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -53,7 +53,7 @@ static bool compareDoubleEpsilon(const double &FSrc, const double &FRef,
   }
   // For FTZ or Preserve mode, we should get the expected number within
   // epsilon for any operation
-  return std::abs(FSrc - FRef) < epsilon;
+  return std::abs(FSrc - FRef) < Epsilon;
 }
 
 static bool compareDoubleULP(const double &FSrc, const double &FRef,
@@ -77,7 +77,7 @@ static bool compareDoubleULP(const double &FSrc, const double &FRef,
 }
 
 static bool compareFloatEpsilon(const float &FSrc, const float &FRef,
-                                float epsilon, offloadtest::DenormMode DM) {
+                                float Epsilon, offloadtest::DenormMode DM) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -91,7 +91,7 @@ static bool compareFloatEpsilon(const float &FSrc, const float &FRef,
 
   // For FTZ or Preserve mode, we should get the expected number within
   // epsilon for any operation
-  return std::abs(FSrc - FRef) < epsilon;
+  return std::abs(FSrc - FRef) < Epsilon;
 }
 
 static bool compareFloatULP(const float &FSrc, const float &FRef,
@@ -114,7 +114,7 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
 }
 
 static bool compareFloat16Epsilon(const uint16_t &FSrc, const uint16_t &FRef,
-                                  float epsilon) {
+                                  float Epsilon) {
   // Treat +0 and -0 as equal
   if ((FSrc & ~Float16BitSign) == 0 && (FRef & ~Float16BitSign) == 0)
     return true;
@@ -123,9 +123,9 @@ static bool compareFloat16Epsilon(const uint16_t &FSrc, const uint16_t &FRef,
   if (isFloat16NAN(FSrc) || isFloat16NAN(FRef))
     return isFloat16NAN(FRef) && isFloat16NAN(FSrc);
 
-  float FSrc32 = convertFloat16ToFloat(FSrc);
-  float FRef32 = convertFloat16ToFloat(FRef);
-  return std::abs(FSrc32 - FRef32) < epsilon;
+  const float FSrc32 = convertFloat16ToFloat(FSrc);
+  const float FRef32 = convertFloat16ToFloat(FRef);
+  return std::abs(FSrc32 - FRef32) < Epsilon;
 }
 
 static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
