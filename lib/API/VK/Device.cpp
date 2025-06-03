@@ -766,7 +766,7 @@ public:
 
 class VKContext {
 private:
-  VkInstance Instance;
+  VkInstance Instance = VK_NULL_HANDLE;
   llvm::SmallVector<std::shared_ptr<VKDevice>> Devices;
 
   VKContext() = default;
@@ -798,7 +798,7 @@ public:
                                      "Cannot find a compatible Vulkan device");
     if (Res)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Unkown Vulkan initialization error");
+                                     "Unknown Vulkan initialization error");
 
     uint32_t DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
@@ -814,6 +814,7 @@ public:
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
     }
     vkDestroyInstance(Instance, NULL);
+    Instance = VK_NULL_HANDLE;
 
 // TODO: This is a bit hacky but matches what I did in DX.
 #ifndef NDEBUG
@@ -828,7 +829,7 @@ public:
                                      "Cannot find a compatible Vulkan device");
     if (Res)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Unkown Vulkan initialization error");
+                                     "Unknown Vulkan initialization error");
 
     DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
