@@ -60,7 +60,7 @@ DescriptorSets:
 # llvm/llvm-project#141089
 # XFAIL: Clang-Vulkan
 # issue with 16 bit ops; no hlk tests
-# XFAIL: Metal-Clang
+# XFAIL: Clang-Metal
 
 # REQUIRES: Half
 # RUN: split-file %s %t
