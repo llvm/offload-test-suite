@@ -55,8 +55,6 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7475
-# XFAIL: DXC-Vulkan
 # llvm/llvm-project#141089
 # XFAIL: Clang-Vulkan
 # issue with 16 bit ops; no hlk tests
