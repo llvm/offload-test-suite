@@ -209,19 +209,17 @@ private:
 #define VULKAN11_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features11.Name)));
-#include "VKFeatures.def"
 #define VULKAN12_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features12.Name)));
-#include "VKFeatures.def"
 #define VULKAN13_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features13.Name)));
-#include "VKFeatures.def"
 #define VULKAN14_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
 #include "VKFeatures.def"
+
   }
 
   void queryLayers() {
