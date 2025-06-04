@@ -770,13 +770,18 @@ private:
   llvm::SmallVector<std::shared_ptr<VKDevice>> Devices;
 
   VKContext() = default;
-  ~VKContext() { vkDestroyInstance(Instance, NULL); }
+  ~VKContext() { cleanup(); }
   VKContext(const VKContext &) = delete;
 
 public:
   static VKContext &instance() {
     static VKContext Ctx;
     return Ctx;
+  }
+
+  void cleanup() {
+    vkDestroyInstance(Instance, NULL);
+    Instance = VK_NULL_HANDLE;
   }
 
   llvm::Error initialize() {
@@ -851,6 +856,8 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeVXDevices() {
+llvm::Error Device::initializeVKDevices() {
   return VKContext::instance().initialize();
 }
+
+void Device::cleanupVKDevices() { VKContext::instance().cleanup(); }
