@@ -265,7 +265,7 @@ public:
 
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
-    
+
     if (vkCreateDevice(Device, &DeviceInfo, nullptr, &IS.Device))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Could not create Vulkan logical device.");
