@@ -76,8 +76,9 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5
-# XFAIL: DXC-Vulkan
+# XFAIL: Vulkan
+# DXC-Vulkan: https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5
+# Clang-Vulkan: Bug # here
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
