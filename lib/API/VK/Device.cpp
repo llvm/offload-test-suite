@@ -219,7 +219,6 @@ private:
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
 #include "VKFeatures.def"
-
   }
 
   void queryLayers() {
