@@ -121,12 +121,11 @@ DescriptorSets:
 
 # Bug in DXC-Vulkan
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7494
-
-# The rest all have inconsistent behaviours and require an HLK test
-# to ensure that they are behave as expected
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7499
-# UNSUPPORTED: Vulkan
-# UNSUPPORTED: Metal
+# Bug in Clang-Vulkan
+# https://github.com/llvm/llvm-project/issues/142677
+# However, the behaviour is also inconsistent and require an HLK test
+# so we will mark everything as UNSUPPORTED:
+# UNSUPPORTED: DXC
 # UNSUPPORTED: Clang
 
 # RUN: split-file %s %t
