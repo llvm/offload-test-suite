@@ -79,10 +79,22 @@ devices = yaml.safe_load(query_string)
 
 for device in devices['Devices']:
   if device['API'] == "DirectX" and config.offloadtest_enable_d3d12:
+    if not config.offloadtest_test_warp:
+      # Don't add warps features if we're not using warp.
+      if "Microsoft Basic Render Driver" in device['Description']:
+        continue
+      if "Intel" in device['Description']:
+        config.available_features.add("DirectX-Intel")
+      if "NVIDIA" in device['Description']:
+        config.available_features.add("DirectX-NV")
+      if "AMD" in device['Description']:
+        config.available_features.add("DirectX-AMD")
+    else:
+      # Don't add native device features when targeting warp.
+      if "Microsoft Basic Render Driver" not in device['Description']:
+        continue
     config.available_features.add("DirectX")
     config.available_features.add(HLSLCompiler + "-DirectX")
-    if "Intel" in device['Description']:
-      config.available_features.add("DirectX-Intel")
 
     if device['Features'].get('Native16BitShaderOpsSupported', False):
       config.available_features.add("Int16")
