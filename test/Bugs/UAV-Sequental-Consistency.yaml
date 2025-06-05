@@ -1,16 +1,15 @@
 #--- source.hlsl
 
 StructuredBuffer<uint32_t> X : register(t0);
-StructuredBuffer<uint32_t> Y : register(t1);
-RWStructuredBuffer<uint32_t> Result : register(u2);
+RWStructuredBuffer<uint32_t> Result : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Result[0] = X[0] + Y[0];
-  Result[1] = X[1] + Y[1] + Result[0];
+  Result[0] = X[0] + 1;
+  Result[1] = X[1] + Result[0];
 
-  Result[2] = X[0] + Y[0] + 2;
-  Result[3] = X[1] + Y[1] + Result[2];
+  Result[2] = X[0] + 2;
+  Result[3] = X[1] + Result[2];
 }
 
 //--- pipeline.yaml
@@ -25,10 +24,6 @@ Buffers:
     Format: Int32
     Stride: 4
     Data: [ 0, 1 ]
-  - Name: Y
-    Format: Int32
-    Stride: 4
-    Data: [ 2, 3 ]
   - Name: Result
     Format: Int32
     Stride: 4
@@ -36,7 +31,7 @@ Buffers:
   - Name: ExpectedResult
     Format: Int32
     Stride: 4
-    Data: [ 2, 6, 4, 8 ]
+    Data: [ 1, 2, 2, 3 ]
 Results:
   - Result: CheckResult
     Rule: BufferExact
@@ -51,20 +46,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Y
-      Kind: StructuredBuffer
+    - Name: Result
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: Result
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 2
-        Space: 0
-      VulkanBinding:
-        Binding: 2
 ...
 #--- end
 
