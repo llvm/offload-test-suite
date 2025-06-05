@@ -80,13 +80,18 @@ Buffers:
     Data: [ 0x1, 0x2 ]
 Results: # Using Result can verify test values without filecheck
   - Result: Test1
-    Rule: BufferFuzzy # Rule which can be used to compare Float Buffers; They are compared within a ULP range
+    Rule: BufferFloatULP # Rule which can be used to compare Float Buffers; They are compared within a ULP range
     ULPT: 1 # ULP to use
     DenormMode: Any # if DenormMode Field is not Specified, 'Any' is the default; FTZ and Preserve are the other options.
     Actual: Out1 # First buffer to compare
     Expected: Expected1 # Second buffer to compare against first
   - Result: Test2
     Rule: BufferExact # Compares Two Buffers for == equality between each value elementwise
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test3
+    Rule: BufferFloatEpsilon # Rule which can be used to compare Float Buffers; They are compared within an epsilon difference
+    Epsilon: 0.0008
     Actual: Out1
     Expected: Expected1
 DescriptorSets:
