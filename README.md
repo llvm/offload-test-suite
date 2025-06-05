@@ -13,6 +13,8 @@ Experimental Runtime test suite for HLSL
 
 # Prerequisites
 
+Requires the Vulkan 1.4 SDK.
+
 This project requires being able to locally build LLVM and leverages LLVM's build infrastructure. It also requires installing the `pyyaml` Python package. You can install `pyyaml` by running:
 
 ```shell
