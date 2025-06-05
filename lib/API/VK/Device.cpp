@@ -252,6 +252,27 @@ public:
     DeviceInfo.queueCreateInfoCount = 1;
     DeviceInfo.pQueueCreateInfos = &QueueInfo;
 
+    VkPhysicalDeviceFeatures2 Features{};
+    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan11Features Features11{};
+    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    VkPhysicalDeviceVulkan12Features Features12{};
+    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan13Features Features13{};
+    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    VkPhysicalDeviceVulkan14Features Features14{};
+    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+
+    Features.pNext = &Features11;
+    Features11.pNext = &Features12;
+    Features12.pNext = &Features13;
+    Features13.pNext = &Features14;
+    Features14.pNext = NULL;
+    vkGetPhysicalDeviceFeatures2(Device, &Features);
+
+    DeviceInfo.pEnabledFeatures = &Features.features;
+    DeviceInfo.pNext = Features.pNext;
+
     if (vkCreateDevice(Device, &DeviceInfo, nullptr, &IS.Device))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Could not create Vulkan logical device.");
