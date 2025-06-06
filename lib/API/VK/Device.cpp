@@ -181,9 +181,16 @@ private:
     Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceVulkan12Features Features12{};
     Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan13Features Features13{};
+    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    VkPhysicalDeviceVulkan14Features Features14{};
+    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 
     Features.pNext = &Features11;
     Features11.pNext = &Features12;
+    Features12.pNext = &Features13;
+    Features13.pNext = &Features14;
+    Features14.pNext = NULL;
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
     Caps.insert(std::make_pair(
@@ -202,10 +209,15 @@ private:
 #define VULKAN11_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features11.Name)));
-#include "VKFeatures.def"
 #define VULKAN12_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features12.Name)));
+#define VULKAN13_FEATURE_BOOL(Name)                                            \
+  Caps.insert(                                                                 \
+      std::make_pair(#Name, make_capability<bool>(#Name, Features13.Name)));
+#define VULKAN14_FEATURE_BOOL(Name)                                            \
+  Caps.insert(                                                                 \
+      std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
 #include "VKFeatures.def"
   }
 
