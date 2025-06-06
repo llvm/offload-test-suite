@@ -35,7 +35,7 @@ Buffers:
     Data: [0x7e00, 0x7e00, 0x0000, 0x0000, 0x3d33, 0x7c00, 0x7c00, 0x0001, 0x0001, 0x3800, 0x2a66, 0x4cc0]
 Results:
   - Result: Test1
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 0
     Actual: Out1
     Expected: ExpectedOut1

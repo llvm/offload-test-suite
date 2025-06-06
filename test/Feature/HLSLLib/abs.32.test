@@ -83,7 +83,7 @@ Results:
     Actual: Out2
     Expected: ExpectedOut2
   - Result: Test3
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 0
     Actual: Out3
     Expected: ExpectedOut3
