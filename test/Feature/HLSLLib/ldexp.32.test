@@ -48,7 +48,7 @@ Buffers:
     Data: [ 3.14159, 0, -inf, NaN, -0, 1, -0, NaN, 2.2214396, NaN, inf, 0 ]
 Results:
   - Result: Test1
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 1
     Actual: Out
     Expected: ExpectedOut
