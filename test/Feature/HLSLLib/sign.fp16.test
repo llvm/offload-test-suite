@@ -1,15 +1,25 @@
 #--- source.hlsl
 
 StructuredBuffer<half4> In1 : register(t0);
+StructuredBuffer<half> In2 : register(t2);
 RWStructuredBuffer<int4> Out1 : register(u1);
+RWStructuredBuffer<bool> Out2 : register(u3);
 
 [numthreads(1,1,1)]
 void main() {
   Out1[0] = sign(In1[0]);
   int4 Tmp = {sign(In1[1].xyz), sign(In1[1].w)};
   Out1[1] = Tmp;
-  int4 Tmp2 = {sign(In1[2].xy), sign(In1[2].zw)};
-  Out1[2] = Tmp2;
+  Out1[2].xy = sign(In1[0].xy);
+
+  int X = sign(In2[0]); // testing nan
+  Out2[0] = X == 1 || X == 0 || X == -1;
+  X = sign(In2[1]); // testing -nan
+  Out2[1] = X == 1 || X == 0 || X == -1;
+  X = sign(In2[2]); // testing denorm
+  Out2[2] = X == 1 || X == 0;
+  X = sign(In2[3]); // testing -denorm
+  Out2[3] = X == 0 || X == -1;
 }
 
 //--- pipeline.yaml
@@ -23,21 +33,37 @@ Buffers:
   - Name: In1
     Format: Float16
     Stride: 8
-    Data: [0x7e00, 0xfe00, 0x0000, 0x8000, 0xbd33, 0x7c00, 0xfc00, 0x0001, 0x8001, 0xb800, 0xaa66, 0x4cc0]
-    # nan, -nan, 0, -0, -1.3, inf, -inf, denorm, -denorm, -0.5, -0.05, 19
+    Data: [0x0000, 0x8000, 0xbd33, 0x7c00, 0xfc00, 0xb800, 0xaa66, 0x4cc0]
+    # 0, -0, -1.3, inf, -inf, -0.5, -0.05, 19
+  - Name: In2 # special values where the result might differ based on platform or compiler
+    Format: Float16
+    Stride: 4
+    Data: [0x7e00, 0xfe00, 0x0001, 0x8001] # nan, -nan, denorm, -denorm 
   - Name: Out1
     Format: Int32
     Stride: 16
     ZeroInitSize: 48
+  - Name: Out2
+    Format: Bool
+    Stride: 4
+    ZeroInitSize: 16
   - Name: ExpectedOut1 # The result we expect
     Format: Int32
     Stride: 16
-    Data: [0, 0, 0, 0, -1, 1, -1, 1, -1, -1, -1, 1] # does pick up the sign of the denorm here
+    Data: [0, 0, -1, 1, -1, -1, -1, 1, 0, 0, 0, 0]
+  - Name: ExpectedOut2
+    Format: Bool
+    Stride: 4
+    Data: [1, 1, 1, 1]
 Results:
   - Result: Test1
     Rule: BufferExact
     Actual: Out1
     Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
 DescriptorSets:
   - Resources:
     - Name: In1
@@ -47,6 +73,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
     - Name: Out1
       Kind: RWStructuredBuffer
       DirectXBinding:
@@ -54,6 +87,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 
