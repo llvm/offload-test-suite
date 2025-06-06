@@ -48,7 +48,7 @@ Buffers:
     Data: [ 0x4248, 0x0000, 0xFC00, 0x7E00, 0x8000, 0x3C00, 0x8000, 0x7E00, 0x4071, 0x7E00, 0x7C00, 0x0000 ] # [ 3.140625, 0, -inf, NaN, -0, 1, -0, NaN, 2.220703, NaN, inf, 0 ]
 Results:
   - Result: Test1
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 1
     Actual: Out
     Expected: ExpectedOut
