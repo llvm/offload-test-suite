@@ -45,8 +45,44 @@ tools = [
     ToolSubst("imgdiff", FindTool("imgdiff"))
 ]
 
+def setDeviceFeatures(config, device, compiler):
+  API = device['API']
+  config.available_features.add(API)
+  if "Microsoft Basic Render Driver" in device['Description']:
+    config.available_features.add("%s-WARP" % API)
+  if "Intel" in device['Description']:
+    config.available_features.add("%s-Intel" % API)
+  if "NVIDIA" in device['Description']:
+    config.available_features.add("%s-NV" % API)
+  if "AMD" in device['Description']:
+    config.available_features.add("%s-AMD" % API)
+    
+  config.available_features.add("%s-%s" % (compiler, API))
+
+  if device['API'] == "DirectX":
+    if device['Features'].get('Native16BitShaderOpsSupported', False):
+      config.available_features.add("Int16")
+      config.available_features.add("Half")
+    if device['Features'].get('DoublePrecisionFloatShaderOps', False):
+      config.available_features.add("Double")
+    if device['Features'].get('Int64ShaderOps', False):
+      config.available_features.add("Int64")
+
+  if device['API'] == "Metal":
+    config.available_features.add("Int16")
+    config.available_features.add("Half")
+
+  if device['API'] == "Vulkan":
+    if device['Features'].get('shaderInt16', False):
+      config.available_features.add("Int16")
+    if device['Features'].get('shaderFloat16', False):
+      config.available_features.add("Half")
+    if device['Features'].get('shaderFloat64', False):
+      config.available_features.add("Double")
+    if device['Features'].get('shaderInt64', False):
+      config.available_features.add("Int64")
+
 if config.offloadtest_test_warp:
-  config.available_features.add("DirectX-WARP")
   tools.append(ToolSubst("%offloader", command=FindTool("offloader"), extra_args=["-warp"]))
 else:
   tools.append(ToolSubst("%offloader", FindTool("offloader")))
@@ -76,57 +112,27 @@ llvm_config.add_tool_substitutions(tools, config.llvm_tools_dir)
 api_query = os.path.join(config.llvm_tools_dir, "api-query")
 query_string = subprocess.check_output(api_query)
 devices = yaml.safe_load(query_string)
+target_device = None
 
+# Find the right device to configure against
 for device in devices['Devices']:
+  is_warp = "Microsoft Basic Render Driver" in device['Description']
   if device['API'] == "DirectX" and config.offloadtest_enable_d3d12:
-    if not config.offloadtest_test_warp:
-      # Don't add warps features if we're not using warp.
-      if "Microsoft Basic Render Driver" in device['Description']:
-        continue
-      if "Intel" in device['Description']:
-        config.available_features.add("DirectX-Intel")
-      if "NVIDIA" in device['Description']:
-        config.available_features.add("DirectX-NV")
-      if "AMD" in device['Description']:
-        config.available_features.add("DirectX-AMD")
-    else:
-      # Don't add native device features when targeting warp.
-      if "Microsoft Basic Render Driver" not in device['Description']:
-        continue
-    config.available_features.add("DirectX")
-    config.available_features.add(HLSLCompiler + "-DirectX")
-
-    if device['Features'].get('Native16BitShaderOpsSupported', False):
-      config.available_features.add("Int16")
-      config.available_features.add("Half")
-    if device['Features'].get('DoublePrecisionFloatShaderOps', False):
-      config.available_features.add("Double")
-    if device['Features'].get('Int64ShaderOps', False):
-      config.available_features.add("Int64")
-
+    if is_warp and config.offloadtest_test_warp:
+      target_device = device
+    elif not is_warp and not config.offloadtest_test_warp:
+      target_device = device
   if device['API'] == "Metal" and config.offloadtest_enable_metal:
-    config.available_features.add("Metal")
-    config.available_features.add(HLSLCompiler + "-Metal")
-
-    config.available_features.add("Int16")
-    config.available_features.add("Half")
-
+    target_device = device
   if device['API'] == "Vulkan" and config.offloadtest_enable_vulkan:
-    config.available_features.add("Vulkan")
-    config.available_features.add(HLSLCompiler + "-Vulkan")
-    if "NVIDIA" in device['Description']:
-      config.available_features.add("Vulkan-NV")
-    if "Intel" in device['Description']:
-      config.available_features.add("Vulkan-Intel")
+    target_device = device
+  # Bail from th eloop if we found a device that matches what we're looking for.
+  if target_device:
+    break
 
-    if device['Features'].get('shaderInt16', False):
-      config.available_features.add("Int16")
-    if device['Features'].get('shaderFloat16', False):
-      config.available_features.add("Half")
-    if device['Features'].get('shaderFloat64', False):
-      config.available_features.add("Double")
-    if device['Features'].get('shaderInt64', False):
-      config.available_features.add("Int64")
+if not target_device:
+  config.fatal('No target device found!')
+setDeviceFeatures(config, target_device, HLSLCompiler)
 
 if os.path.exists(config.goldenimage_dir):
   config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
