@@ -1,0 +1,56 @@
+#--- source.hlsl
+StructuredBuffer<int4> InInt : register(t0);
+RWStructuredBuffer<uint4> OutInt : register(u1);
+[numthreads(1,1,1)]
+void main() {
+  // Int
+  OutInt[0] = countbits(InInt[0]);
+  OutInt[1].xyz = countbits(InInt[0].xyz);
+  OutInt[1].w = countbits(InInt[0].w);
+  OutInt[2].xy = countbits(InInt[0].xy);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: InInt
+    Format: Int32
+    Stride: 16
+    Data: [0x2A, 0, 0x0f0f0f0f, -1]
+  - Name: OutInt
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut # The result we expect
+    Format: UInt32
+    Stride: 16
+    Data: [3, 0, 16, 32, 3, 0, 16, 32, 3, 0, 0, 0]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: OutInt
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
