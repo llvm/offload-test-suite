@@ -30,13 +30,13 @@ void main() {
   Out3[2].xy = sign(In3[0].xy);
 
   int X = sign(In4[0]); // testing nan
-  Out4[0] = X == 1 || X == 0 || X == -1;
+  Out4[0] = (X == 1 || X == 0 || X == -1);
   X = sign(In4[1]); // testing -nan
-  Out4[1] = X == 1 || X == 0 || X == -1;
+  Out4[1] = (X == 1 || X == 0 || X == -1);
   X = sign(In4[2]); // testing denorm
-  Out4[2] = X == 1 || X == 0;
+  Out4[2] = (X == 1 || X == 0);
   X = sign(In4[3]); // testing -denorm
-  Out4[3] = X == 0 || X == -1;
+  Out4[3] = (X == 0 || X == -1);
 }
 
 //--- pipeline.yaml

@@ -13,13 +13,13 @@ void main() {
   Out1[2].xy = sign(In1[0].xy);
 
   int X = sign(In2[0]); // testing nan
-  Out2[0] = X == 1 || X == 0 || X == -1;
+  Out2[0] = (X == 1 || X == 0 || X == -1);
   X = sign(In2[1]); // testing -nan
-  Out2[1] = X == 1 || X == 0 || X == -1;
+  Out2[1] = (X == 1 || X == 0 || X == -1);
   X = sign(In2[2]); // testing denorm
-  Out2[2] = X == 1 || X == 0;
+  Out2[2] = (X == 1 || X == 0);
   X = sign(In2[3]); // testing -denorm
-  Out2[3] = X == 0 || X == -1;
+  Out2[3] = (X == 0 || X == -1);
 }
 
 //--- pipeline.yaml
