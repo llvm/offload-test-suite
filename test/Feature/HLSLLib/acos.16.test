@@ -26,7 +26,7 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [0x7e00, 0xfc00, 0x7c00, 0x8001, 0x0001, 0x8000, 0x0000, 0x3c00, 0xbc00, 0x3e00, 0xbe00, 0x3509, 0xb509, 0x3bff, 0xbbff, 0x3800]
-    #[nan, -inf, inf, -denorm, denorm, -0, 0, 1, -1, 1.5, -1.5, 0.3145926, -0.3145926, 0.9995117, -0.9995117, .5]
+    #[nan, -inf, inf, -denorm, denorm, -0, 0, 1, -1, 1.5, -1.5, 0.3145926, -0.31469727, 0.9995117, -0.9995117, .5]
   - Name: Out
     Format: Float16
     Stride: 8
@@ -35,11 +35,11 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [0x7FFF, 0x7FFF, 0x7FFF, 0x3e48, 0x3e48, 0x3e48, 0x3e48, 0x0000, 0x4248, 0x7FFF, 0x7FFF, 0x3d01, 0x3F90, 0x2800, 0x4238, 0x3c30]
-    #[nan, nan, nan, 1.570796, 1.570796, 1.570796, 1.570796, 0, 3.1415926, nan, nan, 1.2509766, 1.8909, 0.03125, 3.11034, 1.04720]
+    #[nan, nan, nan, 1.570796, 1.570796, 1.570796, 1.570796, 0, 3.1415926, nan, nan, 1.2509766, 1.890625, 0.03125, 3.11034, 1.04720]
 Results:
   - Result: Test1
-    Rule: BufferFuzzy
-    ULPT: 1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
