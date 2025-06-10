@@ -149,7 +149,7 @@ jobs:
       - name: Build LLVM
         run: |
             TEST_CLANG=Off
-            if [[ ${{ inputs.TestTarget }} == *"clang"* ]]; then
+            if [[ ${{ inputs.TestTarget }} =~ "clang" ]]; then
               TEST_CLANG=On
             fi
             cd llvm-project
