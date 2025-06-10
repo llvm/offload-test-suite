@@ -9,10 +9,6 @@ on:
   schedule:
     - cron: '*/30 * * * *' # run every 30 minutes
 
-  pull_request:
-    branches:
-      - main
-
 jobs:
   macOS-Metal-DXC:
     uses: ./.github/workflows/test-all.yaml
@@ -21,4 +17,4 @@ jobs:
       SKU: macos
       Test-Clang: Off
       TestTarget: check-hlsl-mtl
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.ref }}
+      OffloadTest-branch: ${{ github.ref }}
