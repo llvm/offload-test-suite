@@ -146,14 +146,12 @@ jobs:
             cd build
             cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
             ninja
-      - name: Should Test Clang!
-        if: ${{ contains('clang', inputs.TestTarget) }}
-        run: TEST_CLANG=On
-      - name: Should NOT Test Clang!
-        if: ${{ !contains('clang', inputs.TestTarget) }}
-        run: TEST_CLANG=Off
       - name: Build LLVM
         run: |
+            TEST_CLANG=Off
+            if [[ ${{ inputs.TestTarget }} == *"clang"* ]]; then
+              TEST_CLANG=On
+            fi
             cd llvm-project
             mkdir build
             cd build
