@@ -58,7 +58,10 @@ DescriptorSets:
 # llvm/llvm-project#141089
 # XFAIL: Clang-Vulkan
 # issue with 16 bit ops; no hlk tests
-# XFAIL: Clang-Metal
+
+# A bug in the Metal Shader Converter caused it to mis-translate this operation.
+# Version 3 fixes this issue.
+# UNSUPPORTED: Clang-Metal && !metal-shaderconverter-3.0.0-or-later
 
 # REQUIRES: Half
 # RUN: split-file %s %t
