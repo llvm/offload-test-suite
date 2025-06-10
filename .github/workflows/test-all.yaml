@@ -40,12 +40,6 @@ on:
         required: false
         default: 'check-hlsl'
         type: string
-      Test-Clang:
-        required: true
-        type: choice
-        options:
-        - On
-        - Off
       OS:
         required: true
         type: choice
@@ -96,10 +90,6 @@ on:
         description: 'DXC Branch'
         required: false
         default: 'Release'
-        type: string
-      Test-Clang:
-        required: false
-        default: 'On'
         type: string
       TestTarget:
         required: false
@@ -156,12 +146,20 @@ jobs:
             cd build
             cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
             ninja
+      - name: Should Test Clang!
+        if: ${{ contains('clang', inputs.TestTarget) }}
+        env:
+          TEST_CLANG: On
+      - name: Should NOT Test Clang!
+        if: ${{ !contains('clang', inputs.TestTarget) }}
+        env:
+          TEST_CLANG: Off
       - name: Build LLVM
         run: |
             cd llvm-project
             mkdir build
             cd build
-            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{ inputs.Test-Clang }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
+            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=$(TEST_CLANG) -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
             ninja hlsl-test-depends
       - name: Run HLSL Tests
         run: |

@@ -15,6 +15,5 @@ jobs:
     with:
       OS: macOS
       SKU: macos
-      Test-Clang: Off
       TestTarget: check-hlsl-mtl
       OffloadTest-branch: ${{ github.ref }}

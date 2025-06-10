@@ -15,7 +15,6 @@ jobs:
     with:
       OS: windows
       SKU: windows-intel
-      Test-Clang: Off
       BuildType: Debug
       TestTarget: check-hlsl-vk
       OffloadTest-branch: ${{ github.ref }}
