@@ -2,6 +2,7 @@ name: Execution Testing
 
 permissions:
   contents: read
+  checks: write
 
 on:
   pull_request:
