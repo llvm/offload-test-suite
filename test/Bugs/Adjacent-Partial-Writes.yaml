@@ -1,6 +1,8 @@
 #--- source.hlsl
 StructuredBuffer<int4> InInt : register(t0);
-RWStructuredBuffer<uint4> OutInt : register(u1);
+StructuredBuffer<uint4> InUInt : register(t1);
+RWStructuredBuffer<uint4> OutInt : register(u2);
+RWStructuredBuffer<uint4> OutUInt : register(u3);
 [numthreads(1,1,1)]
 void main() {
   // Int
@@ -8,6 +10,11 @@ void main() {
   OutInt[1].xyz = countbits(InInt[0].xyz);
   OutInt[1].w = countbits(InInt[0].w);
   OutInt[2].xy = countbits(InInt[0].xy);
+  // UInt
+  OutUInt[0] = countbits(InUInt[0]);
+  OutUInt[1].xyz = countbits(InUInt[0].xyz);
+  OutUInt[1].w = countbits(InUInt[0].w);
+  OutUInt[2].xy = countbits(InUInt[0].xy);
 }
 //--- pipeline.yaml
 ---
@@ -20,7 +27,15 @@ Buffers:
     Format: Int32
     Stride: 16
     Data: [0x2A, 0, 0x0f0f0f0f, -1]
+  - Name: InUInt
+    Format: UInt32
+    Stride: 16
+    Data: [0x2A, 0, 0x0f0f0f0f, 0xffffffff]
   - Name: OutInt
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: OutUInt
     Format: UInt32
     Stride: 16
     ZeroInitSize: 48
@@ -33,6 +48,10 @@ Results:
     Rule: BufferExact
     Actual: OutInt
     Expected: ExpectedOut
+  - Result: Test2
+    Rule: BufferExact
+    Actual: OutUInt
+    Expected: ExpectedOut
 DescriptorSets:
   - Resources:
     - Name: InInt
@@ -42,13 +61,27 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: OutInt
-      Kind: RWStructuredBuffer
+    - Name: InUInt
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: OutInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 # RUN: split-file %s %t
