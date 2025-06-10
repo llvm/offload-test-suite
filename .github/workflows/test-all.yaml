@@ -141,6 +141,7 @@ jobs:
           arch: amd64
       - name: Detect Clang
         id: Test-Clang
+        shell: bash
         if: contains(inputs.TestTarget, 'clang')
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
       - name: Build DXC
