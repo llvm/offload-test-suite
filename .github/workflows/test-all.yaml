@@ -148,12 +148,10 @@ jobs:
             ninja
       - name: Should Test Clang!
         if: ${{ contains('clang', inputs.TestTarget) }}
-        env:
-          TEST_CLANG: On
+        run: TEST_CLANG=On
       - name: Should NOT Test Clang!
         if: ${{ !contains('clang', inputs.TestTarget) }}
-        env:
-          TEST_CLANG: Off
+        run: TEST_CLANG=Off
       - name: Build LLVM
         run: |
             cd llvm-project
