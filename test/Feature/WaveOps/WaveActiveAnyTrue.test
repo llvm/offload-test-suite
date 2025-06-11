@@ -7,14 +7,15 @@ void main(uint3 threadID : SV_DispatchThreadID) {
   bool B1 = false;
   switch (value[threadID.x]) {
     case 0:
-    case 2: // threads 0, 1, 2
+    case 2: // threads 0, 1, 2; result for each false
       Out[threadID.x] = WaveActiveAnyTrue(B1);
       B1 = true;
       break;
-    default: // thread 3
+    default: // thread 3; result is false
       Out[threadID.x] = WaveActiveAnyTrue(B1);
       break;
   }
+  // result for all threads is true because B1 is true for threads 0-2
   Out[threadID.x + 4] = WaveActiveAnyTrue(B1);
 }
 
