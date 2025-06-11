@@ -6,16 +6,16 @@ RWStructuredBuffer<uint> Out : register(u1);
 void main(uint3 threadID : SV_DispatchThreadID) { 
   switch (value[threadID.x]) {
     case 0:
-      Out[threadID.x] = WaveIsFirstLane(); // threads 0 and 1
+      Out[threadID.x] = WaveIsFirstLane(); // threads 0 and 1; 0 is first for both
       break;
     case 2:
-      Out[threadID.x] = WaveIsFirstLane(); // thread 3
+      Out[threadID.x] = WaveIsFirstLane(); // thread 3; 3 is first
       break;
     default:
-      Out[threadID.x] = WaveIsFirstLane(); // thread 2
+      Out[threadID.x] = WaveIsFirstLane(); // thread 2; 2 is first
       break;
   }
-  Out[threadID.x + 4] = WaveIsFirstLane();
+  Out[threadID.x + 4] = WaveIsFirstLane(); // 0 is first for all
 }
 
 //--- pipeline.yaml
