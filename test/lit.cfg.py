@@ -55,7 +55,7 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("%s-WARP" % API)
     if "Intel" in device["Description"]:
         config.available_features.add("%s-Intel" % API)
-        if "UHD Graphics" in device['Description'] and API == "DirectX":
+        if "UHD Graphics" in device["Description"] and API == "DirectX":
             # When Intel resolves the driver issue and tests XFAILing on the
             # feature below are resolved we can resolve
             # https://github.com/llvm/offload-test-suite/issues/226 by updating
