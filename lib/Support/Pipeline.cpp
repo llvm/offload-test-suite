@@ -14,7 +14,8 @@
 using namespace offloadtest;
 
 static bool isFloatingPointFormat(DataFormat Format) {
-  return Format == DataFormat::Float16 || Format == DataFormat::Float32;
+  return Format == DataFormat::Float16 || Format == DataFormat::Float32 ||
+         Format == DataFormat::Float64;
 }
 
 namespace llvm {
@@ -45,10 +46,13 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       R.ExpectedPtr = P.getBuffer(R.Expected);
       if (!R.ExpectedPtr)
         I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
-      if (R.Rule == Rule::BufferFuzzy) {
+      if (R.Rule == Rule::BufferFloatULP ||
+          R.Rule == Rule::BufferFloatEpsilon) {
         if (!isFloatingPointFormat(R.ActualPtr->Format) ||
             !isFloatingPointFormat(R.ExpectedPtr->Format))
-          I.setError(Twine("BufferFuzzy only accepts Float buffers"));
+          I.setError(Twine("BufferFloat only accepts Float buffers"));
+        if (R.ActualPtr->Format != R.ExpectedPtr->Format)
+          I.setError(Twine("Buffers must have the same type"));
       }
     }
 
@@ -95,6 +99,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
   I.mapOptional("Stride", B.Stride, 0);
+  I.mapOptional("Counter", B.Counter, 0);
   if (!I.outputting() && B.Stride != 0 && B.Channels != 1)
     I.setError("Cannot set a structure stride and more than one channel.");
   switch (B.Format) {
@@ -144,6 +149,7 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
                                                    offloadtest::Resource &R) {
   I.mapRequired("Name", R.Name);
   I.mapRequired("Kind", R.Kind);
+  I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapRequired("DirectXBinding", R.DXBinding);
   I.mapOptional("VulkanBinding", R.VKBinding);
 }
@@ -225,8 +231,13 @@ void MappingTraits<offloadtest::Result>::mapping(IO &I,
   I.mapRequired("Expected", R.Expected);
 
   switch (R.Rule) {
-  case Rule::BufferFuzzy: {
+  case Rule::BufferFloatULP: {
     I.mapRequired("ULPT", R.ULPT);
+    I.mapOptional("DenormMode", R.DM);
+    break;
+  }
+  case Rule::BufferFloatEpsilon: {
+    I.mapRequired("Epsilon", R.Epsilon);
     I.mapOptional("DenormMode", R.DM);
     break;
   }
