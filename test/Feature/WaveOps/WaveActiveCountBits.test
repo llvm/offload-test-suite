@@ -7,15 +7,16 @@ void main(uint3 threadID : SV_DispatchThreadID) {
   bool B1 = false;
   
   switch (value[threadID.x]) {
-    case 0:
+    case 0: // threads 0 and 1; result is number of active lanes (2)
       Out[threadID.x + 4] = WaveActiveCountBits(true); // threads 0 and 1
     case 2:
-      B1 = true;
+      B1 = true; // set b1 to true for thread 3
       break;
     default:
-      Out[threadID.x + 4] = WaveActiveCountBits(false); // thread 2
+      Out[threadID.x + 4] = WaveActiveCountBits(false); // thread 2; expect 0
       break;
   }
+  // should be 3 because B1 set to true for threads 0,1, and 3.
   uint Count = WaveActiveCountBits(B1);
   Out[threadID.x] = Count;
 }
