@@ -9,17 +9,12 @@ on:
   schedule:
     - cron: '0 */2 * * *' # run every 2 hours
 
-  pull_request:
-    branches:
-      - main
-
 jobs:
   Windows-VK-Intel-Clang:
-    uses: ./.github/workflows/test-all.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: windows-intel
-      Test-Clang: On
       TestTarget: check-hlsl-clang-vk
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.ref }}
+      OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
