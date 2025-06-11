@@ -8,17 +8,16 @@ void main(uint3 threadID : SV_DispatchThreadID) {
   switch (value[threadID.x]) {
     case 0: // threads 0 and 1
     B1 = false;
-    Out[threadID.x] = WaveActiveAllTrue(B1);
+    Out[threadID.x] = WaveActiveAllTrue(B1); // Only threads 0 and 1 are active; result should be false;
     break;
     case 2: // thread 2
-      Out[threadID.x] = WaveActiveAllTrue(B1);
-      B1 = true;
+      Out[threadID.x] = WaveActiveAllTrue(B1); // only thread 2 is active; result should be true;
       break;
     default: // thread 3
-      Out[threadID.x] = WaveActiveAllTrue(B1);
+      Out[threadID.x] = WaveActiveAllTrue(B1); // only thread 3 is active; result should be true;
       break;
   }
-  Out[threadID.x + 4] = WaveActiveAllTrue(B1);
+  Out[threadID.x + 4] = WaveActiveAllTrue(B1); // false because its false for threads 0 and 1
 }
 
 //--- pipeline.yaml
