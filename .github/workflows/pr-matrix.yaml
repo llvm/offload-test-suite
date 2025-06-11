@@ -21,7 +21,7 @@ jobs:
         SKU: [windows-intel]
         TestTarget: [check-hlsl-d3d12, check-hlsl-warp-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-warp-d3d12, check-hlsl-clang-vk]
 
-    uses: ./.github/workflows/test-all.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
@@ -36,7 +36,7 @@ jobs:
         SKU: [macos]
         TestTarget: [check-hlsl-mtl, check-hlsl-clang-mtl]
 
-    uses: ./.github/workflows/test-all.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: macOS
       SKU: ${{ matrix.SKU }}

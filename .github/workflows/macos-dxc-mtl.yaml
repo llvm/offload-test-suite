@@ -11,7 +11,7 @@ on:
 
 jobs:
   macOS-Metal-DXC:
-    uses: ./.github/workflows/test-all.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: macOS
       SKU: macos
