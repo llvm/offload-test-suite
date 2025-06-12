@@ -79,6 +79,7 @@ def setDeviceFeatures(config, device, compiler):
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
+        config.available_features.add("Int64")
         config.available_features.add("Half")
 
     if device["API"] == "Vulkan":
