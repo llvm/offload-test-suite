@@ -27,11 +27,11 @@ Buffers:
   - Name: OutInt
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 48
+    Data: [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112]
   - Name: ExpectedOut # The result we expect
     Format: UInt32
     Stride: 16
-    Data: [3, 0, 32, 64, 3, 0, 32, 64, 3, 0, 0, 0]
+    Data: [3, 0, 32, 64, 3, 0, 32, 64, 3, 0, 111, 112]
 Results:
   - Result: Test1
     Rule: BufferExact
