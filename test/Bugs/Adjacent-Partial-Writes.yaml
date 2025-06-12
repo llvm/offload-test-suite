@@ -57,7 +57,13 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int64
+
+# https://github.com/llvm/offload-test-suite/issues/226
 # XFAIL: Intel-Memory-Coherence-Issue-226
+
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7494
+# https://github.com/llvm/llvm-project/issues/142677
+# UNSUPPORTED: Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
