@@ -834,9 +834,11 @@ public:
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a compatible Vulkan device");
-    if (Res)
+    if (Res) {
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error");
+                                     "Unknown Vulkan initialization error: %d",
+                                     Res);
+    }
 
     uint32_t DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
@@ -865,9 +867,11 @@ public:
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a compatible Vulkan device");
-    if (Res)
+    if (Res) {
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error");
+                                     "Unknown Vulkan initialization error %d",
+                                     Res);
+    }
 
     DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
