@@ -870,7 +870,6 @@ public:
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unknown Vulkan initialization error %d",
                                      Res);
-    }
 
     DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
