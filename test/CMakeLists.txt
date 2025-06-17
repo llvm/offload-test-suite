@@ -129,6 +129,7 @@ function(add_offloadtest_lit_suite suite)
 
   add_lit_testsuites(hlsl-${suite} ${CMAKE_CURRENT_SOURCE_DIR}
     DEPENDS ${OFFLOADTEST_DEPS}
+    BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${suite}/
     FOLDER "HLSL tests/Suites/${suite}"
   )
 endfunction()
