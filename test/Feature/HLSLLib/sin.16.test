@@ -1,0 +1,69 @@
+#--- source.hlsl
+
+StructuredBuffer<half4> In : register(t0);
+
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = sin(In[0]);
+  half4 Tmp = {sin(In[1].xyz), sin(In[1].w)};
+  Out[1] = Tmp;
+  half4 Tmp2 = {sin(In[2].xy), sin(In[2].zw)};
+  Out[2] = Tmp2;
+  Out[3] = sin(In[3]);
+  Out[4] = sin(In[4]);
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0x7e00, 0xfc00, 0x8001, 0x8000, 0x0000, 0x0001, 0x7c00, 0x3906, 0x3d06, 0x3f8a, 0x4106, 0x4248, 0x438a, 0x4466, 0x4506, 0x45a7, 0x4648, 0x7e00, 0x7e00, 0x7e00,]
+    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 0.6279297, 1.255859, 1.884766, 2.511719, 3.140625, 3.769531, 4.398438, 5.023438, 5.652344, 6.281250,
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 40
+  - Name: ExpectedOut # The result we expect
+    Format: Float16
+    Stride: 8
+    Data: [ 0x7e00, 0x7e00, 0x8000, 0x8000, 0x0000, 0x0000, 0x7e00, 0x38b3, 0x3b9b, 0x3b9c, 0x38b6, 0x13ed, 0xb8b3, 0xbb9c, 0xbb9e, 0xb8b8, 0x97ed, 0x7e00, 0x7e00, 0x7e00,]
+    #  NaN, NaN, -0, -0, 0, 0, NaN, 0.58747065, 0.95081574, 0.95111507, 0.58904284, 0.00096773, -0.58747751, -0.95112079, -0.95201313, -0.58982444, -0.00193545,
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.003
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
