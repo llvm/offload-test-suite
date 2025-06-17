@@ -55,24 +55,46 @@ Buffers:
     Data: [ 5.399999999999999 ] # Should be 2 ulp away
 Results:
   - Result: Test1 # Testing Expected is Denorm and Out is zero, and both have same sign bit
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 1
     DenormMode: Any
     Actual: Out1
     Expected: Expected1
   - Result: Test2 # Test two values are exactly the same
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 0 # ulp shouldn't matter for this test
     Actual: Out2
     Expected: Expected2
   - Result: Test3 # Test both are NaN
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 0 # ulp shouldn't matter for this test
     Actual: Out3
     Expected: Expected3
   - Result: Test4 # Actual and Expected are not the same but they are within the ULPT
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 2
+    Actual: Out4
+    Expected: Expected4
+  # test BufferFloatEpsilon
+  - Result: Test5 # Testing Expected is Denorm and Out is zero, and both have same sign bit
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    DenormMode: Any
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test6 # Test two values are exactly the same
+    Rule: BufferFloatEpsilon
+    Epsilon: 0 # shouldn't matter for this test
+    Actual: Out2
+    Expected: Expected2
+  - Result: Test7 # Test both are NaN
+    Rule: BufferFloatEpsilon
+    Epsilon: 0 # shouldn't matter for this test
+    Actual: Out3
+    Expected: Expected3
+  - Result: Test8 # Actual and Expected are not the same but they are within the epsilon
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.00000000000001
     Actual: Out4
     Expected: Expected4
 DescriptorSets:

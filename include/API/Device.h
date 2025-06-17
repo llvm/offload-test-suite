@@ -62,7 +62,8 @@ public:
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  static llvm::Error initializeVXDevices();
+  static llvm::Error initializeVKDevices();
+  static void cleanupVKDevices();
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_METAL

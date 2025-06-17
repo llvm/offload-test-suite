@@ -181,9 +181,16 @@ private:
     Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceVulkan12Features Features12{};
     Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan13Features Features13{};
+    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    VkPhysicalDeviceVulkan14Features Features14{};
+    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 
     Features.pNext = &Features11;
     Features11.pNext = &Features12;
+    Features12.pNext = &Features13;
+    Features13.pNext = &Features14;
+    Features14.pNext = NULL;
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
     Caps.insert(std::make_pair(
@@ -202,10 +209,15 @@ private:
 #define VULKAN11_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features11.Name)));
-#include "VKFeatures.def"
 #define VULKAN12_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features12.Name)));
+#define VULKAN13_FEATURE_BOOL(Name)                                            \
+  Caps.insert(                                                                 \
+      std::make_pair(#Name, make_capability<bool>(#Name, Features13.Name)));
+#define VULKAN14_FEATURE_BOOL(Name)                                            \
+  Caps.insert(                                                                 \
+      std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
 #include "VKFeatures.def"
   }
 
@@ -251,6 +263,27 @@ public:
     DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     DeviceInfo.queueCreateInfoCount = 1;
     DeviceInfo.pQueueCreateInfos = &QueueInfo;
+
+    VkPhysicalDeviceFeatures2 Features{};
+    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan11Features Features11{};
+    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    VkPhysicalDeviceVulkan12Features Features12{};
+    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan13Features Features13{};
+    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+    VkPhysicalDeviceVulkan14Features Features14{};
+    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+
+    Features.pNext = &Features11;
+    Features11.pNext = &Features12;
+    Features12.pNext = &Features13;
+    Features13.pNext = &Features14;
+    Features14.pNext = NULL;
+    vkGetPhysicalDeviceFeatures2(Device, &Features);
+
+    DeviceInfo.pEnabledFeatures = &Features.features;
+    DeviceInfo.pNext = Features.pNext;
 
     if (vkCreateDevice(Device, &DeviceInfo, nullptr, &IS.Device))
       return llvm::createStringError(std::errc::no_such_device,
@@ -766,17 +799,22 @@ public:
 
 class VKContext {
 private:
-  VkInstance Instance;
+  VkInstance Instance = VK_NULL_HANDLE;
   llvm::SmallVector<std::shared_ptr<VKDevice>> Devices;
 
   VKContext() = default;
-  ~VKContext() { vkDestroyInstance(Instance, NULL); }
+  ~VKContext() { cleanup(); }
   VKContext(const VKContext &) = delete;
 
 public:
   static VKContext &instance() {
     static VKContext Ctx;
     return Ctx;
+  }
+
+  void cleanup() {
+    vkDestroyInstance(Instance, NULL);
+    Instance = VK_NULL_HANDLE;
   }
 
   llvm::Error initialize() {
@@ -798,7 +836,8 @@ public:
                                      "Cannot find a compatible Vulkan device");
     if (Res)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Unkown Vulkan initialization error");
+                                     "Unknown Vulkan initialization error: %d",
+                                     Res);
 
     uint32_t DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
@@ -814,6 +853,7 @@ public:
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
     }
     vkDestroyInstance(Instance, NULL);
+    Instance = VK_NULL_HANDLE;
 
 // TODO: This is a bit hacky but matches what I did in DX.
 #ifndef NDEBUG
@@ -828,7 +868,8 @@ public:
                                      "Cannot find a compatible Vulkan device");
     if (Res)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Unkown Vulkan initialization error");
+                                     "Unknown Vulkan initialization error %d",
+                                     Res);
 
     DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
@@ -850,6 +891,8 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeVXDevices() {
+llvm::Error Device::initializeVKDevices() {
   return VKContext::instance().initialize();
 }
+
+void Device::cleanupVKDevices() { VKContext::instance().cleanup(); }

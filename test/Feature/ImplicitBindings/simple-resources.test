@@ -66,15 +66,19 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# Clang's Vulkan implicit binding is not yet implemented.
+# UNSUPPORTED: Clang-Vulkan
 
 # DXC's vulkan backend doesn't drop unused bindings, so it isn't possible to
 # specify descriptor sets that are valid for both DirectX and Vulkan there.
 # UNSUPPORTED: DXC-Vulkan
 
+# CBuffer bindings seem to be broken under metal
+# https://github.com/llvm/offload-test-suite/issues/55
+# UNSUPPORTED: Metal
+
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: BufD

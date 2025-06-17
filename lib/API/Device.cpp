@@ -15,6 +15,7 @@
 
 #include "llvm/Support/Error.h"
 
+#include <cstdlib>
 #include <memory>
 
 using namespace offloadtest;
@@ -59,8 +60,14 @@ llvm::Error Device::initialize() {
     return Err;
 #endif
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVXDevices())
+  if (auto Err = initializeVKDevices())
     return Err;
+  // Validation layers have internal state which require a specific destruction
+  // ordering. Relying on the global dtor call for this is unreliable and can
+  // cause a null-deref in the validation layers during the final
+  // vkDestroyInstance. This is a known limitation of the validation layers
+  // which explicitely requires using atexit.
+  atexit(Device::cleanupVKDevices);
 #endif
 #ifdef OFFLOADTEST_ENABLE_METAL
   if (auto Err = initializeMtlDevices())
