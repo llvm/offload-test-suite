@@ -119,3 +119,11 @@ for device in devices['Devices']:
 if os.path.exists(config.goldenimage_dir):
   config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
   config.available_features.add("goldenimage")
+
+# Ask llvm-config about asserts
+llvm_config.feature_config(
+    [
+        ("--assertion-mode", {"ON": "asserts"}),
+        ("--build-mode", {"[Dd][Ee][Bb][Uu][Gg]": "debug"}),
+    ]
+)
