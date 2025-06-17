@@ -866,7 +866,7 @@ public:
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a compatible Vulkan device");
-    if (Res) {
+    if (Res)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unknown Vulkan initialization error %d",
                                      Res);
