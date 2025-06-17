@@ -61,6 +61,7 @@ DescriptorSets:
 ...
 #--- end
 
+# no hlk tests for 16 bit exp so unsure of correct driver behavior for 10
 # XFAIL: Clang
 # XFAIL: DXC
 # REQUIRES: Half
