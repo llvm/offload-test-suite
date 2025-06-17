@@ -7,9 +7,9 @@ RWStructuredBuffer<uint32_t4> Out : register(u2);
 [numthreads(1,1,1)]
 void main() {
   Out[0] = firstbitlow(In1[0]);
-  uint32_t4  Out1 = {firstbitlow(In1[0].xyz), firstbitlow(In1[0].w)};
+  uint32_t4 Out1 = {firstbitlow(In1[0].xyz), firstbitlow(In1[0].w)};
   uint32_t4 Out2 = {firstbitlow(In2[0].xy), firstbitlow(In2[0].zw)};
-  Out[1]= Out1;
+  Out[1] = Out1;
   Out[2] = Out2;
 }
 
@@ -76,6 +76,7 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
+# Fails with 'gpu-exec: error: Failed to materializeAll.:'
 # XFAIL: Metal
 
 # 16/64 bit firstbitlow doesn't have a DXC-Vulkan lowering
