@@ -830,10 +830,19 @@ public:
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     CreateInfo.pApplicationInfo = &AppInfo;
 
+    llvm::SmallVector<const char *> Extensions;
+#if __APPLE__
+    Extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+    CreateInfo.ppEnabledExtensionNames = Extensions.data();
+    CreateInfo.enabledExtensionCount = Extensions.size();
+
     VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a compatible Vulkan device");
+                                     "Cannot find a base Vulkan device");
     if (Res)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unknown Vulkan initialization error: %d",
@@ -862,6 +871,8 @@ public:
     CreateInfo.enabledLayerCount = 1;
 #endif
 
+    // This second creation shouldn't ever fail, but it tries to create the
+    // highest supported device version.
     Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
