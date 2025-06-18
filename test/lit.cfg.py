@@ -74,6 +74,7 @@ def setDeviceFeatures(config, device, compiler):
     if device["API"] == "Metal":
         config.available_features.add("Int16")
         config.available_features.add("Half")
+        config.available_features.add("Int64")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
