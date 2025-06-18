@@ -73,7 +73,7 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
-static DXGI_FORMAT getRawDXFormat(Resource &R) {
+static DXGI_FORMAT getRawDXFormat(const Resource &R) {
   if (!R.isByteAddressBuffer())
     return DXGI_FORMAT_UNKNOWN;
 
@@ -102,20 +102,37 @@ static uint32_t getUAVBufferCounterOffset(Resource &R) {
              : 0;
 }
 
-namespace {
-
-enum DXResourceKind { UAV, SRV, CBV };
-
-DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
+static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::RWBuffer:
+  case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::ConstantBuffer:
+    return D3D12_RESOURCE_DIMENSION_BUFFER;
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+    return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  }
+  llvm_unreachable("All cases handled");
+}
+
+enum DXResourceKind { UAV, SRV, CBV };
+
+static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::Texture2D:
     return SRV;
 
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::RWTexture2D:
     return UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -123,6 +140,99 @@ DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   }
   llvm_unreachable("All cases handled");
 }
+
+static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
+  const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
+  const offloadtest::Buffer &B = *R.BufferPtr;
+  const DXGI_FORMAT Format =
+      R.isTexture() ? getDXFormat(B.Format, B.Channels) : DXGI_FORMAT_UNKNOWN;
+  const uint32_t Width =
+      R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
+  const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
+  const D3D12_TEXTURE_LAYOUT Layout = R.isTexture()
+                                          ? D3D12_TEXTURE_LAYOUT_UNKNOWN
+                                          : D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  const D3D12_RESOURCE_FLAGS Flags =
+      R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+                      : D3D12_RESOURCE_FLAG_NONE;
+  const D3D12_RESOURCE_DESC ResDesc = {Dimension, 0,      Width,  Height, 1, 1,
+                                       Format,    {1, 0}, Layout, Flags};
+  return ResDesc;
+}
+
+static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
+  const uint32_t EltSize = R.getElementSize();
+  const uint32_t NumElts = R.size() / EltSize;
+
+  llvm::outs() << "    EltSize = " << EltSize << " NumElts = " << NumElts
+               << "\n";
+  D3D12_SHADER_RESOURCE_VIEW_DESC Desc = {};
+  Desc.Format = R.isRaw()
+                    ? getRawDXFormat(R)
+                    : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+  Desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  switch (R.Kind) {
+  case ResourceKind::Buffer:
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::ByteAddressBuffer:
+
+    Desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    Desc.Buffer =
+        D3D12_BUFFER_SRV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0,
+                         R.isByteAddressBuffer() ? D3D12_BUFFER_SRV_FLAG_RAW
+                                                 : D3D12_BUFFER_SRV_FLAG_NONE};
+    break;
+  case ResourceKind::Texture2D:
+    Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    Desc.Texture2D = D3D12_TEX2D_SRV{0, 1, 0, 0};
+    break;
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::RWBuffer:
+  case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::ConstantBuffer:
+    llvm_unreachable("Not an SRV type!");
+  }
+  return Desc;
+}
+
+static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
+  const uint32_t EltSize = R.getElementSize();
+  const uint32_t NumElts = R.size() / EltSize;
+  const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
+
+  llvm::outs() << "    EltSize = " << EltSize << " NumElts = " << NumElts
+               << "\n";
+  D3D12_UNORDERED_ACCESS_VIEW_DESC Desc = {};
+  Desc.Format = R.isRaw()
+                    ? getRawDXFormat(R)
+                    : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+  switch (R.Kind) {
+  case ResourceKind::RWBuffer:
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::RWByteAddressBuffer:
+
+    Desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+    Desc.Buffer = D3D12_BUFFER_UAV{
+        0, NumElts, R.isStructuredBuffer() ? EltSize : 0, CounterOffset,
+        R.isByteAddressBuffer() ? D3D12_BUFFER_UAV_FLAG_RAW
+                                : D3D12_BUFFER_UAV_FLAG_NONE};
+    break;
+  case ResourceKind::RWTexture2D:
+    Desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    Desc.Texture2D = D3D12_TEX2D_UAV{0, 0};
+    break;
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::Buffer:
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::Texture2D:
+  case ResourceKind::ConstantBuffer:
+    llvm_unreachable("Not a UAV type!");
+  }
+  return Desc;
+}
+
+namespace {
 
 class DXDevice : public offloadtest::Device {
 private:
@@ -377,8 +487,20 @@ public:
                                  ComPtr<ID3D12Resource> Destination,
                                  ComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
-    IS.CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
-                                 R.size());
+    if (R.isTexture()) {
+      const offloadtest::Buffer &B = *R.BufferPtr;
+      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+          0, CD3DX12_SUBRESOURCE_FOOTPRINT(
+                 getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+                 B.OutputProps.Height, 1,
+                 B.OutputProps.Width * B.getElementSize())};
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
+
+      IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    } else
+      IS.CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
+                                   R.size());
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
@@ -391,17 +513,7 @@ public:
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    const D3D12_RESOURCE_DESC ResDesc = {
-        D3D12_RESOURCE_DIMENSION_BUFFER,
-        0,
-        R.size(),
-        1,
-        1,
-        1,
-        DXGI_FORMAT_UNKNOWN,
-        {1, 0},
-        D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
+    const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
 
     if (auto Err = HR::toError(Device->CreateCommittedResource(
                                    &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
@@ -438,22 +550,9 @@ public:
 
   void bindSRV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
                ComPtr<ID3D12Resource> Buffer) {
-    const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.size() / EltSize;
-    DXGI_FORMAT const EltFormat =
-        R.isRaw() ? getRawDXFormat(R)
-                  : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-    const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {
-        EltFormat,
-        D3D12_SRV_DIMENSION_BUFFER,
-        D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-        {D3D12_BUFFER_SRV{0, NumElts, R.isStructuredBuffer() ? EltSize : 0,
-                          R.isByteAddressBuffer()
-                              ? D3D12_BUFFER_SRV_FLAG_RAW
-                              : D3D12_BUFFER_SRV_FLAG_NONE}}};
+    llvm::outs() << "SRV: HeapIdx = " << HeapIdx << "\n";
+    const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = getSRVDescription(R);
 
-    llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                 << " NumElts = " << NumElts << "\n";
     D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     SRVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
@@ -472,17 +571,7 @@ public:
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    const D3D12_RESOURCE_DESC ResDesc = {
-        D3D12_RESOURCE_DIMENSION_BUFFER,
-        0,
-        BufferSize,
-        1,
-        1,
-        1,
-        DXGI_FORMAT_UNKNOWN,
-        {1, 0},
-        D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
+    const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
 
     if (auto Err = HR::toError(Device->CreateCommittedResource(
                                    &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
@@ -541,24 +630,10 @@ public:
 
   void bindUAV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
                ComPtr<ID3D12Resource> Buffer) {
-    const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.size() / EltSize;
     ID3D12Resource *CounterBuffer = R.HasCounter ? Buffer.Get() : nullptr;
-    const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
-    DXGI_FORMAT const EltFormat =
-        R.isRaw() ? getRawDXFormat(R)
-                  : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-    const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {
-        EltFormat,
-        D3D12_UAV_DIMENSION_BUFFER,
-        {D3D12_BUFFER_UAV{
-            0, NumElts, R.isStructuredBuffer() ? EltSize : 0, CounterOffset,
-            R.isByteAddressBuffer() ? D3D12_BUFFER_UAV_FLAG_RAW
-                                    : D3D12_BUFFER_UAV_FLAG_NONE}}};
+    llvm::outs() << "UAV: HeapIdx = " << HeapIdx << "\n";
+    const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = getUAVDescription(R);
 
-    llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                 << " NumElts = " << NumElts << " HasCounter = " << R.HasCounter
-                 << "\n";
     D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
     UAVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
@@ -891,7 +966,21 @@ public:
       if (R.second.Readback == nullptr)
         return;
       addReadbackBeginBarrier(IS, R.second.Buffer);
-      IS.CmdList->CopyResource(R.second.Readback.Get(), R.second.Buffer.Get());
+      if (R.first->isTexture()) {
+        const offloadtest::Buffer &B = *R.first->BufferPtr;
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+            0, CD3DX12_SUBRESOURCE_FOOTPRINT(
+                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+                   B.OutputProps.Height, 1,
+                   B.OutputProps.Width * B.getElementSize())};
+        const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(R.second.Readback.Get(),
+                                                   Footprint);
+        const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(R.second.Buffer.Get(), 0);
+
+        IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      } else
+        IS.CmdList->CopyResource(R.second.Readback.Get(),
+                                 R.second.Buffer.Get());
       addReadbackEndBarrier(IS, R.second.Buffer);
     };
 
