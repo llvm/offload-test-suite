@@ -163,8 +163,8 @@ if not target_device:
 setDeviceFeatures(config, target_device, HLSLCompiler)
 
 if os.path.exists(config.goldenimage_dir):
-  config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
-  config.available_features.add("goldenimage")
+    config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
+    config.available_features.add("goldenimage")
 
 # Ask llvm-config about asserts
 llvm_config.feature_config(
