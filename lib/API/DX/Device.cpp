@@ -89,14 +89,14 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
-static uint32_t getUAVBufferSize(Resource &R) {
+static uint32_t getUAVBufferSize(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) +
                    sizeof(uint32_t)
              : R.size();
 }
 
-static uint32_t getUAVBufferCounterOffset(Resource &R) {
+static uint32_t getUAVBufferCounterOffset(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT)
              : 0;
