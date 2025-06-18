@@ -41,11 +41,7 @@ macro(add_offloadtest_library name)
   set_target_properties(OffloadTest${name} PROPERTIES FOLDER "Offload Test/Libraries")
 endmacro()
 
-if (APPLE)
-  set(OPTIONAL_MOLTEN COMPONENTS MoltenVK)
-endif()
-
-find_package(Vulkan ${OPTIONAL_MOLTEN})
+find_package(Vulkan)
 message(STATUS "Vulkan Include Dirs: ${Vulkan_INCLUDE_DIRS}")
 if (Vulkan_INCLUDE_DIRS)
   set(OFFLOADTEST_ENABLE_VULKAN On)
