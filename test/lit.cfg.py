@@ -55,6 +55,12 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("%s-WARP" % API)
     if "Intel" in device["Description"]:
         config.available_features.add("%s-Intel" % API)
+        if "UHD Graphics" in device["Description"] and API == "DirectX":
+            # When Intel resolves the driver issue and tests XFAILing on the
+            # feature below are resolved we can resolve
+            # https://github.com/llvm/offload-test-suite/issues/226 by updating
+            # this check to only XFAIL on old driver versions.
+            config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("%s-NV" % API)
     if "AMD" in device["Description"]:
@@ -73,7 +79,9 @@ def setDeviceFeatures(config, device, compiler):
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
+        config.available_features.add("Int64")
         config.available_features.add("Half")
+        config.available_features.add("Int64")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
