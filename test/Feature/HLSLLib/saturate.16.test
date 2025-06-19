@@ -34,8 +34,8 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0x7e00, 0x8001, 0x0000, 0x0000, 0x0001, 0x7e00, 0x3c00, 0x0000, 0x3800, 0x1d1f, 0x3bfe,]
-    #  NaN, NaN, -denorm, 0, 0, denorm, NaN, 1, 0, 0.5, 0.005, 0.999,
+    Data: [ 0x0, 0x0, 0x0, 0x0000, 0x0000, 0x0001, 0x3c00, 0x3c00, 0x0000, 0x3800, 0x1d1f, 0x3bfe,]
+    #  0, 0, 0, 0, 0, denorm, 1, 1, 0, 0.5, 0.005, 0.999,
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
