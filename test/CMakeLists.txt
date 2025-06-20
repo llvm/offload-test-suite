@@ -56,6 +56,7 @@ endfunction()
 
 list(APPEND OFFLOADTEST_DEPS
   api-query
+  llvm-config
   offloader
   FileCheck
   split-file
