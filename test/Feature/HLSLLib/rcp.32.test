@@ -25,8 +25,8 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, 1, -1, 2.5, -0.25,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1, -1, 2.5, -0.25,
+    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, 1, -1, 2.5, -0.25, 2]
+    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1, -1, 2.5, -0.25, 2
   - Name: Out
     Format: Float32
     Stride: 16
@@ -34,8 +34,8 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, nan, inf, inf, inf, inf, nan, 1, -1, 0.4, -4,]
-    #  NaN, NaN, Inf, Inf, Inf, Inf, NaN, 1, -1, 0.4, -4,
+    Data: [ nan, -0, -inf, -inf, inf, inf, 0, 1, -1, 0.4, -4 , 0.5]
+    #  NaN, NaN, Inf, Inf, Inf, Inf, NaN, 1, -1, 0.4, -4, 0.5
 Results:
   - Result: Test1
     Rule: BufferFloatULP
