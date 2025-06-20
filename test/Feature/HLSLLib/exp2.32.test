@@ -34,8 +34,8 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, nan, 1, 1, 1, 1, nan, 2, 0.5, 4, 8, 0.125,]
-    #  NaN, NaN, 1, 1, 1, 1, NaN, 2, 0.5, 4, 8, 0.125,
+    Data: [ nan, 0, 1, 1, 1, 1, inf, 2, 0.5, 4, 8, 0.125,]
+    #  NaN, 0, 1, 1, 1, 1, inf, 2, 0.5, 4, 8, 0.125,
 Results:
   - Result: Test1
     Rule: BufferFloatULP
