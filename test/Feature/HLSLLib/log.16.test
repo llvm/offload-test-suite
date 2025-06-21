@@ -62,6 +62,7 @@ DescriptorSets:
 #--- end
 
 # no hlk tests for 16 bit log so unsure of correct answers for some
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7564
 # XFAIL: DXC
 # XFAIL: Clang
 # REQUIRES: Half
