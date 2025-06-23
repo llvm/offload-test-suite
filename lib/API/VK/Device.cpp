@@ -442,8 +442,9 @@ public:
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
                               static_cast<uint32_t>(B.OutputProps.Height), 1};
-    ImageCreateInfo.usage =
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    ImageCreateInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+                            (R.isReadWrite() ? VK_IMAGE_USAGE_STORAGE_BIT
+                                             : VK_IMAGE_USAGE_SAMPLED_BIT);
 
     VkImage Image;
     if (vkCreateImage(IS.Device, &ImageCreateInfo, nullptr, &Image))
@@ -823,8 +824,7 @@ public:
     Barrier.buffer = R.Device.Buffer;
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    Barrier.dstAccessMask =
-        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+    Barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
