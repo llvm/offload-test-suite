@@ -61,6 +61,8 @@ DescriptorSets:
 ...
 #--- end
 
+# 16bit-hlk-issue-7570
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7570
 # no hlk tests for 16 bit exp so unsure of correct driver behavior for 10
 # XFAIL: Clang
 # XFAIL: DXC
