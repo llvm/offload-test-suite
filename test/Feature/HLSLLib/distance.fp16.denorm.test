@@ -7,18 +7,27 @@ RWStructuredBuffer<half> Result : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
-  // distance ({0.0}, {3.0}) = 3.0
-  half R0 = distance(X[0].x, Y[0].x);
-  Result[0] = R0;
-  // distance({0.0, 0.0}, {3.0, 4.0}) = 5.0
-  half R1 = distance(X[0].xy, Y[0].xy);
-  Result[1] = R1;
-  // distance({0.0, 0.0, 0.0}, {3.0, 4.0, 12.0}) = 13.0
-  half R2 = distance(X[0].xyz, Y[0].xyz);
-  Result[2] = R2;
-  // distance({0.0, 0.0, 0.0, 0.0}, {3.0, 4.0, 12.0, 84.0}) = 85.0
-  half R3 = distance(X[0].xyzw, Y[0].xyzw);
-  Result[3] = R3;  
+  // test denormal cases
+  // distance(inf, 1.0) = inf
+  Result[0] = distance(X[0].x, Y[0].x);
+
+  // distance(NaN, 1.0) = NaN
+  Result[1] = distance(X[0].y, Y[0].x);
+
+  // distance(-inf, 1.0) = inf
+  Result[2] = distance(X[0].z, Y[0].x);
+
+  // distance(inf, NaN) = NaN
+  Result[3] = distance(X[0].w, Y[0].w);
+
+  // distance({inf, NaN, -inf, inf}, {1.0, 1.0, 1.0, NaN}) = NaN
+  Result[4] = distance(X[0].xyzw, Y[0].xyzw);
+
+  // distance({denorm}, {1.0}) = denorm
+  Result[5] = distance(Y[0].z, Y[0].x);
+
+  // distance({-denorm}, {1.0}) = denorm
+  Result[6] = distance(Y[0].y, Y[0].x);
 }
 
 //--- pipeline.yaml
@@ -32,19 +41,19 @@ Buffers:
   - Name: X
     Format: Float16
     Stride: 8
-    Data: [ 0x0000, 0x0000, 0x0000, 0x0000 ]
+    Data: [ 0x7C00, 0x7E00, 0xFC00, 0x7C00 ]
   - Name: Y
     Format: Float16
     Stride: 8
-    Data: [ 0x4200, 0x4400, 0x4a00, 0x5540 ]
+    Data: [ 0x003C, 0x8001, 0x0001, 0x7E00 ]
   - Name: Result
     Format: Float16
     Stride: 2
-    ZeroInitSize: 8
+    ZeroInitSize: 16
   - Name: ExpectedResult
     Format: Float16
     Stride: 2
-    Data: [ 0x4200, 0x4500, 0x4a80, 0x5550 ]
+    Data: [ 0x7C00, 0x7E00, 0x7C00, 0x7E00, 0x7E00, 0x3B, 0x3D, 0x0 ]
 Results:
   - Result: CheckResult
     Rule: BufferFloatULP
