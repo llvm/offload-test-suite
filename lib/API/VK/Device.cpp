@@ -927,9 +927,9 @@ public:
     {
       auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
-      llvm::outs() <<
-      "Using API version " << VK_API_VERSION_MAJOR(AppInfo.apiVersion)
-                << "." << VK_API_VERSION_MINOR(AppInfo.apiVersion) << ".\n";
+      llvm::outs() << "Using API version "
+                   << VK_API_VERSION_MAJOR(AppInfo.apiVersion) << "."
+                   << VK_API_VERSION_MINOR(AppInfo.apiVersion) << ".\n";
     }
     vkDestroyInstance(Instance, NULL);
     Instance = VK_NULL_HANDLE;
