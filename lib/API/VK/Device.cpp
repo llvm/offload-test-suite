@@ -350,6 +350,9 @@ public:
     Features14.pNext = NULL;
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
+    Features.features.shaderStorageImageReadWithoutFormat = true;
+    Features.features.shaderStorageImageWriteWithoutFormat = true;
+
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
 
@@ -900,7 +903,7 @@ public:
     AppInfo.pApplicationName = "OffloadTest";
     // TODO: We should set this based on a command line flag, and simplify the
     // code below to error if the requested version isn't supported.
-    AppInfo.apiVersion = VK_API_VERSION_1_1;
+    AppInfo.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
