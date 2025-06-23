@@ -7,7 +7,7 @@ RWStructuredBuffer<half> Result : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
-  // test denormal cases
+  // test special cases
   // distance(inf, 1.0) = inf
   Result[0] = distance(X[0].x, Y[0].x);
 
