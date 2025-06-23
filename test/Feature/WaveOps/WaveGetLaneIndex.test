@@ -12,16 +12,16 @@ void main(uint3 threadID : SV_DispatchThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
+    DispatchSize: [2, 1, 1]
 Buffers:
   - Name: Out
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 16
+    ZeroInitSize: 32
   - Name: ExpectedOut
     Format: UInt32
     Stride: 4
-    Data: [0, 1, 2, 3]
+    Data: [0, 1, 2, 3, 0, 1, 2, 3]
 Results:
   - Result: Test
     Rule: BufferExact
