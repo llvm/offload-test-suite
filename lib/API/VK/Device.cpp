@@ -59,6 +59,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
 static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
+    return VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
   case ResourceKind::RWBuffer:
     return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
   case ResourceKind::ByteAddressBuffer:
@@ -926,6 +927,9 @@ public:
     {
       auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
+      llvm::outs() <<
+      "Using API version " << VK_API_VERSION_MAJOR(AppInfo.apiVersion)
+                << "." << VK_API_VERSION_MINOR(AppInfo.apiVersion) << ".\n";
     }
     vkDestroyInstance(Instance, NULL);
     Instance = VK_NULL_HANDLE;
