@@ -35,7 +35,7 @@ Buffers:
     Stride: 8
     # For signed, negative values the index of the first 0 from MSB is returned instead.
     Data: [
-      -1,  # All 1s return not found terminal
+      -1,  # All 1s -> return not found terminal
       -8,
       9,
       0
@@ -82,13 +82,9 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
-# XFAIL: Metal
-
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
 # https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5
 # UNSUPPORTED: DXC-Vulkan
-
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl

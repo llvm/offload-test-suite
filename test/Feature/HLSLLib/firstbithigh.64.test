@@ -35,7 +35,7 @@ Buffers:
     Stride: 32
     # For signed, negative values the index of the first 0 from MSB is returned instead.
     Data: [
-      -1,  # All 1s return not found terminal
+      -1,  # All 1s -> return not found terminal
       -8,
       9,
       0
@@ -92,8 +92,6 @@ DescriptorSets:
 
 # https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang-Vulkan
-
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
