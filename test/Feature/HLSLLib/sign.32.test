@@ -1,0 +1,181 @@
+#--- source.hlsl
+
+StructuredBuffer<int4> In1 : register(t0);
+StructuredBuffer<uint4> In2 : register(t1);
+StructuredBuffer<float4> In3 : register(t2);
+StructuredBuffer<float> In4 : register(t3);
+RWStructuredBuffer<int4> Out1 : register(u4);
+RWStructuredBuffer<int4> Out2 : register(u5);
+RWStructuredBuffer<int4> Out3 : register(u6);
+RWStructuredBuffer<uint> Out4 : register(u7);
+
+[numthreads(1,1,1)]
+void main() {
+  // int
+  Out1[0] = sign(In1[0]);
+  int4 Tmp = {sign(In1[0].xyz), sign(In1[0].w)};
+  Out1[1] = Tmp;
+  Out1[2].xy = sign(In1[0].xy);
+
+  // uint
+  Out2[0] = sign(In2[0]);
+  int4 Tmp2 = {sign(In2[0].xyz), sign(In2[0].w)};
+  Out2[1] = Tmp2;
+  Out2[2].xy = sign(In2[0].xy);
+
+  // float
+  Out3[0] = sign(In3[0]);
+  int4 Tmp3 = {sign(In3[1].xyz), sign(In3[1].w)};
+  Out3[1] = Tmp3;
+  Out3[2].xy = sign(In3[0].xy);
+
+  int X = sign(In4[0]); // testing nan
+  Out4[0] = (X == 1 || X == 0 || X == -1);
+  X = sign(In4[1]); // testing -nan
+  Out4[1] = (X == 1 || X == 0 || X == -1);
+  X = sign(In4[2]); // testing denorm
+  Out4[2] = (X == 1 || X == 0);
+  X = sign(In4[3]); // testing -denorm
+  Out4[3] = (X == 0 || X == -1);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In1
+    Format: Int32
+    Stride: 16
+    Data: [-1, 0, -2147483648, 2147483647]
+  - Name: In2
+    Format: UInt32
+    Stride: 16
+    Data: [1, 0xffffffff, 0, 10]
+  - Name: In3
+    Format: Float32
+    Stride: 16
+    Data: [0, -0, -1.3, inf, -inf, -0.5, -0.05, 19]
+  - Name: In4
+    Format: Float32
+    Stride: 4
+    Data: [nan, -nan, 0x1.e7d42cp-127, -0x1.e7d42cp-127]
+  - Name: Out1
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut1 # The result we expect
+    Format: Int32
+    Stride: 16
+    Data: [-1, 0, -1, 1, -1, 0, -1, 1, -1, 0, 0, 0] # Last two are filler
+  - Name: Out2
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 48 
+  - Name: ExpectedOut2 # The result we expect
+    Format: Int32
+    Stride: 16
+    Data: [1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0] # Last two are filler
+  - Name: Out3
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 48 
+  - Name: ExpectedOut3 # The result we expect
+    Format: Int32
+    Stride: 16
+    Data: [0, 0, -1, 1, -1, -1, -1, 1, 0, 0, 0, 0]
+  - Name: Out4
+    Format: UInt32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOut4
+    Format: UInt32
+    Stride: 4
+    Data: [1, 1, 1, 1]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: Test3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: Test4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+DescriptorSets:
+  - Resources:
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: In4
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+...
+#--- end
+
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7512
+# XFAIL: DXC-Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

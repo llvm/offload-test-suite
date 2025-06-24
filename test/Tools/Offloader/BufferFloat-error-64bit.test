@@ -46,19 +46,36 @@ Buffers:
     Data: [ 0.0 ] # not nan
 Results:
   - Result: Test1
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 1
     Actual: Out1
     Expected: Expected1
   - Result: Test2 # Denorm value but mode isn't Any
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 1
     DenormMode: Preserve # same to use FTZ
     Actual: Out2
     Expected: Expected2
   - Result: Test3
-    Rule: BufferFuzzy
+    Rule: BufferFloatULP
     ULPT: 0
+    Actual: Out3
+    Expected: Expected3
+  # test BufferFloatEpsilon
+  - Result: Test4
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.1
+    Actual: Out1
+    Expected: Expected1
+  - Result: Test5 # Denorm value but mode isn't Any
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    DenormMode: Preserve # same to use FTZ
+    Actual: Out2
+    Expected: Expected2
+  - Result: Test6
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
     Actual: Out3
     Expected: Expected3
 DescriptorSets:
@@ -139,6 +156,75 @@ DescriptorSets:
 # CHECK: Depth:           0
 
 # CHECK: Test failed: Test3
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected3
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ 0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out3
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ nan ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test4
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ 1.5, 2.5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out1
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ 20.3, 5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test5
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected2
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ 2.22507e-308 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out2
+# CHECK: Format:          Float64
+# CHECK: Stride:          8
+# CHECK: Data:            [ 0 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+
+# CHECK: Test failed: Test6
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected3
