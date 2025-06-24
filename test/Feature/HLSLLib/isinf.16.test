@@ -57,7 +57,9 @@ DescriptorSets:
 
 # llvm/llvm-project#141089
 # XFAIL: Clang-Vulkan
-# issue with 16 bit ops; no hlk tests
+
+# https://github.com/llvm/llvm-project/issues/145571
+# XFAIL: Clang && DirectX-NV
 
 # A bug in the Metal Shader Converter caused it to mis-translate this operation.
 # Version 3 fixes this issue.
