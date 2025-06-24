@@ -86,9 +86,6 @@ DescriptorSets:
 # https://github.com/llvm/llvm-project/issues/143003
 # XFAIL: Clang-Vulkan
 
-# https://github.com/llvm/llvm-project/issues/144966
-# XFAIL: Clang-DirectX && asserts
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
