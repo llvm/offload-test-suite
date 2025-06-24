@@ -121,7 +121,7 @@ debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
   }
   llvm::dbgs() << '\n';
 
-  // Return true to true the validation error or warning into an error in the
+  // Return true to turn the validation error or warning into an error in the
   // vulkan API. This should causes tests to fail.
   const bool IsErrorOrWarning =
       MessageSeverity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
@@ -349,9 +349,6 @@ public:
     Features13.pNext = &Features14;
     Features14.pNext = NULL;
     vkGetPhysicalDeviceFeatures2(Device, &Features);
-
-    Features.features.shaderStorageImageReadWithoutFormat = true;
-    Features.features.shaderStorageImageWriteWithoutFormat = true;
 
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
@@ -903,7 +900,7 @@ public:
     AppInfo.pApplicationName = "OffloadTest";
     // TODO: We should set this based on a command line flag, and simplify the
     // code below to error if the requested version isn't supported.
-    AppInfo.apiVersion = VK_API_VERSION_1_3;
+    AppInfo.apiVersion = VK_API_VERSION_1_1;
 
     VkInstanceCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -930,9 +927,6 @@ public:
     {
       auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
-      llvm::dbgs() << "Using API version "
-                   << VK_API_VERSION_MAJOR(AppInfo.apiVersion) << "."
-                   << VK_API_VERSION_MINOR(AppInfo.apiVersion) << ".\n";
     }
     vkDestroyInstance(Instance, NULL);
     Instance = VK_NULL_HANDLE;
