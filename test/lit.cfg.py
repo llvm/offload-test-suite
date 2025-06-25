@@ -110,14 +110,16 @@ if config.offloadtest_enable_metal:
     MSCVersionOutput = subprocess.check_output(
         ["metal-shaderconverter", "--version"]
     ).decode("UTF-8")
-    VersionRegex = re.compile("metal-irconverter version: ([0-9]+)\.([0-9]+)\.([0-9]+)")
+    VersionRegex = re.compile(
+        r"metal-irconverter version: ([0-9]+)\.([0-9]+)\.([0-9]+)")
     VersionMatch = VersionRegex.match(MSCVersionOutput)
     if VersionMatch:
         FullVersion = ".".join(VersionMatch.groups()[0:3])
         config.available_features.add("metal-shaderconverter-%s" % FullVersion)
         MajorVersion = int(VersionMatch.group(1))
         for I in range(1, MajorVersion + 1):
-            config.available_features.add("metal-shaderconverter-%s.0.0-or-later" % I)
+            config.available_features.add(
+                f"metal-shaderconverter-{I}.0.0-or-later")
 
 HLSLCompiler = ""
 if config.offloadtest_test_clang:
