@@ -82,6 +82,9 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
+# Fails with 'gpu-exec: error: Failed to materializeAll.:'
+# XFAIL: Metal
+
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
 # https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5
 # UNSUPPORTED: DXC-Vulkan
@@ -92,6 +95,9 @@ DescriptorSets:
 
 # https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang-Vulkan
+
+# https://github.com/llvm/llvm-project/issues/145752
+# XFAIL: Clang-DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
