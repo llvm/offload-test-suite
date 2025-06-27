@@ -123,14 +123,14 @@ jobs:
       - name: Checkout OffloadTest
         uses: actions/checkout@v4
         with:
-          repository: llvm-beanz/offload-test-suite
+          repository: llvm/offload-test-suite
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1
       - name: Checkout Golden Images
         uses: actions/checkout@v4
         with:
-          repository: llvm-beanz/offload-golden-images
+          repository: llvm/offload-golden-images
           ref: main
           path: golden-images
           fetch-depth: 1
