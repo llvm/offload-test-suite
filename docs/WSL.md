@@ -10,7 +10,7 @@ These binaries, in addition to the WSL-specific headers and libraries made avail
 1. Install the DirectX-Headers package (usually named `directx-headers-dev`) from your preferred package manager.
 This is to obtain the libraries: DirectX-Guids (`libDirectX-Guids.a`) and d3dx12-format-properties (`libd3dx12-format-properties.a`)
 Alternatively, build and install the DirectX-Headers from the [original repo](https://github.com/microsoft/DirectX-Headers) or the git submodule of this repository: `third-party/DirectX-Headers`
-1. Install the rest of the [prerequisites](https://github.com/llvm-beanz/offload-test-suite/tree/main?tab=readme-ov-file#prerequisites) and follow the [instructions](https://github.com/llvm-beanz/offload-test-suite/tree/main?tab=readme-ov-file#adding-to-llvm-build) to add the experimental runtime test suite for HLSL to an LLVM build
+1. Install the rest of the [prerequisites](https://github.com/llvm/offload-test-suite/tree/main?tab=readme-ov-file#prerequisites) and follow the [instructions](https://github.com/llvm/offload-test-suite/tree/main?tab=readme-ov-file#adding-to-llvm-build) to add the experimental runtime test suite for HLSL to an LLVM build
 
 ## Known Issues
 
