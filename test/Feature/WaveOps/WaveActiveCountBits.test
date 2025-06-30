@@ -1,0 +1,73 @@
+#--- source.hlsl
+RWBuffer<int> value;
+RWStructuredBuffer<uint> Out : register(u1);
+
+[numthreads(4, 1, 1)]
+void main(uint3 threadID : SV_DispatchThreadID) {
+  bool B1 = false;
+  
+  switch (value[threadID.x]) {
+    case 0: // threads 0 and 1; result is number of active lanes (2)
+      Out[threadID.x + 4] = WaveActiveCountBits(true); // threads 0 and 1
+    case 2:
+      B1 = true; // set b1 to true for thread 3
+      break;
+    default:
+      Out[threadID.x + 4] = WaveActiveCountBits(false); // thread 2; expect 0
+      break;
+  }
+  // should be 3 because B1 set to true for threads 0,1, and 3.
+  uint Count = WaveActiveCountBits(B1);
+  Out[threadID.x] = Count;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: value
+    Format: Int32
+    Data: [ 0, 0, 1, 2]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    ZeroInitSize: 28
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [3, 3, 3, 3, 2, 2, 0]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: value
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# https://github.com/llvm/llvm-project/issues/145513
+# XFAIL: Clang-Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+

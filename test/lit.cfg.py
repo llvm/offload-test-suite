@@ -56,6 +56,12 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("%s-WARP" % API)
     if "Intel" in device["Description"]:
         config.available_features.add("%s-Intel" % API)
+        if "UHD Graphics" in device["Description"] and API == "DirectX":
+            # When Intel resolves the driver issue and tests XFAILing on the
+            # feature below are resolved we can resolve
+            # https://github.com/llvm/offload-test-suite/issues/226 by updating
+            # this check to only XFAIL on old driver versions.
+            config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("%s-NV" % API)
     if "AMD" in device["Description"]:
@@ -74,6 +80,7 @@ def setDeviceFeatures(config, device, compiler):
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
+        config.available_features.add("Int64")
         config.available_features.add("Half")
         config.available_features.add("Int64")
 
@@ -104,14 +111,16 @@ if config.offloadtest_enable_metal:
     MSCVersionOutput = subprocess.check_output(
         ["metal-shaderconverter", "--version"]
     ).decode("UTF-8")
-    VersionRegex = re.compile("metal-irconverter version: ([0-9]+)\.([0-9]+)\.([0-9]+)")
+    VersionRegex = re.compile(
+        r"metal-irconverter version: ([0-9]+)\.([0-9]+)\.([0-9]+)")
     VersionMatch = VersionRegex.match(MSCVersionOutput)
     if VersionMatch:
         FullVersion = ".".join(VersionMatch.groups()[0:3])
         config.available_features.add("metal-shaderconverter-%s" % FullVersion)
         MajorVersion = int(VersionMatch.group(1))
         for I in range(1, MajorVersion + 1):
-            config.available_features.add("metal-shaderconverter-%s.0.0-or-later" % I)
+            config.available_features.add(
+                f"metal-shaderconverter-{I}.0.0-or-later")
 
 HLSLCompiler = ""
 if config.offloadtest_test_clang:
