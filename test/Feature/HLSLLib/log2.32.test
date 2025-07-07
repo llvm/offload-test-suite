@@ -1,0 +1,67 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = log2(In[0]);
+  float4 Tmp = {log2(In[1].xyz), log2(In[1].w)};
+  Out[1] = Tmp;
+  float4 Tmp2 = {log2(In[2].xy), log2(In[2].zw)};
+  Out[2] = Tmp2;
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, 1, -1, 4, 0.25, 2048,]
+    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1, -1, 4, 1/4, 2048,
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ nan, nan, -inf, -inf, -inf, -inf, inf, 0, nan, 2, -2, 11,]
+    #  NaN, NaN, NaN, Inf, Inf, Inf, NaN, 0, NaN, 2, -2, 11,
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
