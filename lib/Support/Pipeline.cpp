@@ -46,8 +46,8 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       R.ExpectedPtr = P.getBuffer(R.Expected);
       if (!R.ExpectedPtr)
         I.setError(Twine("Reference buffer ") + R.Expected + " not found!");
-      if (R.TheRule == Rule::BufferFloatULP ||
-          R.TheRule == Rule::BufferFloatEpsilon) {
+      if (R.ComparisonRule == Rule::BufferFloatULP ||
+          R.ComparisonRule == Rule::BufferFloatEpsilon) {
         if (!isFloatingPointFormat(R.ActualPtr->Format) ||
             !isFloatingPointFormat(R.ExpectedPtr->Format))
           I.setError(Twine("BufferFloat only accepts Float buffers"));
@@ -226,11 +226,11 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
 void MappingTraits<offloadtest::Result>::mapping(IO &I,
                                                  offloadtest::Result &R) {
   I.mapRequired("Result", R.Name);
-  I.mapRequired("Rule", R.TheRule);
+  I.mapRequired("Rule", R.ComparisonRule);
   I.mapRequired("Actual", R.Actual);
   I.mapRequired("Expected", R.Expected);
 
-  switch (R.TheRule) {
+  switch (R.ComparisonRule) {
   case Rule::BufferFloatULP: {
     I.mapRequired("ULPT", R.ULPT);
     I.mapOptional("DenormMode", R.DM);
