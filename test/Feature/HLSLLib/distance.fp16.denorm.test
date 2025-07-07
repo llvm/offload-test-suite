@@ -23,10 +23,10 @@ void main() {
   // distance({inf, NaN, -inf, inf}, {1.0, 1.0, 1.0, NaN}) = NaN
   Result[4] = distance(X[0].xyzw, Y[0].xyzw);
 
-  // distance({denorm}, {1.0}) = denorm
+  // distance({denorm}, {1.0}) = 1.0
   Result[5] = distance(Y[0].z, Y[0].x);
 
-  // distance({-denorm}, {1.0}) = denorm
+  // distance({-denorm}, {1.0}) = 1.0
   Result[6] = distance(Y[0].y, Y[0].x);
 }
 
@@ -45,7 +45,7 @@ Buffers:
   - Name: Y
     Format: Float16
     Stride: 8
-    Data: [ 0x003C, 0x8001, 0x0001, 0x7E00 ]
+    Data: [ 0x3C00, 0x8001, 0x0001, 0x7E00 ]
   - Name: Result
     Format: Float16
     Stride: 2
@@ -53,7 +53,7 @@ Buffers:
   - Name: ExpectedResult
     Format: Float16
     Stride: 2
-    Data: [ 0x7C00, 0x7E00, 0x7C00, 0x7E00, 0x7E00, 0x3B, 0x3D, 0x0 ]
+    Data: [ 0x7C00, 0x7E00, 0x7C00, 0xFE00, 0xFE00, 0x3C00, 0x3C00, 0x0 ]
 Results:
   - Result: CheckResult
     Rule: BufferFloatULP
