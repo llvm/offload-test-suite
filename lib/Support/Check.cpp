@@ -268,7 +268,7 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
 }
 
 llvm::Error verifyResult(offloadtest::Result R) {
-  switch (R.Rule) {
+  switch (R.ComparisonRule) {
   case offloadtest::Rule::BufferExact: {
     if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
       return llvm::Error::success();

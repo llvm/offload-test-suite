@@ -116,7 +116,7 @@ struct Buffer {
 
 struct Result {
   std::string Name;
-  Rule Rule;
+  Rule ComparisonRule;
   std::string Actual;
   std::string Expected;
   Buffer *ActualPtr = nullptr;
