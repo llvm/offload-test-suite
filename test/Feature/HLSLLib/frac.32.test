@@ -61,8 +61,8 @@ DescriptorSets:
 ...
 #--- end
 
-# discrepancy between directx and vulkan for -denorm, but gets it right for denorm...
-# XFAIL: Vulkan
+# On my NVIDIA GPU: discrepancy between directx and vulkan for -denorm, but gets it right for denorm...
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
