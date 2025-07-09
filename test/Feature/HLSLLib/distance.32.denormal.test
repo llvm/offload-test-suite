@@ -8,26 +8,26 @@ RWStructuredBuffer<float> Result : register(u2);
 [numthreads(1,1,1)]
 void main() {
   // test special cases
-  // distance(inf, 1.0) = inf
-  Result[0] = distance(X[0].x, Y[0].x);
+  // distance({inf, 0.0}, {0.0, 1.0}) = inf
+  Result[0] = distance(X[0].xw, Y[0].wx);
 
-  // distance(NaN, 1.0) = NaN
-  Result[1] = distance(X[0].y, Y[0].x);
+  // distance({NaN, 0.0}, {1.0, 0.0}) = NaN
+  Result[1] = distance(X[0].yw, Y[0].xw);
 
-  // distance(-inf, 1.0) = inf
-  Result[2] = distance(X[0].z, Y[0].x);
+  // distance({-inf, 0.0}, {0.0, 1.0}) = inf
+  Result[2] = distance(X[0].zw, Y[0].wx);
 
-  // distance(inf, NaN) = NaN
-  Result[3] = distance(X[0].w, Y[0].w);
+  // distance({inf, 0.0}, {0.0, NaN}) = NaN
+  Result[3] = distance(X[0].xw, X[0].wy);
 
-  // distance({inf, NaN, -inf, inf}, {1.0, 1.0, 1.0, NaN}) = NaN
+  // distance({inf, NaN, -inf, 0}, {1.0, -denorm, denorm, 0}) = NaN
   Result[4] = distance(X[0].xyzw, Y[0].xyzw);
 
-  // distance({denorm}, {1.0}) = denorm
-  Result[5] = distance(Y[0].z, Y[0].x);
+  // distance({denorm, denorm}, {1.0, 0.0}) = 1.0
+  Result[5] = distance(Y[0].zz, Y[0].xw);
 
-  // distance({-denorm}, {1.0}) = denorm
-  Result[6] = distance(Y[0].y, Y[0].x);
+  // distance({-denorm, -denorm}, {0.0, 1.0}) = 1.0
+  Result[6] = distance(Y[0].yy, Y[0].wx);
 }
 
 //--- pipeline.yaml
@@ -41,11 +41,11 @@ Buffers:
   - Name: X
     Format: Float32
     Stride: 16
-    Data: [ inf, NaN, -inf, inf ]
+    Data: [ inf, NaN, -inf, 0 ]
   - Name: Y
     Format: Float32
     Stride: 16
-    Data: [ 1.0, -0x1.e7d42cp-127, 0x1.e7d42cp-127, NaN ] 
+    Data: [ 1.0, -0x1.e7d42cp-127, 0x1.e7d42cp-127, 0 ] 
   - Name: Result
     Format: Float32
     Stride: 4
@@ -86,7 +86,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
