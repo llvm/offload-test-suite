@@ -78,6 +78,8 @@ DescriptorSets:
 #--- end
 
 # UNSUPPORTED: Clang-Vulkan
+# Clang-Vulkan is unsupported because of two validation errors
+# This issue tracks its resolution: https://github.com/llvm/offload-test-suite/issues/285
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
