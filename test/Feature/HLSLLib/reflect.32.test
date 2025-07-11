@@ -1,0 +1,209 @@
+#--- source.hlsl
+
+// This test tests three different reflection scenarios:
+// -----> |
+// -----> /
+// -----> -
+// each test case will cycle through 1-4 dimensions.
+
+StructuredBuffer<float4> IncidentRay : register(t0);
+StructuredBuffer<float4> Wall1 : register(t1);
+StructuredBuffer<float4> Wall2 : register(t2);
+StructuredBuffer<float4> Wall3 : register(t3);
+
+RWStructuredBuffer<float> Result1D : register(u4);
+RWStructuredBuffer<float2> Result2D : register(u5);
+// float4 for simplification in memory alignment
+RWStructuredBuffer<float4> Result3D : register(u6);
+RWStructuredBuffer<float4> Result4D : register(u7);
+
+[numthreads(1,1,1)]
+void main() {
+  // scenario 1: -----> |
+
+  float Wall1_1D = reflect(IncidentRay[0].x, Wall1[0].x);
+  Result1D[0] = Wall1_1D;
+  float2 Wall1_2D = reflect(IncidentRay[0].xy, normalize(Wall1[0].xy));
+  Result2D[0] = Wall1_2D;
+  float3 Wall1_3D = reflect(IncidentRay[0].xyz, normalize(Wall1[0].xyz));
+  Result3D[0] = float4(Wall1_3D, 0.0);
+  float4 Wall1_4D = reflect(IncidentRay[0].xyzw, normalize(Wall1[0].xyzw));
+  Result4D[0] = Wall1_4D;
+
+  // scenario 2: -----> /
+
+  // The 1D scenario isn't applicable because there is no slanted
+  // wall that can be normalized in 1 dimensional space, since a slant
+  // requires at least 2 dimensions.
+  Result1D[1] = 0.0; 
+
+  float2 Wall2_2D = reflect(IncidentRay[0].xy, normalize(Wall2[0].xy));
+  Result2D[1] = Wall2_2D;
+  float3 Wall2_3D = reflect(IncidentRay[0].xyz, normalize(Wall2[0].xyz));
+  Result3D[1] = float4(Wall2_3D, 0.0);
+  float4 Wall2_4D = reflect(IncidentRay[0].xyzw, normalize(Wall2[0].xyzw));
+  Result4D[1] = Wall2_4D;
+
+  // scenario 3: -----> -
+
+  // The 1D scenario isn't applicable because there is no horizontal
+  // wall that can be normalized in 1 dimensional space, since the x
+  // component must be 0.
+  float Wall3_1D = 0.0;
+  Result1D[2] = Wall3_1D;
+  float2 Wall3_2D = reflect(IncidentRay[0].xy, normalize(Wall3[0].xy));
+  Result2D[2] = Wall3_2D;
+  float3 Wall3_3D = reflect(IncidentRay[0].xyz, normalize(Wall3[0].xyz));
+  Result3D[2] = float4(Wall3_3D, 0.0);
+  float4 Wall3_4D = reflect(IncidentRay[0].xyzw, normalize(Wall3[0].xyzw));
+  Result4D[2] = Wall3_4D;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: IncidentRay
+    Format: Float32
+    Stride: 16
+    Data: [ 2.5, 0.0, 0.0, 0.0 ]
+  - Name: Wall1
+    Format: Float32
+    Stride: 16
+    Data: [ -1.0, 0.0, 0.0, 0.0 ]
+  - Name: Wall2
+    Format: Float32
+    Stride: 16
+    Data: [ -1.0, 1.0, 0.0, 0.0 ]
+  - Name: Wall3
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 1.0, 0.0, 0.0 ]
+ 
+  - Name: Result1D
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedResult1D
+    Format: Float32
+    Stride: 4
+    Data: [ -2.5, 0.0, 0.0, 0.0 ]
+
+  - Name: Result2D
+    Format: Float32
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: ExpectedResult2D
+    Format: Float32
+    Stride: 8
+    Data: [ -2.5, 0.0, 0.0, 2.5, 2.5, 0.0, 0.0, 0.0 ]
+
+  - Name: Result3D
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedResult3D
+    Format: Float32
+    Stride: 16
+    Data: [ -2.5, 0.0, 0.0, 0.0, 0.0, 2.5, 0.0, 0.0, 2.5, 0.0, 0.0, 0.0 ]
+
+  - Name: Result4D
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedResult4D
+    Format: Float32
+    Stride: 16
+    Data: [ -2.5, 0.0, 0.0, 0.0, 0.0, 2.5, 0.0, 0.0, 2.5, 0.0, 0.0, 0.0 ]
+
+Results:
+  - Result: CheckResult1D
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.000002 
+    Actual: Result1D
+    Expected: ExpectedResult1D
+  - Result: CheckResult2D
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.000002 
+    Actual: Result2D
+    Expected: ExpectedResult2D
+  - Result: CheckResult3D
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.000002 
+    Actual: Result3D
+    Expected: ExpectedResult3D
+  - Result: CheckResult4D
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.000002 
+    Actual: Result4D
+    Expected: ExpectedResult4D
+
+DescriptorSets:
+  - Resources:
+    - Name: IncidentRay
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Wall1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Wall2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Wall3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Result1D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Result2D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Result3D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Result4D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7    
+...
+#--- end
+# UNSUPPORTED: Clang-Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
