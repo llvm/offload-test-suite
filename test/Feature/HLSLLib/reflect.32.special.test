@@ -1,0 +1,94 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> X : register(t0);
+StructuredBuffer<float4> Y : register(t1);
+
+RWStructuredBuffer<float2> Result : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  // test special cases
+  // reflect({inf, 0.0}, {0.0, 1.0}) = {inf, 0.0}
+  Result[0] = reflect(X[0].xw, float2(0.0, 1.0));
+
+  // reflect({NaN, 0.0}, {1.0, 0.0}) = {NaN, 0.0}
+  Result[1] = reflect(X[0].yw, float2(1.0, 0.0));
+
+  // reflect({-inf, 0.0}, {0.0, 1.0}) = {-inf, 0.0}
+  Result[2] = reflect(X[0].zw, float2(0.0, 1.0));
+
+  // reflect({inf, 0.0}, {0.0, NaN}) = {inf, 0.0}
+  Result[3] = reflect(X[0].xw, normalize(X[0].wy));
+
+  // reflect({inf, denorm}, {-1.0, 0}) = {-inf, denorm}
+  Result[4] = reflect(float2(X[0].x, Y[0].z), float2(-1.0, 0.0));
+
+  // reflect({denorm, denorm}, {-1.0, 0.0}) = {-denorm, denorm}
+  Result[5] = reflect(Y[0].zz, float2(-1.0, 0.0));
+
+  // reflect({-denorm, -denorm}, {0.0, 1.0}) = {-denorm, denorm}
+  Result[6] = reflect(Y[0].yy, float2(0.0, 1.0));
+
+  // reflect({-denorm, -denorm}, normalize({0.0, NaN})) = {NaN, NaN}
+  Result[7] = reflect(Y[0].yy, normalize(X[0].wy));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Float32
+    Stride: 16
+    Data: [ inf, NaN, -inf, 0 ]
+  - Name: Y
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, -0x1.e7d42cp-127, 0x1.e7d42cp-127, -1 ] 
+  - Name: Result
+    Format: Float32
+    Stride: 8
+    ZeroInitSize: 64
+  - Name: ExpectedResult
+    Format: Float32
+    Stride: 8
+    Data: [ inf, 0, NaN, 0, -inf, 0, NaN, NaN, -inf, 0x1.e7d42cp-127, -0x1.e7d42cp-127, 0x1.e7d42cp-127, -0x1.e7d42cp-127, 0x1.e7d42cp-127, NaN, NaN ]
+Results:
+  - Result: CheckResult
+    Rule: BufferFloatULP
+    ULPT: 1 
+    Actual: Result
+    Expected: ExpectedResult
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Result
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
