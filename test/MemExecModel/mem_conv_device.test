@@ -1,0 +1,61 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> write_val : register(u0);
+RWStructuredBuffer<uint> buf : register(u1);
+
+[numthreads(256,1,1)]
+void main(uint3 TID : SV_DispatchThreadID) {
+  uint tid = TID.x;
+  uint temp;
+  InterlockedExchange(write_val[0], tid, temp);
+  uint read_val = write_val[0];
+  // Check if all threads in the wave read the same value
+  buf[tid] = uint(WaveActiveAllEqual(read_val));
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [6553, 1, 1]
+Buffers:
+  - Name: write_val
+    Format: UInt32
+    Stride: 4
+    Data: [0]
+  - Name: buf
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 1677568
+  - Name: expected
+    Format: UInt32
+    Stride: 4
+    Fill: 1
+    Size: 1677568
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: buf
+    Expected: expected
+DescriptorSets:
+  - Resources:
+    - Name: write_val
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: buf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
