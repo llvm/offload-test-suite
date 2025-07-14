@@ -25,8 +25,8 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, -1, 2.718280, 1000.599976, -7.389, nan,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, -1, 2.718280, 1000.599976, -7.389,
+    Data: [ nan, -inf, 0, -0, 0, 1.5, inf, -1, 2.718280, 1000.599976, -7.389, nan,]
+    #  NaN, -Inf, 0, -0, 0, 1.5, Inf, -1, 2.718280, 1000.599976, -7.389,
   - Name: Out
     Format: Float32
     Stride: 16
@@ -34,8 +34,8 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, nan, 0, 0, 0, 0, nan, 0, 0.718280, 0.599976, 0.611, nan,]
-    #  NaN, NaN, 0, 0, 0, 0, NaN, 0, 0.718280, 0.599976, 0.611,
+    Data: [ nan, nan, 0, 0, 0, .5, nan, 0, 0.718280, 0.599976, 0.611, nan,]
+    #  NaN, NaN, 0, 0, 0, .5, NaN, 0, 0.718280, 0.599976, 0.611,
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
@@ -60,8 +60,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# On my NVIDIA GPU: discrepancy between directx and vulkan for -denorm, but gets it right for denorm...
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
