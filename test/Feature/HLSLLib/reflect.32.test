@@ -70,7 +70,7 @@ Buffers:
   - Name: IncidentRay
     Format: Float32
     Stride: 16
-    Data: [ 2.5, 0.0, 0.0, 0.0 ]
+    Data: [ 2.5, -0.0, 0.0, 0.0 ]
   - Name: Wall1
     Format: Float32
     Stride: 16
