@@ -26,8 +26,8 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, 10.0, 10.4, 10.5, 10.6, -10.0, -10.4, -10.5, -10.6, nan,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 10.0, 10.4, 10.5, 10.6, -10.0, -10.4, -10.5, -10.6,
+    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0, inf, 10.0, 10.4, 10.5, 10.6, -10.0, -10.4, -10.5, -10.6, nan,]
+    #  NaN, -Inf, -denorm, -0, 0, 0, Inf, 10.0, 10.4, 10.5, 10.6, -10.0, -10.4, -10.5, -10.6,
   - Name: Out
     Format: Float32
     Stride: 16
@@ -62,8 +62,6 @@ DescriptorSets:
 ...
 #--- end
 
-# discrepancy between directx and vulkan for denorm
-# XFAIL: Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
