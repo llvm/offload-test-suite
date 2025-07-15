@@ -111,11 +111,24 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
       I.mapRequired("Data", Arr);                                              \
     } else {                                                                   \
       int64_t ZeroInitSize;                                                    \
+      int64_t Size = 0;                                                        \
+      std::optional<Type> Fill;                                                \
       I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
+      I.mapOptional("Fill", Fill);                                             \
+      I.mapOptional("Size", Size, 0);                                          \
       if (ZeroInitSize > 0) {                                                  \
         B.Size = ZeroInitSize;                                                 \
         B.Data.reset(new char[B.Size]);                                        \
         memset(B.Data.get(), 0, B.Size);                                       \
+        break;                                                                 \
+      }                                                                        \
+      if (Fill.has_value()) {                                                  \
+        if (Size == 0)                                                         \
+          return I.setError("'Size' must be provided when using 'Fill'");      \
+        B.Size = Size * sizeof(Type);                                          \
+        B.Data.reset(new char[B.Size]);                                        \
+        std::fill_n(reinterpret_cast<Type *>(B.Data.get()), Size,              \
+                    Fill.value());                                             \
         break;                                                                 \
       }                                                                        \
       llvm::SmallVector<Type, 64> Arr;                                         \
@@ -139,7 +152,8 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     DATA_CASE(Float16, llvm::yaml::Hex16)
     DATA_CASE(Float32, float)
     DATA_CASE(Float64, double)
-    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a bool using 4 bytes.
+    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a
+                              // bool using 4 bytes.
   }
 
   I.mapOptional("OutputProps", B.OutputProps);
