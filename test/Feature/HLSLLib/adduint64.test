@@ -1,7 +1,7 @@
 #--- source.hlsl
 
-StructuredBuffer<float4> In : register(t0);
-RWStructuredBuffer<float4> Out : register(u1);
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<uint4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
@@ -11,6 +11,8 @@ void main() {
   Out[1].zw = AddUint64(In[1].zw, In[1].zw);
   Out[2].xy = AddUint64(In[2].xy, In[2].xy);
   Out[2].zw = AddUint64(In[2].zw, In[2].zw);
+  Out[3] = AddUint64(In[0], In[0]); // vec4 test
+  Out[4].xy = AddUint64(uint2(1,2), uint2(3,4));
 }
 
 //--- pipeline.yaml
@@ -22,21 +24,20 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
-    Format: Float32
+    Format: UInt32
     Stride: 16
     Data: [ 1, 0, 1, 256, 10000, 10001, 0x80000000, 1, 0x7fffffff, 0x7fffffff, 0xffffffff, 0x7fffffff ]
   - Name: Out
-    Format: Float32
+    Format: UInt32
     Stride: 16
-    ZeroInitSize: 48
+    ZeroInitSize: 80
   - Name: ExpectedOut # The result we expect
-    Format: Float32
+    Format: UInt32
     Stride: 16
-    Data: [ 2, 0, 2, 512, 20000, 20002, 0, 3, 0xfffffffe, 0xfffffffe, 0xfffffffe, 0xffffffff ]
+    Data: [ 2, 0, 2, 512, 20000, 20002, 0, 3, 0xfffffffe, 0xfffffffe, 0xfffffffe, 0xffffffff, 2, 0, 2, 512, 4, 6, 0, 0 ]
 Results:
   - Result: Test1
-    Rule: BufferFloatEpsilon
-    Epsilon: 0
+    Rule: BufferExact
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
