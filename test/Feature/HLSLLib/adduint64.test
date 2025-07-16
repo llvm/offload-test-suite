@@ -1,0 +1,64 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0].xy = AddUint64(In[0].xy, In[0].xy);
+  Out[0].zw = AddUint64(In[0].zw, In[0].zw);
+  Out[1].xy = AddUint64(In[1].xy, In[1].xy);
+  Out[1].zw = AddUint64(In[1].zw, In[1].zw);
+  Out[2].xy = AddUint64(In[2].xy, In[2].xy);
+  Out[2].zw = AddUint64(In[2].zw, In[2].zw);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 0, 1, 256, 10000, 10001, 0x80000000, 1, 0x7fffffff, 0x7fffffff, 0xffffffff, 0x7fffffff ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ 2, 0, 2, 512, 20000, 20002, 0, 3, 0xfffffffe, 0xfffffffe, 0xfffffffe, 0xffffffff ]
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang-Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
