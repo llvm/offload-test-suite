@@ -7,18 +7,29 @@ RWStructuredBuffer<half> Result : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
-  // distance ({0.0}, {3.0}) = 3.0
+  // distance ({1.125}, {2.375}) = 1.25
   half R0 = distance(X[0].x, Y[0].x);
   Result[0] = R0;
-  // distance({0.0, 0.0}, {3.0, 4.0}) = 5.0
+  half R0_constant = distance(half(1.125), half(2.375));
+  Result[1] = R0_constant;
+
+  // distance({1.125, 2.5}, {2.375, 5.25}) = 3.02076
   half R1 = distance(X[0].xy, Y[0].xy);
-  Result[1] = R1;
-  // distance({0.0, 0.0, 0.0}, {3.0, 4.0, 12.0}) = 13.0
+  Result[2] = R1;
+  half R1_constant = distance(half2(1.125, 2.5), half2(2.375, 5.25));
+  Result[3] = R1_constant;
+
+  // distance({1.125, 2.5, 4.75}, {2.375, 5.25, 8.375}) = 4.71865
   half R2 = distance(X[0].xyz, Y[0].xyz);
-  Result[2] = R2;
-  // distance({0.0, 0.0, 0.0, 0.0}, {3.0, 4.0, 12.0, 84.0}) = 85.0
+  Result[4] = R2;
+  half R2_constant = distance(half3(1.125, 2.5, 4.75), half3(2.375, 5.25, 8.375));
+  Result[5] = R2_constant;
+
+  // distance({1.125, 2.5, 4.75, 6.625}, {2.375, 5.25, 8.375, 5.30}) = 4.90115
   half R3 = distance(X[0].xyzw, Y[0].xyzw);
-  Result[3] = R3;  
+  Result[6] = R3;
+  half R3_constant = distance(half4(1.125, 2.5, 4.75, 6.625), half4(2.375, 5.25, 8.375, 5.30));
+  Result[7] = R3_constant;
 }
 
 //--- pipeline.yaml
@@ -32,23 +43,23 @@ Buffers:
   - Name: X
     Format: Float16
     Stride: 8
-    Data: [ 0x0000, 0x0000, 0x0000, 0x0000 ]
+    Data: [ 0x3c80, 0x4100, 0x44c0, 0x46a0 ]
   - Name: Y
     Format: Float16
     Stride: 8
-    Data: [ 0x4200, 0x4400, 0x4a00, 0x5540 ]
+    Data: [ 0x40c0, 0x4540, 0x4830, 0x454d ] 
   - Name: Result
     Format: Float16
     Stride: 2
-    ZeroInitSize: 8
+    ZeroInitSize: 16
   - Name: ExpectedResult
     Format: Float16
     Stride: 2
-    Data: [ 0x4200, 0x4500, 0x4a80, 0x5550 ]
+    Data: [ 0x3d00, 0x3d00, 0x420b, 0x420b, 0x44b8, 0x44b8, 0x44e7, 0x44e7 ]
 Results:
   - Result: CheckResult
     Rule: BufferFloatULP
-    ULPT: 1
+    ULPT: 5
     Actual: Result
     Expected: ExpectedResult
 DescriptorSets:

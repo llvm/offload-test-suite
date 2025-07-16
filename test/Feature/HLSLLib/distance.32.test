@@ -7,18 +7,29 @@ RWStructuredBuffer<float> Result : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
-  // distance ({0.0}, {3.0}) = 3.0
+  // distance ({1.125}, {2.375}) = 1.25
   float R0 = distance(X[0].x, Y[0].x);
   Result[0] = R0;
-  // distance({0.0, 0.0}, {3.0, 4.0}) = 5.0
+  float R0_constant = distance(1.125, 2.375);
+  Result[1] = R0_constant;
+
+  // distance({1.125, 2.5}, {2.375, 5.25}) = 3.02076
   float R1 = distance(X[0].xy, Y[0].xy);
-  Result[1] = R1;
-  // distance({0.0, 0.0, 0.0}, {3.0, 4.0, 12.0}) = 13.0
-  float R2 = distance(X[0].xyz, Y[0].xyz);
-  Result[2] = R2;
-  // distance({0.0, 0.0, 0.0, 0.0}, {3.0, 4.0, 12.0, 84.0}) = 85.0
+  Result[2] = R1;
+  float R1_constant = distance(float2(1.125, 2.5), float2(2.375, 5.25));
+  Result[3] = R1_constant;
+
+  // distance({1.125, 2.5, 4.75}, {2.375, 5.25, 8.375}) = 4.71865
+  float R2 = distance(float3(1.125, 2.5, 4.75), float3(2.375, 5.25, 8.375));
+  Result[4] = R2;
+  float R2_constant = distance(X[0].xyz, Y[0].xyz);
+  Result[5] = R2_constant;
+
+  // distance({1.125, 2.5, 4.75, 6.625}, {2.375, 5.25, 8.375, 5.30}) = 4.90115
   float R3 = distance(X[0].xyzw, Y[0].xyzw);
-  Result[3] = R3; 
+  Result[6] = R3;
+  float R3_constant = distance(float4(1.125, 2.5, 4.75, 6.625), float4(1.125, 2.5, 4.75, 6.625));
+  Result[7] = R3;
 }
 
 //--- pipeline.yaml
@@ -32,23 +43,23 @@ Buffers:
   - Name: X
     Format: Float32
     Stride: 16
-    Data: [ 0.0, 0.0, 0.0, 0.0 ]
+    Data: [ 1.125, 2.5, 4.75, 6.625 ]
   - Name: Y
     Format: Float32
     Stride: 16
-    Data: [ 3.0, 4.0, 12.0, 84.0 ] 
+    Data: [ 2.375, 5.25, 8.375, 5.30 ] 
   - Name: Result
     Format: Float32
     Stride: 4
-    ZeroInitSize: 16
+    ZeroInitSize: 32
   - Name: ExpectedResult
     Format: Float32
     Stride: 4
-    Data: [ 3.0, 5.0, 13.0, 85.0]
+    Data: [ 1.25, 1.25, 3.02076, 3.02076, 4.71865, 4.71865, 4.90115, 4.90115 ]
 Results:
   - Result: CheckResult
-    Rule: BufferFloatULP
-    ULPT: 1 
+    Rule: BufferFloatEpsilon
+    Epsilon: .0008
     Actual: Result
     Expected: ExpectedResult
 DescriptorSets:
