@@ -28,7 +28,7 @@ void main() {
   // distance({1.125, 2.5, 4.75, 6.625}, {2.375, 5.25, 8.375, 5.30}) = 4.90115
   float R3 = distance(X[0].xyzw, Y[0].xyzw);
   Result[6] = R3;
-  float R3_constant = distance(float4(1.125, 2.5, 4.75, 6.625), float4(1.125, 2.5, 4.75, 6.625));
+  float R3_constant = distance(float4(1.125, 2.5, 4.75, 6.625), float4(2.375, 5.25, 8.375, 5.30));
   Result[7] = R3_constant;
 }
 
