@@ -1,5 +1,8 @@
 #--- source.hlsl
 
+// This test tests four different distance scenarios
+// One in 1D, 2D, 3D, and 4D
+
 StructuredBuffer<half4> X : register(t0);
 StructuredBuffer<half4> Y : register(t1);
 
