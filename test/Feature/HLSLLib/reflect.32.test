@@ -1,10 +1,7 @@
 #--- source.hlsl
 
-// This test tests three different reflection scenarios:
-// -----> |
-// -----> /
-// -----> -
-// each test case will cycle through 1-4 dimensions.
+// This test tests three different reflection scenarios
+// One in 2D, 3D, and 4D
 
 StructuredBuffer<float2> IncidentRay2D : register(t0);
 StructuredBuffer<float4> IncidentRay3D : register(t1);
@@ -186,5 +183,5 @@ DescriptorSets:
 # UNSUPPORTED: Clang-Vulkan
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
