@@ -1,0 +1,64 @@
+#--- source.hlsl
+
+StructuredBuffer<uint16_t4> In : register(t0);
+RWStructuredBuffer<uint16_t4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = reversebits(In[0]);
+  uint16_t4 Tmp = {reversebits(In[1].xyz), reversebits(In[1].w)};
+  Out[1] = Tmp;
+  uint16_t4 Tmp2 = {reversebits(In[2].xy), reversebits(In[2].zw)};
+  Out[2] = Tmp2;
+  Out[3] = reversebits(uint16_t4(0, 1, 8, 32767));
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 1, 8, 256, 32767, 65535, 21845, 61680, 4680, 33825, 3976, 49155 ]
+  - Name: Out
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: ExpectedOut # The result we expect
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 32768, 4096, 128, 65534, 65535, 43690, 3855, 4680, 33825, 4592, 49155, 0, 32768, 4096, 65534 ]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
