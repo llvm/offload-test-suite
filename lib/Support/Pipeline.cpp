@@ -108,7 +108,13 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     if (I.outputting()) {                                                      \
       llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
                                       B.Size / sizeof(Type));                  \
+      std::vector<llvm::yaml::Hex64> HexVec;                                   \
+      HexVec.reserve(Arr.size());                                              \
+      for (const auto &val : Arr)                                              \
+        HexVec.emplace_back(static_cast<uint64_t>(val));                       \
+      llvm::MutableArrayRef<llvm::yaml::Hex64> HexArr(HexVec);                 \
       I.mapRequired("Data", Arr);                                              \
+      I.mapRequired("HexData", HexArr);                                        \
     } else {                                                                   \
       int64_t ZeroInitSize;                                                    \
       I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
