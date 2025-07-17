@@ -5,14 +5,15 @@ RWStructuredBuffer<uint4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0].xy = AddUint64(In[0].xy, In[0].xy);
-  Out[0].zw = AddUint64(In[0].zw, In[0].zw);
-  Out[1].xy = AddUint64(In[1].xy, In[1].xy);
-  Out[1].zw = AddUint64(In[1].zw, In[1].zw);
-  Out[2].xy = AddUint64(In[2].xy, In[2].xy);
-  Out[2].zw = AddUint64(In[2].zw, In[2].zw);
-  Out[3] = AddUint64(In[0], In[0]); // vec4 test
-  Out[4].xy = AddUint64(uint2(1,2), uint2(3,4));
+  // vec4
+  Out[0] = AddUint64(In[0], In[0]);
+  Out[1] = AddUint64(uint4(1, 0, 1, 256), uint4(1, 0, 1, 256));
+
+  // vec2
+  uint4 Tmp = {AddUint64(In[1].xy, In[1].xy), AddUint64(In[1].zw, In[1].zw)};
+  Out[2] = Tmp;
+  uint4 Tmp2 = {AddUint64(In[2].xy, In[2].xy), AddUint64(In[2].zw, In[2].zw)};
+  Out[3] = Tmp2;
 }
 
 //--- pipeline.yaml
@@ -27,14 +28,16 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [ 1, 0, 1, 256, 10000, 10001, 0x80000000, 1, 0x7fffffff, 0x7fffffff, 0xffffffff, 0x7fffffff ]
+    # 1, 0, 1, 256, 10000, 10001, 2147483648, 1, 2147483647, 2147483647, 4294967295, 2147483647
   - Name: Out
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 80
+    ZeroInitSize: 64
   - Name: ExpectedOut # The result we expect
     Format: UInt32
     Stride: 16
-    Data: [ 2, 0, 2, 512, 20000, 20002, 0, 3, 0xfffffffe, 0xfffffffe, 0xfffffffe, 0xffffffff, 2, 0, 2, 512, 4, 6, 0, 0 ]
+    Data: [ 2, 0, 2, 512, 2, 0, 2, 512, 20000, 20002, 0, 3, 0xfffffffe, 0xfffffffe, 0xfffffffe, 0xffffffff ]
+    # 2, 0, 2, 512, 2, 0, 2, 512, 20000, 20002, 0, 3, 4294967294, 4294967294, 4294967294, 4294967295
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -59,7 +62,9 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
+# https://github.com/llvm/llvm-project/issues/149345
+# XFAIL: Clang-DirectX
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
