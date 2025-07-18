@@ -93,11 +93,11 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
-template <typename T> uint64_t bitPatternAsHex64(const T &val) {
+static template <typename T> uint64_t bitPatternAsHex64(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
-  uint64_t raw = 0;
-  memcpy(&raw, &val, sizeof(T));
-  return raw;
+  uint64_t Raw = 0;
+  memcpy(&Raw, &Val, sizeof(T));
+  return Raw;
 }
 
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
