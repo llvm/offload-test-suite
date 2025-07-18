@@ -93,6 +93,13 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
+template <typename T> static uint64_t bitPatternAsHex64(const T &Val) {
+  static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
+  uint64_t Raw = 0;
+  memcpy(&Raw, &Val, sizeof(T));
+  return Raw;
+}
+
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
                                                  offloadtest::Buffer &B) {
   I.mapRequired("Name", B.Name);
@@ -108,7 +115,13 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     if (I.outputting()) {                                                      \
       llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
                                       B.Size / sizeof(Type));                  \
+      std::vector<llvm::yaml::Hex64> HexVec;                                   \
+      HexVec.reserve(Arr.size());                                              \
+      for (const auto &val : Arr)                                              \
+        HexVec.emplace_back(bitPatternAsHex64(val));                           \
+      llvm::MutableArrayRef<llvm::yaml::Hex64> HexArr(HexVec);                 \
       I.mapRequired("Data", Arr);                                              \
+      I.mapRequired("HexData", HexArr);                                        \
     } else {                                                                   \
       int64_t ZeroInitSize;                                                    \
       I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \

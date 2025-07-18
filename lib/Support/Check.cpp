@@ -268,26 +268,34 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
 }
 
 llvm::Error verifyResult(offloadtest::Result R) {
+  llvm::SmallString<256> TestRuleStr;
+  llvm::raw_svector_ostream TestRuleOStr(TestRuleStr);
   switch (R.ComparisonRule) {
   case offloadtest::Rule::BufferExact: {
     if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
       return llvm::Error::success();
+    TestRuleOStr << "Comparison Rule: BufferExact\n";
     break;
   }
   case offloadtest::Rule::BufferFloatULP: {
     if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
       return llvm::Error::success();
+    TestRuleOStr << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
     break;
   }
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
+    TestRuleOStr << "Comparison Rule: BufferFloatEpsilon\nEpsilon: "
+                 << R.Epsilon << "\n";
     break;
   }
   }
   llvm::SmallString<256> Str;
   llvm::raw_svector_ostream OS(Str);
-  OS << "Test failed: " << R.Name << "\nExpected:\n";
+  OS << "Test failed: " << R.Name << "\n";
+  OS << TestRuleStr;
+  OS << "Expected:\n";
   llvm::yaml::Output YAMLOS(OS);
   YAMLOS << *R.ExpectedPtr;
   OS << "Got:\n";
