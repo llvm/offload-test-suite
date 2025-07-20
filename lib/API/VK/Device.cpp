@@ -163,6 +163,8 @@ private:
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
   LayerVector Layers;
+  using ExtensionVector = std::vector<VkExtensionProperties>;
+  ExtensionVector Extensions;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -226,6 +228,20 @@ public:
     return false;
   }
 
+  const ExtensionVector &getExtensions() {
+    if (Extensions.empty())
+      queryExtensions();
+    return Extensions;
+  }
+
+  bool isExtensionSupported(llvm::StringRef QueryName) {
+    for (const auto &Ext : getExtensions()) {
+      if (Ext.extensionName == QueryName)
+        return true;
+    }
+    return false;
+  }
+
   void printExtra(llvm::raw_ostream &OS) override {
     OS << "  Layers:\n";
     for (auto Layer : getLayers()) {
@@ -235,6 +251,12 @@ public:
       OS << "    ImplVersion: " << Layer.implementationVersion << "\n";
       Sz = strnlen(Layer.description, VK_MAX_DESCRIPTION_SIZE);
       OS << "    LayerDesc: " << llvm::StringRef(Layer.description, Sz) << "\n";
+    }
+
+    OS << "  Extensions:\n";
+    for (const auto &Ext : getExtensions()) {
+      OS << "  - ExtensionName: " << llvm::StringRef(Ext.extensionName) << "\n";
+      OS << "    SpecVersion: " << Ext.specVersion << "\n";
     }
   }
 
@@ -299,6 +321,19 @@ private:
 
     Layers.insert(Layers.begin(), LayerCount, VkLayerProperties());
     vkEnumerateInstanceLayerProperties(&LayerCount, Layers.data());
+  }
+
+  void queryExtensions() {
+    assert(Extensions.empty() && "Should not be called twice!");
+    uint32_t ExtCount;
+    vkEnumerateDeviceExtensionProperties(Device, nullptr, &ExtCount, nullptr);
+
+    if (ExtCount == 0)
+      return;
+
+    Extensions.insert(Extensions.begin(), ExtCount, VkExtensionProperties());
+    vkEnumerateDeviceExtensionProperties(Device, nullptr, &ExtCount,
+                                         Extensions.data());
   }
 
 public:
@@ -906,6 +941,19 @@ public:
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     CreateInfo.pApplicationInfo = &AppInfo;
 
+    llvm::SmallVector<const char *> Extensions;
+    llvm::SmallVector<const char *> Layers;
+#if __APPLE__
+    // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
+    // extension is required, so we can just force this one on. If it fails, the
+    // whole device would fail anyways.
+    Extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+    CreateInfo.ppEnabledExtensionNames = Extensions.data();
+    CreateInfo.enabledExtensionCount = Extensions.size();
+
     VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
@@ -927,21 +975,26 @@ public:
     {
       auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
+
+#ifndef NDEBUG
+      const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
+      if (TmpDev->isLayerSupported(ValidationLayer))
+        Layers.push_back(ValidationLayer.data());
+
+      const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
+      if (TmpDev->isExtensionSupported(DebugUtilsExtensionName))
+        Extensions.push_back(DebugUtilsExtensionName.data());
+#endif
+      CreateInfo.ppEnabledLayerNames = Layers.data();
+      CreateInfo.enabledLayerCount = Layers.size();
+      CreateInfo.ppEnabledExtensionNames = Extensions.data();
+      CreateInfo.enabledExtensionCount = Extensions.size();
     }
     vkDestroyInstance(Instance, NULL);
     Instance = VK_NULL_HANDLE;
 
-// TODO: This is a bit hacky but matches what I did in DX.
-#ifndef NDEBUG
-    const char *ValidationLayer = "VK_LAYER_KHRONOS_validation";
-    CreateInfo.ppEnabledLayerNames = &ValidationLayer;
-    CreateInfo.enabledLayerCount = 1;
-
-    const char *DebugUtilsExtensionName = "VK_EXT_debug_utils";
-    CreateInfo.ppEnabledExtensionNames = &DebugUtilsExtensionName;
-    CreateInfo.enabledExtensionCount = 1;
-#endif
-
+    // This second creation shouldn't ever fail, but it tries to create the
+    // highest supported device version.
     Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
