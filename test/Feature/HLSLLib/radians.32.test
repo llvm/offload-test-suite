@@ -1,0 +1,67 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = radians(In[0]);
+  float4 Tmp = {radians(In[1].xyz), radians(In[1].w)};
+  Out[1] = Tmp;
+  float4 Tmp2 = {radians(In[2].xy), radians(In[2].zw)};
+  Out[2] = Tmp2;
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, 180, -180, 114.592, 57.2958, -57.2958]
+    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 180, -180, 114.592, 57.2958, -57.2958
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 48
+  - Name: ExpectedOut # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ nan, -inf, -0, -0, 0, 0, inf, 3.1415926, -3.1415926, 0x1.0000400000000p+1, 0x1.0000060000000p+0, -0x1.0000060000000p+0]
+    #  NaN, NaN, 0, 0, 0, 0, NaN, 3.1415926, -3.1415926, 2.00001, 1, -1
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
