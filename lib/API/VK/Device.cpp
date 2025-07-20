@@ -207,6 +207,12 @@ private:
              DescriptorType == VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
     }
 
+    bool isReadWrite() const {
+      return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
+             DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_BUFFER ||
+             DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+    }
+
     uint32_t size() const { return BufferPtr->size(); }
 
     VkDescriptorType DescriptorType;
@@ -510,9 +516,11 @@ public:
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
                               static_cast<uint32_t>(B.OutputProps.Height), 1};
-    ImageCreateInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-                            (R.isReadWrite() ? VK_IMAGE_USAGE_STORAGE_BIT
-                                             : VK_IMAGE_USAGE_SAMPLED_BIT);
+    ImageCreateInfo.usage =
+        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+        (R.isReadWrite()
+             ? (VK_IMAGE_USAGE_STORAGE_BIT| VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+             : VK_IMAGE_USAGE_SAMPLED_BIT);
 
     VkImage Image;
     if (vkCreateImage(IS.Device, &ImageCreateInfo, nullptr, &Image))
@@ -880,20 +888,20 @@ public:
       ImageBarrier.srcAccessMask = 0;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
       vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                            nullptr, 1, &ImageBarrier);
 
       vkCmdCopyBufferToImage(IS.CmdBuffer, R.Host.Buffer, R.Image.Image,
-                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                             VK_IMAGE_LAYOUT_GENERAL, 1,
                              &BufferCopyRegion);
 
       ImageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       ImageBarrier.dstAccessMask =
           VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-      ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+      ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
       vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
@@ -906,7 +914,7 @@ public:
     Barrier.buffer = R.Device.Buffer;
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    Barrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    Barrier.dstAccessMask = 0;
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
@@ -915,6 +923,8 @@ public:
   }
 
   void copyResourceDataToHost(InvocationState &IS, ResourceRef &R) {
+    if (!R.isReadWrite())
+      return;
     if (R.isImage()) {
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -927,11 +937,10 @@ public:
 
       ImageBarrier.image = R.Image.Image;
       ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask =
-          VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+      ImageBarrier.srcAccessMask = 0;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
       vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
@@ -948,7 +957,7 @@ public:
       BufferCopyRegion.imageExtent.depth = 1;
       BufferCopyRegion.bufferOffset = 0;
       vkCmdCopyImageToBuffer(IS.CmdBuffer, R.Image.Image,
-                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                             VK_IMAGE_LAYOUT_GENERAL,
                              R.Host.Buffer, 1, &BufferCopyRegion);
 
       VkBufferMemoryBarrier Barrier = {};
@@ -1039,9 +1048,18 @@ public:
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(IS.Device, V, nullptr);
 
+    for (auto &V : IS.ImageViews)
+      vkDestroyImageView(IS.Device, V, nullptr);
+
     for (auto &R : IS.Buffers) {
-      vkDestroyBuffer(IS.Device, R.Device.Buffer, nullptr);
-      vkFreeMemory(IS.Device, R.Device.Memory, nullptr);
+      if (R.isBuffer()) {
+        vkDestroyBuffer(IS.Device, R.Device.Buffer, nullptr);
+        vkFreeMemory(IS.Device, R.Device.Memory, nullptr);
+      } else {
+        assert(R.isImage());
+        vkDestroyImage(IS.Device, R.Image.Image, nullptr);
+        vkFreeMemory(IS.Device, R.Image.Memory, nullptr);
+      }
       vkDestroyBuffer(IS.Device, R.Host.Buffer, nullptr);
       vkFreeMemory(IS.Device, R.Host.Memory, nullptr);
     }
