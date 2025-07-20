@@ -1,5 +1,9 @@
 # Enabling Vulkan on macOS with MoltenVK
 
+> Note: MoltenVK uses SPIRV-Cross to convert SPIRV shaders to the Metal shading
+> language. This increases the mismatch between shader behavior, and as a result
+> many of the tests in this suite have known failures or behavior differences.
+
 To enable Vulkan testing on macOS you first need to download and install the
 Vulkan SDK from [here](https://vulkan.lunarg.com).
 
