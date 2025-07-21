@@ -762,8 +762,7 @@ public:
           ViewCreateInfo.subresourceRange.levelCount = 1;
           ViewCreateInfo.image = IS.Buffers[BufIdx].Image.Image;
           VkImageView View = {0};
-          if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr,
-                                &IS.ImageViews.back()))
+          if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &View))
             return llvm::createStringError(std::errc::device_or_resource_busy,
                                            "Failed to create image view.");
           const VkDescriptorImageInfo ImageInfo = {
@@ -787,8 +786,7 @@ public:
             DescriptorData[BufIdx] = BI;
           } else {
             VkBufferView View = {0};
-            if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr,
-                                   &View))
+            if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
             IS.BufferViews.push_back(View);
