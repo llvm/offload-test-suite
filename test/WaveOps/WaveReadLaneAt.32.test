@@ -6,6 +6,9 @@ RWStructuredBuffer<int4> OutInt : register(u1);
 StructuredBuffer<uint4> InUInt : register(t2);
 RWStructuredBuffer<uint4> OutUInt : register(u3);
 
+StructuredBuffer<float4> InFloat : register(t4);
+RWStructuredBuffer<float4> OutFloat : register(u5);
+
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
   uint OutIdx = TID.x * 3;
@@ -21,6 +24,12 @@ void main(uint3 TID : SV_GroupThreadID) {
   uint4 ThreadInUInt = {InUInt[TID.x].xyz, InUInt[TID.x].w};
   OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);;
   OutUInt[OutIdx + 2].xy = WaveReadLaneAt(InUInt[TID.x].xy, TID.x);
+
+  // Float
+  OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
+  uint4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
 }
 
 //--- pipeline.yaml
@@ -55,6 +64,18 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InFloat
+    Format: Float32
+    Stride: 16
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutFloat
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 144
+  - Name: ExpectedOutFloat # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
 Results:
   - Result: TestInt
     Rule: BufferExact
@@ -64,6 +85,10 @@ Results:
     Rule: BufferExact
     Actual: OutUInt
     Expected: ExpectedOutUInt
+  - Result: TestFloat
+    Rule: BufferExact
+    Actual: OutFloat
+    Expected: ExpectedOutFloat
 DescriptorSets:
   - Resources:
     - Name: InInt
@@ -94,6 +119,20 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 3
+    - Name: InFloat
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
 ...
 #--- end
 
