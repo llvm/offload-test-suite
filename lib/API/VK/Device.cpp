@@ -714,16 +714,30 @@ public:
                                  IS.DescriptorSets.data()))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to allocate descriptor sets.");
+
+    union WriteDescriptorData {
+      WriteDescriptorData() = default;
+      WriteDescriptorData(VkDescriptorBufferInfo I) : BufferInfo(I) {}
+      WriteDescriptorData(VkDescriptorImageInfo I) : ImageInfo(I) {}
+      WriteDescriptorData(VkBufferView I) : BufferView(I) {}
+      VkDescriptorBufferInfo BufferInfo;
+      VkDescriptorImageInfo ImageInfo;
+      VkBufferView BufferView;
+    };
     llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
     assert(IS.BufferViews.empty());
-    llvm::SmallVector<VkDescriptorBufferInfo> RawBufferInfos;
-    llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
-
-    // This massively over-reserves the descriptor info structs, but prevents
-    // dumb things from happening if these get reallocated...
     const uint32_t DescriptorCount = P.getDescriptorCount();
-    RawBufferInfos.reserve(DescriptorCount);
-    ImageInfos.reserve(DescriptorCount);
+
+    // TODO: Vulkan descriptor arrays have the same binding for multiple
+    // descriptor entries. We'll need to do something differently here to
+    // support them, but I'm not completely sure what, so for now this is good
+    // enough. This just allocates a block of data to store descriptor updates
+    // using a union. Since only one descriptor is put into each update call
+    // that's fine. For arrays we'll potentially need more than one, so the
+    // union won't work.
+    const std::unique_ptr<WriteDescriptorData[]> DescriptorData =
+        std::unique_ptr<WriteDescriptorData[]>(
+            new WriteDescriptorData[DescriptorCount]);
 
     uint32_t BufIdx = 0;
     for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
@@ -753,9 +767,8 @@ public:
             return llvm::createStringError(std::errc::device_or_resource_busy,
                                            "Failed to create image view.");
           const VkDescriptorImageInfo ImageInfo = {
-              IS.Buffers[BufIdx].Image.Sampler, IS.ImageViews.back(),
-              VK_IMAGE_LAYOUT_GENERAL};
-          ImageInfos.push_back(ImageInfo);
+              IS.Buffers[BufIdx].Image.Sampler, View, VK_IMAGE_LAYOUT_GENERAL};
+          DescriptorData[BufIdx] = ImageInfo;
         } else {
           VkBufferViewCreateInfo ViewCreateInfo = {};
           const bool IsRawOrUniform = R.isRaw();
@@ -770,13 +783,15 @@ public:
           if (IsRawOrUniform) {
             const VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer,
                                                0, VK_WHOLE_SIZE};
-            RawBufferInfos.push_back(BI);
+            DescriptorData[BufIdx] = BI;
           } else {
-            IS.BufferViews.push_back(VkBufferView{0});
+            VkBufferView View = {0};
             if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr,
-                                   &IS.BufferViews.back()))
+                                   &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
+            IS.BufferViews.push_back(View);
+            DescriptorData[BufIdx] = View;
           }
         }
         VkWriteDescriptorSet WDS = {};
@@ -786,11 +801,11 @@ public:
         WDS.descriptorCount = 1;
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (R.isTexture())
-          WDS.pImageInfo = &ImageInfos.back();
+          WDS.pImageInfo = &DescriptorData[BufIdx].ImageInfo;
         else if (R.isRaw())
-          WDS.pBufferInfo = &RawBufferInfos.back();
+          WDS.pBufferInfo = &DescriptorData[BufIdx].BufferInfo;
         else
-          WDS.pTexelBufferView = &IS.BufferViews.back();
+          WDS.pTexelBufferView = &DescriptorData[BufIdx].BufferView;
         llvm::outs() << "Updating Descriptor [" << BufIdx << "] { " << SetIdx
                      << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
