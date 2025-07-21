@@ -519,7 +519,7 @@ public:
     ImageCreateInfo.usage =
         VK_IMAGE_USAGE_TRANSFER_DST_BIT |
         (R.isReadWrite()
-             ? (VK_IMAGE_USAGE_STORAGE_BIT| VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+             ? (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
              : VK_IMAGE_USAGE_SAMPLED_BIT);
 
     VkImage Image;
@@ -895,8 +895,7 @@ public:
                            nullptr, 1, &ImageBarrier);
 
       vkCmdCopyBufferToImage(IS.CmdBuffer, R.Host.Buffer, R.Image.Image,
-                             VK_IMAGE_LAYOUT_GENERAL, 1,
-                             &BufferCopyRegion);
+                             VK_IMAGE_LAYOUT_GENERAL, 1, &BufferCopyRegion);
 
       ImageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       ImageBarrier.dstAccessMask =
@@ -957,8 +956,8 @@ public:
       BufferCopyRegion.imageExtent.depth = 1;
       BufferCopyRegion.bufferOffset = 0;
       vkCmdCopyImageToBuffer(IS.CmdBuffer, R.Image.Image,
-                             VK_IMAGE_LAYOUT_GENERAL,
-                             R.Host.Buffer, 1, &BufferCopyRegion);
+                             VK_IMAGE_LAYOUT_GENERAL, R.Host.Buffer, 1,
+                             &BufferCopyRegion);
 
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
