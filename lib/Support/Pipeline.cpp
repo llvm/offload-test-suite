@@ -97,21 +97,20 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
 
 // Override yaml printer so that hex strings aren't printed like scalars,
 // but are printed inline as if they were elements of a vector
-template <>
-struct SequenceTraits<llvm::MutableArrayRef<std::string>> {
+template <> struct SequenceTraits<llvm::MutableArrayRef<std::string>> {
   static size_t size(IO &io, llvm::MutableArrayRef<std::string> &seq) {
     return seq.size();
   }
 
-  static std::string &element(IO &io, llvm::MutableArrayRef<std::string> &seq, size_t index) {    
+  static std::string &element(IO &io, llvm::MutableArrayRef<std::string> &seq,
+                              size_t index) {
     return seq[index];
   }
 
   static const bool flow = true;
 };
 
-template <typename T>
-static std::string bitPatternAsHex64(const T &Val) {
+template <typename T> static std::string bitPatternAsHex64(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
 
   std::ostringstream Oss;
