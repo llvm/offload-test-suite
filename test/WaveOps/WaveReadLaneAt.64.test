@@ -136,7 +136,7 @@ DescriptorSets:
 ...
 #--- end
 
-# REQUIRES: Half, Int64
+# REQUIRES: Double, Int64
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
