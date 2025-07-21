@@ -95,7 +95,7 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
-// override yaml printer so that hex strings aren't printed like scalars,
+// Override yaml printer so that hex strings aren't printed like scalars,
 // but are printed inline as if they were elements of a vector
 template <>
 struct SequenceTraits<llvm::MutableArrayRef<std::string>> {

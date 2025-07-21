@@ -77,7 +77,7 @@ struct Buffer {
   int Channels;
   int Stride;
   std::unique_ptr<char[]> Data;
-  std::unique_ptr<llvm::yaml::Hex64> HexData;
+  std::unique_ptr<std::string> HexData;
   size_t Size;
   size_t HexSize;
   OutputProperties OutputProps;
