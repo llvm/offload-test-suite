@@ -761,7 +761,7 @@ public:
           ViewCreateInfo.subresourceRange.layerCount = 1;
           ViewCreateInfo.subresourceRange.levelCount = 1;
           ViewCreateInfo.image = IS.Buffers[BufIdx].Image.Image;
-          IS.ImageViews.push_back(VkImageView(0));
+          VkImageView View = {0};
           if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr,
                                 &IS.ImageViews.back()))
             return llvm::createStringError(std::errc::device_or_resource_busy,
@@ -769,6 +769,7 @@ public:
           const VkDescriptorImageInfo ImageInfo = {
               IS.Buffers[BufIdx].Image.Sampler, View, VK_IMAGE_LAYOUT_GENERAL};
           DescriptorData[BufIdx] = ImageInfo;
+          IS.ImageViews.push_back(View);
         } else {
           VkBufferViewCreateInfo ViewCreateInfo = {};
           const bool IsRawOrUniform = R.isRaw();
