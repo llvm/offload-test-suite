@@ -47,28 +47,32 @@ Buffers:
     Format: Float16
     Stride: 4
     Data: [ 0x3a00, 0xb800 ]
+    # 0.75, -0.5
   - Name: IncidentRay3D
     Format: Float16
     Stride: 8
     Data: [ 0x3800, 0xb400, 0x3a00, 0x0000 ]
+    # 0.5, -0.25, 0.75, 0.0
   - Name: IncidentRay4D
     Format: Float16
     Stride: 8
     Data: [ 0x3800, 0xb400, 0x3a00, 0xb800 ]
-
+    # 0.5, -0.25, 0.75, 0.0
   - Name: Wall2D
     Format: Float16
     Stride: 4
     Data: [ 0x39a8, 0x39a8 ]
+    # 0.70703125, 0.70703125
   - Name: Wall3D
     Format: Float16
     Stride: 8
     Data: [ 0x3800, 0x3800, 0x39a8, 0x0000 ]
+    # 0.5, 0.5, 0.70703125, 0.0
   - Name: Wall4D
     Format: Float16
     Stride: 8
     Data: [ 0x3800, 0x3800, 0x3800, 0x3800 ]
-   
+    # 0.5, 0.5, 0.5, 0.5
   - Name: Result2D
     Format: Float16
     Stride: 4
@@ -77,7 +81,7 @@ Buffers:
     Format: Float16
     Stride: 4
     Data: [ 0x3800, 0xba00, 0x3800, 0xba00 ]
-
+    # 0.5, -0.75, 0.5, -0.75
   - Name: Result3D
     Format: Float16
     Stride: 8
@@ -86,7 +90,7 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [ 0xb0f8, 0xbb3e, 0xb1a8, 0x0000, 0xb0f8, 0xbb3e, 0xb1a8, 0x0000 ]
-
+    # -0.15527344, -0.90527344, -0.17675781, 0.0, -0.15527344, -0.90527344, -0.17675781, 0.0
   - Name: Result4D
     Format: Float16
     Stride: 8
@@ -95,7 +99,7 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [ 0x3400, 0xb800, 0x3800, 0xba00, 0x3400, 0xb800, 0x3800, 0xba00 ]
-
+    # 0.25, -0.5, 0.5, -0.75, 0.25, -0.5, 0.5, -0.75
 Results:  
   - Result: CheckResult2D
     Rule: BufferFloatULP
