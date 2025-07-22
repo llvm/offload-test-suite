@@ -655,7 +655,7 @@ public:
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         WDS.dstSet = IS.DescriptorSets[SetIdx];
-        WDS.dstBinding = RIdx;
+        WDS.dstBinding = R.VKBinding->Binding;
         WDS.descriptorCount = 1;
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (IsRawOrUniform)
