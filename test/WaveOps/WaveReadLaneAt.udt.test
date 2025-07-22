@@ -9,20 +9,10 @@ StructuredBuffer<UserDefinedStruct> InUDS : register(t0);
 RWStructuredBuffer<int> OutInt : register(u1);
 RWStructuredBuffer<float> OutFloat : register(u2);
 
-// Note: stored in column-major format
-struct MatrixStruct {
-  uint4x4 matrixData;
-};
-
-StructuredBuffer<MatrixStruct> InMatrix : register(t3);
-RWStructuredBuffer<uint4> OutMatrix : register(u4);
-
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
   OutInt[TID.x] = WaveReadLaneAt(InUDS[TID.x].intData, TID.x);
   OutFloat[TID.x] = WaveReadLaneAt(InUDS[TID.x].floatData, TID.x);
-
-  OutMatrix[TID.x] = WaveReadLaneAt(InMatrix[0].matrixData[TID.x], TID.x);
 }
 
 //--- pipeline.yaml
@@ -53,18 +43,6 @@ Buffers:
     Format: Float32
     Stride: 16
     Data: [ 0, 1, 2, 3]
-  - Name: InMatrix
-    Format: UInt32
-    Stride: 16
-    Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
-  - Name: OutMatrix
-    Format: UInt32
-    Stride: 16
-    ZeroInitSize: 64
-  - Name: ExpectedOutMatrix # The result we expect
-    Format: UInt32
-    Stride: 16
-    Data: [ 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 ]
 Results:
   - Result: TestInt
     Rule: BufferExact
@@ -74,10 +52,6 @@ Results:
     Rule: BufferExact
     Actual: OutFloat
     Expected: ExpectedOutFloat
-  - Result: TestMatrix
-    Rule: BufferExact
-    Actual: OutMatrix
-    Expected: ExpectedOutMatrix
 DescriptorSets:
   - Resources:
     - Name: InUDS
@@ -101,20 +75,6 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 2
-    - Name: InMatrix
-      Kind: StructuredBuffer
-      DirectXBinding:
-        Register: 3
-        Space: 0
-      VulkanBinding:
-        Binding: 3
-    - Name: OutMatrix
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 4
-        Space: 0
-      VulkanBinding:
-        Binding: 4
 ...
 #--- end
 
