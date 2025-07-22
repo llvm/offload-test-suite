@@ -9,6 +9,10 @@ RWStructuredBuffer<uint4> OutUInt : register(u3);
 StructuredBuffer<float4> InFloat : register(t4);
 RWStructuredBuffer<float4> OutFloat : register(u5);
 
+// Checks for edge-case floats
+StructuredBuffer<float> InEdgeFloat : register(t6);
+RWStructuredBuffer<float> OutEdgeFloat : register(u7);
+
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
   uint OutIdx = TID.x * 3;
@@ -30,6 +34,9 @@ void main(uint3 TID : SV_GroupThreadID) {
   uint4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
   OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
   OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
+
+  // Edge-Cases
+  OutEdgeFloat[TID.x] = WaveReadLaneAt(InEdgeFloat[TID.x], TID.x);
 }
 
 //--- pipeline.yaml
@@ -76,6 +83,18 @@ Buffers:
     Format: Float32
     Stride: 16
     Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InEdgeFloat
+    Format: Float32
+    Stride: 16
+    Data: [inf, -inf, nan, 0 ]
+  - Name: OutEdgeFloat
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 16
+  - Name: ExpectedOutEdgeFloat # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ inf, -inf, nan, 0]
 Results:
   - Result: TestInt
     Rule: BufferExact
@@ -89,6 +108,10 @@ Results:
     Rule: BufferExact
     Actual: OutFloat
     Expected: ExpectedOutFloat
+  - Result: TestEdgeFloat
+    Rule: BufferExact
+    Actual: OutEdgeFloat
+    Expected: ExpectedOutEdgeFloat
 DescriptorSets:
   - Resources:
     - Name: InInt
@@ -133,6 +156,20 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 5
+    - Name: InEdgeFloat
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: OutEdgeFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
 ...
 #--- end
 

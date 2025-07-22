@@ -17,18 +17,12 @@ struct MatrixStruct {
 StructuredBuffer<MatrixStruct> InMatrix : register(t3);
 RWStructuredBuffer<uint4> OutMatrix : register(u4);
 
-// Checks for edge-case floats
-StructuredBuffer<float> InEdgeFloat : register(t5);
-RWStructuredBuffer<float> OutEdgeFloat : register(u6);
-
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
   OutInt[TID.x] = WaveReadLaneAt(InUDS[TID.x].intData, TID.x);
   OutFloat[TID.x] = WaveReadLaneAt(InUDS[TID.x].floatData, TID.x);
 
   OutMatrix[TID.x] = WaveReadLaneAt(InMatrix[0].matrixData[TID.x], TID.x);
-
-  OutEdgeFloat[TID.x] = WaveReadLaneAt(InEdgeFloat[TID.x], TID.x);
 }
 
 //--- pipeline.yaml
@@ -71,18 +65,6 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [ 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 ]
-  - Name: InEdgeFloat
-    Format: Float32
-    Stride: 16
-    Data: [inf, -inf, nan, 0 ]
-  - Name: OutEdgeFloat
-    Format: Float32
-    Stride: 16
-    ZeroInitSize: 16
-  - Name: ExpectedOutEdgeFloat # The result we expect
-    Format: Float32
-    Stride: 16
-    Data: [ inf, -inf, nan, 0]
 Results:
   - Result: TestInt
     Rule: BufferExact
@@ -96,10 +78,6 @@ Results:
     Rule: BufferExact
     Actual: OutMatrix
     Expected: ExpectedOutMatrix
-  - Result: TestEdgeFloat
-    Rule: BufferExact
-    Actual: OutEdgeFloat
-    Expected: ExpectedOutEdgeFloat
 DescriptorSets:
   - Resources:
     - Name: InUDS
@@ -137,20 +115,6 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 4
-    - Name: InEdgeFloat
-      Kind: StructuredBuffer
-      DirectXBinding:
-        Register: 5
-        Space: 0
-      VulkanBinding:
-        Binding: 5
-    - Name: OutEdgeFloat
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 6
-        Space: 0
-      VulkanBinding:
-        Binding: 6
 ...
 #--- end
 
