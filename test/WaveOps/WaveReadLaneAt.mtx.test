@@ -1,0 +1,62 @@
+#--- source.hlsl
+
+// Note: stored in column-major format
+struct MatrixStruct {
+    uint4x4 matrixData;
+};
+
+StructuredBuffer<MatrixStruct> InMatrix : register(t0);
+RWStructuredBuffer<uint4> OutMatrix : register(u1);
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  OutMatrix[TID.x] = WaveReadLaneAt(InMatrix[0].matrixData[TID.x], TID.x);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: InMatrix
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
+  - Name: OutMatrix
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOutMatrix # The result we expect
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 ]
+Results:
+  - Result: TestMatrix
+    Rule: BufferExact
+    Actual: OutMatrix
+    Expected: ExpectedOutMatrix
+DescriptorSets:
+  - Resources:
+    - Name: InMatrix
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutMatrix
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
