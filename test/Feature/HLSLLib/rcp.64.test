@@ -11,6 +11,7 @@ void main() {
   Out[1] = Tmp;
   float4 Tmp2 = {rcp(In[2].xy), rcp(In[2].zw)};
   Out[2] = Tmp2;
+  Out[3] = rcp(double4(1, 10, 0.2, -4));
 }
 
 
@@ -25,19 +26,19 @@ Buffers:
   - Name: In
     Format: Float64
     Stride: 32
-    Data: [ -0, 0, 1, -1, 2.5, -0.25, 2, 0.5, 2.5, -0.25, 2, 0.5]
+    Data: [ -0, 10, 1, -1, 2.5, -0.25, 2, 0.5, 2.5, -0.25, 2, 0.432]
   - Name: Out
     Format: Float64
     Stride: 32
-    ZeroInitSize: 96
+    ZeroInitSize: 128
   - Name: ExpectedOut # The result we expect
     Format: Float64
     Stride: 32
-    Data: [ -inf, inf, 1, -1, 0x1.99999a0000000p-2, -4 , 0.5, 2, 0x1.99999a0000000p-2, -4 , 0.5, 2]
+    Data: [ -inf, 0.1, 1, -1, 0x1.99999a0000000p-2, -4 , 0.5, 2, 0x1.99999a0000000p-2, -4 , 0.5, 2.31481, 1, 0.1, 5, -0.25]
 Results:
   - Result: Test1
-    Rule: BufferFloatULP
-    ULPT: 2
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -58,6 +59,9 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+
+# https://github.com/llvm/llvm-project/issues/149561
+# XFAIL: Clang-Vulkan
 
 # REQUIRES: Double
 # RUN: split-file %s %t
