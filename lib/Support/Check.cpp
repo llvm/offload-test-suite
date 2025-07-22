@@ -269,15 +269,21 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
-template <typename T> static std::string bitPatternAsHex64(const T &Val) {
+template <typename T>
+static std::string bitPatternAsHex64(const T &Val,
+                                     offloadtest::Rule ComparisonRule) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
 
   std::ostringstream Oss;
-  Oss << std::hexfloat << Val;
+  if (ComparisonRule == offloadtest::Rule::BufferExact)
+    Oss << std::hex << Val;
+  else
+    Oss << std::hexfloat << Val;
   return Oss.str();
 }
 
-static const std::string getBufferStr(offloadtest::Buffer *B) {
+static const std::string getBufferStr(offloadtest::Buffer *B,
+                                      offloadtest::Rule ComparisonRule) {
   std::string ret = "";
   switch (B->Format) {
 #define DATA_CASE(Enum, Type)                                                  \
@@ -287,10 +293,10 @@ static const std::string getBufferStr(offloadtest::Buffer *B) {
     if (Arr.size() == 0)                                                       \
       return "";                                                               \
     if (Arr.size() == 1)                                                       \
-      return "[ " + bitPatternAsHex64(Arr[0]) + " ]";                          \
-    ret += " [ " + bitPatternAsHex64(Arr[0]);                                  \
+      return "[ " + bitPatternAsHex64(Arr[0], ComparisonRule) + " ]";          \
+    ret += " [ " + bitPatternAsHex64(Arr[0], ComparisonRule);                  \
     for (unsigned int i = 1; i < Arr.size(); i++)                              \
-      ret += ", " + bitPatternAsHex64(Arr[i]);                                 \
+      ret += ", " + bitPatternAsHex64(Arr[i], ComparisonRule);                 \
     break;                                                                     \
   }
     DATA_CASE(Hex8, llvm::yaml::Hex8)
@@ -349,8 +355,10 @@ llvm::Error verifyResult(offloadtest::Result R) {
   // Now print exact hex64 representations of each element of the
   // actual and expected buffers.
 
-  const std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
-  const std::string ActualBufferStr = getBufferStr(R.ActualPtr);
+  const std::string ExpectedBufferStr =
+      getBufferStr(R.ExpectedPtr, R.ComparisonRule);
+  const std::string ActualBufferStr =
+      getBufferStr(R.ActualPtr, R.ComparisonRule);
 
   OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
      << ExpectedBufferStr << "\n";
