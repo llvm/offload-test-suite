@@ -10,8 +10,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Pipeline.h"
-#include <iomanip>   // for std::hexfloat
-#include <sstream>
 
 using namespace offloadtest;
 
@@ -95,29 +93,6 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
-// Override yaml printer so that hex strings aren't printed like scalars,
-// but are printed inline as if they were elements of a vector
-template <> struct SequenceTraits<llvm::MutableArrayRef<std::string>> {
-  static size_t size(IO &io, llvm::MutableArrayRef<std::string> &seq) {
-    return seq.size();
-  }
-
-  static std::string &element(IO &io, llvm::MutableArrayRef<std::string> &seq,
-                              size_t index) {
-    return seq[index];
-  }
-
-  static const bool flow = true;
-};
-
-template <typename T> static std::string bitPatternAsHex64(const T &Val) {
-  static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
-
-  std::ostringstream Oss;
-  Oss << std::hexfloat << Val;
-  return Oss.str();
-}
-
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
                                                  offloadtest::Buffer &B) {
   I.mapRequired("Name", B.Name);
@@ -133,13 +108,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     if (I.outputting()) {                                                      \
       llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
                                       B.Size / sizeof(Type));                  \
-      std::vector<std::string> HexVec;                                         \
-      HexVec.reserve(Arr.size());                                              \
-      for (const auto &val : Arr)                                              \
-        HexVec.emplace_back(bitPatternAsHex64(val));                           \
-      llvm::MutableArrayRef<std::string> HexArr(HexVec);                       \
       I.mapRequired("Data", Arr);                                              \
-      I.mapRequired("HexData", HexArr);                                        \
     } else {                                                                   \
       int64_t ZeroInitSize;                                                    \
       I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
