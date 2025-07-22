@@ -10,11 +10,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Check.h"
+#include "Support/Pipeline.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
-#include "Support/Pipeline.h"
 #include <cmath>
 #include <sstream>
 
@@ -277,21 +277,20 @@ template <typename T> static std::string bitPatternAsHex64(const T &Val) {
   return Oss.str();
 }
 
-std::string getBufferStr(offloadtest::Buffer *B){
+std::string getBufferStr(offloadtest::Buffer *B) {
   std::string ret = "";
   switch (B->Format) {
 #define DATA_CASE(Enum, Type)                                                  \
   case offloadtest::DataFormat::Enum: {                                        \
-    llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B->Data.get()),             \
-                          B->Size / sizeof(Type));                             \
+    llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B->Data.get()),   \
+                                    B->Size / sizeof(Type));                   \
     if (Arr.size() == 0)                                                       \
       return "";                                                               \
     else if (Arr.size() == 1)                                                  \
       return "[ " + bitPatternAsHex64(Arr[0]) + " ]";                          \
     ret += " [ " + bitPatternAsHex64(Arr[0]);                                  \
-    for (unsigned int i = 1; i < Arr.size(); i++){                             \
-        ret += ", " + bitPatternAsHex64(Arr[i]);                               \
-    }                                                                          \
+    for (unsigned int i = 1; i < Arr.size(); i++)                              \
+      ret += ", " + bitPatternAsHex64(Arr[i]);                                 \
     break;                                                                     \
   }
     DATA_CASE(Hex8, llvm::yaml::Hex8)
@@ -307,7 +306,8 @@ std::string getBufferStr(offloadtest::Buffer *B){
     DATA_CASE(Float16, llvm::yaml::Hex16)
     DATA_CASE(Float32, float)
     DATA_CASE(Float64, double)
-    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a bool using 4 bytes.
+    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a
+                              // bool using 4 bytes.
   }
   return ret;
 }
@@ -352,8 +352,10 @@ llvm::Error verifyResult(offloadtest::Result R) {
   std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
   std::string ActualBufferStr = getBufferStr(R.ActualPtr);
 
-  OS << "Full Hex 64bit representation of Expected Buffer Values:\n" << ExpectedBufferStr << "\n";
-  OS << "Full Hex 64bit representation of Actual Buffer Values:\n" << ActualBufferStr << "\n";
+  OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
+     << ExpectedBufferStr << "\n";
+  OS << "Full Hex 64bit representation of Actual Buffer Values:\n"
+     << ActualBufferStr << "\n";
 
   return llvm::createStringError(Str.c_str());
 }
