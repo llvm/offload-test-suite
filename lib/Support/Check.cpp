@@ -277,16 +277,16 @@ template <typename T> static std::string bitPatternAsHex64(const T &Val) {
   return Oss.str();
 }
 
-std::string getBufferStr(offloadtest::Buffer *B) {
+static const std::string getBufferStr(offloadtest::Buffer *B) {
   std::string ret = "";
   switch (B->Format) {
 #define DATA_CASE(Enum, Type)                                                  \
   case offloadtest::DataFormat::Enum: {                                        \
-    llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B->Data.get()),   \
-                                    B->Size / sizeof(Type));                   \
+    const llvm::MutableArrayRef<Type> Arr(                                     \
+        reinterpret_cast<Type *>(B->Data.get()), B->Size / sizeof(Type));      \
     if (Arr.size() == 0)                                                       \
       return "";                                                               \
-    else if (Arr.size() == 1)                                                  \
+    if (Arr.size() == 1)                                                       \
       return "[ " + bitPatternAsHex64(Arr[0]) + " ]";                          \
     ret += " [ " + bitPatternAsHex64(Arr[0]);                                  \
     for (unsigned int i = 1; i < Arr.size(); i++)                              \
@@ -349,8 +349,8 @@ llvm::Error verifyResult(offloadtest::Result R) {
   // Now print exact hex64 representations of each element of the
   // actual and expected buffers.
 
-  std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
-  std::string ActualBufferStr = getBufferStr(R.ActualPtr);
+  const std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
+  const std::string ActualBufferStr = getBufferStr(R.ActualPtr);
 
   OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
      << ExpectedBufferStr << "\n";
