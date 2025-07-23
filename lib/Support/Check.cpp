@@ -297,6 +297,7 @@ static const std::string getBufferStr(offloadtest::Buffer *B,
     ret += " [ " + bitPatternAsHex64(Arr[0], ComparisonRule);                  \
     for (unsigned int i = 1; i < Arr.size(); i++)                              \
       ret += ", " + bitPatternAsHex64(Arr[i], ComparisonRule);                 \
+    ret += " ]";                                                               \
     break;                                                                     \
   }
     DATA_CASE(Hex8, llvm::yaml::Hex8)
@@ -319,33 +320,31 @@ static const std::string getBufferStr(offloadtest::Buffer *B,
 }
 
 llvm::Error verifyResult(offloadtest::Result R) {
-  llvm::SmallString<256> TestRuleStr;
-  llvm::raw_svector_ostream TestRuleOStr(TestRuleStr);
+  llvm::SmallString<256> Str;
+  llvm::raw_svector_ostream OS(Str);
+  OS << "Test failed: " << R.Name << "\n";
+
   switch (R.ComparisonRule) {
   case offloadtest::Rule::BufferExact: {
     if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
       return llvm::Error::success();
-    TestRuleOStr << "Comparison Rule: BufferExact\n";
+    OS << "Comparison Rule: BufferExact\n";
     break;
   }
   case offloadtest::Rule::BufferFloatULP: {
     if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
       return llvm::Error::success();
-    TestRuleOStr << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
+    OS << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
     break;
   }
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
-    TestRuleOStr << "Comparison Rule: BufferFloatEpsilon\nEpsilon: "
-                 << R.Epsilon << "\n";
+    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << R.Epsilon << "\n";
     break;
   }
   }
-  llvm::SmallString<256> Str;
-  llvm::raw_svector_ostream OS(Str);
-  OS << "Test failed: " << R.Name << "\n";
-  OS << TestRuleStr;
+
   OS << "Expected:\n";
   llvm::yaml::Output YAMLOS(OS);
   YAMLOS << *R.ExpectedPtr;
