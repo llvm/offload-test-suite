@@ -39,7 +39,7 @@ Buffers:
   - Name: ExpectedLows
     Format: UInt32
     Stride: 16
-    Data: [ 0, 0, 343597384, 2680059593, 0, 2576980378, 2576980378, 1717986918, 858993459, 2696277389, 3944497965, 2680059593, 0, 0, 343597384, 2680059593 ] # 536870912, 2684354560 ]
+    Data: [ 0, 0, 343597384, 2680059593, 0, 2576980378, 2576980378, 1717986918, 858993459, 2696277389, 3944497965, 2680059593, 0, 0, 536870912, 2684354560 ]
   - Name: Highs
     Format: UInt32
     Stride: 16
@@ -90,5 +90,5 @@ DescriptorSets:
 
 # REQUIRES: Double
 # RUN: split-file %s %t
-# RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target  -T cs_6_5 -HV 202x -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
