@@ -1,0 +1,65 @@
+#--- source.hlsl
+StructuredBuffer<half4> In0 : register(t0);
+
+RWStructuredBuffer<uint16_t4> Out0 : register(u1);
+
+
+[numthreads(1,1,1)]
+void main() {
+
+Out0[0] = asuint16(In0[0]);
+Out0[1] = uint16_t4(asuint16(In0[1].xyz), asuint16(In0[1].w));
+Out0[2] = uint16_t4(asuint16(In0[2].xy), asuint16(In0[2].zw));
+Out0[3] = asuint16(half4(-5, 0, 10.111, 0.05));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Float16
+    Stride: 8
+    Data: [0xc500, 0, 0x490e, 0x2a66, 0xbc00, 0x5640, 0xc500, 0, 0x490e, 0x2a66, 0xbc00, 0x5640]
+    # [-5, 0, 10.111, 0.05, -1, 100, -5, 0, 10.111, 0.05, -1, 100]
+  - Name: Out0
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: ExpectedOut0
+    Format: UInt16
+    Stride: 8
+    Data: [ 50432, 0, 18702, 10854, 48128, 22080, 50432, 0, 18702, 10854, 48128, 22080, 50432, 0, 18702, 10854 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# https://github.com/llvm/llvm-project/issues/146942
+# XFAIL: Clang-Vulkan
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
