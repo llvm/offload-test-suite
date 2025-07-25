@@ -59,6 +59,7 @@ DescriptorSets:
 # https://github.com/llvm/llvm-project/issues/146942
 # XFAIL: Clang-Vulkan
 
+# REQUIRES: Int16
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
