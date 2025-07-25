@@ -105,6 +105,7 @@ template <typename Type> static void setData(IO &I, offloadtest::Buffer &B) {
       B.Size = ZeroInitSize;
       B.Data.reset(new char[B.Size]);
       memset(B.Data.get(), 0, B.Size);
+      I.mapOptional("OutputProps", B.OutputProps);
       return;
     }
     llvm::SmallVector<Type, 64> Arr;
