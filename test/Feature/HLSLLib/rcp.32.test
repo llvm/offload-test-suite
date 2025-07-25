@@ -26,7 +26,7 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [-0, 10, 1, -1, 2.5, -0.25, 2, 0.5, 2.5, -0.25, 2, 0.432]
+    Data: [3, 10, 1, -1, 2.5, -0.25, 2, 0.5, 2.5, -0.25, 2, 0.432]
   - Name: Out
     Format: Float32
     Stride: 16
@@ -34,7 +34,7 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [-inf, 0.1, 1, -1, 0.4, -4 , 0.5, 2, 0.4, -4 , 0.5, 2.31481481481, 1, 0.1, 5, -0.25]
+    Data: [0.333333, 0.1, 1, -1, 0.4, -4 , 0.5, 2, 0.4, -4 , 0.5, 2.31481481481, 1, 0.1, 5, -0.25]
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
