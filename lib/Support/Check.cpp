@@ -297,39 +297,39 @@ std::string formatBuffer(offloadtest::Buffer *B, offloadtest::Rule rule) {
 }
 
 static const std::string getBufferStr(offloadtest::Buffer *B,
-                                      offloadtest::Rule rule) {
+                                      offloadtest::Rule Rule) {
   using DF = offloadtest::DataFormat;
   switch (B->Format) {
   case DF::Hex8:
-    return formatBuffer<llvm::yaml::Hex8>(B, rule);
+    return formatBuffer<llvm::yaml::Hex8>(B, Rule);
   case DF::Hex16:
-    return formatBuffer<llvm::yaml::Hex16>(B, rule);
+    return formatBuffer<llvm::yaml::Hex16>(B, Rule);
   case DF::Hex32:
-    return formatBuffer<llvm::yaml::Hex32>(B, rule);
+    return formatBuffer<llvm::yaml::Hex32>(B, Rule);
   case DF::Hex64:
-    return formatBuffer<llvm::yaml::Hex64>(B, rule);
+    return formatBuffer<llvm::yaml::Hex64>(B, Rule);
   case DF::UInt16:
-    return formatBuffer<uint16_t>(B, rule);
+    return formatBuffer<uint16_t>(B, Rule);
   case DF::UInt32:
-    return formatBuffer<uint32_t>(B, rule);
+    return formatBuffer<uint32_t>(B, Rule);
   case DF::UInt64:
-    return formatBuffer<uint64_t>(B, rule);
+    return formatBuffer<uint64_t>(B, Rule);
   case DF::Int16:
-    return formatBuffer<int16_t>(B, rule);
+    return formatBuffer<int16_t>(B, Rule);
   case DF::Int32:
-    return formatBuffer<int32_t>(B, rule);
+    return formatBuffer<int32_t>(B, Rule);
   case DF::Int64:
-    return formatBuffer<int64_t>(B, rule);
+    return formatBuffer<int64_t>(B, Rule);
   case DF::Float16:
     return formatBuffer<llvm::yaml::Hex16>(B,
-                                           rule); // assuming no native float16
+                                           Rule); // assuming no native float16
   case DF::Float32:
-    return formatBuffer<float>(B, rule);
+    return formatBuffer<float>(B, Rule);
   case DF::Float64:
-    return formatBuffer<double>(B, rule);
+    return formatBuffer<double>(B, Rule);
   case DF::Bool:
     return formatBuffer<uint32_t>(B,
-                                  rule); // Because sizeof(bool) is 1 but HLSL
+                                  Rule); // Because sizeof(bool) is 1 but HLSL
                                          // represents a bool using 4 bytes.
   }
 }
