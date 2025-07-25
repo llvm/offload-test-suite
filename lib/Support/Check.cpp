@@ -276,7 +276,7 @@ static std::string bitPatternAsHex64(const T &Val,
 
   std::ostringstream Oss;
   if (ComparisonRule == offloadtest::Rule::BufferExact)
-    Oss << std::hex << Val;
+    Oss << "0x" << std::hex << Val;
   else
     Oss << std::hexfloat << Val;
   return Oss.str();

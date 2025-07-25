@@ -71,6 +71,6 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK: Full Hex 64bit representation of Expected Buffer Values:
-# CHECK: [ 1, 2, 3, 4 ]
+# CHECK: [ 0x1, 0x2, 0x3, 0x4 ]
 # CHECK: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK: [ 14, 1e, 28, 32 ]
+# CHECK: [ 0x14, 0x1e, 0x28, 0x32 ]
