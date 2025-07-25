@@ -93,6 +93,30 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
+template <typename Type> static void setData(IO &I, offloadtest::Buffer &B) {
+  if (I.outputting()) {
+    llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),
+                                    B.Size / sizeof(Type));
+    I.mapRequired("Data", Arr);
+  } else {
+    int64_t ZeroInitSize;
+    I.mapOptional("ZeroInitSize", ZeroInitSize, 0);
+    if (ZeroInitSize > 0) {
+      B.Size = ZeroInitSize;
+      B.Data.reset(new char[B.Size]);
+      memset(B.Data.get(), 0, B.Size);
+      return;
+    }
+    llvm::SmallVector<Type, 64> Arr;
+    I.mapRequired("Data", Arr);
+    B.Size = Arr.size() * sizeof(Type);
+    B.Data.reset(new char[B.Size]);
+    memcpy(B.Data.get(), Arr.data(), B.Size);
+  }
+
+  I.mapOptional("OutputProps", B.OutputProps);
+}
+
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
                                                  offloadtest::Buffer &B) {
   I.mapRequired("Name", B.Name);
@@ -102,44 +126,37 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   I.mapOptional("Counter", B.Counter, 0);
   if (!I.outputting() && B.Stride != 0 && B.Channels != 1)
     I.setError("Cannot set a structure stride and more than one channel.");
+  using DF = offloadtest::DataFormat;
   switch (B.Format) {
-#define DATA_CASE(Enum, Type)                                                  \
-  case DataFormat::Enum: {                                                     \
-    if (I.outputting()) {                                                      \
-      llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
-                                      B.Size / sizeof(Type));                  \
-      I.mapRequired("Data", Arr);                                              \
-    } else {                                                                   \
-      int64_t ZeroInitSize;                                                    \
-      I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
-      if (ZeroInitSize > 0) {                                                  \
-        B.Size = ZeroInitSize;                                                 \
-        B.Data.reset(new char[B.Size]);                                        \
-        memset(B.Data.get(), 0, B.Size);                                       \
-        break;                                                                 \
-      }                                                                        \
-      llvm::SmallVector<Type, 64> Arr;                                         \
-      I.mapRequired("Data", Arr);                                              \
-      B.Size = Arr.size() * sizeof(Type);                                      \
-      B.Data.reset(new char[B.Size]);                                          \
-      memcpy(B.Data.get(), Arr.data(), B.Size);                                \
-    }                                                                          \
-    break;                                                                     \
-  }
-    DATA_CASE(Hex8, llvm::yaml::Hex8)
-    DATA_CASE(Hex16, llvm::yaml::Hex16)
-    DATA_CASE(Hex32, llvm::yaml::Hex32)
-    DATA_CASE(Hex64, llvm::yaml::Hex64)
-    DATA_CASE(UInt16, uint16_t)
-    DATA_CASE(UInt32, uint32_t)
-    DATA_CASE(UInt64, uint64_t)
-    DATA_CASE(Int16, int16_t)
-    DATA_CASE(Int32, int32_t)
-    DATA_CASE(Int64, int64_t)
-    DATA_CASE(Float16, llvm::yaml::Hex16)
-    DATA_CASE(Float32, float)
-    DATA_CASE(Float64, double)
-    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a bool using 4 bytes.
+  case DF::Hex8:
+    return setData<llvm::yaml::Hex8>(I, B);
+  case DF::Hex16:
+    return setData<llvm::yaml::Hex16>(I, B);
+  case DF::Hex32:
+    return setData<llvm::yaml::Hex32>(I, B);
+  case DF::Hex64:
+    return setData<llvm::yaml::Hex64>(I, B);
+  case DF::UInt16:
+    return setData<uint16_t>(I, B);
+  case DF::UInt32:
+    return setData<uint32_t>(I, B);
+  case DF::UInt64:
+    return setData<uint64_t>(I, B);
+  case DF::Int16:
+    return setData<int16_t>(I, B);
+  case DF::Int32:
+    return setData<int32_t>(I, B);
+  case DF::Int64:
+    return setData<int64_t>(I, B);
+  case DF::Float16:
+    return setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
+  case DF::Float32:
+    return setData<float>(I, B);
+  case DF::Float64:
+    return setData<double>(I, B);
+  case DF::Bool:
+    return setData<uint32_t>(I, B); // Because sizeof(bool) is 1 but HLSL
+                                    // represents a bool using 4 bytes.
   }
 
   I.mapOptional("OutputProps", B.OutputProps);

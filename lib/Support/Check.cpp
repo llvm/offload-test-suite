@@ -282,41 +282,56 @@ static std::string bitPatternAsHex64(const T &Val,
   return Oss.str();
 }
 
+template <typename T>
+std::string formatBuffer(offloadtest::Buffer *B, offloadtest::Rule rule) {
+  llvm::MutableArrayRef<T> arr(reinterpret_cast<T *>(B->Data.get()),
+                               B->Size / sizeof(T));
+  if (arr.empty())
+    return "";
+
+  std::string result = "[ " + bitPatternAsHex64(arr[0], rule);
+  for (size_t i = 1; i < arr.size(); ++i)
+    result += ", " + bitPatternAsHex64(arr[i], rule);
+  result += " ]";
+  return result;
+}
+
 static const std::string getBufferStr(offloadtest::Buffer *B,
-                                      offloadtest::Rule ComparisonRule) {
-  std::string ret = "";
+                                      offloadtest::Rule rule) {
+  using DF = offloadtest::DataFormat;
   switch (B->Format) {
-#define DATA_CASE(Enum, Type)                                                  \
-  case offloadtest::DataFormat::Enum: {                                        \
-    const llvm::MutableArrayRef<Type> Arr(                                     \
-        reinterpret_cast<Type *>(B->Data.get()), B->Size / sizeof(Type));      \
-    if (Arr.size() == 0)                                                       \
-      return "";                                                               \
-    if (Arr.size() == 1)                                                       \
-      return "[ " + bitPatternAsHex64(Arr[0], ComparisonRule) + " ]";          \
-    ret += " [ " + bitPatternAsHex64(Arr[0], ComparisonRule);                  \
-    for (unsigned int i = 1; i < Arr.size(); i++)                              \
-      ret += ", " + bitPatternAsHex64(Arr[i], ComparisonRule);                 \
-    ret += " ]";                                                               \
-    break;                                                                     \
+  case DF::Hex8:
+    return formatBuffer<llvm::yaml::Hex8>(B, rule);
+  case DF::Hex16:
+    return formatBuffer<llvm::yaml::Hex16>(B, rule);
+  case DF::Hex32:
+    return formatBuffer<llvm::yaml::Hex32>(B, rule);
+  case DF::Hex64:
+    return formatBuffer<llvm::yaml::Hex64>(B, rule);
+  case DF::UInt16:
+    return formatBuffer<uint16_t>(B, rule);
+  case DF::UInt32:
+    return formatBuffer<uint32_t>(B, rule);
+  case DF::UInt64:
+    return formatBuffer<uint64_t>(B, rule);
+  case DF::Int16:
+    return formatBuffer<int16_t>(B, rule);
+  case DF::Int32:
+    return formatBuffer<int32_t>(B, rule);
+  case DF::Int64:
+    return formatBuffer<int64_t>(B, rule);
+  case DF::Float16:
+    return formatBuffer<llvm::yaml::Hex16>(B,
+                                           rule); // assuming no native float16
+  case DF::Float32:
+    return formatBuffer<float>(B, rule);
+  case DF::Float64:
+    return formatBuffer<double>(B, rule);
+  case DF::Bool:
+    return formatBuffer<uint32_t>(B,
+                                  rule); // Because sizeof(bool) is 1 but HLSL
+                                         // represents a bool using 4 bytes.
   }
-    DATA_CASE(Hex8, llvm::yaml::Hex8)
-    DATA_CASE(Hex16, llvm::yaml::Hex16)
-    DATA_CASE(Hex32, llvm::yaml::Hex32)
-    DATA_CASE(Hex64, llvm::yaml::Hex64)
-    DATA_CASE(UInt16, uint16_t)
-    DATA_CASE(UInt32, uint32_t)
-    DATA_CASE(UInt64, uint64_t)
-    DATA_CASE(Int16, int16_t)
-    DATA_CASE(Int32, int32_t)
-    DATA_CASE(Int64, int64_t)
-    DATA_CASE(Float16, llvm::yaml::Hex16)
-    DATA_CASE(Float32, float)
-    DATA_CASE(Float64, double)
-    DATA_CASE(Bool, uint32_t) // Because sizeof(bool) is 1 but HLSL represents a
-                              // bool using 4 bytes.
-  }
-  return ret;
 }
 
 llvm::Error verifyResult(offloadtest::Result R) {
@@ -340,7 +355,10 @@ llvm::Error verifyResult(offloadtest::Result R) {
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
-    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << R.Epsilon << "\n";
+
+    std::ostringstream Oss;
+    Oss << std::defaultfloat << R.Epsilon;
+    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str() << "\n";
     break;
   }
   }
