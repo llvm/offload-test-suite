@@ -283,9 +283,10 @@ static std::string bitPatternAsHex64(const T &Val,
 }
 
 template <typename T>
-std::string formatBuffer(offloadtest::Buffer *B, offloadtest::Rule Rule) {
-  llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B->Data.get()),
-                               B->Size / sizeof(T));
+static std::string formatBuffer(offloadtest::Buffer *B,
+                                offloadtest::Rule Rule) {
+  const llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B->Data.get()),
+                                     B->Size / sizeof(T));
   if (Arr.empty())
     return "";
 
