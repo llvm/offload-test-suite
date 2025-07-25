@@ -110,6 +110,8 @@ DescriptorSets:
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
 
 # CHECK: Test failed: Test1
+# CHECK: Comparison Rule: BufferFloatULP
+# CHECK: ULP: 1
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected1
@@ -131,8 +133,18 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x1.8000000000000p+0, 0x1.4000000000000p+1 ]
+# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x1.44cccc 
+# The rest is #ccccccdp+4, 0x1.4000000000000p+2 ], but some implementations
+# have trailing 0's for the remaining hex64 data. So, we resume checking from p+4
+# CHECK: p+4, 0x1.4000000000000p+2 ]
 
 # CHECK: Test failed: Test2
+# CHECK: Comparison Rule: BufferFloatULP
+# CHECK: ULP: 1
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected2
@@ -154,8 +166,15 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x0.fffffffffffffp-1022 ]
+# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x0.0000000000000p+0 ]
 
 # CHECK: Test failed: Test3
+# CHECK: Comparison Rule: BufferFloatULP
+# CHECK: ULP: 0
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected3
@@ -177,8 +196,15 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x0.0000000000000p+0 ]
+# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: [ nan ]
 
 # CHECK: Test failed: Test4
+# CHECK: Comparison Rule: BufferFloatEpsilon
+# CHECK: Epsilon: 0.1
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected1
@@ -200,8 +226,18 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x1.8000000000000p+0, 0x1.4000000000000p+1 ]
+# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x1.44cccc 
+# The rest is #ccccccdp+4, 0x1.4000000000000p+2 ], but some implementations
+# have trailing 0's for the remaining hex64 data. So, we resume checking from p+4
+# CHECK: p+4, 0x1.4000000000000p+2 ]
 
 # CHECK: Test failed: Test5
+# CHECK: Comparison Rule: BufferFloatEpsilon
+# CHECK: Epsilon: 0
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected2
@@ -223,8 +259,15 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x0.fffffffffffffp-1022 ]
+# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x0.0000000000000p+0 ]
 
 # CHECK: Test failed: Test6
+# CHECK: Comparison Rule: BufferFloatEpsilon
+# CHECK: Epsilon: 0
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected3
@@ -246,3 +289,8 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x0.0000000000000p+0 ]
+# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: [ nan ]
