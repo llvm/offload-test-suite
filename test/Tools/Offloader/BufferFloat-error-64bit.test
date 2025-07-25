@@ -139,7 +139,7 @@ DescriptorSets:
 # CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
 # CHECK-NEXT: [ 0x1.44cccc 
 # The rest is #ccccccdp+4, 0x1.4000000000000p+2 ], but some implementations
-# the remaining hex64 data. So, we resume checking from p+4
+# have trailing 0's for the remaining hex64 data. So, we resume checking from p+4
 # CHECK: p+4, 0x1.4000000000000p+2 ]
 
 # CHECK: Test failed: Test2
@@ -232,7 +232,7 @@ DescriptorSets:
 # CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
 # CHECK-NEXT: [ 0x1.44cccc 
 # The rest is #ccccccdp+4, 0x1.4000000000000p+2 ], but some implementations
-# the remaining hex64 data. So, we resume checking from p+4
+# have trailing 0's for the remaining hex64 data. So, we resume checking from p+4
 # CHECK: p+4, 0x1.4000000000000p+2 ]
 
 # CHECK: Test failed: Test5
