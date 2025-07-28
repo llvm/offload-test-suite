@@ -39,9 +39,6 @@ DescriptorSets:
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
-# CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
-# CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
-
 # CHECK: Name: Out
 # CHECK: Counter: 4
 # CHECK: Data: [

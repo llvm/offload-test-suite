@@ -118,18 +118,39 @@ class MTLDevice : public offloadtest::Device {
       IRDescriptorTableSetBufferView(&TablePtr[HeapIdx], &View);
       IS.Buffers.push_back(Buf);
     } else {
-      const uint64_t Width = R.size() / R.getElementSize();
+      const uint64_t Width = R.isTexture() ? R.BufferPtr->OutputProps.Width
+                                           : R.size() / R.getElementSize();
+      const uint64_t Height =
+          R.isTexture() ? R.BufferPtr->OutputProps.Height : 1;
       MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
       if (R.isReadWrite())
         UsageFlags |= MTL::ResourceUsageWrite;
-      MTL::TextureDescriptor *Desc =
-          MTL::TextureDescriptor::textureBufferDescriptor(
-              getMTLFormat(R.BufferPtr->Format, R.BufferPtr->Channels), Width,
-              MTL::ResourceStorageModeManaged, UsageFlags);
+      MTL::TextureDescriptor *Desc = nullptr;
+      const MTL::PixelFormat Format =
+          getMTLFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+      switch (R.Kind) {
+      case ResourceKind::Buffer:
+      case ResourceKind::RWBuffer:
+        Desc = MTL::TextureDescriptor::textureBufferDescriptor(
+            Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
+        break;
+      case ResourceKind::Texture2D:
+      case ResourceKind::RWTexture2D:
+        Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width,
+                                                           Height, false);
+        break;
+      case ResourceKind::StructuredBuffer:
+      case ResourceKind::RWStructuredBuffer:
+      case ResourceKind::ByteAddressBuffer:
+      case ResourceKind::RWByteAddressBuffer:
+      case ResourceKind::ConstantBuffer:
+        llvm_unreachable("Raw is checked above");
+      }
 
       MTL::Texture *NewTex = Device->newTexture(Desc);
-      NewTex->replaceRegion(MTL::Region(0, 0, Width, 1), 0,
-                            R.BufferPtr->Data.get(), 0);
+      NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
+                            R.BufferPtr->Data.get(),
+                            Width * R.getElementSize());
 
       IS.Textures.push_back(NewTex);
 
@@ -193,21 +214,25 @@ class MTLDevice : public offloadtest::Device {
     uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (R.isReadWrite()) {
-          if (R.isRaw()) {
-            memcpy(R.BufferPtr->Data.get(),
-                   IS.Buffers[BufferIndex++]->contents(), R.size());
-          } else {
-            const uint64_t Width = R.size() / R.getElementSize();
-            IS.Textures[TextureIndex++]->getBytes(
-                R.BufferPtr->Data.get(), 0, MTL::Region(0, 0, Width, 1), 0);
-          }
-        } else {
+        if (R.isReadOnly()) {
           if (R.isRaw())
             ++BufferIndex;
           else
             ++TextureIndex;
+          continue;
         }
+        if (R.isRaw()) {
+          memcpy(R.BufferPtr->Data.get(), IS.Buffers[BufferIndex++]->contents(),
+                 R.size());
+          continue;
+        }
+        const uint64_t Width = R.isTexture() ? R.BufferPtr->OutputProps.Width
+                                             : R.size() / R.getElementSize();
+        const uint64_t Height =
+            R.isTexture() ? R.BufferPtr->OutputProps.Height : 1;
+        IS.Textures[TextureIndex++]->getBytes(
+            R.BufferPtr->Data.get(), Width * R.getElementSize(),
+            MTL::Region(0, 0, Width, Height), 0);
       }
     }
     return llvm::Error::success();
