@@ -134,9 +134,15 @@ private:
     ComPtr<ID3D12Resource> Upload;
     ComPtr<ID3D12Resource> Buffer;
     ComPtr<ID3D12Resource> Readback;
+    ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
+                ComPtr<ID3D12Resource> Readback)
+        : Upload(Upload), Buffer(Buffer), Readback(Readback) {}
   };
 
-  using ResourcePair = std::pair<offloadtest::Resource *, ResourceSet>;
+  // ResourceBundle will contain one ResourceSet for a singular resource
+  // or multiple ResourceSets for resource array.
+  using ResourceBundle = llvm::SmallVector<ResourceSet>;
+  using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
 
   struct DescriptorTable {
     llvm::SmallVector<ResourcePair> Resources;
@@ -278,13 +284,13 @@ public:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
         }
-        Ranges.get()[RangeIdx].NumDescriptors = 1;
+        Ranges.get()[RangeIdx].NumDescriptors = R.BufferPtr->ArraySize;
         Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
         Ranges.get()[RangeIdx].RegisterSpace = R.DXBinding.Space;
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
             DescriptorIdx;
         RangeIdx++;
-        DescriptorIdx++;
+        DescriptorIdx += R.BufferPtr->ArraySize;
       }
       RootParams.push_back(
           D3D12_ROOT_PARAMETER{D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
@@ -326,7 +332,8 @@ public:
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, P.getDescriptorCount(),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+        P.getDescriptorCountWithFlattenedArrays(),
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
     if (auto Err = HR::toError(Device->CreateDescriptorHeap(
                                    &HeapDesc, IID_PPV_ARGS(&State.DescHeap)),
@@ -382,12 +389,8 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-  llvm::Expected<ResourceSet> createSRV(Resource &R, InvocationState &IS) {
-    llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
-                 << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
-                 << " }\n";
-    ComPtr<ID3D12Resource> Buffer;
-    ComPtr<ID3D12Resource> UploadBuffer;
+  llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
+    ResourceBundle Bundle;
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -402,42 +405,53 @@ public:
         {1, 0},
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
-
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                   IID_PPV_ARGS(&Buffer)),
-                               "Failed to create committed resource (buffer)."))
-      return Err;
-
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
         CD3DX12_RESOURCE_DESC::Buffer(R.size());
 
-    if (auto Err =
-            HR::toError(Device->CreateCommittedResource(
-                            &UploadHeapProp, D3D12_HEAP_FLAG_NONE,
-                            &UploadResDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                            nullptr, IID_PPV_ARGS(&UploadBuffer)),
-                        "Failed to create committed resource (upload buffer)."))
-      return Err;
+    uint32_t RegOffset = 0;
+    for (const auto &ResData : R.BufferPtr->Data) {
+      llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
+                   << R.DXBinding.Register + RegOffset
+                   << ", Space = " << R.DXBinding.Space << " }\n";
 
-    // Initialize the SRV data
-    void *ResDataPtr = nullptr;
-    if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
-                               "Failed to acquire UAV data pointer."))
-      return Err;
-    memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
-    UploadBuffer->Unmap(0, nullptr);
+      ComPtr<ID3D12Resource> Buffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
+                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&Buffer)),
+              "Failed to create committed resource (buffer)."))
+        return Err;
 
-    addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+      ComPtr<ID3D12Resource> UploadBuffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                  IID_PPV_ARGS(&UploadBuffer)),
+              "Failed to create committed resource (upload buffer)."))
+        return Err;
 
-    return ResourceSet{UploadBuffer, Buffer, nullptr};
+      // Initialize the SRV data
+      void *ResDataPtr = nullptr;
+      if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
+                                 "Failed to acquire UAV data pointer."))
+        return Err;
+      memcpy(ResDataPtr, ResData.get(), R.size());
+      UploadBuffer->Unmap(0, nullptr);
+
+      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+
+      Bundle.emplace_back(UploadBuffer, Buffer, nullptr);
+      RegOffset++;
+    }
+    return Bundle;
   }
 
-  void bindSRV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
-               ComPtr<ID3D12Resource> Buffer) {
+  // returns the next available HeapIdx
+  uint32_t bindSRV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                   ResourceBundle ResBundle) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     DXGI_FORMAT const EltFormat =
@@ -451,24 +465,25 @@ public:
                           R.isByteAddressBuffer()
                               ? D3D12_BUFFER_SRV_FLAG_RAW
                               : D3D12_BUFFER_SRV_FLAG_NONE}}};
-
-    llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                 << " NumElts = " << NumElts << "\n";
-    D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle =
+    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE SRVHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
-    SRVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
-                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateShaderResourceView(Buffer.Get(), &SRVDesc, SRVHandle);
+
+    for (ResourceSet &RS : ResBundle) {
+      llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
+                   << " NumElts = " << NumElts << "\n";
+      D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = SRVHandleHeapStart;
+      SRVHandle.ptr += HeapIdx * DescHandleIncSize;
+      Device->CreateShaderResourceView(RS.Buffer.Get(), &SRVDesc, SRVHandle);
+      HeapIdx++;
+    }
+    return HeapIdx;
   }
 
-  llvm::Expected<ResourceSet> createUAV(Resource &R, InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createUAV(Resource &R, InvocationState &IS) {
+    ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
-    llvm::outs() << "Creating UAV: { Size = " << BufferSize << ", Register = u"
-                 << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
-                 << ", HasCounter = " << R.HasCounter << " }\n";
-    ComPtr<ID3D12Resource> Buffer;
-    ComPtr<ID3D12Resource> UploadBuffer;
-    ComPtr<ID3D12Resource> ReadBackBuffer;
 
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -483,26 +498,6 @@ public:
         {1, 0},
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
-
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                   IID_PPV_ARGS(&Buffer)),
-                               "Failed to create committed resource (buffer)."))
-      return Err;
-
-    const D3D12_HEAP_PROPERTIES UploadHeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
-
-    if (auto Err =
-            HR::toError(Device->CreateCommittedResource(
-                            &UploadHeapProp, D3D12_HEAP_FLAG_NONE,
-                            &UploadResDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                            nullptr, IID_PPV_ARGS(&UploadBuffer)),
-                        "Failed to create committed resource (upload buffer)."))
-      return Err;
 
     const D3D12_HEAP_PROPERTIES ReadBackHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
@@ -518,32 +513,65 @@ public:
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_NONE};
 
-    if (auto Err = HR::toError(
-            Device->CreateCommittedResource(
-                &ReadBackHeapProp, D3D12_HEAP_FLAG_NONE, &ReadBackResDesc,
-                D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                IID_PPV_ARGS(&ReadBackBuffer)),
-            "Failed to create committed resource (readback buffer)."))
-      return Err;
+    const D3D12_HEAP_PROPERTIES UploadHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    const D3D12_RESOURCE_DESC UploadResDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
 
-    // Initialize the UAV data
-    void *ResDataPtr = nullptr;
-    if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
-                               "Failed to acquire UAV data pointer."))
-      return Err;
-    memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
-    UploadBuffer->Unmap(0, nullptr);
+    uint32_t RegOffset = 0;
+    for (const auto &ResData : R.BufferPtr->Data) {
+      llvm::outs() << "Creating UAV: { Size = " << BufferSize
+                   << ", Register = u" << R.DXBinding.Register + RegOffset
+                   << ", Space = " << R.DXBinding.Space
+                   << ", HasCounter = " << R.HasCounter << " }\n";
 
-    addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+      ComPtr<ID3D12Resource> Buffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
+                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&Buffer)),
+              "Failed to create committed resource (buffer)."))
+        return Err;
 
-    return ResourceSet{UploadBuffer, Buffer, ReadBackBuffer};
+      ComPtr<ID3D12Resource> UploadBuffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                  IID_PPV_ARGS(&UploadBuffer)),
+              "Failed to create committed resource (upload buffer)."))
+        return Err;
+
+      ComPtr<ID3D12Resource> ReadBackBuffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &ReadBackHeapProp, D3D12_HEAP_FLAG_NONE, &ReadBackResDesc,
+                  D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                  IID_PPV_ARGS(&ReadBackBuffer)),
+              "Failed to create committed resource (readback buffer)."))
+        return Err;
+
+      // Initialize the UAV data
+      void *ResDataPtr = nullptr;
+      if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
+                                 "Failed to acquire UAV data pointer."))
+        return Err;
+      memcpy(ResDataPtr, ResData.get(), R.size());
+      UploadBuffer->Unmap(0, nullptr);
+
+      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+
+      Bundle.emplace_back(UploadBuffer, Buffer, ReadBackBuffer);
+      RegOffset++;
+    }
+    return Bundle;
   }
 
-  void bindUAV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
-               ComPtr<ID3D12Resource> Buffer) {
+  // returns the next available HeapIdx
+  uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                   ResourceBundle ResBundle) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
-    ID3D12Resource *CounterBuffer = R.HasCounter ? Buffer.Get() : nullptr;
     const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
     DXGI_FORMAT const EltFormat =
         R.isRaw() ? getRawDXFormat(R)
@@ -555,30 +583,33 @@ public:
             0, NumElts, R.isStructuredBuffer() ? EltSize : 0, CounterOffset,
             R.isByteAddressBuffer() ? D3D12_BUFFER_UAV_FLAG_RAW
                                     : D3D12_BUFFER_UAV_FLAG_NONE}}};
-
-    llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                 << " NumElts = " << NumElts << " HasCounter = " << R.HasCounter
-                 << "\n";
-    D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle =
+    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE UAVHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
-    UAVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
-                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateUnorderedAccessView(Buffer.Get(), CounterBuffer, &UAVDesc,
-                                      UAVHandle);
+
+    for (ResourceSet &RS : ResBundle) {
+      llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
+                   << " NumElts = " << NumElts
+                   << " HasCounter = " << R.HasCounter << "\n";
+      D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle = UAVHandleHeapStart;
+      UAVHandle.ptr += HeapIdx * DescHandleIncSize;
+      ID3D12Resource *CounterBuffer = R.HasCounter ? RS.Buffer.Get() : nullptr;
+      Device->CreateUnorderedAccessView(RS.Buffer.Get(), CounterBuffer,
+                                        &UAVDesc, UAVHandle);
+      HeapIdx++;
+    }
+    return HeapIdx;
   }
 
   static size_t getCBVSize(size_t Sz) {
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  llvm::Expected<ResourceSet> createCBV(Resource &R, InvocationState &IS) {
-    const size_t CBVSize = getCBVSize(R.size());
-    llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
-                 << R.DXBinding.Register << ", Space = " << R.DXBinding.Space
-                 << " }\n";
-    ComPtr<ID3D12Resource> Buffer;
-    ComPtr<ID3D12Resource> UploadBuffer;
+  llvm::Expected<ResourceBundle> createCBV(Resource &R, InvocationState &IS) {
+    ResourceBundle Bundle;
 
+    const size_t CBVSize = getCBVSize(R.size());
     const D3D12_HEAP_PROPERTIES HeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     const D3D12_RESOURCE_DESC ResDesc = {
@@ -593,56 +624,75 @@ public:
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
 
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                   IID_PPV_ARGS(&Buffer)),
-                               "Failed to create committed resource (buffer)."))
-      return Err;
-
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
         CD3DX12_RESOURCE_DESC::Buffer(CBVSize);
 
-    if (auto Err =
-            HR::toError(Device->CreateCommittedResource(
-                            &UploadHeapProp, D3D12_HEAP_FLAG_NONE,
-                            &UploadResDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
-                            nullptr, IID_PPV_ARGS(&UploadBuffer)),
-                        "Failed to create committed resource (upload buffer)."))
-      return Err;
+    uint32_t RegOffset = 0;
+    for (const auto &ResData : R.BufferPtr->Data) {
+      llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
+                   << R.DXBinding.Register + RegOffset
+                   << ", Space = " << R.DXBinding.Space << " }\n";
 
-    // Initialize the CBV data
-    void *ResDataPtr = nullptr;
-    if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
-                               "Failed to acquire UAV data pointer."))
-      return Err;
-    memcpy(ResDataPtr, R.BufferPtr->Data.get(), R.size());
-    // Zero any remaining bytes
-    if (R.size() < CBVSize) {
-      void *ExtraData = static_cast<char *>(ResDataPtr) + R.size();
-      memset(ExtraData, 0, CBVSize - R.size() - 1);
+      ComPtr<ID3D12Resource> Buffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
+                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&Buffer)),
+              "Failed to create committed resource (buffer)."))
+        return Err;
+
+      ComPtr<ID3D12Resource> UploadBuffer;
+      if (auto Err = HR::toError(
+              Device->CreateCommittedResource(
+                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                  IID_PPV_ARGS(&UploadBuffer)),
+              "Failed to create committed resource (upload buffer)."))
+        return Err;
+
+      // Initialize the CBV data
+      void *ResDataPtr = nullptr;
+      if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
+                                 "Failed to acquire UAV data pointer."))
+        return Err;
+      memcpy(ResDataPtr, ResData.get(), R.size());
+      // Zero any remaining bytes
+      if (R.size() < CBVSize) {
+        void *ExtraData = static_cast<char *>(ResDataPtr) + R.size();
+        memset(ExtraData, 0, CBVSize - R.size() - 1);
+      }
+      UploadBuffer->Unmap(0, nullptr);
+
+      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+
+      Bundle.emplace_back(UploadBuffer, Buffer, nullptr);
+      RegOffset++;
     }
-    UploadBuffer->Unmap(0, nullptr);
-
-    addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
-
-    return ResourceSet{UploadBuffer, Buffer, nullptr};
+    return Bundle;
   }
 
-  void bindCBV(Resource &R, InvocationState &IS, const uint32_t HeapIdx,
-               ComPtr<ID3D12Resource> Buffer) {
+  // returns the next available HeapIdx
+  uint32_t bindCBV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                   ResourceBundle ResBundle) {
     const size_t CBVSize = getCBVSize(R.size());
-    const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
-        Buffer->GetGPUVirtualAddress(), static_cast<uint32_t>(CBVSize)};
-
-    llvm::outs() << "CBV: HeapIdx = " << HeapIdx << "\n";
-    D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle =
+    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    D3D12_CPU_DESCRIPTOR_HANDLE CVBHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
-    CBVHandle.ptr += HeapIdx * Device->GetDescriptorHandleIncrementSize(
-                                   D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    Device->CreateConstantBufferView(&CBVDesc, CBVHandle);
+
+    for (ResourceSet &RS : ResBundle) {
+      llvm::outs() << "CBV: HeapIdx = " << HeapIdx << " Size = " << CBVSize
+                   << "\n";
+      const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
+          RS.Buffer->GetGPUVirtualAddress(), static_cast<uint32_t>(CBVSize)};
+      D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle = CVBHandleHeapStart;
+      CBVHandle.ptr += HeapIdx * DescHandleIncSize;
+      Device->CreateConstantBufferView(&CBVDesc, CBVHandle);
+      HeapIdx++;
+    }
+    return HeapIdx;
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
@@ -690,13 +740,13 @@ public:
       for (auto &R : T.Resources) {
         switch (getDXKind(R.first->Kind)) {
         case SRV:
-          bindSRV(*(R.first), IS, HeapIndex++, R.second.Buffer);
+          HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
           break;
         case UAV:
-          bindUAV(*(R.first), IS, HeapIndex++, R.second.Buffer);
+          HeapIndex = bindUAV(*(R.first), IS, HeapIndex, R.second);
           break;
         case CBV:
-          bindCBV(*(R.first), IS, HeapIndex++, R.second.Buffer);
+          HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
           break;
         }
       }
@@ -814,7 +864,7 @@ public:
     return waitForSignal(IS);
   }
 
-  void createComputeCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     IS.CmdList->SetPipelineState(IS.PSO.Get());
     IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
 
@@ -837,11 +887,14 @@ public:
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
           auto &Constant = std::get<dx::RootConstant>(Param.Data);
+          if (Constant.BufferPtr->ArraySize != 1)
+            return llvm::createStringError(std::errc::value_too_large,
+                       "Root constant cannot refer to resource arrays.");
           const uint32_t NumValues =
               Constant.BufferPtr->size() / sizeof(uint32_t);
           IS.CmdList->SetComputeRoot32BitConstants(
-              RootParamIndex++, NumValues, Constant.BufferPtr->Data.get(),
-              ConstantOffset);
+              RootParamIndex++, NumValues,
+              Constant.BufferPtr->Data.back().get(), ConstantOffset);
           ConstantOffset += NumValues;
           break;
         }
@@ -851,21 +904,24 @@ public:
           break;
         case dx::RootParamKind::RootDescriptor:
           assert(RootDescIt != IS.RootResources.end());
+          if (RootDescIt->first->BufferPtr->ArraySize != 1)
+            return llvm::createStringError(std::errc::value_too_large,
+                       "Root descriptor cannot refer to resource arrays.");
           switch (getDXKind(RootDescIt->first->Kind)) {
           case SRV:
             IS.CmdList->SetComputeRootShaderResourceView(
                 RootParamIndex++,
-                RootDescIt->second.Buffer->GetGPUVirtualAddress());
+                RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case UAV:
             IS.CmdList->SetComputeRootUnorderedAccessView(
                 RootParamIndex++,
-                RootDescIt->second.Buffer->GetGPUVirtualAddress());
+                RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case CBV:
             IS.CmdList->SetComputeRootConstantBufferView(
                 RootParamIndex++,
-                RootDescIt->second.Buffer->GetGPUVirtualAddress());
+                RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           }
           ++RootDescIt;
@@ -888,11 +944,14 @@ public:
     IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
-      if (R.second.Readback == nullptr)
-        return;
-      addReadbackBeginBarrier(IS, R.second.Buffer);
-      IS.CmdList->CopyResource(R.second.Readback.Get(), R.second.Buffer.Get());
-      addReadbackEndBarrier(IS, R.second.Buffer);
+      for (ResourceSet &RS : R.second) {
+        if (RS.Readback == nullptr)
+          continue;
+        ;
+        addReadbackBeginBarrier(IS, RS.Buffer);
+        IS.CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
+        addReadbackEndBarrier(IS, RS.Buffer);
+      }
     };
 
     for (auto &Table : IS.DescTables)
@@ -901,23 +960,36 @@ public:
 
     for (auto &R : IS.RootResources)
       CopyBackResource(R);
+
+    return llvm::Error::success();
   }
 
   llvm::Error readBack(InvocationState &IS) {
     auto MemCpyBack = [](ResourcePair &R) -> llvm::Error {
       if (!R.first->isReadWrite())
         return llvm::Error::success();
-      void *DataPtr;
-      if (auto Err = HR::toError(R.second.Readback->Map(0, nullptr, &DataPtr),
-                                 "Failed to map result."))
-        return Err;
-      memcpy(R.first->BufferPtr->Data.get(), DataPtr, R.first->size());
-      if (R.first->HasCounter)
-        memcpy(&R.first->BufferPtr->Counter,
-               static_cast<char *>(DataPtr) +
-                   getUAVBufferCounterOffset(*R.first),
-               sizeof(uint32_t));
-      R.second.Readback->Unmap(0, nullptr);
+
+      auto RSIt = R.second.begin();
+      auto DataIt = R.first->BufferPtr->Data.begin();
+      for (; RSIt != R.second.end() && DataIt != R.first->BufferPtr->Data.end();
+           ++RSIt, ++DataIt) {
+        void *DataPtr;
+        if (auto Err = HR::toError(RSIt->Readback->Map(0, nullptr, &DataPtr),
+                                   "Failed to map result."))
+          return Err;
+        memcpy(DataIt->get(), DataPtr, R.first->size());
+
+        if (R.first->HasCounter) {
+          uint32_t Counter;
+          memcpy(&Counter,
+                 static_cast<char *>(DataPtr) +
+                     getUAVBufferCounterOffset(*R.first),
+                 sizeof(uint32_t));
+          R.first->BufferPtr->Counters.push_back(Counter);
+        }
+        RSIt->Readback->Unmap(0, nullptr);
+      }
+
       return llvm::Error::success();
     };
 
@@ -980,7 +1052,8 @@ public:
     if (auto Err = createEvent(State))
       return Err;
     llvm::outs() << "Event prepared.\n";
-    createComputeCommands(P, State);
+    if (auto Err = createComputeCommands(P, State))
+      return Err;
     llvm::outs() << "Compute command list created.\n";
     if (auto Err = executeCommandList(State))
       return Err;

@@ -93,39 +93,119 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
   I.mapRequired("Resources", D.Resources);
 }
 
+// Data can contain one block of data for a singular resource
+// or multiple blocks for a resource array.
+// For a single resource the yaml will look like this:
+//
+//   Data: [0, 1, 2, 3]
+//
+// For an array of resources the yaml will have a list like this:
+//
+//   Data:
+//     - [0, 1, 2, 3]
+//     - [4, 5, 6, 7]
+//     - [8, 9, 10, 11]
+template <typename T> static void mapBufferData(IO &I, offloadtest::Buffer &B) {
+  if (I.outputting()) {
+    if (B.ArraySize == 1) {
+      // single buffer output
+      llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B.Data.back().get()),
+                                   B.Size / sizeof(T));
+      I.mapRequired("Data", Arr);
+    } else {
+      // array of buffers output
+      llvm::SmallVector<llvm::MutableArrayRef<T>> Arrays;
+      for (const auto &D : B.Data)
+        Arrays.emplace_back(reinterpret_cast<T *>(D.get()), B.Size / sizeof(T));
+      I.mapRequired("Data", Arrays);
+    }
+    return;
+  }
+
+  // zero-initialized buffer(s)
+  int64_t ZeroInitSize;
+  I.mapOptional("ZeroInitSize", ZeroInitSize, 0);
+  if (ZeroInitSize > 0) {
+    B.Size = ZeroInitSize;
+    for (uint32_t i = 0; i < B.ArraySize; i++) {
+      B.Data.push_back(std::make_unique<char[]>(B.Size));
+      memset(B.Data.back().get(), 0, B.Size);
+    }
+    return;
+  }
+
+  // single buffer input
+  if (B.ArraySize == 1) {
+    llvm::SmallVector<T, 64> Arr;
+    I.mapRequired("Data", Arr);
+    B.Size = Arr.size() * sizeof(T);
+    B.Data.push_back(std::make_unique<char[]>(B.Size));
+    memcpy(B.Data.back().get(), Arr.data(), B.Size);
+    return;
+  }
+
+  // array of buffers input
+  llvm::SmallVector<llvm::SmallVector<T>> Arrays;
+  I.mapRequired("Data", Arrays);
+  B.Size = Arrays.back().size() * sizeof(T);
+
+  uint32_t ActualSize = 0;
+  for (auto Arr : Arrays) {
+    if (Arr.size() * sizeof(T) != B.Size) {
+      I.setError("All buffers must have the same size.");
+      return;
+    }
+    B.Data.push_back(std::make_unique<char[]>(B.Size));
+    memcpy(B.Data.back().get(), Arr.data(), B.Size);
+    ActualSize++;
+  }
+  if (ActualSize != B.ArraySize)
+    I.setError(Twine("Expected ") + std::to_string(B.ArraySize) +
+               " buffers, found " + std::to_string(ActualSize));
+}
+
+// Counter(s) can contain one counter value for a singular resource
+// or multiple values for array of resources with counters.
+// For a single resource the yaml will look like this:
+//
+//   Counter: 5
+//
+// For an array of resources the yaml will have look like this:
+//
+//   Counters: [5, 4, 3]
+//
+static void mapCounters(IO &I, offloadtest::Buffer &B) {
+  // counters are printed only if they exist and only on output
+  if (!I.outputting() || B.Counters.empty())
+    return;
+ 
+  if (B.ArraySize == 1) {
+    assert(B.Counters.size() == 1 &&
+            "expected a single counter for a single buffer");
+    I.mapRequired("Counter", B.Counters.back());
+  } else {
+    assert(B.Counters.size() == B.ArraySize &&
+          "number of counters should match the number of buffers");
+    I.mapRequired("Counters", B.Counters);
+  }
+}
+
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
                                                  offloadtest::Buffer &B) {
   I.mapRequired("Name", B.Name);
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
   I.mapOptional("Stride", B.Stride, 0);
-  I.mapOptional("Counter", B.Counter, 0);
+  I.mapOptional("ArraySize", B.ArraySize, 1);
+  mapCounters(I, B);
+
   if (!I.outputting() && B.Stride != 0 && B.Channels != 1)
     I.setError("Cannot set a structure stride and more than one channel.");
   switch (B.Format) {
 #define DATA_CASE(Enum, Type)                                                  \
-  case DataFormat::Enum: {                                                     \
-    if (I.outputting()) {                                                      \
-      llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
-                                      B.Size / sizeof(Type));                  \
-      I.mapRequired("Data", Arr);                                              \
-    } else {                                                                   \
-      int64_t ZeroInitSize;                                                    \
-      I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
-      if (ZeroInitSize > 0) {                                                  \
-        B.Size = ZeroInitSize;                                                 \
-        B.Data.reset(new char[B.Size]);                                        \
-        memset(B.Data.get(), 0, B.Size);                                       \
-        break;                                                                 \
-      }                                                                        \
-      llvm::SmallVector<Type, 64> Arr;                                         \
-      I.mapRequired("Data", Arr);                                              \
-      B.Size = Arr.size() * sizeof(Type);                                      \
-      B.Data.reset(new char[B.Size]);                                          \
-      memcpy(B.Data.get(), Arr.data(), B.Size);                                \
-    }                                                                          \
-    break;                                                                     \
-  }
+  case DataFormat::Enum:                                                       \
+    mapBufferData<Type>(I, B);                                                 \
+    break;
     DATA_CASE(Hex8, llvm::yaml::Hex8)
     DATA_CASE(Hex16, llvm::yaml::Hex16)
     DATA_CASE(Hex32, llvm::yaml::Hex32)

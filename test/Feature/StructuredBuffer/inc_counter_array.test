@@ -1,0 +1,57 @@
+#--- source.hlsl
+
+// This test verifies handling of resource arrays when the
+// resource type has a counter.
+
+RWStructuredBuffer<int> Out[4] : register(u0);
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  for (int i = 0; i < GI; i++)
+    Out[GI].IncrementCounter();
+  
+  Out[GI][0] = Out[GI].IncrementCounter();
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Hex32
+    Stride: 4
+    ArraySize: 4
+    ZeroInitSize: 4
+
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      HasCounter: true
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
+# CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
+
+# CHECK: Name: Out
+# CHECK: Counters: [ 1, 2, 3, 4 ]
+# CHECK: Data:
+      - [ 0x0 ]
+      - [ 0x1 ]
+      - [ 0x2 ]
+      - [ 0x3 ]

@@ -1,0 +1,53 @@
+#--- source.hlsl
+
+// This test verifies that an error is reported when a resource array is
+// used in a root signature in a root descriptor
+
+RWStructuredBuffer<int> Buf : register(u2);
+
+#define RootSig "UAV(u2)"
+
+[RootSignature(RootSig)]
+[numthreads(1,1,1)]
+void main() {
+    Buf[0]++;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 2, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: RootDescriptor
+        Resource:
+            Name: BufArray
+            Kind: RWStructuredBuffer
+      - Kind: DescriptorTable
+Buffers:
+  - Name: BufArray
+    Format: Int32
+    ArraySize: 2
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: BufArray
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# UNSUPPORTED: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: error: Root descriptor cannot refer to resource arrays

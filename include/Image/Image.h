@@ -90,7 +90,9 @@ public:
                  B.getSingleElementSize(), B.Channels,
                  B.Format == DataFormat::Float32 ||
                      B.Format == DataFormat::Float64,
-                 llvm::StringRef(B.Data.get(), B.size())) {}
+                 llvm::StringRef(B.Data.back().get(), B.size())) {
+    assert(B.ArraySize == 1 && "Buffer must not be an array to be used for ImageRef");
+  }
 
   uint32_t getHeight() const { return Height; }
   uint32_t getWidth() const { return Width; }

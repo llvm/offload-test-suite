@@ -169,9 +169,14 @@ private:
     VkDeviceMemory Memory;
   };
 
-  struct ResourceRef {
+  struct BufferSet {
     BufferRef Host;
     BufferRef Device;
+    BufferSet(BufferRef Host, BufferRef Device) : Host(Host), Device(Device) {}
+  };
+
+  struct BufferBundle {
+    llvm::SmallVector<BufferSet> BufferSets;
     uint64_t Size;
   };
 
@@ -187,7 +192,7 @@ private:
     VkPipeline Pipeline;
 
     llvm::SmallVector<VkDescriptorSetLayout> DescriptorSetLayouts;
-    llvm::SmallVector<ResourceRef> Buffers;
+    llvm::SmallVector<BufferBundle> Buffers;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
   };
@@ -453,27 +458,31 @@ public:
   }
 
   llvm::Error createBuffer(Resource &R, InvocationState &IS) {
-    auto ExHostBuf = createBuffer(
-        IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), R.BufferPtr->Data.get());
-    if (!ExHostBuf)
-      return ExHostBuf.takeError();
+    BufferBundle Bundle;
+    for (auto &ResData : R.BufferPtr->Data) {
+      auto ExHostBuf = createBuffer(
+          IS,
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
+      if (!ExHostBuf)
+        return ExHostBuf.takeError();
 
-    auto ExDeviceBuf =
-        createBuffer(IS,
-                     getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
-    if (!ExDeviceBuf)
-      return ExDeviceBuf.takeError();
+      auto ExDeviceBuf =
+          createBuffer(IS,
+                       getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+      if (!ExDeviceBuf)
+        return ExDeviceBuf.takeError();
 
-    VkBufferCopy Copy = {};
-    Copy.size = R.size();
-    vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                    &Copy);
-
-    IS.Buffers.push_back(ResourceRef{*ExHostBuf, *ExDeviceBuf, R.size()});
-
+      VkBufferCopy Copy = {};
+      Copy.size = R.size();
+      vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
+                      &Copy);
+      Bundle.BufferSets.emplace_back(*ExHostBuf, *ExDeviceBuf);
+    }
+    Bundle.Size = R.size();
+    IS.Buffers.push_back(Bundle);
     return llvm::Error::success();
   }
 
@@ -524,17 +533,15 @@ public:
     uint32_t UniformBufferCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
+        uint32_t Count = R.BufferPtr->ArraySize;
         if (isUniform(R.Kind))
-          UniformBufferCount += 1;
+          UniformBufferCount += Count;
         else if (R.isRaw())
-          StorageBufferCount += 1;
+          StorageBufferCount += Count;
         else
-          TexelBufferCount += 1;
+          TexelBufferCount += Count;
       }
     }
-    assert(TexelBufferCount + StorageBufferCount + UniformBufferCount ==
-               P.getDescriptorCount() &&
-           "Mismatch in descriptor type identification.");
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
     if (TexelBufferCount > 0) {
       VkDescriptorPoolSize PoolSize = {};
@@ -579,7 +586,7 @@ public:
                                          R.Name.c_str());
         Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
-        Binding.descriptorCount = 1;
+        Binding.descriptorCount = R.BufferPtr->ArraySize;
         Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         Bindings.push_back(Binding);
       }
@@ -631,37 +638,44 @@ public:
            ++RIdx, ++BufIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         // This is a hack... need a better way to do this.
-        VkBufferViewCreateInfo ViewCreateInfo = {};
+        uint32_t IndexOfFirstBufferInArray;
         const bool IsRawOrUniform = R.isRaw();
-        const VkFormat Format =
-            IsRawOrUniform
-                ? VK_FORMAT_UNDEFINED
-                : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-        ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-        ViewCreateInfo.buffer = IS.Buffers[BufIdx].Device.Buffer;
-        ViewCreateInfo.format = Format;
-        ViewCreateInfo.range = VK_WHOLE_SIZE;
         if (IsRawOrUniform) {
-          const VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer,
-                                             0, VK_WHOLE_SIZE};
-          RawBufferInfos.push_back(BI);
+          IndexOfFirstBufferInArray = RawBufferInfos.size();
+          for (auto BufSet : IS.Buffers[BufIdx].BufferSets) {
+            const VkDescriptorBufferInfo BI = {BufSet.Device.Buffer, 0,
+                                               VK_WHOLE_SIZE};
+            RawBufferInfos.push_back(BI);
+          }
         } else {
-          IS.BufferViews.push_back(VkBufferView{0});
-          if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr,
-                                 &IS.BufferViews.back()))
-            return llvm::createStringError(std::errc::device_or_resource_busy,
-                                           "Failed to create buffer view.");
+          IndexOfFirstBufferInArray = IS.BufferViews.size();
+          const VkFormat Format =
+              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+          VkBufferViewCreateInfo ViewCreateInfo = {};
+          ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+          ViewCreateInfo.format = Format;
+          ViewCreateInfo.range = VK_WHOLE_SIZE;
+          for (auto BufSet : IS.Buffers[BufIdx].BufferSets) {
+            ViewCreateInfo.buffer = BufSet.Device.Buffer;
+            IS.BufferViews.push_back(VkBufferView{0});
+            if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr,
+                                   &IS.BufferViews.back()))
+              return llvm::createStringError(std::errc::device_or_resource_busy,
+                                             "Failed to create buffer view.");
+          }
         }
+
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = RIdx;
-        WDS.descriptorCount = 1;
+        WDS.descriptorCount = R.BufferPtr->ArraySize;
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (IsRawOrUniform)
-          WDS.pBufferInfo = &RawBufferInfos.back();
+          WDS.pBufferInfo = RawBufferInfos.data() + IndexOfFirstBufferInArray;
         else
-          WDS.pTexelBufferView = &IS.BufferViews.back();
+          WDS.pTexelBufferView =
+              IS.BufferViews.data() + IndexOfFirstBufferInArray;
         llvm::outs() << "Updating Descriptor [" << BufIdx << "] { " << SetIdx
                      << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
@@ -714,16 +728,18 @@ public:
     for (auto &UAV : IS.Buffers) {
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-      Barrier.buffer = UAV.Device.Buffer;
       Barrier.size = VK_WHOLE_SIZE;
       Barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
       Barrier.dstAccessMask =
           VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
       Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
-                           1, &Barrier, 0, nullptr);
+      for (auto UAVBufSet : UAV.BufferSets) {
+        Barrier.buffer = UAVBufSet.Device.Buffer;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+                             nullptr, 1, &Barrier, 0, nullptr);
+      }
     }
     vkCmdBindPipeline(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                       IS.Pipeline);
@@ -738,30 +754,35 @@ public:
     for (auto &UAV : IS.Buffers) {
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-      Barrier.buffer = UAV.Device.Buffer;
       Barrier.size = VK_WHOLE_SIZE;
       Barrier.srcAccessMask =
           VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
       Barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
-                           &Barrier, 0, nullptr);
+      for (auto UAVBufSet : UAV.BufferSets) {
+        Barrier.buffer = UAVBufSet.Device.Buffer;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
+                             &Barrier, 0, nullptr);
+      }
       VkBufferCopy CopyRegion = {};
       CopyRegion.size = UAV.Size;
-      vkCmdCopyBuffer(IS.CmdBuffer, UAV.Device.Buffer, UAV.Host.Buffer, 1,
-                      &CopyRegion);
+      for (auto UAVBufSet : UAV.BufferSets)
+        vkCmdCopyBuffer(IS.CmdBuffer, UAVBufSet.Device.Buffer, UAVBufSet.Host.Buffer, 1,
+                        &CopyRegion);
 
-      Barrier.buffer = UAV.Host.Buffer;
       Barrier.size = VK_WHOLE_SIZE;
       Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       Barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
       Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                           &Barrier, 0, nullptr);
+      for (auto UAVBufSet : UAV.BufferSets) {
+        Barrier.buffer = UAVBufSet.Host.Buffer;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                             &Barrier, 0, nullptr);
+      }
     }
     return llvm::Error::success();
   }
@@ -773,17 +794,25 @@ public:
         const Resource &R = S.Resources[I];
         if (!R.isReadWrite())
           continue;
-        void *Mapped = nullptr;
-        vkMapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory, 0, VK_WHOLE_SIZE,
-                    0, &Mapped);
         VkMappedMemoryRange Range = {};
         Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        Range.memory = IS.Buffers[BufIdx].Host.Memory;
         Range.offset = 0;
         Range.size = VK_WHOLE_SIZE;
-        vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-        memcpy(R.BufferPtr->Data.get(), Mapped, R.size());
-        vkUnmapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory);
+
+        auto &BufferSets = IS.Buffers[BufIdx].BufferSets;
+        auto &DataSet = R.BufferPtr->Data;
+        auto BufSetIt = BufferSets.begin();
+        auto DataIt = DataSet.begin();
+        for (; BufSetIt != BufferSets.end() && DataIt != DataSet.end();
+             ++BufSetIt, ++DataIt) {
+          void *Mapped = nullptr;
+          vkMapMemory(IS.Device, BufSetIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
+                      &Mapped);
+          Range.memory = BufSetIt->Host.Memory;
+          vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+          memcpy(DataIt->get(), Mapped, R.size());
+          vkUnmapMemory(IS.Device, BufSetIt->Host.Memory);
+        }
       }
     }
     return llvm::Error::success();
@@ -795,10 +824,12 @@ public:
       vkDestroyBufferView(IS.Device, V, nullptr);
 
     for (auto &R : IS.Buffers) {
-      vkDestroyBuffer(IS.Device, R.Device.Buffer, nullptr);
-      vkFreeMemory(IS.Device, R.Device.Memory, nullptr);
-      vkDestroyBuffer(IS.Device, R.Host.Buffer, nullptr);
-      vkFreeMemory(IS.Device, R.Host.Memory, nullptr);
+      for (auto &BufSet : R.BufferSets) {
+        vkDestroyBuffer(IS.Device, BufSet.Host.Buffer, nullptr);
+        vkFreeMemory(IS.Device, BufSet.Host.Memory, nullptr);
+        vkDestroyBuffer(IS.Device, BufSet.Device.Buffer, nullptr);
+        vkFreeMemory(IS.Device, BufSet.Device.Memory, nullptr);
+      }
     }
 
     vkDestroyPipeline(IS.Device, IS.Pipeline, nullptr);
