@@ -108,7 +108,7 @@ class MTLDevice : public offloadtest::Device {
                                const uint32_t HeapIdx) {
     auto *TablePtr = (IRDescriptorTableEntry *)IS.ArgBuffer->contents();
 
-    assert(R.ArraySize == 1 &&
+    assert(R.BufferPtr->ArraySize == 1 &&
            "Resource arrays are not yet supported on Metal.");
 
     if (R.isRaw()) {
@@ -218,7 +218,7 @@ class MTLDevice : public offloadtest::Device {
     uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        assert(R.ArraySize == 1 &&
+        assert(R.BufferPtr->ArraySize == 1 &&
                "Resource arrays are not yet supported on Metal.");
         if (R.isReadOnly()) {
           if (R.isRaw())
