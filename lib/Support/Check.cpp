@@ -10,11 +10,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Check.h"
+#include "Support/Pipeline.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
+#include <sstream>
 
 constexpr uint16_t Float16BitSign = 0x8000;
 constexpr uint16_t Float16BitExp = 0x7c00;
@@ -275,30 +277,119 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
+template <typename T>
+static std::string bitPatternAsHex64(const T &Val,
+                                     offloadtest::Rule ComparisonRule) {
+  static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
+
+  std::ostringstream Oss;
+  if (ComparisonRule == offloadtest::Rule::BufferExact)
+    Oss << "0x" << std::hex << Val;
+  else
+    Oss << std::hexfloat << Val;
+  return Oss.str();
+}
+
+template <typename T>
+static std::string formatBuffer(offloadtest::Buffer *B,
+                                offloadtest::Rule Rule) {
+  const llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B->Data.get()),
+                                     B->Size / sizeof(T));
+  if (Arr.empty())
+    return "";
+
+  std::string Result = "[ " + bitPatternAsHex64(Arr[0], Rule);
+  for (size_t I = 1; I < Arr.size(); ++I)
+    Result += ", " + bitPatternAsHex64(Arr[I], Rule);
+  Result += " ]";
+  return Result;
+}
+
+static const std::string getBufferStr(offloadtest::Buffer *B,
+                                      offloadtest::Rule Rule) {
+  using DF = offloadtest::DataFormat;
+  switch (B->Format) {
+  case DF::Hex8:
+    return formatBuffer<llvm::yaml::Hex8>(B, Rule);
+  case DF::Hex16:
+    return formatBuffer<llvm::yaml::Hex16>(B, Rule);
+  case DF::Hex32:
+    return formatBuffer<llvm::yaml::Hex32>(B, Rule);
+  case DF::Hex64:
+    return formatBuffer<llvm::yaml::Hex64>(B, Rule);
+  case DF::UInt16:
+    return formatBuffer<uint16_t>(B, Rule);
+  case DF::UInt32:
+    return formatBuffer<uint32_t>(B, Rule);
+  case DF::UInt64:
+    return formatBuffer<uint64_t>(B, Rule);
+  case DF::Int16:
+    return formatBuffer<int16_t>(B, Rule);
+  case DF::Int32:
+    return formatBuffer<int32_t>(B, Rule);
+  case DF::Int64:
+    return formatBuffer<int64_t>(B, Rule);
+  case DF::Float16:
+    return formatBuffer<llvm::yaml::Hex16>(B,
+                                           Rule); // assuming no native float16
+  case DF::Float32:
+    return formatBuffer<float>(B, Rule);
+  case DF::Float64:
+    return formatBuffer<double>(B, Rule);
+  case DF::Bool:
+    return formatBuffer<uint32_t>(B,
+                                  Rule); // Because sizeof(bool) is 1 but HLSL
+                                         // represents a bool using 4 bytes.
+  }
+}
+
 llvm::Error verifyResult(offloadtest::Result R) {
+  llvm::SmallString<256> Str;
+  llvm::raw_svector_ostream OS(Str);
+  OS << "Test failed: " << R.Name << "\n";
+
   switch (R.ComparisonRule) {
   case offloadtest::Rule::BufferExact: {
     if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
       return llvm::Error::success();
+    OS << "Comparison Rule: BufferExact\n";
     break;
   }
   case offloadtest::Rule::BufferFloatULP: {
     if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
       return llvm::Error::success();
+    OS << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
     break;
   }
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
+
+    std::ostringstream Oss;
+    Oss << std::defaultfloat << R.Epsilon;
+    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str() << "\n";
     break;
   }
   }
-  llvm::SmallString<256> Str;
-  llvm::raw_svector_ostream OS(Str);
-  OS << "Test failed: " << R.Name << "\nExpected:\n";
+
+  OS << "Expected:\n";
   llvm::yaml::Output YAMLOS(OS);
   YAMLOS << *R.ExpectedPtr;
   OS << "Got:\n";
   YAMLOS << *R.ActualPtr;
+
+  // Now print exact hex64 representations of each element of the
+  // actual and expected buffers.
+
+  const std::string ExpectedBufferStr =
+      getBufferStr(R.ExpectedPtr, R.ComparisonRule);
+  const std::string ActualBufferStr =
+      getBufferStr(R.ActualPtr, R.ComparisonRule);
+
+  OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
+     << ExpectedBufferStr << "\n";
+  OS << "Full Hex 64bit representation of Actual Buffer Values:\n"
+     << ActualBufferStr << "\n";
+
   return llvm::createStringError(Str.c_str());
 }

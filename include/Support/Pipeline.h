@@ -50,9 +50,11 @@ enum class ResourceKind {
   Buffer,
   StructuredBuffer,
   ByteAddressBuffer,
+  Texture2D,
   RWBuffer,
   RWStructuredBuffer,
   RWByteAddressBuffer,
+  RWTexture2D,
   ConstantBuffer,
 };
 
@@ -143,12 +145,31 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
+      return true;
+    }
+    llvm_unreachable("All cases handled");
+  }
+
+  bool isTexture() const {
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+      return false;
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -183,15 +204,19 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::Texture2D:
     case ResourceKind::ConstantBuffer:
       return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
     case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::RWTexture2D:
       return true;
     }
     llvm_unreachable("All cases handled");
   }
+
+  bool isReadOnly() const { return !isReadWrite(); }
 };
 
 struct DescriptorSet {
@@ -373,9 +398,11 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(Buffer);
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
+    ENUM_CASE(Texture2D);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
     ENUM_CASE(RWByteAddressBuffer);
+    ENUM_CASE(RWTexture2D);
     ENUM_CASE(ConstantBuffer);
 #undef ENUM_CASE
   }
