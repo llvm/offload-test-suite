@@ -1,5 +1,7 @@
 #--- source.hlsl
 
+// This test verifies handling of texture arrays
+
 Texture2D<float4> In[2] : register(t0);
 RWTexture2D<float4> Out[2] : register(u1);
 
