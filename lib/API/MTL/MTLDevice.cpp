@@ -108,9 +108,13 @@ class MTLDevice : public offloadtest::Device {
                                const uint32_t HeapIdx) {
     auto *TablePtr = (IRDescriptorTableEntry *)IS.ArgBuffer->contents();
 
+    assert(R.ArraySize == 1 &&
+           "Resource arrays are not yet supported on Metal.");
+
     if (R.isRaw()) {
-      MTL::Buffer *Buf = Device->newBuffer(R.BufferPtr->Data.get(), R.size(),
-                                           MTL::ResourceStorageModeManaged);
+      MTL::Buffer *Buf =
+          Device->newBuffer(R.BufferPtr->Data.back().get(), R.size(),
+                            MTL::ResourceStorageModeManaged);
       IRBufferView View = {};
       View.buffer = Buf;
       View.bufferSize = R.size();
@@ -149,7 +153,7 @@ class MTLDevice : public offloadtest::Device {
 
       MTL::Texture *NewTex = Device->newTexture(Desc);
       NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
-                            R.BufferPtr->Data.get(),
+                            R.BufferPtr->Data.back().get(),
                             Width * R.getElementSize());
 
       IS.Textures.push_back(NewTex);
@@ -214,6 +218,8 @@ class MTLDevice : public offloadtest::Device {
     uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
+        assert(R.ArraySize == 1 &&
+               "Resource arrays are not yet supported on Metal.");
         if (R.isReadOnly()) {
           if (R.isRaw())
             ++BufferIndex;
@@ -222,8 +228,8 @@ class MTLDevice : public offloadtest::Device {
           continue;
         }
         if (R.isRaw()) {
-          memcpy(R.BufferPtr->Data.get(), IS.Buffers[BufferIndex++]->contents(),
-                 R.size());
+          memcpy(R.BufferPtr->Data.back().get(),
+                 IS.Buffers[BufferIndex++]->contents(), R.size());
           continue;
         }
         const uint64_t Width = R.isTexture() ? R.BufferPtr->OutputProps.Width
@@ -231,7 +237,7 @@ class MTLDevice : public offloadtest::Device {
         const uint64_t Height =
             R.isTexture() ? R.BufferPtr->OutputProps.Height : 1;
         IS.Textures[TextureIndex++]->getBytes(
-            R.BufferPtr->Data.get(), Width * R.getElementSize(),
+            R.BufferPtr->Data.back().get(), Width * R.getElementSize(),
             MTL::Region(0, 0, Width, Height), 0);
       }
     }

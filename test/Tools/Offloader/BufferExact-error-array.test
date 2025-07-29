@@ -1,13 +1,12 @@
 #--- source.hlsl
 
-RWStructuredBuffer<int> Out : register(u0);
+RWStructuredBuffer<int> OutArray[2] : register(u0);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0] = 20;
-  Out[1] = 30;
-  Out[2] = 40;
-  Out[3] = 50;
+  for (int i = 0; i < 2; i++)
+    for (int j = 0; j < 4; j++)
+      OutArray[i][j] = j * 10 + i; 
 }
 
 //--- pipeline.yaml
@@ -18,22 +17,26 @@ Shaders:
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-  - Name: Out
+  - Name: OutArray
     Format: Int32
     Stride: 4
     ZeroInitSize: 16
-  - Name: Expected1
+    ArraySize: 2
+  - Name: ExpectedOutArray
     Format: Int32
     Stride: 4
-    Data: [ 1, 2, 3, 4 ]
+    ArraySize: 2
+    Data:
+      - [ 1, 2, 3, 4 ]
+      - [ 5, 6, 7, 8 ]
 Results:
-  - Result: Test1
+  - Result: TestOutArray
     Rule: BufferExact
-    Actual: Out
-    Expected: Expected1
+    Actual: OutArray
+    Expected: ExpectedOutArray
 DescriptorSets:
   - Resources:
-    - Name: Out
+    - Name: OutArray
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
@@ -43,34 +46,47 @@ DescriptorSets:
 ...
 #--- end
 
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
 
-# CHECK: Test failed: Test1
+# CHECK: Test failed: TestOutArray
 # CHECK: Comparison Rule: BufferExact
 # CHECK: Expected:
 # CHECK: ---
-# CHECK: Name:            Expected1
+# CHECK: Name:            ExpectedOutArray
 # CHECK: Format:          Int32
 # CHECK: Stride:          4
-# CHECK: Data:            [ 1, 2, 3, 4 ]
+# CHECK: ArraySize:       2
+# CHECK: Data:
+# CHECK: - [ 1, 2, 3, 4 ]
+# CHECK: - [ 5, 6, 7, 8 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
-# CHECK:  ...
+# CHECK: ...
 # CHECK: Got:
 # CHECK: ---
-# CHECK: Name:            Out
+# CHECK: Name:            OutArray
 # CHECK: Format:          Int32
 # CHECK: Stride:          4
-# CHECK: Data:            [ 20, 30, 40, 50 ]
+# CHECK: ArraySize:       2
+# CHECK: Data:
+# CHECK: - [ 0, 10, 20, 30 ]
+# CHECK: - [ 1, 11, 21, 31 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
+# CHECK: ...
 # CHECK: Full Hex 64bit representation of Expected Buffer Values:
-# CHECK: [ 0x1, 0x2, 0x3, 0x4 ]
+# CHECK: - [ 0x1, 0x2, 0x3, 0x4 ]
+# CHECK: - [ 0x5, 0x6, 0x7, 0x8 ]
 # CHECK: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK: [ 0x14, 0x1e, 0x28, 0x32 ]
+# CHECK: - [ 0x0, 0xa, 0x14, 0x1e ]
+# CHECK: - [ 0x1, 0xb, 0x15, 0x1f ]
+ 
