@@ -178,14 +178,14 @@ static void setCounters(IO &I, offloadtest::Buffer &B) {
   // counters are printed only if they exist and only on output
   if (!I.outputting() || B.Counters.empty())
     return;
- 
+
   if (B.ArraySize == 1) {
     assert(B.Counters.size() == 1 &&
-            "expected a single counter for a single buffer");
+           "expected a single counter for a single buffer");
     I.mapRequired("Counter", B.Counters.back());
   } else {
     assert(B.Counters.size() == B.ArraySize &&
-          "number of counters should match the number of buffers");
+           "number of counters should match the number of buffers");
     I.mapRequired("Counters", B.Counters);
   }
 }

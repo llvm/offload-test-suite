@@ -91,7 +91,8 @@ public:
                  B.Format == DataFormat::Float32 ||
                      B.Format == DataFormat::Float64,
                  llvm::StringRef(B.Data.back().get(), B.size())) {
-    assert(B.ArraySize == 1 && "Buffer must not be an array to be used for ImageRef");
+    assert(B.ArraySize == 1 &&
+           "Buffer must not be an array to be used for ImageRef");
   }
 
   uint32_t getHeight() const { return Height; }

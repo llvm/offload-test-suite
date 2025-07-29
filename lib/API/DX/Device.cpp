@@ -977,8 +977,9 @@ public:
         case dx::RootParamKind::Constant: {
           auto &Constant = std::get<dx::RootConstant>(Param.Data);
           if (Constant.BufferPtr->ArraySize != 1)
-            return llvm::createStringError(std::errc::value_too_large,
-                       "Root constant cannot refer to resource arrays.");
+            return llvm::createStringError(
+                std::errc::value_too_large,
+                "Root constant cannot refer to resource arrays.");
           const uint32_t NumValues =
               Constant.BufferPtr->size() / sizeof(uint32_t);
           IS.CmdList->SetComputeRoot32BitConstants(
@@ -994,8 +995,9 @@ public:
         case dx::RootParamKind::RootDescriptor:
           assert(RootDescIt != IS.RootResources.end());
           if (RootDescIt->first->BufferPtr->ArraySize != 1)
-            return llvm::createStringError(std::errc::value_too_large,
-                       "Root descriptor cannot refer to resource arrays.");
+            return llvm::createStringError(
+                std::errc::value_too_large,
+                "Root descriptor cannot refer to resource arrays.");
           switch (getDXKind(RootDescIt->first->Kind)) {
           case SRV:
             IS.CmdList->SetComputeRootShaderResourceView(
@@ -1037,15 +1039,15 @@ public:
         const offloadtest::Buffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
             0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                  getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                  B.OutputProps.Height, 1,
-                  B.OutputProps.Width * B.getElementSize())};
+                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+                   B.OutputProps.Height, 1,
+                   B.OutputProps.Width * B.getElementSize())};
         for (ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
           addReadbackBeginBarrier(IS, RS.Buffer);
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
-                                                    Footprint);
+                                                     Footprint);
           const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
           IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
           addReadbackEndBarrier(IS, RS.Buffer);
