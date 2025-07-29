@@ -127,7 +127,7 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
   I.mapOptional("ZeroInitSize", ZeroInitSize, 0);
   if (ZeroInitSize > 0) {
     B.Size = ZeroInitSize;
-    for (uint32_t i = 0; i < B.ArraySize; i++) {
+    for (uint32_t I = 0; I < B.ArraySize; I++) {
       B.Data.push_back(std::make_unique<char[]>(B.Size));
       memset(B.Data.back().get(), 0, B.Size);
     }

@@ -566,16 +566,13 @@ public:
                    ResourceBundle ResBundle) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
-    DXGI_FORMAT const EltFormat =
-        R.isRaw() ? getRawDXFormat(R)
-                  : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = getSRVDescription(R);
     const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_CPU_DESCRIPTOR_HANDLE SRVHandleHeapStart =
+    const D3D12_CPU_DESCRIPTOR_HANDLE SRVHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
 
-    for (ResourceSet &RS : ResBundle) {
+    for (const ResourceSet &RS : ResBundle) {
       llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
                    << " NumElts = " << NumElts << "\n";
       D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = SRVHandleHeapStart;
@@ -667,17 +664,13 @@ public:
                    ResourceBundle ResBundle) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
-    const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
-    DXGI_FORMAT const EltFormat =
-        R.isRaw() ? getRawDXFormat(R)
-                  : getDXFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = getUAVDescription(R);
     const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_CPU_DESCRIPTOR_HANDLE UAVHandleHeapStart =
+    const D3D12_CPU_DESCRIPTOR_HANDLE UAVHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
 
-    for (ResourceSet &RS : ResBundle) {
+    for (const ResourceSet &RS : ResBundle) {
       llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
                    << " NumElts = " << NumElts
                    << " HasCounter = " << R.HasCounter << "\n";
@@ -768,10 +761,10 @@ public:
     const size_t CBVSize = getCBVSize(R.size());
     const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    D3D12_CPU_DESCRIPTOR_HANDLE CVBHandleHeapStart =
+    const D3D12_CPU_DESCRIPTOR_HANDLE CVBHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
 
-    for (ResourceSet &RS : ResBundle) {
+    for (const ResourceSet &RS : ResBundle) {
       llvm::outs() << "CBV: HeapIdx = " << HeapIdx << " Size = " << CBVSize
                    << "\n";
       const D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {
@@ -1042,7 +1035,7 @@ public:
                    getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
                    B.OutputProps.Height, 1,
                    B.OutputProps.Width * B.getElementSize())};
-        for (ResourceSet &RS : R.second) {
+        for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
           addReadbackBeginBarrier(IS, RS.Buffer);
@@ -1054,7 +1047,7 @@ public:
         }
         return;
       }
-      for (ResourceSet &RS : R.second) {
+      for (const ResourceSet &RS : R.second) {
         if (RS.Readback == nullptr)
           continue;
         addReadbackBeginBarrier(IS, RS.Buffer);
@@ -1078,8 +1071,8 @@ public:
       if (!R.first->isReadWrite())
         return llvm::Error::success();
 
-      auto RSIt = R.second.begin();
-      auto DataIt = R.first->BufferPtr->Data.begin();
+      auto *RSIt = R.second.begin();
+      auto *DataIt = R.first->BufferPtr->Data.begin();
       for (; RSIt != R.second.end() && DataIt != R.first->BufferPtr->Data.end();
            ++RSIt, ++DataIt) {
         void *DataPtr;

@@ -678,10 +678,6 @@ public:
         DescriptorCounts[getDescriptorType(R.Kind)] += R.BufferPtr->ArraySize;
       }
     }
-    assert(std::accumulate(&DescriptorCounts[0],
-                           &DescriptorCounts[DescriptorTypesSize],
-                           0u) == P.getDescriptorCount() &&
-           "Mismatch in descriptor type identification.");
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
     for (const VkDescriptorType Type : DescriptorTypes) {
       if (DescriptorCounts[Type] > 0) {
@@ -759,38 +755,42 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to allocate descriptor sets.");
 
-    union WriteDescriptorData {
-      WriteDescriptorData() = default;
-      WriteDescriptorData(VkDescriptorBufferInfo I) : BufferInfo(I) {}
-      WriteDescriptorData(VkDescriptorImageInfo I) : ImageInfo(I) {}
-      WriteDescriptorData(VkBufferView I) : BufferView(I) {}
-      VkDescriptorBufferInfo BufferInfo;
-      VkDescriptorImageInfo ImageInfo;
-      VkBufferView BufferView;
-    };
-    llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
-    assert(IS.BufferViews.empty());
-    const uint32_t DescriptorCount = P.getDescriptorCount();
+    // Calculate the number of infos/views we are going to need for each type
+    uint32_t ImageInfoCount = 0;
+    uint32_t BufferInfoCount = 0;
+    uint32_t BufferViewCount = 0;
+    for (auto &D : P.Sets) {
+      for (auto &R : D.Resources) {
+        const uint32_t Count = R.BufferPtr->ArraySize;
+        if (R.isTexture())
+          ImageInfoCount += Count;
+        else if (R.isRaw())
+          BufferInfoCount += Count;
+        else
+          BufferViewCount += Count;
+      }
+    }
 
-    // TODO: Vulkan descriptor arrays have the same binding for multiple
-    // descriptor entries. We'll need to do something differently here to
-    // support them, but I'm not completely sure what, so for now this is good
-    // enough. This just allocates a block of data to store descriptor updates
-    // using a union. Since only one descriptor is put into each update call
-    // that's fine. For arrays we'll potentially need more than one, so the
-    // union won't work.
-    const std::unique_ptr<WriteDescriptorData[]> DescriptorData =
-        std::unique_ptr<WriteDescriptorData[]>(
-            new WriteDescriptorData[DescriptorCount]);
+    // reserve enough space for the descriptor infos so it never needs to be
+    // resized (we need the memory fixed in place)
+    llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
+    llvm::SmallVector<VkDescriptorBufferInfo> BufferInfos;
+    llvm::SmallVector<VkBufferView> BufferViews;
+    ImageInfos.reserve(ImageInfoCount);
+    BufferInfos.reserve(BufferInfoCount);
+    BufferViews.reserve(BufferViewCount);
+
+    llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
+    WriteDescriptors.reserve(ImageInfoCount + BufferInfoCount +
+                             BufferViewCount);
+    assert(IS.BufferViews.empty());
 
     uint32_t OverallResIdx = 0;
-    uint32_t BufIdx = 0;
     for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
-        // This is a hack... need a better way to do this.
-        uint32_t IndexOfFirstBufferDataInArray = BufIdx;
+        uint32_t IndexOfFirstBufferDataInArray;
         if (R.isTexture()) {
           VkImageViewCreateInfo ViewCreateInfo = {};
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -806,6 +806,7 @@ public:
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
           ViewCreateInfo.subresourceRange.levelCount = 1;
+          IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
             VkImageView View = {0};
@@ -815,13 +816,14 @@ public:
             const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
                                                      VK_IMAGE_LAYOUT_GENERAL};
             IS.ImageViews.push_back(View);
-            DescriptorData[BufIdx++] = ImageInfo;
+            ImageInfos.push_back(ImageInfo);
           }
         } else if (R.isRaw()) {
+          IndexOfFirstBufferDataInArray = BufferInfos.size();
           for (auto ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
                                                VK_WHOLE_SIZE};
-            DescriptorData[BufIdx++] = BI;
+            BufferInfos.push_back(BI);
           }
         } else {
           VkBufferViewCreateInfo ViewCreateInfo = {};
@@ -831,13 +833,14 @@ public:
           ViewCreateInfo.format = Format;
           ViewCreateInfo.range = VK_WHOLE_SIZE;
           VkBufferView View = {0};
+          IndexOfFirstBufferDataInArray = BufferViews.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.buffer = ResRef.Device.Buffer;
             if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
             IS.BufferViews.push_back(View);
-            DescriptorData[BufIdx++] = View;
+            BufferViews.push_back(View);
           }
         }
 
@@ -848,19 +851,21 @@ public:
         WDS.descriptorCount = R.BufferPtr->ArraySize;
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (R.isTexture())
-          WDS.pImageInfo =
-              &DescriptorData[IndexOfFirstBufferDataInArray].ImageInfo;
+          WDS.pImageInfo = &ImageInfos[IndexOfFirstBufferDataInArray];
         else if (R.isRaw())
-          WDS.pBufferInfo =
-              &DescriptorData[IndexOfFirstBufferDataInArray].BufferInfo;
+          WDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
         else
-          WDS.pTexelBufferView =
-              &DescriptorData[IndexOfFirstBufferDataInArray].BufferView;
+          WDS.pTexelBufferView = &BufferViews[IndexOfFirstBufferDataInArray];
         llvm::outs() << "Updating Descriptor [" << OverallResIdx << "] { "
                      << SetIdx << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
       }
     }
+    assert(ImageInfos.size() == ImageInfoCount &&
+           BufferInfos.size() == BufferInfoCount &&
+           BufferViews.size() == BufferViewCount &&
+           "size of buffer infos does not match expected count");
+
     llvm::outs() << "WriteDescriptors: " << WriteDescriptors.size() << "\n";
     vkUpdateDescriptorSets(IS.Device, WriteDescriptors.size(),
                            WriteDescriptors.data(), 0, nullptr);
@@ -1093,8 +1098,8 @@ public:
         Range.size = VK_WHOLE_SIZE;
         auto &ResourceRef = IS.Resources[BufIdx].ResourceRefs;
         auto &DataSet = R.BufferPtr->Data;
-        auto ResRefIt = ResourceRef.begin();
-        auto DataIt = DataSet.begin();
+        auto *ResRefIt = ResourceRef.begin();
+        auto *DataIt = DataSet.begin();
         for (; ResRefIt != ResourceRef.end() && DataIt != DataSet.end();
              ++ResRefIt, ++DataIt) {
           void *Mapped = nullptr;
