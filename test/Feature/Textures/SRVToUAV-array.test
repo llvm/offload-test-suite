@@ -1,0 +1,91 @@
+#--- source.hlsl
+
+Texture2D<float4> In[2] : register(t0);
+RWTexture2D<float4> Out[2] : register(u1);
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  for (int i = 0; i < 2; i++) {
+    uint2 GID = {GI / 2, GI % 2};
+    float4 Color = In[i][GID.xy];
+    Out[i][GID.xy] = Color.bgra;
+  }
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    Data: 
+      - [1.0, 0.0, 0.0, 1.0,
+         0.0, 1.0, 0.0, 1.0,
+         0.0, 0.0, 1.0, 1.0,
+         1.0, 1.0, 0.0, 1.0]
+      - [2.0, 0.0, 0.0, 2.0,
+         0.0, 2.0, 0.0, 2.0,
+         0.0, 0.0, 2.0, 2.0,
+         2.0, 2.0, 0.0, 2.0]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    ZeroInitSize: 64
+    ArraySize: 2
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    Data:
+      - [0.0, 0.0, 1.0, 1.0,
+         0.0, 1.0, 0.0, 1.0,
+         1.0, 0.0, 0.0, 1.0,
+         0.0, 1.0, 1.0, 1.0]
+      - [0.0, 0.0, 2.0, 2.0,
+         0.0, 2.0, 0.0, 2.0,
+         2.0, 0.0, 0.0, 2.0,
+         0.0, 2.0, 2.0, 2.0]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: Texture2D
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

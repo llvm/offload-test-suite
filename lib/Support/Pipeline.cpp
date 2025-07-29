@@ -204,34 +204,48 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   using DF = offloadtest::DataFormat;
   switch (B.Format) {
   case DF::Hex8:
-    return setData<llvm::yaml::Hex8>(I, B);
+    setData<llvm::yaml::Hex8>(I, B);
+    break;
   case DF::Hex16:
-    return setData<llvm::yaml::Hex16>(I, B);
+    setData<llvm::yaml::Hex16>(I, B);
+    break;
   case DF::Hex32:
-    return setData<llvm::yaml::Hex32>(I, B);
+    setData<llvm::yaml::Hex32>(I, B);
+    break;
   case DF::Hex64:
-    return setData<llvm::yaml::Hex64>(I, B);
+    setData<llvm::yaml::Hex64>(I, B);
+    break;
   case DF::UInt16:
-    return setData<uint16_t>(I, B);
+    setData<uint16_t>(I, B);
+    break;
   case DF::UInt32:
-    return setData<uint32_t>(I, B);
+    setData<uint32_t>(I, B);
+    break;
   case DF::UInt64:
-    return setData<uint64_t>(I, B);
+    setData<uint64_t>(I, B);
+    break;
   case DF::Int16:
-    return setData<int16_t>(I, B);
+    setData<int16_t>(I, B);
+    break;
   case DF::Int32:
-    return setData<int32_t>(I, B);
+    setData<int32_t>(I, B);
+    break;
   case DF::Int64:
-    return setData<int64_t>(I, B);
+    setData<int64_t>(I, B);
+    break;
   case DF::Float16:
-    return setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
+    setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
+    break;
   case DF::Float32:
-    return setData<float>(I, B);
+    setData<float>(I, B);
+    break;
   case DF::Float64:
-    return setData<double>(I, B);
+    setData<double>(I, B);
+    break;
   case DF::Bool:
-    return setData<uint32_t>(I, B); // Because sizeof(bool) is 1 but HLSL
-                                    // represents a bool using 4 bytes.
+    setData<uint32_t>(I, B); // Because sizeof(bool) is 1 but HLSL
+                             // represents a bool using 4 bytes.
+    break;
   }
 
   I.mapOptional("OutputProps", B.OutputProps);

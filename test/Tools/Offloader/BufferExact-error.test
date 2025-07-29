@@ -1,6 +1,7 @@
 #--- source.hlsl
 
 RWStructuredBuffer<int> Out : register(u0);
+RWStructuredBuffer<int> OutArray[2] : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
@@ -8,6 +9,10 @@ void main() {
   Out[1] = 30;
   Out[2] = 40;
   Out[3] = 50;
+
+  for (int i = 0; i < 2; i++)
+    for (int j = 0; j < 4; j++)
+      OutArray[i][j] = Out[j] + i; 
 }
 
 //--- pipeline.yaml
@@ -26,11 +31,27 @@ Buffers:
     Format: Int32
     Stride: 4
     Data: [ 1, 2, 3, 4 ]
+  - Name: OutArray
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 16
+    ArraySize: 2
+  - Name: Expected2
+    Format: Int32
+    Stride: 4
+    ArraySize: 2
+    Data:
+      - [ 1, 2, 3, 4 ]
+      - [ 5, 6, 7, 8 ]
 Results:
   - Result: Test1
     Rule: BufferExact
     Actual: Out
     Expected: Expected1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: OutArray
+    Expected: Expected2
 DescriptorSets:
   - Resources:
     - Name: Out
@@ -40,6 +61,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
+    - Name: OutArray
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
 ...
 #--- end
 
@@ -74,3 +102,40 @@ DescriptorSets:
 # CHECK: [ 0x1, 0x2, 0x3, 0x4 ]
 # CHECK: Full Hex 64bit representation of Actual Buffer Values:
 # CHECK: [ 0x14, 0x1e, 0x28, 0x32 ]
+
+# CHECK: Test failed: Test2
+# CHECK: Comparison Rule: BufferExact
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected2
+# CHECK: Format:          Int32
+# CHECK: Stride:          4
+# CHECK: ArraySize:       2
+# CHECK: Data:
+# CHECK: - [ 1, 2, 3, 4 ]
+# CHECK: - [ 5, 6, 7, 8 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK: ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            OutArray
+# CHECK: Format:          Int32
+# CHECK: Stride:          4
+# CHECK: ArraySize:       2
+# CHECK: Data:
+# CHECK: - [ 20, 30, 40, 50 ]
+# CHECK: - [ 21, 31, 41, 51 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK: ...
+# CHECK: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK: - [ 0x1, 0x2, 0x3, 0x4 ]
+# CHECK: - [ 0x5, 0x6, 0x7, 0x8 ]
+# CHECK: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK: - [ 0x14, 0x1e, 0x28, 0x32 ]
+# CHECK: - [ 0x15, 0x1f, 0x29, 0x33 ]

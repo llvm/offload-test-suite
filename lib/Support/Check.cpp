@@ -291,18 +291,45 @@ static std::string bitPatternAsHex64(const T &Val,
 }
 
 template <typename T>
+static void formatBuffer(llvm::ArrayRef<T> Arr, offloadtest::Rule Rule,
+                         llvm::raw_svector_ostream &Result) {
+  if (Arr.empty())
+    return;
+
+  Result << "[ " << bitPatternAsHex64(Arr[0], Rule);
+  for (size_t I = 1; I < Arr.size(); ++I)
+    Result << ", " << bitPatternAsHex64(Arr[I], Rule);
+  Result << " ]";
+}
+
+template <typename T>
+static void formatBufferArray(offloadtest::Buffer *B, offloadtest::Rule Rule,
+                              llvm::raw_svector_ostream &Result) {
+  assert(B->ArraySize > 1 && "Buffer must be an array to format as array");
+  for (const auto &DataPtr : B->Data) {
+    if (DataPtr != *B->Data.begin())
+      Result << "\n";
+    Result << " - ";
+    formatBuffer(llvm::ArrayRef<T>(reinterpret_cast<T *>(DataPtr.get()),
+                                   B->Size / sizeof(T)),
+                 Rule, Result);
+  }
+}
+
+template <typename T>
 static std::string formatBuffer(offloadtest::Buffer *B,
                                 offloadtest::Rule Rule) {
-  const llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B->Data.get()),
-                                     B->Size / sizeof(T));
-  if (Arr.empty())
-    return "";
+  llvm::SmallString<256> Str;
+  llvm::raw_svector_ostream Result(Str);
 
-  std::string Result = "[ " + bitPatternAsHex64(Arr[0], Rule);
-  for (size_t I = 1; I < Arr.size(); ++I)
-    Result += ", " + bitPatternAsHex64(Arr[I], Rule);
-  Result += " ]";
-  return Result;
+  if (B->ArraySize > 1)
+    formatBufferArray<T>(B, Rule, Result);
+  else
+    formatBuffer(llvm::ArrayRef<T>(reinterpret_cast<T *>(B->Data.back().get()),
+                                   B->Size / sizeof(T)),
+                 Rule, Result);
+
+  return std::string(Result.str());
 }
 
 static const std::string getBufferStr(offloadtest::Buffer *B,

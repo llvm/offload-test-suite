@@ -188,14 +188,18 @@ private:
   };
 
   struct ResourceRef {
-    ResourceRef(VkDescriptorType T, BufferRef H, BufferRef D, Buffer *P)
-        : DescriptorType(T), Host(H), Device(D), BufferPtr(P) {
-      assert(isBuffer());
-    }
-    ResourceRef(VkDescriptorType T, BufferRef H, ImageRef I, Buffer *P)
-        : DescriptorType(T), Host(H), Image(I), BufferPtr(P) {
-      assert(isImage());
-    }
+    ResourceRef(BufferRef H, BufferRef D) : Host(H), Device(D) {}
+    ResourceRef(BufferRef H, ImageRef I) : Host(H), Image(I) {}
+
+    BufferRef Host;
+    BufferRef Device;
+    ImageRef Image;
+  };
+
+  struct ResourceBundle {
+    ResourceBundle(VkDescriptorType DescriptorType, uint64_t Size,
+                   Buffer *BufferPtr)
+        : DescriptorType(DescriptorType), Size(Size), BufferPtr(BufferPtr) {}
 
     bool isImage() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
@@ -218,10 +222,9 @@ private:
     uint32_t size() const { return BufferPtr->size(); }
 
     VkDescriptorType DescriptorType;
-    BufferRef Host;
-    BufferRef Device;
-    ImageRef Image;
+    uint64_t Size;
     Buffer *BufferPtr;
+    llvm::SmallVector<ResourceRef> ResourceRefs;
   };
 
   struct InvocationState {
@@ -236,7 +239,7 @@ private:
     VkPipeline Pipeline;
 
     llvm::SmallVector<VkDescriptorSetLayout> DescriptorSetLayouts;
-    llvm::SmallVector<ResourceRef> Buffers;
+    llvm::SmallVector<ResourceBundle> Resources;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
     llvm::SmallVector<VkImageView> ImageViews;
@@ -578,42 +581,40 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Image memory binding failed.");
 
-    return ResourceRef(getDescriptorType(R.Kind), Host,
-                       ImageRef{Image, Sampler, Memory}, R.BufferPtr);
+    return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
   }
 
   llvm::Error createBuffer(Resource &R, InvocationState &IS) {
-    auto ExHostBuf = createBuffer(
-        IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), R.BufferPtr->Data.get());
-    if (!ExHostBuf)
-      return ExHostBuf.takeError();
+    ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
+    for (auto &ResData : R.BufferPtr->Data) {
+      auto ExHostBuf = createBuffer(
+          IS,
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
+      if (!ExHostBuf)
+        return ExHostBuf.takeError();
 
-    if (R.isTexture()) {
-      auto ExImageRef = createImage(IS, R, *ExHostBuf);
-      if (!ExImageRef)
-        return ExImageRef.takeError();
-
-      IS.Buffers.push_back(*ExImageRef);
-      return llvm::Error::success();
+      if (R.isTexture()) {
+        auto ExImageRef = createImage(IS, R, *ExHostBuf);
+        if (!ExImageRef)
+          return ExImageRef.takeError();
+        Bundle.ResourceRefs.push_back(*ExImageRef);
+      } else {
+        auto ExDeviceBuf = createBuffer(
+            IS,
+            getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+        if (!ExDeviceBuf)
+          return ExDeviceBuf.takeError();
+        VkBufferCopy Copy = {};
+        Copy.size = R.size();
+        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
+                        &Copy);
+        Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
+      }
     }
-
-    auto ExDeviceBuf =
-        createBuffer(IS,
-                     getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                         VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                     VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
-    if (!ExDeviceBuf)
-      return ExDeviceBuf.takeError();
-
-    VkBufferCopy Copy = {};
-    Copy.size = R.size();
-    vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                    &Copy);
-
-    IS.Buffers.push_back(ResourceRef(getDescriptorType(R.Kind), *ExHostBuf,
-                                     *ExDeviceBuf, R.BufferPtr));
-
+    IS.Resources.push_back(Bundle);
     return llvm::Error::success();
   }
 
@@ -674,7 +675,7 @@ public:
     uint32_t DescriptorCounts[DescriptorTypesSize] = {0};
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
-        DescriptorCounts[getDescriptorType(R.Kind)]++;
+        DescriptorCounts[getDescriptorType(R.Kind)] += R.BufferPtr->ArraySize;
       }
     }
     assert(std::accumulate(&DescriptorCounts[0],
@@ -715,7 +716,7 @@ public:
                                          R.Name.c_str());
         Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
-        Binding.descriptorCount = 1;
+        Binding.descriptorCount = R.BufferPtr->ArraySize;
         Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
         Bindings.push_back(Binding);
       }
@@ -782,12 +783,14 @@ public:
         std::unique_ptr<WriteDescriptorData[]>(
             new WriteDescriptorData[DescriptorCount]);
 
+    uint32_t OverallResIdx = 0;
     uint32_t BufIdx = 0;
     for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
-           ++RIdx, ++BufIdx) {
+           ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         // This is a hack... need a better way to do this.
+        uint32_t IndexOfFirstBufferDataInArray = BufIdx;
         if (R.isTexture()) {
           VkImageViewCreateInfo ViewCreateInfo = {};
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -803,53 +806,58 @@ public:
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
           ViewCreateInfo.subresourceRange.levelCount = 1;
-          ViewCreateInfo.image = IS.Buffers[BufIdx].Image.Image;
-          VkImageView View = {0};
-          if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &View))
-            return llvm::createStringError(std::errc::device_or_resource_busy,
-                                           "Failed to create image view.");
-          const VkDescriptorImageInfo ImageInfo = {
-              IS.Buffers[BufIdx].Image.Sampler, View, VK_IMAGE_LAYOUT_GENERAL};
-          DescriptorData[BufIdx] = ImageInfo;
-          IS.ImageViews.push_back(View);
+          for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
+            ViewCreateInfo.image = ResRef.Image.Image;
+            VkImageView View = {0};
+            if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &View))
+              return llvm::createStringError(std::errc::device_or_resource_busy,
+                                             "Failed to create image view.");
+            const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
+                                                     VK_IMAGE_LAYOUT_GENERAL};
+            IS.ImageViews.push_back(View);
+            DescriptorData[BufIdx++] = ImageInfo;
+          }
+        } else if (R.isRaw()) {
+          for (auto ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
+            const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
+                                               VK_WHOLE_SIZE};
+            DescriptorData[BufIdx++] = BI;
+          }
         } else {
           VkBufferViewCreateInfo ViewCreateInfo = {};
-          const bool IsRawOrUniform = R.isRaw();
           const VkFormat Format =
-              IsRawOrUniform
-                  ? VK_FORMAT_UNDEFINED
-                  : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-          ViewCreateInfo.buffer = IS.Buffers[BufIdx].Device.Buffer;
           ViewCreateInfo.format = Format;
           ViewCreateInfo.range = VK_WHOLE_SIZE;
-          if (IsRawOrUniform) {
-            const VkDescriptorBufferInfo BI = {IS.Buffers[BufIdx].Device.Buffer,
-                                               0, VK_WHOLE_SIZE};
-            DescriptorData[BufIdx] = BI;
-          } else {
-            VkBufferView View = {0};
+          VkBufferView View = {0};
+          for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
+            ViewCreateInfo.buffer = ResRef.Device.Buffer;
             if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
             IS.BufferViews.push_back(View);
-            DescriptorData[BufIdx] = View;
+            DescriptorData[BufIdx++] = View;
           }
         }
+
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = R.VKBinding->Binding;
-        WDS.descriptorCount = 1;
+        WDS.descriptorCount = R.BufferPtr->ArraySize;
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (R.isTexture())
-          WDS.pImageInfo = &DescriptorData[BufIdx].ImageInfo;
+          WDS.pImageInfo =
+              &DescriptorData[IndexOfFirstBufferDataInArray].ImageInfo;
         else if (R.isRaw())
-          WDS.pBufferInfo = &DescriptorData[BufIdx].BufferInfo;
+          WDS.pBufferInfo =
+              &DescriptorData[IndexOfFirstBufferDataInArray].BufferInfo;
         else
-          WDS.pTexelBufferView = &DescriptorData[BufIdx].BufferView;
-        llvm::outs() << "Updating Descriptor [" << BufIdx << "] { " << SetIdx
-                     << ", " << RIdx << " }\n";
+          WDS.pTexelBufferView =
+              &DescriptorData[IndexOfFirstBufferDataInArray].BufferView;
+        llvm::outs() << "Updating Descriptor [" << OverallResIdx << "] { "
+                     << SetIdx << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
       }
     }
@@ -896,7 +904,7 @@ public:
     return llvm::Error::success();
   }
 
-  void copyResourceDataToDevice(InvocationState &IS, ResourceRef &R) {
+  void copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
     if (R.isImage()) {
       const offloadtest::Buffer &B = *R.BufferPtr;
       VkBufferImageCopy BufferCopyRegion = {};
@@ -918,19 +926,22 @@ public:
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-      ImageBarrier.image = R.Image.Image;
       ImageBarrier.subresourceRange = SubRange;
       ImageBarrier.srcAccessMask = 0;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &ImageBarrier);
+      for (auto &ResRef : R.ResourceRefs) {
+        ImageBarrier.image = ResRef.Image.Image;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &ImageBarrier);
 
-      vkCmdCopyBufferToImage(IS.CmdBuffer, R.Host.Buffer, R.Image.Image,
-                             VK_IMAGE_LAYOUT_GENERAL, 1, &BufferCopyRegion);
+        vkCmdCopyBufferToImage(IS.CmdBuffer, ResRef.Host.Buffer,
+                               ResRef.Image.Image, VK_IMAGE_LAYOUT_GENERAL, 1,
+                               &BufferCopyRegion);
+      }
 
       ImageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       ImageBarrier.dstAccessMask =
@@ -938,25 +949,30 @@ public:
       ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
-                           0, nullptr, 1, &ImageBarrier);
+      for (auto &ResRef : R.ResourceRefs) {
+        ImageBarrier.image = ResRef.Image.Image;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
+                             nullptr, 0, nullptr, 1, &ImageBarrier);
+      }
       return;
     }
     VkBufferMemoryBarrier Barrier = {};
     Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    Barrier.buffer = R.Device.Buffer;
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
     Barrier.dstAccessMask = 0;
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
-                         VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 1,
-                         &Barrier, 0, nullptr);
+    for (auto &ResRef : R.ResourceRefs) {
+      Barrier.buffer = ResRef.Host.Buffer;
+      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           1, &Barrier, 0, nullptr);
+    }
   }
 
-  void copyResourceDataToHost(InvocationState &IS, ResourceRef &R) {
+  void copyResourceDataToHost(InvocationState &IS, ResourceBundle &R) {
     if (!R.isReadWrite())
       return;
     if (R.isImage()) {
@@ -969,16 +985,18 @@ public:
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
-      ImageBarrier.image = R.Image.Image;
       ImageBarrier.subresourceRange = SubRange;
       ImageBarrier.srcAccessMask = 0;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                           nullptr, 1, &ImageBarrier);
+      for (auto &ResRef : R.ResourceRefs) {
+        ImageBarrier.image = ResRef.Image.Image;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &ImageBarrier);
+      }
 
       const offloadtest::Buffer &B = *R.BufferPtr;
       VkBufferImageCopy BufferCopyRegion = {};
@@ -990,53 +1008,61 @@ public:
       BufferCopyRegion.imageExtent.height = B.OutputProps.Height;
       BufferCopyRegion.imageExtent.depth = 1;
       BufferCopyRegion.bufferOffset = 0;
-      vkCmdCopyImageToBuffer(IS.CmdBuffer, R.Image.Image,
-                             VK_IMAGE_LAYOUT_GENERAL, R.Host.Buffer, 1,
-                             &BufferCopyRegion);
+      for (auto &ResRef : R.ResourceRefs)
+        vkCmdCopyImageToBuffer(IS.CmdBuffer, ResRef.Image.Image,
+                               VK_IMAGE_LAYOUT_GENERAL, ResRef.Host.Buffer, 1,
+                               &BufferCopyRegion);
 
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-      Barrier.buffer = R.Host.Buffer;
       Barrier.size = VK_WHOLE_SIZE;
       Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       Barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
       Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                           &Barrier, 0, nullptr);
+      for (auto &ResRef : R.ResourceRefs) {
+        Barrier.buffer = ResRef.Host.Buffer;
+        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                             &Barrier, 0, nullptr);
+      }
       return;
     }
     VkBufferMemoryBarrier Barrier = {};
     Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    Barrier.buffer = R.Device.Buffer;
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask =
         VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
     Barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
-                         &Barrier, 0, nullptr);
+    for (auto &ResRef : R.ResourceRefs) {
+      Barrier.buffer = ResRef.Host.Buffer;
+      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
+                           &Barrier, 0, nullptr);
+    }
     VkBufferCopy CopyRegion = {};
     CopyRegion.size = R.size();
-    vkCmdCopyBuffer(IS.CmdBuffer, R.Device.Buffer, R.Host.Buffer, 1,
-                    &CopyRegion);
+    for (auto &ResRef : R.ResourceRefs)
+      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
+                      &CopyRegion);
 
-    Barrier.buffer = R.Host.Buffer;
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     Barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &Barrier,
-                         0, nullptr);
+    for (auto &ResRef : R.ResourceRefs) {
+      Barrier.buffer = ResRef.Host.Buffer;
+      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                           &Barrier, 0, nullptr);
+    }
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    for (auto &R : IS.Buffers)
+    for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
     vkCmdBindPipeline(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1049,7 +1075,7 @@ public:
     vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
                   DispatchSize[2]);
 
-    for (auto &R : IS.Buffers)
+    for (auto &R : IS.Resources)
       copyResourceDataToHost(IS, R);
     return llvm::Error::success();
   }
@@ -1061,17 +1087,24 @@ public:
         const Resource &R = S.Resources[I];
         if (!R.isReadWrite())
           continue;
-        void *Mapped = nullptr;
-        vkMapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory, 0, VK_WHOLE_SIZE,
-                    0, &Mapped);
         VkMappedMemoryRange Range = {};
         Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        Range.memory = IS.Buffers[BufIdx].Host.Memory;
         Range.offset = 0;
         Range.size = VK_WHOLE_SIZE;
-        vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-        memcpy(R.BufferPtr->Data.get(), Mapped, R.size());
-        vkUnmapMemory(IS.Device, IS.Buffers[BufIdx].Host.Memory);
+        auto &ResourceRef = IS.Resources[BufIdx].ResourceRefs;
+        auto &DataSet = R.BufferPtr->Data;
+        auto ResRefIt = ResourceRef.begin();
+        auto DataIt = DataSet.begin();
+        for (; ResRefIt != ResourceRef.end() && DataIt != DataSet.end();
+             ++ResRefIt, ++DataIt) {
+          void *Mapped = nullptr;
+          vkMapMemory(IS.Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
+                      &Mapped);
+          Range.memory = ResRefIt->Host.Memory;
+          vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+          memcpy(DataIt->get(), Mapped, R.size());
+          vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
+        }
       }
     }
     return llvm::Error::success();
@@ -1085,17 +1118,19 @@ public:
     for (auto &V : IS.ImageViews)
       vkDestroyImageView(IS.Device, V, nullptr);
 
-    for (auto &R : IS.Buffers) {
-      if (R.isBuffer()) {
-        vkDestroyBuffer(IS.Device, R.Device.Buffer, nullptr);
-        vkFreeMemory(IS.Device, R.Device.Memory, nullptr);
-      } else {
-        assert(R.isImage());
-        vkDestroyImage(IS.Device, R.Image.Image, nullptr);
-        vkFreeMemory(IS.Device, R.Image.Memory, nullptr);
+    for (auto &R : IS.Resources) {
+      for (auto &ResRef : R.ResourceRefs) {
+        if (R.isBuffer()) {
+          vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
+          vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
+        } else {
+          assert(R.isImage());
+          vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
+          vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
+        }
+        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
       }
-      vkDestroyBuffer(IS.Device, R.Host.Buffer, nullptr);
-      vkFreeMemory(IS.Device, R.Host.Memory, nullptr);
     }
 
     vkDestroyPipeline(IS.Device, IS.Pipeline, nullptr);
