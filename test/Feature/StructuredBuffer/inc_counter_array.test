@@ -41,6 +41,13 @@ DescriptorSets:
 # UNSUPPORTED: Metal
 # UNSUPPORTED: Clang
 
+# WARP has an issue counters in resource arrays
+# Internal issue #58567630
+# XFAIL: DXC && WARP
+
+# Intel has an issue with counters in resource arrays
+# XFAIL: DXC && Intel
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
