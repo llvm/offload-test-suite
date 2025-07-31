@@ -37,7 +37,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Offload tests are missing support for counters on Vulcan
+# Offload tests are missing support for counters on Vulkan
 # https://github.com/llvm/offload-test-suite/issues/303
 # XFAIL: Vulkan
 
