@@ -1,0 +1,53 @@
+#--- source.hlsl
+
+// This test verifies that an error is reported when a resource array is
+// used in a root signature as a root constant
+
+cbuffer RootConstants : register(b0) {
+  float4 C;
+};
+
+#define RootSig "RootConstants(num32BitConstants = 4, b0)"
+
+[RootSignature(RootSig)]
+[numthreads(1,1,1)]
+void main() {
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 2, 1]
+RuntimeSettings:
+  DirectX:
+    RootParameters:
+      - Kind: Constant
+        Name: RootConstantsArray
+      - Kind: DescriptorTable
+Buffers:
+  - Name: RootConstantsArray
+    Format: Int32
+    ArraySize: 2
+    Data:
+      - [ 0, 1, 2, 3 ]
+      - [ 4, 5, 6, 7 ]
+DescriptorSets:
+  - Resources:
+    - Name: RootConstantsArray
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: error: Root constant cannot refer to resource arrays

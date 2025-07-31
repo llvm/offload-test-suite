@@ -155,11 +155,16 @@ static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
 }
 
 static bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
-  if (B1->size() != B2->size())
+  if (B1->ArraySize != B2->ArraySize || B1->size() != B2->size())
     return false;
-  for (uint32_t I = 0; I < B1->size(); ++I) {
-    if (B1->Data[I] != B2->Data[I])
-      return false;
+
+  for (auto B1Data = B1->Data.begin(), B2Data = B2->Data.begin();
+       B1Data != B1->Data.end() && B2Data != B2->Data.end();
+       ++B1Data, ++B2Data) {
+    for (uint32_t I = 0; I < B1->size(); ++I) {
+      if (B1Data->get()[I] != B2Data->get()[I])
+        return false;
+    }
   }
   return true;
 }
@@ -178,33 +183,36 @@ static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
 }
 
 template <typename T>
+static bool testAllArray(std::function<bool(const T &, const T &)> ComparisonFn,
+                         offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
+  if (B1->ArraySize != B2->ArraySize || B1->size() != B2->size())
+    return false;
+
+  for (auto B1Data = B1->Data.begin(), B2Data = B2->Data.begin();
+       B1Data != B1->Data.end() && B2Data != B2->Data.end();
+       ++B1Data, ++B2Data) {
+    const llvm::ArrayRef<T> Arr1(reinterpret_cast<T *>(B1Data->get()),
+                                 B1->Size / sizeof(T));
+    const llvm::ArrayRef<T> Arr2(reinterpret_cast<T *>(B2Data->get()),
+                                 B2->Size / sizeof(T));
+    if (!testAll<T>(ComparisonFn, Arr1, Arr2))
+      return false;
+  }
+  return true;
+}
+
+template <typename T>
 static bool
 testBufferFloat(std::function<bool(const T &, const T &)> ComparisonFn,
                 offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
   assert(B1->Format == B2->Format && "Buffer types must be the same");
   switch (B1->Format) {
-  case offloadtest::DataFormat::Float64: {
-    const llvm::ArrayRef<double> Arr1(
-        reinterpret_cast<double *>(B1->Data.get()), B1->Size / sizeof(double));
-    const llvm::ArrayRef<double> Arr2(
-        reinterpret_cast<double *>(B2->Data.get()), B2->Size / sizeof(double));
-    return testAll<double>(ComparisonFn, Arr1, Arr2);
-  }
-  case offloadtest::DataFormat::Float32: {
-    const llvm::ArrayRef<float> Arr1(reinterpret_cast<float *>(B1->Data.get()),
-                                     B1->Size / sizeof(float));
-    const llvm::ArrayRef<float> Arr2(reinterpret_cast<float *>(B2->Data.get()),
-                                     B2->Size / sizeof(float));
-    return testAll<float>(ComparisonFn, Arr1, Arr2);
-  }
+  case offloadtest::DataFormat::Float64:
+    return testAllArray<double>(ComparisonFn, B1, B2);
+  case offloadtest::DataFormat::Float32:
+    return testAllArray<float>(ComparisonFn, B1, B2);
   case offloadtest::DataFormat::Float16: {
-    const llvm::ArrayRef<uint16_t> Arr1(
-        reinterpret_cast<uint16_t *>(B1->Data.get()),
-        B1->Size / sizeof(uint16_t));
-    const llvm::ArrayRef<uint16_t> Arr2(
-        reinterpret_cast<uint16_t *>(B2->Data.get()),
-        B2->Size / sizeof(uint16_t));
-    return testAll<uint16_t>(ComparisonFn, Arr1, Arr2);
+    return testAllArray<uint16_t>(ComparisonFn, B1, B2);
   }
   default:
     llvm_unreachable("Only float types are supported by the fuzzy test.");
@@ -283,18 +291,45 @@ static std::string bitPatternAsHex64(const T &Val,
 }
 
 template <typename T>
+static void formatBuffer(llvm::ArrayRef<T> Arr, offloadtest::Rule Rule,
+                         llvm::raw_svector_ostream &Result) {
+  if (Arr.empty())
+    return;
+
+  Result << "[ " << bitPatternAsHex64(Arr[0], Rule);
+  for (size_t I = 1; I < Arr.size(); ++I)
+    Result << ", " << bitPatternAsHex64(Arr[I], Rule);
+  Result << " ]";
+}
+
+template <typename T>
+static void formatBufferArray(offloadtest::Buffer *B, offloadtest::Rule Rule,
+                              llvm::raw_svector_ostream &Result) {
+  assert(B->ArraySize > 1 && "Buffer must be an array to format as array");
+  for (const auto &DataPtr : B->Data) {
+    if (DataPtr != *B->Data.begin())
+      Result << "\n";
+    Result << " - ";
+    formatBuffer(llvm::ArrayRef<T>(reinterpret_cast<T *>(DataPtr.get()),
+                                   B->Size / sizeof(T)),
+                 Rule, Result);
+  }
+}
+
+template <typename T>
 static std::string formatBuffer(offloadtest::Buffer *B,
                                 offloadtest::Rule Rule) {
-  const llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B->Data.get()),
-                                     B->Size / sizeof(T));
-  if (Arr.empty())
-    return "";
+  llvm::SmallString<256> Str;
+  llvm::raw_svector_ostream Result(Str);
 
-  std::string Result = "[ " + bitPatternAsHex64(Arr[0], Rule);
-  for (size_t I = 1; I < Arr.size(); ++I)
-    Result += ", " + bitPatternAsHex64(Arr[I], Rule);
-  Result += " ]";
-  return Result;
+  if (B->ArraySize > 1)
+    formatBufferArray<T>(B, Rule, Result);
+  else
+    formatBuffer(llvm::ArrayRef<T>(reinterpret_cast<T *>(B->Data.back().get()),
+                                   B->Size / sizeof(T)),
+                 Rule, Result);
+
+  return std::string(Result.str());
 }
 
 static const std::string getBufferStr(offloadtest::Buffer *B,

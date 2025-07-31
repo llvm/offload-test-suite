@@ -1,0 +1,80 @@
+#--- source.hlsl
+
+// This test verifies handling of ConstantBuffer arrays
+
+struct MyConstants {
+    int4 c;
+};
+
+[[vk::binding(0)]]
+ConstantBuffer<MyConstants> CB[2] : register(b0);
+
+[[vk::binding(1)]]
+RWStructuredBuffer<int4> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[0] = CB[0].c + CB[1].c;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 2, 1]
+
+Buffers:
+  - Name: CB
+    Format: Int32
+    ArraySize: 2
+    Data:
+      - [ 0, 1, 2, 3 ]
+      - [ 1, 2, 3, 4 ]
+
+  - Name: BufOut
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 16
+
+  - Name: ExpectedBufOut
+    Format: Int32
+    Data: [ 1, 3, 5, 7 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedBufOut
+
+DescriptorSets:
+  - Resources:
+    - Name: CB
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Resource arrays are not yet implemented in Clang:
+# https://github.com/llvm/llvm-project/issues/133835
+# XFAIL: Clang
+
+# Offload tests are missing support for resource arrays on Metal
+# https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o

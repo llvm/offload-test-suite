@@ -163,6 +163,12 @@ int run() {
     }
     for (const auto &B : PipelineDesc.Buffers) {
       if (B.Name == ImageOutput) {
+        if (B.ArraySize != 1)
+          ExitOnErr(createStringError(
+              std::errc::invalid_argument,
+              "Cannot output image for buffer '%s' with array size %d",
+              B.Name.c_str(), B.ArraySize));
+
         const ImageRef Img = ImageRef(B);
         ExitOnErr(Image::writePNG(Img, OutputFilename));
         return 0;
