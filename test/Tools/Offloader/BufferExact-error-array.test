@@ -46,10 +46,13 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# Resource arrays are not yet implemented in Clang:
+# https://github.com/llvm/llvm-project/issues/133835
+# XFAIL: Clang
 
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
+# Offload tests are missing support for resource arrays on Metal
+# https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
@@ -91,4 +94,3 @@ DescriptorSets:
 # CHECK: Full Hex 64bit representation of Actual Buffer Values:
 # CHECK: - [ 0x0, 0xa, 0x14, 0x1e ]
 # CHECK: - [ 0x1, 0xb, 0x15, 0x1f ]
- 

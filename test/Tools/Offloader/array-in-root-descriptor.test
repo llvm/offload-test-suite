@@ -37,16 +37,12 @@ DescriptorSets:
     - Name: BufArray
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 0
+        Register: 2
         Space: 0
-      VulkanBinding:
-        Binding: 0
 ...
 #--- end
 
 # UNSUPPORTED: Vulkan
-
-# Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
 
 # RUN: split-file %s %t

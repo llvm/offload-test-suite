@@ -37,16 +37,25 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Vulkan
-# UNSUPPORTED: Metal
-# UNSUPPORTED: Clang
+# Offload tests are missing support for counters on Vulcan
+# https://github.com/llvm/offload-test-suite/issues/303
+# XFAIL: Vulkan
+
+# Offload tests are missing support for counters and resource arrays on Metal
+# https://github.com/llvm/offload-test-suite/issues/304
+# https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+
+# Resource arrays are not yet implemented in Clang:
+# https://github.com/llvm/llvm-project/issues/133835
+# XFAIL: Clang
 
 # WARP has an issue counters in resource arrays
 # Internal issue #58567630
-# XFAIL: DXC && WARP
+# XFAIL: DXC && DirectX-WARP
 
 # Intel has an issue with counters in resource arrays
-# XFAIL: DXC && Intel
+# XFAIL: DXC && DirectX-Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
