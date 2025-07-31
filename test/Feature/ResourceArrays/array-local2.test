@@ -1,0 +1,88 @@
+#--- source.hlsl
+
+// Another variation testing resource arrays used as a local
+// variable and function argument, making sure the array is
+// always a local copy.
+
+RWBuffer<int> X : register(u0);
+RWBuffer<int> Y : register(u1);
+
+void SomeFn(RWBuffer<int> Arr[2], uint Idx, int Val0) {
+  Arr[0] = Y;
+  Arr[0][Idx] = Val0;
+}
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  RWBuffer<int> Arr[2] = {X, Y};
+  SomeFn(Arr, GI, 1);
+  Arr[0][GI] = 2;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufX
+    Format: Int32
+    ZeroInitSize: 16
+
+  - Name: BufY
+    Format: Int32
+    ZeroInitSize: 16
+
+  - Name: ExpectedX
+    Format: Int32
+    Data: [ 2, 2, 2, 2 ]
+
+  - Name: ExpectedY
+    Format: Int32
+    Data: [ 1, 1, 1, 1 ]
+
+Results:
+  - Result: BufX
+    Rule: BufferExact
+    Actual: BufX
+    Expected: ExpectedX
+
+  - Result: BufY
+    Rule: BufferExact
+    Actual: BufY
+    Expected: ExpectedY
+
+DescriptorSets:
+  - Resources:
+    - Name: BufX
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufY
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# DXC-DirectX has a bug here and produces wrong output:
+# BufX: [ 0, 0, 0, 0 ]
+# BufY: [ 2, 2, 2, 2 ]
+# XFAIL: DXC-DirectX
+
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o

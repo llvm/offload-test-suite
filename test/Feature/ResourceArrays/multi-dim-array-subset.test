@@ -1,0 +1,101 @@
+#--- source.hlsl
+
+// This test verified handling of subsets of multi-dimensional resource
+// arrays used in a function argument.
+
+RWBuffer<float> In[4][2] : register(u0);
+RWBuffer<float> Out : register(u0, space1);
+RWBuffer<float> Out2 : register(u1, space1);
+
+float foo(RWBuffer<float> A[2], uint Index) {
+  return A[0][Index] + A[1][Index];
+}
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  // the content of Out1 and Out2 should be identical
+  Out1[GI] = foo(In[GI], GI);
+  Out2[GI] = In[GI][0][GI] + In[GI][1][GI];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufIn
+    Format: Float32
+    ArraySize: 8
+    Data:
+      - [ 1.0, 2.0, 3.0, 4.0 ]
+      - [ 0.1, 0.2, 0.3, 0.4 ]
+      - [ 5.0, 6.0, 7.0, 8.0 ]
+      - [ 0.5, 0.6, 0.7, 0.8 ]
+      - [ 10.0, 11.0, 12.0, 13.0 ]
+      - [ 0.10, 0.11, 0.12, 0.13 ]
+      - [ 14.0, 15.0, 16.0, 17.0 ]
+      - [ 0.14, 0.15, 0.16, 0.17 ]
+
+  - Name: BufOut1
+    Format: Float32
+    ZeroInitSize: 16
+
+  - Name: BufOut2
+    Format: Float32
+    ZeroInitSize: 16
+
+  - Name: ExpectedOuts
+    Format: Float32
+    Data: [ 1.1, 6.6, 12.12, 17.17 ]
+
+Results:
+  - Result: BufOut1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.00001
+    Actual: BufOut1
+    Expected: ExpectedOuts
+
+  - Result: BufOut2
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.00001
+    Actual: BufOut2
+    Expected: ExpectedOuts
+
+DescriptorSets:
+  - Resources:
+    - Name: BufIn
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: BufOut1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 1
+    - Name: BufOut2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# DXC has a bug here and produces wrong output:
+# [ 2, 12, 13.2, 18.7 ]
+# XFAIL: DXC
+
+# Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: Vulkan
+
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o
