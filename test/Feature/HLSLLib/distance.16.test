@@ -1,0 +1,127 @@
+#--- source.hlsl
+
+// This test tests four different distance scenarios
+// One in 1D, 2D, 3D, and 4D
+
+StructuredBuffer<half4> X : register(t0);
+StructuredBuffer<half4> Y : register(t1);
+
+RWStructuredBuffer<half> Result : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  // distance ({1.125}, {2.375}) = 1.25
+  half R0 = distance(X[0].x, Y[0].x);
+  Result[0] = R0;
+  half R0_constant = distance(half(1.125), half(2.375));
+  Result[1] = R0_constant;
+
+  // distance({1.125, 2.5}, {2.375, 5.25}) = 3.02076
+  half R1 = distance(X[0].xy, Y[0].xy);
+  Result[2] = R1;
+  half R1_constant = distance(half2(1.125, 2.5), half2(2.375, 5.25));
+  Result[3] = R1_constant;
+
+  // distance({1.125, 2.5, 4.75}, {2.375, 5.25, 8.375}) = 4.71865
+  half R2 = distance(X[0].xyz, Y[0].xyz);
+  Result[4] = R2;
+  half R2_constant = distance(half3(1.125, 2.5, 4.75), half3(2.375, 5.25, 8.375));
+  Result[5] = R2_constant;
+
+  // distance({1.125, 2.5, 4.75, 6.625}, {2.375, 5.25, 8.375, 5.30}) = 4.90115
+  half R3 = distance(X[0], Y[0]);
+  Result[6] = R3;
+  half R3_constant = distance(half4(1.125, 2.5, 4.75, 6.625), half4(2.375, 5.25, 8.375, 5.30));
+  Result[7] = R3_constant;
+
+  // distance ({-7.29}, {-12.29}) = 5.0
+  half R4 = distance(X[1].x, Y[1].x);
+  Result[8] = R4;
+  half R4_constant = distance(half(-7.29), half(-12.29));
+  Result[9] = R4_constant;
+
+  // distance({-7.29, 137.14}, {-12.29, -4.0}) = 141.2303
+  half R5 = distance(X[1].xy, Y[1].xy);
+  Result[10] = R5;
+  half R5_constant = distance(half2(-7.29, 137.14), half2(-12.29, -4.0));
+  Result[11] = R5_constant;
+
+  // distance({-7.29, 137.14, 1.1}, {-12.29, -4.0, -2.1}) = 141.2406
+  half R6 = distance(X[1].xyz, Y[1].xyz);
+  Result[12] = R6;
+  half R6_constant = distance(half3(-7.29, 137.14, 1.1), half3(-12.29, -4.0, -2.1));
+  Result[13] = R6_constant;
+
+  // distance({-7.29, 137.14, 1.1, -3.5}, {-12.29, -4.0, -2.1, -2.5}) = 141.2445
+  half R7 = distance(X[1], Y[1]);
+  Result[14] = R7;
+  half R7_constant = distance(half4(-7.29, 137.14, 11.1, -30.5), half4(-12.29, -4.0, -2.1, -2.5));
+  Result[15] = R7_constant;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3c80, 0x4100, 0x44c0, 0x46a0, 0xc74a, 0x5849, 0x498d, 0xcfa0 ]
+    # 1.125, 2.5, 4.75, 6.625, -7.29, 137.14, 11.1, -30.5
+  - Name: Y
+    Format: Float16
+    Stride: 8
+    Data: [ 0x40c0, 0x4540, 0x4830, 0x454d, 0xca25, 0xc400, 0xc033, 0xc100 ] 
+    # 2.375, 5.25, 8.375, 5.30, -12.29, -4.0, -2.1, -2.5
+  - Name: Result
+    Format: Float16
+    Stride: 2
+    ZeroInitSize: 32
+  - Name: ExpectedResult
+    Format: Float16
+    Stride: 2
+    Data: [ 0x3d00, 0x3d00, 0x420b, 0x420b, 0x44b8, 0x44b8, 0x44e7, 0x44e7, 0x4500, 0x4500, 0x586a, 0x586a, 0x586f, 0x586f, 0x5885, 0x5885 ]
+    # 1.25, 1.25, 3.02076, 3.02076, 4.71865, 4.71865, 4.90115, 4.90115, 5.0, 5.0, 141.229, 141.229, 141.844, 141.844, 144.581, 144.581
+Results:
+  - Result: CheckResult
+    Rule: BufferFloatULP
+    ULPT: 5
+    Actual: Result
+    Expected: ExpectedResult
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Result
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# UNSUPPORTED: Clang-Vulkan
+# Clang-Vulkan is unsupported because of two validation errors
+# This issue tracks its resolution: https://github.com/llvm/offload-test-suite/issues/285
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
