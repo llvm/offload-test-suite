@@ -1,0 +1,149 @@
+#--- source.hlsl
+
+// This test verified handling of global resource arrays. It also
+// verifies that the offload test suite can read/write resource
+// array data from/to yaml and compare it with expected results.
+// It is using FileCheck compare for array BufB and expected
+// results compare for array BufC and BufD.
+
+[[vk::binding(0)]]
+RWBuffer<int> A[2] : register(u0);
+
+[[vk::binding(1)]]
+RWStructuredBuffer<int> B[4] : register(u4);
+
+[[vk::binding(2)]]
+RWBuffer<int> C[2] : register(u8);
+
+[[vk::binding(3)]]
+RWBuffer<float> D[2] : register(u10);
+
+[numthreads(4,2,1)]
+void main(uint GI : SV_GroupIndex) {
+  for (int i = 0; i < 4; i++) {
+    B[i][GI] = A[0][GI] * (i + 1);
+  }
+  for (int i = 0; i < 2; i++) {
+    C[i][GI] = A[i][GI] * 2;
+  }
+  for (int i = 0; i < 2; i++) {
+    D[i][GI] = (float)A[i][GI] / 3.14159f;
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 2, 1]
+Buffers:
+  - Name: BufA
+    Format: Int32
+    ArraySize: 2
+    Data:
+      - [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+      - [ 1, 2, 3, 4, 5, 6, 7, 8 ]
+
+  - Name: BufB
+    Format: Int32
+    ArraySize: 4
+    ZeroInitSize: 32
+
+  - Name: BufC
+    Format: Int32
+    ArraySize: 2
+    ZeroInitSize: 32
+
+  - Name: ExpectedBufC
+    Format: Int32
+    ArraySize: 2
+    Data: 
+      - [ 0, 2, 4, 6, 8, 10, 12, 14 ]
+      - [ 2, 4, 6, 8, 10, 12, 14, 16 ]
+
+  - Name: BufD
+    Format: Float32
+    ArraySize: 2
+    ZeroInitSize: 32
+
+  - Name: ExpectedBufD
+    Format: Float32
+    ArraySize: 2
+    Data:
+      - [ 0, 0.32, 0.64, 0.94, 1.27, 1.59, 1.91, 2.23 ]
+      - [ 0.32, 0.64, 0.95, 1.27, 1.59, 1.91, 2.23, 2.54 ]
+Results:
+  - Result: BufC
+    Rule: BufferExact
+    Actual: BufC
+    Expected: ExpectedBufC
+
+  - Result: BufD
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.05
+    Actual: BufD
+    Expected: ExpectedBufD
+
+DescriptorSets:
+  - Resources:
+    - Name: BufA
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufB
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufC
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: BufD
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Resource arrays are not yet implemented in Clang:
+# https://github.com/llvm/llvm-project/issues/133835
+# XFAIL: Clang
+
+# Offload tests are missing support for resource arrays on Metal
+# https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+// CHECK: Name: BufB
+// CHECK: Format: Int32
+// CHECK: ArraySize: 4
+// CHECK: Data:
+// CHECK:   - [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+// CHECK:   - [ 0, 2, 4, 6, 8, 10, 12, 14 ]
+// CHECK:   - [ 0, 3, 6, 9, 12, 15, 18, 21 ]
+// CHECK:   - [ 0, 4, 8, 12, 16, 20, 24, 28 ]
+
+// CHECK: Name: BufD
+// CHECK: Format: Float32
+// CHECK: ArraySize: 2
+// CHECK: Data:
+// CHECK: - [ 0, 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817 ]
+// CHECK: - [ 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817, 
+// CHECK:     2.54648 ]

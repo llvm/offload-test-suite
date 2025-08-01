@@ -78,10 +78,15 @@ struct Buffer {
   DataFormat Format;
   int Channels;
   int Stride;
-  std::unique_ptr<char[]> Data;
+  uint32_t ArraySize;
+  // Data can contain one block of data for a singular resource
+  // or multiple blocks for a resource array.
+  llvm::SmallVector<std::unique_ptr<char[]>> Data;
   size_t Size;
   OutputProperties OutputProps;
-  uint32_t Counter;
+  // Counters can contain one counter value for a singular resource
+  // or multiple values for an array of resources with counters.
+  llvm::SmallVector<uint32_t> Counters;
 
   uint32_t size() const { return Size; }
 
@@ -267,6 +272,14 @@ struct Pipeline {
     return DescriptorCount;
   }
 
+  uint32_t getDescriptorCountWithFlattenedArrays() const {
+    uint32_t DescriptorCount = 0;
+    for (auto &D : Sets)
+      for (auto &R : D.Resources)
+        DescriptorCount += R.BufferPtr->ArraySize;
+    return DescriptorCount;
+  }
+
   Buffer *getBuffer(llvm::StringRef Name) {
     for (auto &B : Buffers)
       if (Name == B.Name)
@@ -412,6 +425,32 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 #undef ENUM_CASE
   }
 };
+
+template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
+  static size_t size(IO &io, SmallVector<SmallVector<T>> &seq) {
+    return seq.size();
+  }
+
+  static SmallVector<T> &element(IO &io, SmallVector<SmallVector<T>> &seq,
+                                 size_t index) {
+    if (index >= seq.size())
+      seq.resize(index + 1);
+    return seq[index];
+  }
+};
+
+template <typename T> struct SequenceTraits<SmallVector<MutableArrayRef<T>>> {
+  static size_t size(IO &io, SmallVector<MutableArrayRef<T>> &seq) {
+    return seq.size();
+  }
+
+  static MutableArrayRef<T> &
+  element(IO &io, SmallVector<MutableArrayRef<T>> &seq, size_t index) {
+    assert(index < seq.size());
+    return seq[index];
+  }
+};
+
 } // namespace yaml
 } // namespace llvm
 
