@@ -74,9 +74,8 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 
-# DXC-DirectX has a bug here and produces wrong output:
-# BufX: [ 0, 0, 0, 0 ]
-# BufY: [ 2, 2, 2, 2 ]
+# DXC-DirectX has a bug here
+https://github.com/microsoft/DirectXShaderCompiler/issues/7678
 # XFAIL: DXC-DirectX
 
 # Resource arrays are not yet supported on Metal
