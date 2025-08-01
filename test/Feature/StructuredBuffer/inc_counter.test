@@ -31,9 +31,13 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Vulkan
-# UNSUPPORTED: Metal
-# UNSUPPORTED: Clang
+# Offload tests are missing support for counters on Vulcan
+# https://github.com/llvm/offload-test-suite/issues/303
+# XFAIL: Vulkan
+
+# Offload tests are missing support for counters on Metal
+# https://github.com/llvm/offload-test-suite/issues/304
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
