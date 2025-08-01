@@ -9,7 +9,7 @@ RWBuffer<float> Out  : register(u2);
 
 float foo(RWBuffer<float> A[2][3], uint Index) {
     return A[0][0][Index] + (A[0][1][Index] + 1) * 10 + (A[0][2][Index] + 2) * 100 +
-           A[1][0][Index] + (A[1][1][Index] + 1) / 10 + (A[1][2][Index] + 2) / 100;
+           A[1][0][Index] + (A[1][1][Index] + 0.1) / 10 + (A[1][2][Index] + 0.2) / 100;
 }
 
 float bar(uint Index) {
@@ -77,10 +77,6 @@ DescriptorSets:
 #--- end
 
 # UNSUPPORTED: Clang
-
-# DXC has a bug and produces wrong output:
-# [ 210.12, 321.231, 432.342, 543.453, 654.564, 765.675, 876.786, 987.897 ]
-# XFAIL: DXC
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
