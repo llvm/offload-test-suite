@@ -1,22 +1,24 @@
 #--- source.hlsl
 
-// Another variation testing resource arrays used as a local
-// variable and function argument, making sure the array is
-// always a local copy.
+// Another variation testing resource arrays used as a local variable and
+// function argument. In this case the function SomeFn modifies the array B,
+// which should be a local copy of array A that is defined in main function.
+// The test verifies that this modification of local array B does not affect
+// array A.
 
 RWBuffer<int> X : register(u0);
 RWBuffer<int> Y : register(u1);
 
-void SomeFn(RWBuffer<int> Arr[2], uint Idx, int Val0) {
-  Arr[0] = Y;
-  Arr[0][Idx] = Val0;
+void SomeFn(RWBuffer<int> B[2], uint Idx, int Val0) {
+  B[0] = Y;
+  B[0][Idx] = Val0;
 }
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  RWBuffer<int> Arr[2] = {X, Y};
-  SomeFn(Arr, GI, 1);
-  Arr[0][GI] = 2;
+  RWBuffer<int> A[2] = {X, Y};
+  SomeFn(A, GI, 1);
+  A[0][GI] = 2;
 }
 
 //--- pipeline.yaml
@@ -74,7 +76,8 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 
-# DXC-DirectX has a bug here
+# DXC-DirectX has a bug here because it does not create a local copy
+# of a function argument if the type is resource or resource array.
 https://github.com/microsoft/DirectXShaderCompiler/issues/7678
 # XFAIL: DXC-DirectX
 

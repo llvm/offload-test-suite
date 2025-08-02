@@ -12,7 +12,6 @@ float foo(RWBuffer<float> A[2], uint Index) {
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  // the content of Out1 and Out2 should be identical
   Out[GI] = foo(In[GI], GI);
 }
 
