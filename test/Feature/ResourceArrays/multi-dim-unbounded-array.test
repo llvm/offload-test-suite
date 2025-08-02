@@ -1,0 +1,73 @@
+#--- source.hlsl
+
+// This test verified handling of unbounded multi-dimensional resource array.
+
+RWBuffer<int> Buf[][2] : register(u0);
+
+[numthreads(4,2,1)]
+void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
+  for (int i = 0; i < 4; i++) {
+    Buf[GTI.x][GTI.y][i] = Buf[GTI.x][GTI.y][i] + 100 * GI;
+  } 
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Buf
+    Format: Int32
+    ArraySize: 8
+    Data:
+      - [ 0, 1, 2, 3 ]
+      - [ 1, 2, 3, 4 ]
+      - [ 2, 3, 4, 5 ]
+      - [ 3, 4, 5, 6 ]
+      - [ 4, 5, 6, 7 ]
+      - [ 5, 6, 7, 8 ]
+      - [ 6, 7, 8, 9 ]
+      - [ 7, 8, 9, 10 ]
+
+  - Name: ExpectedBuf
+    Format: Int32
+    ArraySize: 8
+    Data:
+      - [ 0, 1, 2, 3 ]
+      - [ 401, 402, 403, 404 ]
+      - [ 102, 103, 104, 105 ]
+      - [ 503, 504, 505, 506 ]
+      - [ 204, 205, 206, 207 ]
+      - [ 605, 606, 607, 608 ]
+      - [ 306, 307, 308, 309 ]
+      - [ 707, 708, 709, 710 ]
+
+Results:
+  - Result: Buf
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+
+DescriptorSets:
+  - Resources:
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
+# Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
