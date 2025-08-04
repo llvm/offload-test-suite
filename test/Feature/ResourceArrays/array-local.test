@@ -1,0 +1,90 @@
+#--- source.hlsl
+
+// This test verified handling of resource arrays used as a local
+// variable and function argument.
+
+RWBuffer<float> BufA : register(u0);
+RWBuffer<float> BufB : register(u1);
+RWBuffer<float> Out  : register(u2);
+
+float foo(RWBuffer<float> ArgArray[2], uint Index) {
+    return ArgArray[0][Index] + ArgArray[1][Index] * 10;
+}
+
+float bar(uint Index) {
+  RWBuffer<float> LocalArray[2];
+  LocalArray[0] = BufA;
+  LocalArray[1] = BufB;
+  return foo(LocalArray, Index);
+}
+
+[numthreads(4,2,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI] = bar(GI);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufA
+    Format: Float32
+    Data: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+
+  - Name: BufB
+    Format: Float32
+    Data: [ 0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08 ]
+
+  - Name: BufOut
+    Format: Float32
+    ZeroInitSize: 32
+
+  - Name: ExpectedOut
+    Format: Float32
+    Data: [ 0.1, 1.2, 2.3, 3.4, 4.5, 5.6, 6.7, 7.8 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0001
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: BufA
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufB
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o
