@@ -1,14 +1,14 @@
 #--- source.hlsl
 
-StructuredBuffer<uint16_t4> In : register(t0);
-RWStructuredBuffer<uint16_t4> Out : register(u1);
+StructuredBuffer<uint64_t4> In : register(t0);
+RWStructuredBuffer<uint64_t4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
   Out[0] = reversebits(In[0]);
-  uint16_t4 Tmp = {reversebits(In[1].xyz), reversebits(In[1].w)};
+  uint64_t4 Tmp = {reversebits(In[1].xyz), reversebits(In[1].w)};
   Out[1] = Tmp;
-  uint16_t4 Tmp2 = {reversebits(In[2].xy), reversebits(uint16_t2(0, 256))};
+  uint64_t4 Tmp2 = {reversebits(In[2].xy), reversebits(uint64_t2(0, 4294967296))};
   Out[2] = Tmp2;
 }
 
@@ -22,17 +22,17 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
-    Format: UInt16
-    Stride: 8
-    Data: [ 0, 1, 8, 0x0100, 0x7FFF, 0xFFFF, 0x5555, 0xF0F0, 0x0F88, 0xC003, 0, 0 ] # Last two are filler
+    Format: UInt64
+    Stride: 32
+    Data: [ 0, 1, 8, 0x0000000100000000, 0x7FFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0x5555555555555555, 0xF0F0F0F0F0F0F0F0, 0x0F880F880F880F88, 0xC003C003C003C003, 0, 0 ] # Last two are filler
   - Name: Out
-    Format: UInt16
-    Stride: 8
-    ZeroInitSize: 24
+    Format: UInt64
+    Stride: 32
+    ZeroInitSize: 96
   - Name: ExpectedOut # The result we expect
-    Format: UInt16
-    Stride: 8
-    Data: [ 0, 32768, 4096, 0x0080, 0xFFFE, 0xFFFF, 0xAAAA, 0x0F0F, 0x11F0, 0xC003, 0, 128 ]    
+    Format: UInt64
+    Stride: 32
+    Data: [ 0, 9223372036854775808, 1152921504606846976, 0x0000000080000000, 0xFFFFFFFFFFFFFFFE, 0xFFFFFFFFFFFFFFFF, 0xAAAAAAAAAAAAAAAA, 0x0F0F0F0F0F0F0F0F, 0x11F011F011F011F0, 0xC003C003C003C003, 0, 2147483648 ]
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -57,7 +57,7 @@ DescriptorSets:
 ...
 #--- end
 
-# REQUIRES: Int16
+# REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
