@@ -12,9 +12,13 @@ on:
 jobs:
   Windows-D3D12-Warp-DXC:
     uses: ./.github/workflows/build-and-test-callable.yaml
+    strategy:
+      matrix:
+        fail-fast: false
+        SKU: [windows-amd, windows-intel, windows-nvidia]
     with:
       OS: windows
-      SKU: windows-amd
+      SKU: ${{ matrix.SKU }}
       BuildType: Debug
       TestTarget: check-hlsl-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}

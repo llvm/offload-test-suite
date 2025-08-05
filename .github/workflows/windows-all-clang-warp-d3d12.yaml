@@ -12,9 +12,13 @@ on:
 jobs:
   Windows-D3D12-Warp-Clang:
     uses: ./.github/workflows/build-and-test-callable.yaml
+    strategy:
+      matrix:
+        fail-fast: false
+        SKU: [windows-amd, windows-intel, windows-nvidia]
     with:
       OS: windows
-      SKU: windows-intel
+      SKU: ${{ matrix.SKU }}
       TestTarget: check-hlsl-clang-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
