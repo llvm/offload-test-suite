@@ -94,7 +94,7 @@ Buffers:
   - Name: ExpectedResult2D
     Format: Float32
     Stride: 8
-    Data: [ 0.0019378662, 0.9892578, 0.0019378662, 0.9892578, 0.0, 0.0, 1.0, 1.0 ]
+    Data: [ 0x1.fc35fc0000000p-10, 0x1.fab10c0000000p-1, 0x1.fc35fc0000000p-10, 0x1.fab10c0000000p-1, 0x0.0000000000000p+0, 0x0.0000000000000p+0, 0x1.0000000000000p+0, 0x1.0000000000000p+0 ]
   - Name: Result3D
     Format: Float32
     Stride: 16
@@ -102,7 +102,7 @@ Buffers:
   - Name: ExpectedResult3D
     Format: Float32
     Stride: 16
-    Data: [ 0.0019378662, 0.9892578, 1.0, 0.0, 0.0019378662, 0.9892578, 1.0, 0.0 ]
+    Data: [ 0x1.fc35fc0000000p-10, 0x1.fab10c0000000p-1, 0x1.0000000000000p+0, 0x0.0000000000000p+0, 0x1.fc35fc0000000p-10, 0x1.fab10c0000000p-1, 0x1.0000000000000p+0, 0x0.0000000000000p+0 ]
   - Name: Result4D
     Format: Float32
     Stride: 16
@@ -110,7 +110,7 @@ Buffers:
   - Name: ExpectedResult4D
     Format: Float32
     Stride: 16
-    Data: [ 0.0019378662, 0.9892578, 0.84375, 0.9873047, 0.0019378662, 0.9892578, 0.84375, 0.9873047 ]
+    Data: [ 0x1.fc35fc0000000p-10, 0x1.fab10c0000000p-1, 0x1.b000000000000p-1, 0x1.f97a0a0000000p-1, 0x1.fc35fc0000000p-10, 0x1.fab10c0000000p-1, 0x1.b000000000000p-1, 0x1.f97a0a0000000p-1 ]
 Results:  
   - Result: CheckResult2D
     Rule: BufferFloatULP
@@ -216,9 +216,8 @@ DescriptorSets:
         Binding: 11     
 ...
 #--- end
-# UNSUPPORTED: Clang-Vulkan
-# REQUIRES: float
+
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
