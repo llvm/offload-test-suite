@@ -1,0 +1,21 @@
+name: Windows D3D12 NVIDIA DXC
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 * * * *' # run every 30 minutes
+
+jobs:
+  Windows-D3D12-NVIDIA-DXC:
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-nvidia
+      BuildType: Debug
+      TestTarget: check-hlsl-d3d12
+      OffloadTest-branch: ${{ github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

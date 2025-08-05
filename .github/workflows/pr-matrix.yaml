@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        SKU: [windows-intel]
+        SKU: [windows-amd, windows-intel, windows-nvidia]
         TestTarget: [check-hlsl-d3d12, check-hlsl-warp-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-warp-d3d12, check-hlsl-clang-vk]
 
     uses: ./.github/workflows/build-and-test-callable.yaml

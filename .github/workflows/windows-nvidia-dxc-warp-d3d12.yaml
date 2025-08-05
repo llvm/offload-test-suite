@@ -1,0 +1,21 @@
+name: Windows D3D12 Warp DXC
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */2 * * *' # run every 2 hours
+
+jobs:
+  Windows-D3D12-Warp-DXC:
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-nvidia
+      BuildType: Debug
+      TestTarget: check-hlsl-warp-d3d12
+      OffloadTest-branch: ${{ github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
