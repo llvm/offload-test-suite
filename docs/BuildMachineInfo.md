@@ -8,9 +8,9 @@
 
 ## Windows Intel GPU
 
-* CPU: Intel Xeon <I'll figure out the model>
+* CPU:
 * GPU: Intel UHD Graphics 630
-* RAM: <I should figure this out too>
+* RAM:
 
 ## Windows NVIDIA GPU
 
