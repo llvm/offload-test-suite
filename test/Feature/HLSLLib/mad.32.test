@@ -207,7 +207,7 @@ DescriptorSets:
         Binding: 11
 #--- end
 
-# TODO: File bug and link here
+# TODO: https://github.com/llvm/llvm-project/issues/152220
 # XFAIL: Clang-DirectX
 
 # RUN: split-file %s %t
