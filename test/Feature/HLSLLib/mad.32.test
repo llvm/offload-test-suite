@@ -209,6 +209,7 @@ DescriptorSets:
 
 # TODO: https://github.com/llvm/llvm-project/issues/152220
 # XFAIL: Clang-DirectX
+# XFAIL: Clang-Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl

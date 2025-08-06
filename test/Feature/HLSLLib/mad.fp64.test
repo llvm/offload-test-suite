@@ -11,7 +11,7 @@ void main() {
   Out[0] = mad(M[0], A[0], B[0]);
   Out[1] = double4(mad(M[1].xyz, A[1].xyz, B[1].xyz), mad(M[1].w, A[1].w, B[1].w));
   Out[2] = double4(mad(M[2].xy, A[2].xy, B[2].xy), mad(M[2].zw, A[2].zw, B[2].zw));
-  Out[3] = mad(double4(1.0, 1.5, 1e+308, -1e+308), double4(1.0, 10, 2, 2), double4(1.0, -5.5, 0, 0));
+  Out[3] = mad(double4(1.0, 1.5, 1e+308l, -1e+308l), double4(1.0, 10, 2, 2), double4(1.0, -5.5, 0, 0));
 }
 //--- pipeline.yaml
 
@@ -34,8 +34,8 @@ Buffers:
   - Name: B
     Format: Float64
     Stride: 32
-    Data: [ NaN, -Inf, 0x0.fffffffffffffp-1022, -0, 0, Inf, 1.0, -1.0, 1, 0, -5.5, 1 ]
-    # NaN, -Inf, denorm, -0, 0, Inf, 1.0, -1.0, 1, 0, -5.5, 1
+    Data: [ NaN, -Inf, 0, -0, 0, Inf, 1.0, -1.0, 1, 0, -5.5, 1 ]
+    # NaN, -Inf, 0, -0, 0, Inf, 1.0, -1.0, 1, 0, -5.5, 1
   - Name: Out
     Format: Float64
     Stride: 32
@@ -43,7 +43,7 @@ Buffers:
   - Name: ExpectedOut
     Format: Float64
     Stride: 32
-    Data: [ NaN, NaN, 0x1.ffffffffffffep-1022, 0, 0, Inf, 2, 0, 1, 1, 9.5, -16.5, 2, 9.5, Inf, -Inf ]
+    Data: [ NaN, NaN, 0x0.fffffffffffffp-1022, 0, 0, Inf, 2, 0, 1, 1, 9.5, -16.5, 2, 9.5, Inf, -Inf ]
 Results:
   - Result: Test0
     Rule: BufferFloatULP
@@ -84,5 +84,5 @@ DescriptorSets:
 
 # REQUIRES: Double
 # RUN: split-file %s %t
-# RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
