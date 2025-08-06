@@ -184,7 +184,6 @@ DescriptorSets:
         Binding: 8      
 ...
 #--- end
-# UNSUPPORTED: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
