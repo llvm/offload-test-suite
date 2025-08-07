@@ -228,7 +228,6 @@ DescriptorSets:
         Binding: 11     
 ...
 #--- end
-# UNSUPPORTED: Clang-Vulkan
 # REQUIRES: Half
 
 # RUN: split-file %s %t
