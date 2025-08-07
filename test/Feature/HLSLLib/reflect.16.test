@@ -184,6 +184,9 @@ DescriptorSets:
         Binding: 8      
 ...
 #--- end
+# When Clang-vulkan runs this test, 4 wave tests unexpectedly pass.
+# Described in issue: https://github.com/llvm/offload-test-suite/issues/322
+# XFAIL: Clang-Vulkan
 # REQUIRES: Half
 
 # RUN: split-file %s %t
