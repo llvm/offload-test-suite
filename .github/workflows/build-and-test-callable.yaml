@@ -50,9 +50,10 @@ on:
         required: true
         type: choice
         options:
-        - macOS
-        - GPU-Intel
-        - GPU-NV
+        - macos
+        - windows-amd
+        - windows-intel
+        - windows-nvidia
       LLVM-ExtraCMakeArgs:
         description: 'Extra CMake Args for LLVM'
         required: false
