@@ -49,7 +49,7 @@ Buffers:
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
-    Epsilon: 1
+    Epsilon: 0.008
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
