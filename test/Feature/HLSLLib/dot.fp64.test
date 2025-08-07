@@ -41,7 +41,7 @@ Buffers:
     ZeroInitSize: 64
   - Name: ExpectedOut
     Format: Float64
-    Stride: 32
+    Stride: 8
     Data: [ 8.20125, 8.20125, -7.85, -7.85, 5.225, 5.225, -23.1875, -23.1875 ]
 Results:
   - Result: Test0
