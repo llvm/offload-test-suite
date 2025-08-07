@@ -60,7 +60,7 @@ DescriptorSets:
 # UNSUPPORTED: Vulkan
 
 # https://github.com/llvm/llvm-project/issues/138996
-# UNSUPPORTED: Clang
+# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl

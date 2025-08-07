@@ -99,7 +99,7 @@ DescriptorSets:
 
 +# Clang trips on 2-element vectors in structs:
 +# https://github.com/llvm/llvm-project/issues/123968
-+# UNSUPPORTED: Clang
++# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
