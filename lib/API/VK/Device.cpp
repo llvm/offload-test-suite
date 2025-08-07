@@ -324,14 +324,17 @@ private:
     Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     VkPhysicalDeviceVulkan13Features Features13{};
     Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+#ifdef VK_VERSION_1_4
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+#endif
 
     Features.pNext = &Features11;
     Features11.pNext = &Features12;
     Features12.pNext = &Features13;
+#ifdef VK_VERSION_1_4
     Features13.pNext = &Features14;
-    Features14.pNext = NULL;
+#endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
     Caps.insert(std::make_pair(
@@ -356,9 +359,11 @@ private:
 #define VULKAN13_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features13.Name)));
+#ifdef VK_VERSION_1_4
 #define VULKAN14_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
+#endif
 #include "VKFeatures.def"
   }
 
@@ -426,14 +431,17 @@ public:
     Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     VkPhysicalDeviceVulkan13Features Features13{};
     Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+#ifdef VK_VERSION_1_4
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+#endif
 
     Features.pNext = &Features11;
     Features11.pNext = &Features12;
     Features12.pNext = &Features13;
+#ifdef VK_VERSION_1_4
     Features13.pNext = &Features14;
-    Features14.pNext = NULL;
+#endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
     DeviceInfo.pEnabledFeatures = &Features.features;
