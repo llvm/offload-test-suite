@@ -1,0 +1,20 @@
+name: Windows Vulkan NVIDIA Clang
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */2 * * *' # run every 2 hours
+
+jobs:
+  Windows-VK-NVIDIA-Clang:
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-nvidia
+      TestTarget: check-hlsl-clang-vk
+      OffloadTest-branch: ${{ github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
