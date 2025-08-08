@@ -46,7 +46,7 @@ jobs:
       -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-Extra:
-    if: ${{ github.event.label.name == 'test-all' }}
+    if: contains( github.event.pull_request.labels, 'test-all')
     strategy:
       fail-fast: false
       matrix:
