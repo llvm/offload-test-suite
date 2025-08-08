@@ -1,0 +1,90 @@
+#--- source.hlsl
+
+// This test verified handling of multi-dimensional resource arrays
+// used as a local variable and function argument
+
+RWBuffer<float> BufA : register(u0);
+RWBuffer<float> BufB : register(u1);
+RWBuffer<float> Out  : register(u2);
+
+float foo(RWBuffer<float> A[2][3], uint Index) {
+    return A[0][0][Index] + (A[0][1][Index] + 1) * 10 + (A[0][2][Index] + 2) * 100 +
+           A[1][0][Index] + (A[1][1][Index] + 0.1) / 10 + (A[1][2][Index] + 0.2) / 100;
+}
+
+float bar(uint Index) {
+  RWBuffer<float> LocalArray[2][3];
+  for (int i = 0; i < 3; i++) {
+    LocalArray[0][i] = BufA;
+    LocalArray[1][i] = BufB;
+  }
+  return foo(LocalArray, Index);
+}
+
+[numthreads(4,2,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI] = bar(GI);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufA
+    Format: Float32
+    Data: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+
+  - Name: BufB
+    Format: Float32
+    Data: [ 0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7 ]
+
+  - Name: BufOut
+    Format: Float32
+    ZeroInitSize: 32
+
+  - Name: ExpectedOut
+    Format: Float32
+    Data: [ 210.012, 321.123, 432.234, 543.345, 654.456, 765.567,
+            876.678, 987.789 ]
+Results:
+  - Result: BufOut
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.001
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: BufA
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: BufB
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+    - Name: BufOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang
+
+# Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: Vulkan
+
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o
