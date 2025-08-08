@@ -1,0 +1,192 @@
+#--- source.hlsl
+
+// This test tests three different refraction scenarios
+// One in 2D, 3D, and 4D
+
+StructuredBuffer<half2> IncidentRay2D : register(t0);
+StructuredBuffer<half4> IncidentRay3D : register(t1);
+StructuredBuffer<half4> IncidentRay4D : register(t2);
+StructuredBuffer<half2> Wall2D : register(t3);
+StructuredBuffer<half4> Wall3D : register(t4);
+StructuredBuffer<half4> Wall4D : register(t5);
+RWStructuredBuffer<half2> Result2D : register(u6);
+RWStructuredBuffer<half4> Result3D : register(u7);
+RWStructuredBuffer<half4> Result4D : register(u8);
+
+[numthreads(1,1,1)]
+void main() {
+  // 2D case
+  half2 result2D = refract(IncidentRay2D[0], normalize(Wall2D[0]), 0.5);
+  Result2D[0] = result2D;
+  half2 result2D_constant = refract(half2(0.75, -0.5), half2(0.70710677, 0.70710677), half(0.5));
+  Result2D[1] = result2D_constant;
+  // the below case is a case of total internal reflection, the 0 vector is expected
+  Result2D[2] = refract(half2(0.75, -0.5), half2(0.70710677, 0.70710677), 1.3);
+
+  // 3D case, using half4 for alignment
+  half4 result3D = half4(refract(IncidentRay3D[0].xyz, normalize(Wall3D[0].xyz), 0.5), half(0.0));
+  Result3D[0] = result3D;
+  half4 result3D_constant = half4(refract(half3(0.5, -0.25, 0.75), half3(0.5, 0.5, 0.70710677), 0.5), half(0.0));
+  Result3D[1] = result3D_constant;
+
+  // 4D case
+  half4 result4D = refract(IncidentRay4D[0].xyzw, normalize(Wall4D[0].xyzw), 0.5);
+  Result4D[0] = result4D;
+  half4 result4D_constant = refract(half4(0.5, -0.25, 0.75, -0.5), half4(0.5, 0.5, 0.5, 0.5), half(0.5));
+  Result4D[1] = result4D_constant;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  
+  - Name: IncidentRay2D
+    Format: Float16
+    Stride: 4
+    Data: [ 0x3a00, 0xb800 ]
+  - Name: IncidentRay3D
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3800, 0xb400, 0x3a00, 0x0 ]
+    # 0.5, -0.25, 0.75, 0.0
+  - Name: IncidentRay4D
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3800, 0xb400, 0x3a00, 0xb800]
+    # 0.5, -0.25, 0.75, -0.5
+  - Name: Wall2D
+    Format: Float16
+    Stride: 4
+    Data: [ 0x39a8, 0x39a8 ]
+    # 0.70703125, 0.70703125
+  - Name: Wall3D
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3800, 0x3800, 0x39a8, 0x0 ]
+    # 0.5, 0.5, 0.70703125, 0.0
+  - Name: Wall4D
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3800, 0x3800, 0x3800, 0x3800 ]
+    # 0.5, 0.5, 0.5, 0.5
+  - Name: Result2D
+    Format: Float16
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedResult2D
+    Format: Float16
+    Stride: 4
+    Data: [ 0xb4d9, 0xbb6d, 0xb4d9, 0xbb6d, 0x0, 0x0, 0x0, 0x0 ]
+    # -0.30297852, -0.92822266, -0.30297852, -0.92822266, 0.0, 0.0, 0.0, 0.0,
+  - Name: Result3D
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 16
+  - Name: ExpectedResult3D
+    Format: Float16
+    Stride: 8
+    Data: [ 0xb607, 0xba04, 0xb817, 0x0, 0xb607, 0xba04, 0xb817, 0x0 ]
+    # -0.37670898, -0.7519531, 0.51123047, 0.0, -0.37670898, -0.7519531, 0.51123047, 0.0
+  - Name: Result4D
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 16
+  - Name: ExpectedResult4D
+    Format: Float16
+    Stride: 8
+    Data: [ 0xb400, 0xb900, 0xb000, 0xba00, 0xb400, 0xb900, 0xb000, 0xba00 ]
+    # -0.25, -0.625, -0.125, -0.75, -0.25, -0.625, -0.125, -0.75
+Results:  
+  - Result: CheckResult2D
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Result2D
+    Expected: ExpectedResult2D
+  - Result: CheckResult3D
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Result3D
+    Expected: ExpectedResult3D
+  - Result: CheckResult4D
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Result4D
+    Expected: ExpectedResult4D
+
+DescriptorSets:
+  - Resources:
+    - Name: IncidentRay2D
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: IncidentRay3D
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: IncidentRay4D
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Wall2D
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Wall3D
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Wall4D
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Result2D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Result3D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: Result4D
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8      
+...
+#--- end
+# REQUIRES: Half
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
