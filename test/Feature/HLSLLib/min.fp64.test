@@ -1,0 +1,74 @@
+#--- source.hlsl
+StructuredBuffer<double4> X : register(t0);
+StructuredBuffer<double4> Y : register(t1);
+
+RWStructuredBuffer<double4> Out : register(u2);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = min(X[0], Y[0]);
+  Out[1] = double4(min(X[1].xyz, Y[1].xyz), min(X[1].w, Y[1].w));
+  Out[2] = double4(min(X[2].xy, Y[2].xy), min(X[2].zw, Y[2].zw));
+  Out[3] = min(X[3], Y[3]);
+  Out[4] = min(double4(1.0, -1.0, 31408, -415), double4(-1.0, 1.0, 1.5, 129.5));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Float64
+    Stride: 32
+    Data: [ -inf, -inf, -inf, -inf, inf, inf, inf, inf, NaN, NaN, NaN, NaN, 1.0, 1.0, -1.0, -1.0 ]
+  - Name: Y
+    Format: Float64
+    Stride: 32
+    Data: [ -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN ]
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    ZeroInitSize: 160
+  - Name: ExpectedOut0
+    Format: Float64
+    Stride: 32
+    Data: [ -inf, -inf, -inf, -inf, -inf, inf, 1.0, inf, -inf, inf, 1.0, NaN, -inf, 1.0, -1.0, -1.0, -1.0, -1.0, 1.5, -415 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out
+    Expected: ExpectedOut0
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
