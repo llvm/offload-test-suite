@@ -44,6 +44,22 @@ jobs:
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
+  Exec-Tests-Extra:
+    if: contains( github.event.pull_request.labels.*.name, 'test-all')
+    strategy:
+      fail-fast: false
+      matrix:
+        SKU: [windows-nvidia, windows-amd]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: ${{ matrix.SKU }}
+      TestTarget: ${{ matrix.TestTarget }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
   Exec-Tests-MacOS:
     strategy:
       fail-fast: false
