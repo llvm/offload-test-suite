@@ -21,10 +21,22 @@ function(setup_warp version)
     return()
   endif()
 
-  message(STATUS "Fetching WARP ${version}...")
+  if (version STREQUAL "LKG")
+    set(version "1.0.14.2")
+    set(version_description "Latest Known Good (${version})")
+  else ()
+    set(version_description "Custom (${version})")
+  endif()
+
+  message(STATUS "Fetching WARP ${version_description}...")
 
   set(WARP_ARCHIVE "${CMAKE_CURRENT_BINARY_DIR}/Microsoft.Direct3D.WARP.${version}.zip")
-  file(DOWNLOAD "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/${version}/" ${WARP_ARCHIVE})
+  if (version STREQUAL "Latest")
+    file(DOWNLOAD "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/" ${WARP_ARCHIVE})
+  else()
+    file(DOWNLOAD "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/${version}/" ${WARP_ARCHIVE})
+  endif()
+
 
   guess_nuget_arch(NUGET_ARCH)
 
@@ -40,5 +52,5 @@ function(setup_warp version)
   file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/warp")
 endfunction()
 
-set(WARP_VERSION "System" CACHE STRING "")
+set(WARP_VERSION "LKG" CACHE STRING "")
 setup_warp(${WARP_VERSION})
