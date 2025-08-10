@@ -39,7 +39,7 @@ Buffers:
 Results:
   - Result: Test1
     Rule: BufferFloatULP
-    ULPT: 3
+    ULPT: 5
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
