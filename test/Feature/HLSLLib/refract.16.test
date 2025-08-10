@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-// This test tests three different reflection scenarios
+// This test tests three different refraction scenarios
 // One in 2D, 3D, and 4D
 
 StructuredBuffer<half2> IncidentRay2D : register(t0);
@@ -16,21 +16,23 @@ RWStructuredBuffer<half4> Result4D : register(u8);
 [numthreads(1,1,1)]
 void main() {
   // 2D case
-  half2 result2D = reflect(IncidentRay2D[0].xy, normalize(Wall2D[0].xy));
+  half2 result2D = refract(IncidentRay2D[0], normalize(Wall2D[0]), 0.5);
   Result2D[0] = result2D;
-  half2 result2D_constant = reflect(half2(0.75, -0.5), half2(0.70710677, 0.70710677));
+  half2 result2D_constant = refract(half2(0.75, -0.5), half2(0.70710677, 0.70710677), half(0.5));
   Result2D[1] = result2D_constant;
+  // the below case is a case of total internal reflection, the 0 vector is expected
+  Result2D[2] = refract(half2(0.75, -0.5), half2(0.70710677, 0.70710677), 1.3);
 
   // 3D case, using half4 for alignment
-  half4 result3D = half4(reflect(IncidentRay3D[0].xyz, normalize(Wall3D[0].xyz)), 0.0);
+  half4 result3D = half4(refract(IncidentRay3D[0].xyz, normalize(Wall3D[0].xyz), 0.5), half(0.0));
   Result3D[0] = result3D;
-  half4 result3D_constant = half4(reflect(half3(0.5, -0.25, 0.75), half3(0.5, 0.5, 0.70710677)), 0.0);
+  half4 result3D_constant = half4(refract(half3(0.5, -0.25, 0.75), half3(0.5, 0.5, 0.70710677), 0.5), half(0.0));
   Result3D[1] = result3D_constant;
 
   // 4D case
-  half4 result4D = reflect(IncidentRay4D[0].xyzw, normalize(Wall4D[0].xyzw));
+  half4 result4D = refract(IncidentRay4D[0].xyzw, normalize(Wall4D[0].xyzw), 0.5);
   Result4D[0] = result4D;
-  half4 result4D_constant = reflect(half4(0.5, -0.25, 0.75, -0.5), half4(0.5, 0.5, 0.5, 0.5));
+  half4 result4D_constant = refract(half4(0.5, -0.25, 0.75, -0.5), half4(0.5, 0.5, 0.5, 0.5), half(0.5));
   Result4D[1] = result4D_constant;
 }
 
@@ -47,17 +49,16 @@ Buffers:
     Format: Float16
     Stride: 4
     Data: [ 0x3a00, 0xb800 ]
-    # 0.75, -0.5
   - Name: IncidentRay3D
     Format: Float16
     Stride: 8
-    Data: [ 0x3800, 0xb400, 0x3a00, 0x0000 ]
+    Data: [ 0x3800, 0xb400, 0x3a00, 0x0 ]
     # 0.5, -0.25, 0.75, 0.0
   - Name: IncidentRay4D
     Format: Float16
     Stride: 8
-    Data: [ 0x3800, 0xb400, 0x3a00, 0xb800 ]
-    # 0.5, -0.25, 0.75, 0.0
+    Data: [ 0x3800, 0xb400, 0x3a00, 0xb800]
+    # 0.5, -0.25, 0.75, -0.5
   - Name: Wall2D
     Format: Float16
     Stride: 4
@@ -66,7 +67,7 @@ Buffers:
   - Name: Wall3D
     Format: Float16
     Stride: 8
-    Data: [ 0x3800, 0x3800, 0x39a8, 0x0000 ]
+    Data: [ 0x3800, 0x3800, 0x39a8, 0x0 ]
     # 0.5, 0.5, 0.70703125, 0.0
   - Name: Wall4D
     Format: Float16
@@ -76,12 +77,12 @@ Buffers:
   - Name: Result2D
     Format: Float16
     Stride: 4
-    ZeroInitSize: 8
+    ZeroInitSize: 16
   - Name: ExpectedResult2D
     Format: Float16
     Stride: 4
-    Data: [ 0x3800, 0xba00, 0x3800, 0xba00 ]
-    # 0.5, -0.75, 0.5, -0.75
+    Data: [ 0xb4d9, 0xbb6d, 0xb4d9, 0xbb6d, 0x0, 0x0, 0x0, 0x0 ]
+    # -0.30297852, -0.92822266, -0.30297852, -0.92822266, 0.0, 0.0, 0.0, 0.0,
   - Name: Result3D
     Format: Float16
     Stride: 8
@@ -89,8 +90,8 @@ Buffers:
   - Name: ExpectedResult3D
     Format: Float16
     Stride: 8
-    Data: [ 0xb0f8, 0xbb3e, 0xb1a8, 0x0000, 0xb0f8, 0xbb3e, 0xb1a8, 0x0000 ]
-    # -0.15527344, -0.90527344, -0.17675781, 0.0, -0.15527344, -0.90527344, -0.17675781, 0.0
+    Data: [ 0xb607, 0xba04, 0xb817, 0x0, 0xb607, 0xba04, 0xb817, 0x0 ]
+    # -0.37670898, -0.7519531, 0.51123047, 0.0, -0.37670898, -0.7519531, 0.51123047, 0.0
   - Name: Result4D
     Format: Float16
     Stride: 8
@@ -98,22 +99,22 @@ Buffers:
   - Name: ExpectedResult4D
     Format: Float16
     Stride: 8
-    Data: [ 0x3400, 0xb800, 0x3800, 0xba00, 0x3400, 0xb800, 0x3800, 0xba00 ]
-    # 0.25, -0.5, 0.5, -0.75, 0.25, -0.5, 0.5, -0.75
+    Data: [ 0xb400, 0xb900, 0xb000, 0xba00, 0xb400, 0xb900, 0xb000, 0xba00 ]
+    # -0.25, -0.625, -0.125, -0.75, -0.25, -0.625, -0.125, -0.75
 Results:  
   - Result: CheckResult2D
     Rule: BufferFloatULP
-    ULPT: 1
+    ULPT: 2
     Actual: Result2D
     Expected: ExpectedResult2D
   - Result: CheckResult3D
     Rule: BufferFloatULP
-    ULPT: 1
+    ULPT: 2
     Actual: Result3D
     Expected: ExpectedResult3D
   - Result: CheckResult4D
     Rule: BufferFloatULP
-    ULPT: 1
+    ULPT: 2
     Actual: Result4D
     Expected: ExpectedResult4D
 
