@@ -44,6 +44,7 @@ function(setup_warp version)
 
   file(GLOB_RECURSE LIBS "${CMAKE_CURRENT_BINARY_DIR}/warp/*.dll" $<IF:$<CONFIG:DEBUG>,"${CMAKE_CURRENT_BINARY_DIR}/warp/*.pdb">)
 
+  file(MAKE_DIRECTORY "${LLVM_RUNTIME_OUTPUT_INTDIR}")
   foreach(FILE ${LIBS})
     get_filename_component(FILENAME ${FILE} NAME)
     file(COPY_FILE ${FILE} "${LLVM_RUNTIME_OUTPUT_INTDIR}/${FILENAME}")
