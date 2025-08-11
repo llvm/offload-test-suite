@@ -63,11 +63,11 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/149919
-# XFAIL: Clang-Vulkan
-
 # https://github.com/llvm/offload-test-suite/issues/292
 # XFAIL: DXC-Metal
+
+https://github.com/llvm/offload-test-suite/issues/344
+# XFAIL: Clang-Metal
 
 # UNSUPPORTED: DXC-Vulkan
 
