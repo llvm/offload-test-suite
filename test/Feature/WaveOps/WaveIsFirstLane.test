@@ -4,17 +4,19 @@ RWStructuredBuffer<uint> Out : register(u1);
 
 [numthreads(4, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID) { 
+  uint tmp = 0xFF;
   switch (value[threadID.x]) {
     case 0:
-      Out[threadID.x] = WaveIsFirstLane(); // threads 0 and 1; 0 is first for both
+      tmp = WaveIsFirstLane(); // threads 0 and 1; 0 is first for both
       break;
     case 2:
-      Out[threadID.x] = WaveIsFirstLane(); // thread 3; 3 is first
+      tmp = WaveIsFirstLane(); // thread 3; 3 is first
       break;
     default:
-      Out[threadID.x] = WaveIsFirstLane(); // thread 2; 2 is first
+      tmp = WaveIsFirstLane(); // thread 2; 2 is first
       break;
   }
+  Out[threadID.x] = tmp;
   Out[threadID.x + 4] = WaveIsFirstLane(); // 0 is first for all
 }
 
