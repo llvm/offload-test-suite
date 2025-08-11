@@ -1,23 +1,21 @@
 #--- source.hlsl
 StructuredBuffer<int16_t4> In0 : register(t0);
 StructuredBuffer<uint16_t4> In1 : register(t1);
-
 RWStructuredBuffer<int16_t4> Out0 : register(u2);
 RWStructuredBuffer<int16_t4> Out1 : register(u3);
-
 
 [numthreads(1,1,1)]
 void main() {
 
-Out0[0] = asint16(In0[0]);
-Out0[1] = int16_t4(asint16(In0[1].xyz), asint16(In0[1].w));
-Out0[2] = int16_t4(asint16(In0[2].xy), asint16(In0[2].zw));
-Out0[3] = asint16(int16_t4(0, 32767, -100, -32768));
+  Out0[0] = asint16(In0[0]);
+  Out0[1] = int16_t4(asint16(In0[1].xyz), asint16(In0[1].w));
+  Out0[2] = int16_t4(asint16(In0[2].xy), asint16(In0[2].zw));
+  Out0[3] = asint16(int16_t4(0, 32767, -100, -32768));
   
-Out1[0] = asint16(In1[0]);
-Out1[1] = int16_t4(asint16(In1[1].xyz), asint16(In1[1].w));
-Out1[2] = int16_t4(asint16(In1[2].xy), asint16(In1[2].zw));
-Out1[3] = asint16(uint16_t4(0, 100, 65535, 10));
+  Out1[0] = asint16(In1[0]);
+  Out1[1] = int16_t4(asint16(In1[1].xyz), asint16(In1[1].w));
+  Out1[2] = int16_t4(asint16(In1[2].xy), asint16(In1[2].zw));
+  Out1[3] = asint16(uint16_t4(0, 100, 65535, 10));
 }
 //--- pipeline.yaml
 
