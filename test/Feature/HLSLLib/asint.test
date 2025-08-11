@@ -28,8 +28,7 @@ void main() {
   Out3[1] = asint(In3[0]);
   int4 Tmp3 = {asint(In3[0].xyz), asint(In3[0].w)};
   Out3[2] = Tmp3;
-  Out3[3].xy = asint(In3[0].xy);
-  
+  Out3[3].xy = asint(In3[0].xy);  
 }
 
 //--- pipeline.yaml
@@ -48,6 +47,7 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [0xffffffff, 0, 0x80000000, 0x7FFFFFFF]
+   # uint max, 0, 2147483648 , 2147483647 
   - Name: In3
     Format: Float32
     Stride: 16
@@ -135,9 +135,6 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
-
-# https://github.com/llvm/llvm-project/issues/146942
-# XFAIL: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
