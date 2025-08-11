@@ -94,14 +94,13 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/152585
-# XFAIL: Clang-DirectX
-# XFAIL: Clang-Metal
+# https://github.com/llvm/offload-test-suite/issues/341
+# XFAIL: DXC-Metal
 
 # https://github.com/llvm/llvm-project/issues/149561
 # XFAIL: Clang-Vulkan
 
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -HV 202x -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
