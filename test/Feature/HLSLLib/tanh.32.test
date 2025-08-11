@@ -37,7 +37,7 @@ Buffers:
 Results:
   - Result: Test1
     Rule: BufferFloatULP
-    ULPT: 120  # Metal has an ULP range of 5, CUDA has 2, but NV drivers seem to have wider drift
+    ULPT: 5
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -61,5 +61,5 @@ DescriptorSets:
 
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
