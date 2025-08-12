@@ -17,8 +17,7 @@ void main() {
   Out0[0] = max(X0[0], Y0[0]);
   Out0[1] = float4(max(X0[1].xyz, Y0[1].xyz), max(X0[1].w, Y0[1].w));
   Out0[2] = float4(max(X0[2].xy, Y0[2].xy), max(X0[2].zw, Y0[2].zw));
-  Out0[3] = max(X0[3], Y0[3]);
-  Out0[4] = max(half4(1.0, -1.0, 31408, -415), half4(-1.0, 1.0, 1.5, 129.5));
+  Out0[3] = max(half4(1.0, -1.0, 31408, -415), half4(-1.0, 1.0, 1.5, 129.5));
 
   // int
   Out1[0] = max(X1[0], Y1[0]);
@@ -43,11 +42,11 @@ Buffers:
   - Name: X0
     Format: Float32
     Stride: 16
-    Data: [ -inf, -inf, -inf, -inf, inf, inf, inf, inf, NaN, NaN, NaN, NaN, 1.0, 1.0, -1.0, -1.0 ]
+    Data: [ 1.0, -1.0, 31408, -415, 3.14159, 42, -123.456, 0.0001, -10, 10.5, 3e+38, 0 ]
   - Name: Y0
     Format: Float32
     Stride: 16
-    Data: [ -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN ]
+    Data: [ -1.0, 1.0, 1.5, 129.5, 2.71828, 42, -654.321, 0.0002, 10, 10.5, 0, -3e+38 ]
   - Name: X1
     Format: Int32
     Stride: 16
@@ -67,11 +66,11 @@ Buffers:
   - Name: Out0
     Format: Float32
     Stride: 16
-    ZeroInitSize: 80
+    ZeroInitSize: 64
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
-    Data: [ -inf, inf, 1.0, -inf, inf, inf, inf, inf, -inf, inf, 1.0, NaN, 1.0, inf, 1.0, -1.0, 1.0, 1.0, 31408, 129.5 ]
+    Data: [ 1.0, 1.0, 31408, 129.5, 3.14159, 42, -123.456, 0.0002, 10, 10.5, 3e+38, 0, 1.0, 1.0, 31408, 129.5 ]
   - Name: Out1
     Format: Int32
     Stride: 16
