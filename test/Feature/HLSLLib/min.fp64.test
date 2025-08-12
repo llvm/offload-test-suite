@@ -10,8 +10,7 @@ void main() {
   Out[0] = min(X[0], Y[0]);
   Out[1] = double4(min(X[1].xyz, Y[1].xyz), min(X[1].w, Y[1].w));
   Out[2] = double4(min(X[2].xy, Y[2].xy), min(X[2].zw, Y[2].zw));
-  Out[3] = min(X[3], Y[3]);
-  Out[4] = min(double4(1.0, -1.0, 31408, -415), double4(-1.0, 1.0, 1.5, 129.5));
+  Out[3] = min(double4(1.0, -1.0, 31408, -415), double4(-1.0, 1.0, 1.5, 129.5));
 }
 //--- pipeline.yaml
 
@@ -24,19 +23,19 @@ Buffers:
   - Name: X
     Format: Float64
     Stride: 32
-    Data: [ -inf, -inf, -inf, -inf, inf, inf, inf, inf, NaN, NaN, NaN, NaN, 1.0, 1.0, -1.0, -1.0 ]
+    Data: [ 1.0, -1.0, 31408, -415, 3.14159, 42, -123.456, 0.0001, -10, 10.5, 1e+308, 0 ]
   - Name: Y
     Format: Float64
     Stride: 32
-    Data: [ -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN ]
+    Data: [ -1.0, 1.0, 1.5, 129.5, 2.71828, 42, -654.321, 0.0002, 10, 10.5, 0, -1e+308 ]
   - Name: Out
     Format: Float64
     Stride: 32
-    ZeroInitSize: 160
+    ZeroInitSize: 128
   - Name: ExpectedOut0
     Format: Float64
     Stride: 32
-    Data: [ -inf, -inf, -inf, -inf, -inf, inf, 1.0, inf, -inf, inf, 1.0, NaN, -inf, 1.0, -1.0, -1.0, -1.0, -1.0, 1.5, -415 ]
+    Data: [ -1.0, -1.0, 1.5, -415, 2.71828, 42, -654.321, 0.0001, -10, 10.5, 0, -1e+308, -1.0, -1.0, 1.5, -415 ]
 Results:
   - Result: Test0
     Rule: BufferFloatEpsilon

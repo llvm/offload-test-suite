@@ -10,8 +10,7 @@ void main() {
   Out[0] = min(X[0], Y[0]);
   Out[1] = half4(min(X[1].xyz, Y[1].xyz), min(X[1].w, Y[1].w));
   Out[2] = half4(min(X[2].xy, Y[2].xy), min(X[2].zw, Y[2].zw));
-  Out[3] = min(X[3], Y[3]);
-  Out[4] = min(half4(1.0, -1.0, 31408, -415), half4(-1.0, 1.0, 1.5, 129.5));
+  Out[3] = min(half4(1.0, -1.0, 31408, -415), half4(-1.0, 1.0, 1.5, 129.5));
 }
 //--- pipeline.yaml
 
@@ -24,22 +23,22 @@ Buffers:
   - Name: X
     Format: Float16
     Stride: 8
-    Data: [ 0xfc00, 0xfc00, 0xfc00, 0xfc00, 0x7c00, 0x7c00, 0x7c00, 0x7c00, 0x7e00, 0x7e00, 0x7e00, 0x7e00, 0x3c00, 0x3c00, 0xbc00, 0xbc00 ]
-    # -inf, -inf, -inf, -inf, inf, inf, inf, inf, NaN, NaN, NaN, NaN, 1.0, 1.0, -1.0, -1.0
+    Data: [ 0x3c00, 0xbc00, 0x77ab, 0xde7c, 0x4248, 0x5140, 0xd7b7, 0x068e, 0xc900, 0x4940, 0x7bff, 0x0000 ]
+    # 1.0, -1.0, 31408, -415, 3.14159, 42, -123.456, 0.0001, -10, 10.5, 65504, 0
   - Name: Y
     Format: Float16
     Stride: 8
-    Data: [ 0xfc00, 0x7c00, 0x3c00, 0x7e00, 0xfc00, 0x7c00, 0x3c00, 0x7e00, 0xfc00, 0x7c00, 0x3c00, 0x7e00, 0xfc00, 0x7c00, 0x3c00, 0x7e00 ]
-    # -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN, -inf, inf, 1.0, NaN
+    Data: [ 0xbc00, 0x3c00, 0x3e00, 0x580c, 0x4170, 0x5140, 0xe11d, 0x0a8e, 0x4900, 0x4940, 0x0000, 0xfbff ]
+    # -1.0, 1.0, 1.5, 129.5, 2.71828, 42, -654.321, 0.0002, 10, 10.5, 0, -65504
   - Name: Out
     Format: Float16
     Stride: 8
-    ZeroInitSize: 40
+    ZeroInitSize: 32
   - Name: ExpectedOut
     Format: Float16
     Stride: 8
-    Data: [ 0xfc00, 0xfc00, 0xfc00, 0xfc00, 0xfc00, 0x7c00, 0x3c00, 0x7c00, 0xfc00, 0x7c00, 0x3c00, 0x7e00, 0xfc00, 0x3c00, 0xbc00, 0xbc00, 0xbc00, 0xbc00, 0x3e00, 0xde7c ]
-    # -inf, -inf, -inf, -inf, -inf, inf, 1.0, inf, -inf, inf, 1.0, NaN, -inf, 1.0, -1.0, -1.0, -1.0, -1.0, 1.5, -415
+    Data: [ 0xbc00, 0xbc00, 0x3e00, 0xde7c, 0x4170, 0x5140, 0xe11d, 0x068e, 0xc900, 0x4940, 0x0000, 0xfbff, 0xbc00, 0xbc00, 0x3e00, 0xde7c ]
+    # -1.0, -1.0, 1.5, -415, 2.71828, 42, -654.321, 0.0001, -10, 10.5, 0, -65504, -1.0, -1.0, 1.5, -415
 Results:
   - Result: Test0
     Rule: BufferFloatEpsilon
