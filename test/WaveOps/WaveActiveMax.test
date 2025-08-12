@@ -5,7 +5,7 @@ RWStructuredBuffer<float> NegInfs : register(u2);
 RWStructuredBuffer<float> Mix : register(u3);
 
 [numthreads(4,1,1)]
-void main(uint3 GID : SV_GroupIndex) {
+void main(uint GID : SV_GroupIndex) {
   Nans[GID] = WaveActiveMax(Nans[GID]);
   Infs[GID] = WaveActiveMax(Infs[GID]);
   NegInfs[GID] = WaveActiveMax(NegInfs[GID]);
