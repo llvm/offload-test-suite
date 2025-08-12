@@ -69,7 +69,7 @@ DescriptorSets:
 # RUN: %dxc_target -T cs_6_0 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s \
 # RUN: %if DirectX-WARP %{ --check-prefixes=CHECK,NO_IDENT,NO_NAN %} \
-# RUN: %else %{ %if Metal %{ --check-prefixes=CHECK,NO_IDENT,NAN %}
+# RUN: %else %{ %if Metal %{ --check-prefixes=CHECK,NO_IDENT,NAN %} \
 # RUN:          %else %{ --check-prefixes=CHECK,IDENT,NO_NAN %} %}
 
 # The SPIR-V Spec for OpGroupNonUniformFMax says:
