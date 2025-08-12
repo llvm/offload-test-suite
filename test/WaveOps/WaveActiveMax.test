@@ -67,8 +67,8 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Gis -Fo %t.o %t/source.hlsl
-# RUN: %if DirectX-WARP %{ %offloader %t/pipeline.yaml %t.o | FileCheck %s --check-prefixes=CHECK,WARP %}
-# RUN: %if !DirectX-WARP %{ %offloader %t/pipeline.yaml %t.o | FileCheck %s --check-prefixes=CHECK,GPU %}
+# RUN: %if (DirectX-WARP || Metal) %{ %offloader %t/pipeline.yaml %t.o | FileCheck %s --check-prefixes=CHECK,NO_IDENT %}
+# RUN: %if !DirectX-WARP %{ %offloader %t/pipeline.yaml %t.o | FileCheck %s --check-prefixes=CHECK,IDENT %}
 
 # The SPIR-V Spec for OpGroupNonUniformFMax says:
 # > From the set of Value(s) provided by active invocations within a subgroup,
@@ -86,6 +86,8 @@ DescriptorSets:
 # DirectX driver implementations seem to match SPIR-V, except WARP, which does
 # not treat -INF as an identity.
 
+# Metal also is consistent except that it does not treat -INF as an identity.
+
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: Data: [ nan, nan, nan, nan ]
@@ -94,8 +96,8 @@ DescriptorSets:
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
 # CHECK: Name: NegInfs
 # CHECK-NEXT: Format: Float32
-# GPU-NEXT: Data: [ 0, 0, 0, 0 ]
-# WARP-NEXT: Data: [ -inf, -inf, -inf, -inf ]
+# IDENT-NEXT: Data: [ 0, 0, 0, 0 ]
+# NO_IDENT-NEXT: Data: [ -inf, -inf, -inf, -inf ]
 # CHECK: Name: Mix
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
