@@ -4,7 +4,6 @@ RWStructuredBuffer<uint4> Out0 : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-
   Out0[0] = D3DCOLORtoUBYTE4(In0[0]);
   Out0[1] = D3DCOLORtoUBYTE4(float4(0, 11.11, -50.5, 100));
 }
