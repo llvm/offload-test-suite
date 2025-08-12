@@ -10,7 +10,7 @@ StructuredBuffer<float16_t4> InFloat : register(t4);
 RWStructuredBuffer<float16_t4> OutFloat : register(u5);
 
 [numthreads(4,1,1)]
-void main(uint16_t3 TID : SV_GroupThreadID) {
+void main(uint32_t3 TID : SV_GroupThreadID) {
   uint OutIdx = TID.x * 3;
 
   // Int
