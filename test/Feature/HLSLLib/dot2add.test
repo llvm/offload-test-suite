@@ -95,12 +95,15 @@ DescriptorSets:
 #--- end
 
 # https://github.com/llvm/offload-test-suite/issues/341
-# XFAIL: DXC-Metal
+# XFAIL: Metal
 
 # https://github.com/llvm/llvm-project/issues/149561
 # XFAIL: Clang-Vulkan
 
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7695
+# XFAIL: DXC-Vulkan
+
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -HV 202x -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
