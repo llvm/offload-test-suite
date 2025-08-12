@@ -4,17 +4,21 @@ RWStructuredBuffer<uint> Out : register(u1);
 
 [numthreads(4, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID) { 
+  uint tmp = 0xFF;
   switch (value[threadID.x]) {
     case 0:
-      Out[threadID.x] = WaveIsFirstLane(); // threads 0 and 1; 0 is first for both
+      tmp = WaveIsFirstLane(); // threads 0 and 1; 0 is first for both
       break;
     case 2:
-      Out[threadID.x] = WaveIsFirstLane(); // thread 3; 3 is first
+      tmp = WaveIsFirstLane(); // thread 3; 3 is first
       break;
     default:
-      Out[threadID.x] = WaveIsFirstLane(); // thread 2; 2 is first
+      tmp = WaveIsFirstLane(); // thread 2; 2 is first
       break;
   }
+  // Using a temporary value that is wave-divergent here seems to hit a driver
+  // bug in the NV 50-series GPUs
+  Out[threadID.x] = tmp;
   Out[threadID.x + 4] = WaveIsFirstLane(); // 0 is first for all
 }
 
@@ -63,6 +67,8 @@ DescriptorSets:
 
 # https://github.com/llvm/llvm-project/issues/145513
 # XFAIL: Clang-Vulkan
+
+# XFAIL: NV-Reconvergence-Issue-320
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
