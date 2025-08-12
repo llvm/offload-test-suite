@@ -4,15 +4,13 @@ StructuredBuffer<float4> In1 : register(t1);
 
 RWStructuredBuffer<float4> Out0 : register(u2);
 
-
 [numthreads(1,1,1)]
 void main() {
-
-Out0[0] = fmod(In0[0], In1[0]);
-Out0[1] = float4(fmod(In0[1].xyz, In1[1].xyz), fmod(In0[1].w, In1[1].w));
-Out0[2] = float4(fmod(In0[2].xy, In1[2].xy), fmod(In0[2].zw, In1[2].zw));
-Out0[3] = fmod(float4(10.10, -99.99, 5, 0.25), float4(1.1, -3, 0.25, 5));
-  }
+  Out0[0] = fmod(In0[0], In1[0]);
+  Out0[1] = float4(fmod(In0[1].xyz, In1[1].xyz), fmod(In0[1].w, In1[1].w));
+  Out0[2] = float4(fmod(In0[2].xy, In1[2].xy), fmod(In0[2].zw, In1[2].zw));
+  Out0[3] = fmod(float4(10.10, -99.99, 5, 0.25), float4(1.1, -3, 0.25, 5));
+}
 //--- pipeline.yaml
 
 ---
@@ -36,7 +34,7 @@ Buffers:
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
-    Data: [ 0.2, -0.990005, 0, 0.25, 0, 2.1154, 0.2, -0.990005, 0, 0.25, 0, 2.1154, 0.2, -0.98999, 0, 0.25 ]
+    Data: [ 0.2, -0.99, 0, 0.25, 0, 2.1154, 0.2, -0.99, 0, 0.25, 0, 2.1154, 0.2, -0.99, 0, 0.25 ]
 Results:
   - Result: Test0
     Rule: BufferFloatEpsilon
@@ -68,7 +66,6 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-
 # RUN: split-file %s %t
-# RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
