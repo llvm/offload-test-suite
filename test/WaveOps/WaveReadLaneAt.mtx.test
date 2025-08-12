@@ -1,12 +1,13 @@
 #--- source.hlsl
 
 // Note: stored in column-major format
+
 struct MatrixStruct {
-    uint4x4 matrixData;
+    float4x4 matrixData;
 };
 
 StructuredBuffer<MatrixStruct> InMatrix : register(t0);
-RWStructuredBuffer<uint4> OutMatrix : register(u1);
+RWStructuredBuffer<float4> OutMatrix : register(u1);
 
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
@@ -22,15 +23,15 @@ Shaders:
     DispatchSize: [4, 1, 1]
 Buffers:
   - Name: InMatrix
-    Format: UInt32
+    Format: Float32
     Stride: 16
     Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 ]
   - Name: OutMatrix
-    Format: UInt32
+    Format: Float32
     Stride: 16
     ZeroInitSize: 64
   - Name: ExpectedOutMatrix # The result we expect
-    Format: UInt32
+    Format: Float32
     Stride: 16
     Data: [ 0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15 ]
 Results:
@@ -56,6 +57,8 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+# UNSUPPORTED: Clang
+# Test is unsupported in clang because matrix support isn't ready yet
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

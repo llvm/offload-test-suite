@@ -20,19 +20,19 @@ void main(uint3 TID : SV_GroupThreadID) {
   // Int
   OutInt[OutIdx] = WaveReadLaneAt(InInt[TID.x], TID.x);
   uint4 ThreadInInt = {InInt[TID.x].xyz, InInt[TID.x].w};
-  OutInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInInt, TID.x);;
+  OutInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInInt, TID.x);
   OutInt[OutIdx + 2].xy = WaveReadLaneAt(InInt[TID.x].xy, TID.x);
 
   // UInt
   OutUInt[OutIdx] = WaveReadLaneAt(InUInt[TID.x], TID.x);
   uint4 ThreadInUInt = {InUInt[TID.x].xyz, InUInt[TID.x].w};
-  OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);;
+  OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);
   OutUInt[OutIdx + 2].xy = WaveReadLaneAt(InUInt[TID.x].xy, TID.x);
 
   // Float
   OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
   uint4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
-  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);
   OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
 
   // Edge-Cases
@@ -85,15 +85,15 @@ Buffers:
     Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
   - Name: InEdgeFloat
     Format: Float32
-    Stride: 16
+    Stride: 4
     Data: [inf, -inf, nan, 0 ]
   - Name: OutEdgeFloat
     Format: Float32
-    Stride: 16
+    Stride: 4
     ZeroInitSize: 16
   - Name: ExpectedOutEdgeFloat # The result we expect
     Format: Float32
-    Stride: 16
+    Stride: 4
     Data: [ inf, -inf, nan, 0]
 Results:
   - Result: TestInt
@@ -174,5 +174,5 @@ DescriptorSets:
 #--- end
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

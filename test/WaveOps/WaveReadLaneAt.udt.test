@@ -25,24 +25,24 @@ Shaders:
 Buffers:
   - Name: InUDS
     Format: Hex32
-    Stride: 16
-    Data: [0x0, 0x0, 0x1, 0x3f800000, 0x2, 0x40000000, 0x3, 0x40400000 ]
+    Stride: 8
+    Data: [0x0, 0x0, 0x1, 0x3fa00000, 0x2, 0x40200000, 0x3, 0x40700000 ]
   - Name: OutInt
     Format: Int32
-    Stride: 16
+    Stride: 4
     ZeroInitSize: 16
   - Name: OutFloat
     Format: Float32
-    Stride: 16
+    Stride: 4
     ZeroInitSize: 16
   - Name: ExpectedOutInt # The result we expect
     Format: Int32
-    Stride: 16
+    Stride: 4
     Data: [ 0, 1, 2, 3]
   - Name: ExpectedOutFloat # The result we expect
     Format: Float32
-    Stride: 16
-    Data: [ 0, 1, 2, 3]
+    Stride: 4
+    Data: [ 0.0, 1.25, 2.5, 3.75]
 Results:
   - Result: TestInt
     Rule: BufferExact

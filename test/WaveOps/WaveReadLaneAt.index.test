@@ -43,31 +43,31 @@ Shaders:
 Buffers:
   - Name: InInt
     Format: Int32
-    Stride: 16
+    Stride: 4
     Data: [0, 1, 2, 3 ]
   - Name: OutBroadcast
     Format: Int32
-    Stride: 16
+    Stride: 4
     ZeroInitSize: 16
   - Name: ExpectedOutBroadcast # The result we expect
     Format: Int32
-    Stride: 16
+    Stride: 4
     Data: [ 2, 2, 2, 2 ]
   - Name: OutShift
     Format: Int32
-    Stride: 16
+    Stride: 4
     ZeroInitSize: 16
   - Name: ExpectedOutShift # The result we expect
     Format: Int32
-    Stride: 16
+    Stride: 4
     Data: [ 4, 2, 4, 2 ]
   - Name: OutMix
     Format: Int32
-    Stride: 16
+    Stride: 4
     ZeroInitSize: 16
   - Name: ExpectedOutMix # The result we expect
     Format: Int32
-    Stride: 16
+    Stride: 4
     Data: [ 2, 3, 1, 0 ]
 Results:
   - Result: TestBroadcast
