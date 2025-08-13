@@ -141,9 +141,8 @@ DescriptorSets:
         Binding: 7
 #--- end
 
-# TODO: https://github.com/llvm/llvm-project/issues/152220
-# XFAIL: Clang-DirectX
-# XFAIL: Clang-Metal
+# https://github.com/llvm/llvm-project/issues/140095
+# UNSUPPORTED: Clang-Vulkan
 
 # REQUIRES: Int16
 # RUN: split-file %s %t
