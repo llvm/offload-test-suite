@@ -68,9 +68,8 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s \
-# RUN: %if DirectX-WARP %{ --check-prefixes=CHECK,NO_IDENT,NO_NAN %} \
-# RUN: %else %{ %if Metal %{ --check-prefixes=CHECK,NO_IDENT,NAN %} \
-# RUN:          %else %{ --check-prefixes=CHECK,IDENT,NO_NAN %} %}
+# RUN: %if Metal %{ --check-prefixes=CHECK,NAN %} \
+# RUN: %else %{ --check-prefixes=CHECK,NO_NAN %}
 
 # The SPIR-V Spec for OpGroupNonUniformFMax says:
 # > From the set of Value(s) provided by active invocations within a subgroup,
@@ -80,16 +79,9 @@ DescriptorSets:
 
 # This makes Vulkan undefined for cases where all values are nan.
 
-# Also SPIR-V states:
-# > The identity I for Operation is -INF.
+# DirectX driver implementations seem to match SPIR-V.
 
-# This makes it defined that any lane value of -INF is ignored.
-
-# DirectX driver implementations seem to match SPIR-V, except WARP, which does
-# not treat -INF as an identity.
-
-# Metal also is consistent except that it preserves NaN and does not treat -INF
-# as an identity.
+# Metal also is consistent except that it preserves NaN.
 
 
 # CHECK: Name: Nans
@@ -101,8 +93,7 @@ DescriptorSets:
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
 # CHECK: Name: NegInfs
 # CHECK-NEXT: Format: Float32
-# IDENT-NEXT: Data: [ 0, 0, 0, 0 ]
-# NO_IDENT-NEXT: Data: [ -inf, -inf, -inf, -inf ]
+# CHECK-NEXT: Data: [ -inf, -inf, -inf, -inf ]
 # CHECK: Name: Mix
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
