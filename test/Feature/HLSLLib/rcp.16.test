@@ -6,11 +6,12 @@ RWStructuredBuffer<half4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0] = sinh(In[0]);
-  half4 Tmp = {sinh(In[1].xyz), sinh(In[1].w)};
+  Out[0] = rcp(In[0]);
+  half4 Tmp = {rcp(In[1].xyz), rcp(In[1].w)};
   Out[1] = Tmp;
-  half4 Tmp2 = {sinh(In[2].xy), sinh(In[2].zw)};
+  half4 Tmp2 = {rcp(In[2].xy), rcp(In[2].zw)};
   Out[2] = Tmp2;
+  Out[3] = rcp(half4(1, 10, 0.2, -4));
 }
 
 
@@ -25,21 +26,21 @@ Buffers:
   - Name: In
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x8001, 0x8000, 0x0000, 0x0001, 0x7c00, 0x3c00, 0xbc00, 0x7e00, 0x7e00, 0x7e00,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1, -1,
+    Data: [ 0x4200, 0x4900, 0x3c00, 0xbc00, 0x4100, 0xb400, 0x4000, 0x3800, 0x4100, 0xb400, 0x4000, 0x3800]
+    #  3, 10, 1, -1, 2.5, -0.25, 2, 0.5, 2.5, -0.25, 2, 0.5
   - Name: Out
     Format: Float16
     Stride: 8
-    ZeroInitSize: 24
+    ZeroInitSize: 32
   - Name: ExpectedOut # The result we expect
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x0000, 0x0000, 0x0000, 0x0000, 0x7c00, 0x3cb3, 0xbcb3, 0x7e00, 0x7e00, 0x7e00,]
-    #  NaN, -Inf, 0.0, 0.0, 0.0, 0.0, Inf, 1.175201, -1.175201,
+    Data: [0x3555, 0x2e66, 0x3c00, 0xbc00, 0x3666, 0xc400, 0x3800, 0x4000, 0x3666, 0xc400, 0x3800, 0x4000, 0x3c00, 0x2e66, 0x4500, 0xb400]
+    # 0.333, 0.1, 1, -1, 0.4, -4, 0.5, 2, 0.4, -4, 0.5, 2, 1, 0.1, 5, -0.25
 Results:
   - Result: Test1
-    Rule: BufferFloatULP
-    ULPT: 2
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -61,8 +62,8 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/KhronosGroup/SPIRV-Cross/issues/2507
-# XFAIL: Vulkan-Darwin
+# https://github.com/llvm/llvm-project/issues/149561
+# XFAIL: Clang-Vulkan
 
 # REQUIRES: Half
 # RUN: split-file %s %t
