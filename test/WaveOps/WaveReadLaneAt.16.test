@@ -135,6 +135,8 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
+# Tracked by https://github.com/llvm/offload-test-suite/issues/351
+# XFAIL: Metal
 
 # REQUIRES: Half, Int16
 

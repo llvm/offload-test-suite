@@ -172,6 +172,9 @@ DescriptorSets:
         Binding: 7
 ...
 #--- end
+# Tracked by https://github.com/llvm/offload-test-suite/issues/351
+# XFAIL: Metal
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl

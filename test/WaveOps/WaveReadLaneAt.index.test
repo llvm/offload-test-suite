@@ -114,6 +114,8 @@ DescriptorSets:
         Binding: 3
 ...
 #--- end
+# Tracked by https://github.com/llvm/offload-test-suite/issues/352
+# XFAIL: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
