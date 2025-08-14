@@ -82,8 +82,13 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# REQUIRES: Double
+# https://github.com/llvm/llvm-project/issues/153513
+# XFAIL: Clang-Vulkan
 
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7699
+# XFAIL: DXC-Vulkan
+
+# REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
