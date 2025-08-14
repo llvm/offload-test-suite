@@ -6,9 +6,6 @@ RWStructuredBuffer<int64_t4> OutInt : register(u1);
 StructuredBuffer<uint64_t4> InUInt : register(t2);
 RWStructuredBuffer<uint64_t4> OutUInt : register(u3);
 
-StructuredBuffer<float64_t4> InFloat : register(t4);
-RWStructuredBuffer<float64_t4> OutFloat : register(u5);
-
 [numthreads(4,1,1)]
 void main(uint32_t3 TID : SV_GroupThreadID) {
   uint OutIdx = TID.x * 3;
@@ -24,12 +21,6 @@ void main(uint32_t3 TID : SV_GroupThreadID) {
   int64_t4 ThreadInUInt = {InUInt[TID.x].xyz, InUInt[TID.x].w};
   OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);;
   OutUInt[OutIdx + 2].xy = WaveReadLaneAt(InUInt[TID.x].xy, TID.x);
-
-  // Float
-  OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
-  float64_t4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
-  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
-  OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
 }
 
 //--- pipeline.yaml
@@ -64,18 +55,6 @@ Buffers:
     Format: UInt64
     Stride: 16
     Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
-  - Name: InFloat
-    Format: Float64
-    Stride: 16
-    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
-  - Name: OutFloat
-    Format: Float64
-    Stride: 16
-    ZeroInitSize: 288
-  - Name: ExpectedOutFloat # The result we expect
-    Format: Float64
-    Stride: 16
-    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
 Results:
   - Result: TestInt
     Rule: BufferExact
@@ -85,10 +64,6 @@ Results:
     Rule: BufferExact
     Actual: OutUInt
     Expected: ExpectedOutUInt
-  - Result: TestFloat
-    Rule: BufferExact
-    Actual: OutFloat
-    Expected: ExpectedOutFloat
 DescriptorSets:
   - Resources:
     - Name: InInt
@@ -119,24 +94,10 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 3
-    - Name: InFloat
-      Kind: StructuredBuffer
-      DirectXBinding:
-        Register: 4
-        Space: 0
-      VulkanBinding:
-        Binding: 4
-    - Name: OutFloat
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 5
-        Space: 0
-      VulkanBinding:
-        Binding: 5
 ...
 #--- end
 
-# REQUIRES: Double, Int64
+# REQUIRES: Int64
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
