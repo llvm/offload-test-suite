@@ -1,0 +1,76 @@
+#--- source.hlsl
+StructuredBuffer<half4> X : register(t0);
+StructuredBuffer<half4> Y : register(t1);
+
+RWStructuredBuffer<half4> Out : register(u2);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = pow(X[0], Y[0]);
+  Out[1] = half4(pow(X[1].xyz, Y[1].xyz), pow(X[1].w, Y[1].w));
+  Out[2] = half4(pow(X[2].xy, Y[2].xy), pow(X[2].zw, Y[2].zw));
+  Out[3] = pow(half4(2, 4, 1.5, 8), half4(3, 0.5, 2, 0.33333333));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4000, 0x4400, 0x3e00, 0x4800, 0x4500, 0x4700, 0xc200, 0x0000, 0x0000, 0x4400, 0x4170, 0x4900 ]
+    # 2, 4, 1.5, 8, 5, 7, -3, 0, 0, 4, 2.718, 10
+  - Name: Y
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4200, 0x3800, 0x4000, 0x3555, 0x0000, 0x3c00, 0x4500, 0xbc00, 0x4600, 0xbc00, 0x4000, 0xc500 ]
+    # 3, 0.5, 2, 0.33333333, 0, 1, 5, -1, 6, -1, 2, -5
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4800, 0x4000, 0x4080, 0x4000, 0x3c00, 0x4700, 0x7e00, 0x7c00, 0x0000, 0x3400, 0x4763, 0x00a8, 0x4800, 0x4000, 0x4080, 0x4000 ]
+    # 8, 2, 2.25, 2, 1, 7, NaN, inf, 0, 0.25, 7.387524, 0.00001, 8, 2, 2.25, 2
+Results:
+  - Result: Test
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
