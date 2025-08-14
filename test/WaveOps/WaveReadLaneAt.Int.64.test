@@ -97,6 +97,9 @@ DescriptorSets:
 ...
 #--- end
 
+Tracked by https://github.com/llvm/offload-test-suite/issues/355
+# XFAIL: Metal
+
 # REQUIRES: Int64
 
 # RUN: split-file %s %t
