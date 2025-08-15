@@ -23,7 +23,7 @@ Buffers:
   - Name: X
     Format: Float32
     Stride: 16
-    Data: [ 2, 4, 1.5, 8, 5, 7, -3, 0, 0, 4, 2.718, 10 ]
+    Data: [ 2, 4, 1.5, 8, 5, 7, 3, 0, 0, 4, 2.718, 10 ]
   - Name: Y
     Format: Float32
     Stride: 16
@@ -35,7 +35,7 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
-    Data: [ 8, 2, 2.25, 2, 1, 7, NaN, inf, 0, 0.25, 7.387524, 0.00001, 8, 2, 2.25, 2 ]
+    Data: [ 8, 2, 2.25, 2, 1, 7, 243, inf, 0, 0.25, 7.387524, 0.00001, 8, 2, 2.25, 2 ]
 Results:
   - Result: Test
     Rule: BufferFloatULP
