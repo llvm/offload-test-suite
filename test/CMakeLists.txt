@@ -171,6 +171,7 @@ endif()
 if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
   set(TEST_d3d12 True)
   set(FORCE_WARP True)
+  get_property(WARP_ARCHITECTURE GLOBAL PROPERTY WARP_ARCHITECTURE)
   add_offloadtest_lit_suite(warp-d3d12)
 
   if (OFFLOADTEST_TEST_CLANG)

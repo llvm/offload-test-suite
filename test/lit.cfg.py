@@ -53,6 +53,7 @@ def setDeviceFeatures(config, device, compiler):
     config.available_features.add(API)
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("%s-WARP" % API)
+        config.available_features.add("WARP-%s" % config.warp_arch)
     if "Intel" in device["Description"]:
         config.available_features.add("%s-Intel" % API)
         if "UHD Graphics" in device["Description"] and API == "DirectX":

@@ -9,6 +9,8 @@ config.offloadtest_dxc = '"' + path(r"@DXC_EXECUTABLE@") + '"'
 config.offloadtest_supports_spirv = @SUPPORTS_SPIRV@
 config.offloadtest_test_clang = @FORCE_CLANG@
 config.offloadtest_test_warp = @FORCE_WARP@
+if config.offloadtest_test_warp:
+  config.warp_arch = r"@WARP_ARCHITECTURE@"
 config.offloadtest_dxc_dir = r"@DXC_DIR@"
 config.goldenimage_dir = r"@GOLDENIMAGE_DIR@"
 
