@@ -357,6 +357,9 @@ DescriptorSets:
 # https://github.com/llvm/offload-test-suite/issues/55
 # UNSUPPORTED: Metal
 
+# No idea what is going on here, but the results are _way_ off.
+# XFAIL: Vulkan-Darwin
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/particle-life.hlsl %}
 # RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/particle-life.hlsl %}

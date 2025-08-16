@@ -1267,7 +1267,7 @@ public:
     VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a compatible Vulkan device");
+                                     "Cannot find a base Vulkan device");
     if (Res)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unknown Vulkan initialization error: %d",
