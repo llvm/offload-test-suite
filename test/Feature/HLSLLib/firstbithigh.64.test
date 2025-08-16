@@ -90,8 +90,9 @@ DescriptorSets:
 # UNSUPPORTED: DXC-Vulkan
 
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7502
-# WARP firstbithigh(s64 -1) should return -1 but returns 32
-# XFAIL: DirectX-WARP
+# WARP firstbithigh(s64 -1) should return -1 but returns 32 on arm64 and older
+# versions of WARP
+# XFAIL: WARP-arm64
 
 # https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang-Vulkan

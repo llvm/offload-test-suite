@@ -51,6 +51,7 @@ function(setup_warp version)
   endforeach()
 
   file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/warp")
+  set_property(GLOBAL PROPERTY WARP_ARCHITECTURE ${NUGET_ARCH})
 endfunction()
 
 set(WARP_VERSION "LKG" CACHE STRING "")
