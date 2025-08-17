@@ -6,11 +6,12 @@ RWStructuredBuffer<float4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0] = sinh(In[0]);
-  float4 Tmp = {sinh(In[1].xyz), sinh(In[1].w)};
+  Out[0] = rcp(In[0]);
+  float4 Tmp = {rcp(In[1].xyz), rcp(In[1].w)};
   Out[1] = Tmp;
-  float4 Tmp2 = {sinh(In[2].xy), sinh(In[2].zw)};
+  float4 Tmp2 = {rcp(In[2].xy), rcp(In[2].zw)};
   Out[2] = Tmp2;
+  Out[3] = rcp(float4(1, 10, 0.2, -4));
 }
 
 
@@ -25,21 +26,19 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, 1, -1, nan, nan, nan,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1, -1,
+    Data: [3, 10, 1, -1, 2.5, -0.25, 2, 0.5, 2.5, -0.25, 2, 0.432]
   - Name: Out
     Format: Float32
     Stride: 16
-    ZeroInitSize: 48
+    ZeroInitSize: 64
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, 0.0, 0.0, 0.0, 0.0, inf, 1.175201, -1.175201, nan, nan, nan,]
-    #  NaN, -Inf, 0.0, 0.0, 0.0, 0.0, Inf, 1.175201, -1.175201,
+    Data: [0.333333, 0.1, 1, -1, 0.4, -4 , 0.5, 2, 0.4, -4 , 0.5, 2.31481481481, 1, 0.1, 5, -0.25]
 Results:
   - Result: Test1
-    Rule: BufferFloatULP
-    ULPT: 4
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -61,6 +60,8 @@ DescriptorSets:
 ...
 #--- end
 
+# https://github.com/llvm/llvm-project/issues/149561
+# XFAIL: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

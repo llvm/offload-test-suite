@@ -64,6 +64,10 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("%s-NV" % API)
+        NV50SeriesRegex = re.compile("NVIDIA GeForce [A-Z]+ 50[0-9]+")
+        NV50SeriesMatch = NV50SeriesRegex.match(device["Description"])
+        if NV50SeriesMatch and API == "DirectX":
+            config.available_features.add("NV-Reconvergence-Issue-320")
     if "AMD" in device["Description"]:
         config.available_features.add("%s-AMD" % API)
 
