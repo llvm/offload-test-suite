@@ -22,7 +22,7 @@ function(setup_warp version)
   endif()
 
   if (version STREQUAL "LKG")
-    set(version "1.0.14.2")
+    set(version "1.0.13")
     set(version_description "Latest Known Good (${version})")
   else ()
     set(version_description "Custom (${version})")
