@@ -41,12 +41,24 @@ function(setup_warp version)
     file(DOWNLOAD "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/${version}/" ${WARP_ARCHIVE})
   endif()
 
-
   guess_nuget_arch(NUGET_ARCH)
 
-  file(ARCHIVE_EXTRACT INPUT ${WARP_ARCHIVE} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/warp" PATTERNS *${NUGET_ARCH}*dll *${NUGET_ARCH}*pdb)
+  # This is all awfulness to work around the fact that the last known good WRAP
+  # for x64 is before arm64 support was shipped via NuGet, and the packaging
+  # changed and we just aren't allowed to have nice things.
+  file(ARCHIVE_EXTRACT INPUT ${WARP_ARCHIVE} DESTINATION "${CMAKE_CURRENT_BINARY_DIR}/warp" PATTERNS *dll *pdb)
 
-  file(GLOB_RECURSE LIBS "${CMAKE_CURRENT_BINARY_DIR}/warp/*.dll" $<IF:$<CONFIG:DEBUG>,"${CMAKE_CURRENT_BINARY_DIR}/warp/*.pdb">)
+  file(GLOB_RECURSE LIBS "${CMAKE_CURRENT_BINARY_DIR}/warp/build/native/*/${NUGET_ARCH}/*.dll"
+       $<IF:$<CONFIG:DEBUG>,"${CMAKE_CURRENT_BINARY_DIR}/warp/build/native/*/${NUGET_ARCH}/*.pdb">)
+  
+  if (${NUGET_ARCH} STREQUAL "x64" AND NOT LIBS)
+    file(GLOB_RECURSE LIBS "${CMAKE_CURRENT_BINARY_DIR}/warp/build/native/amd64/*.dll"
+         $<IF:$<CONFIG:DEBUG>,"${CMAKE_CURRENT_BINARY_DIR}/warp/build/native/amd64/*.pdb">)
+  endif ()
+  
+  if (NOT LIBS)
+    message(FATAL_ERROR "Requested version of WARP does not support current architecture (or it was packaged in a way we don't handle).")
+  endif()
 
   file(MAKE_DIRECTORY "${LLVM_RUNTIME_OUTPUT_INTDIR}")
   foreach(FILE ${LIBS})
