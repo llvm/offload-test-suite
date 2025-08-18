@@ -15,8 +15,10 @@ WARP:
   non-WARP configurations. This is useful if you're running Windows in a VM and
   do not have a physical GPU.
 
-* **WARP_VERSION** - Defaults to `System` which uses the system version of WARP.
-  This option may also be set to an explicit WARP version, and the configuration
-  step will pull WARP from NuGet. See the [NuGet package
-  listing](https://www.nuget.org/packages/Microsoft.Direct3D.WARP) to identify
-  valid versions.
+* **WARP_VERSION** - Defaults to `LKG` which uses a Known-Good version of WARP.
+  This is the default version tested in the GitHub actions. Alternatively this
+  option may be set to the special values `System` to use the system version or
+  `Latest` to use the latest non-preview version, or it may be set to an
+  explicit WARP version, and the configuration step will pull WARP from NuGet.
+  See the [NuGet package listing](https://www.nuget.org/packages/Microsoft.Direct3D.WARP)
+  to identify valid versions.
