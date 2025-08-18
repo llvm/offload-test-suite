@@ -1,0 +1,71 @@
+#--- source.hlsl
+
+StructuredBuffer<int> InInt : register(t0);
+RWStructuredBuffer<int> OutInt : register(u1);
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+
+  int offset = 2;
+  if (TID.x < 2){
+    offset = 0;
+  }
+  switch (offset) {
+    case 0:
+      OutInt[TID.x] = WaveReadLaneAt(InInt[TID.x], (TID.x + 1) % 2);
+      break;
+    case 2:
+      OutInt[TID.x] = WaveReadLaneAt(InInt[TID.x], offset + ((TID.x - 1 + offset) % 2));
+      break;    
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [16, 1, 1]
+Buffers:
+  - Name: InInt
+    Format: Int32
+    Stride: 4
+    Data: [0, 1, 2, 3 ]
+  - Name: OutInt
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOutInt
+    Format: Int32
+    Stride: 4
+    Data: [ 1, 0, 3, 2]
+  
+Results:
+  - Result: TestOut
+    Rule: BufferExact
+    Actual: OutInt
+    Expected: ExpectedOutInt
+
+DescriptorSets:
+  - Resources:
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1    
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

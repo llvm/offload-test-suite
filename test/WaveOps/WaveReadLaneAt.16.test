@@ -1,0 +1,145 @@
+#--- source.hlsl
+
+StructuredBuffer<int16_t4> InInt : register(t0);
+RWStructuredBuffer<int16_t4> OutInt : register(u1);
+
+StructuredBuffer<uint16_t4> InUInt : register(t2);
+RWStructuredBuffer<uint16_t4> OutUInt : register(u3);
+
+StructuredBuffer<float16_t4> InFloat : register(t4);
+RWStructuredBuffer<float16_t4> OutFloat : register(u5);
+
+[numthreads(4,1,1)]
+void main(uint32_t3 TID : SV_GroupThreadID) {
+  uint OutIdx = TID.x * 3;
+
+  // Int
+  OutInt[OutIdx] = WaveReadLaneAt(InInt[TID.x], TID.x);
+  uint16_t4 ThreadInInt = {InInt[TID.x].xyz, InInt[TID.x].w};
+  OutInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInInt, TID.x);;
+  OutInt[OutIdx + 2].xy = WaveReadLaneAt(InInt[TID.x].xy, TID.x);
+
+  // UInt
+  OutUInt[OutIdx] = WaveReadLaneAt(InUInt[TID.x], TID.x);
+  int16_t4 ThreadInUInt = {InUInt[TID.x].xyz, InUInt[TID.x].w};
+  OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);;
+  OutUInt[OutIdx + 2].xy = WaveReadLaneAt(InUInt[TID.x].xy, TID.x);
+
+  // Float
+  OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
+  float16_t4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: InInt
+    Format: Int16
+    Stride: 8
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutInt
+    Format: Int16
+    Stride: 8
+    ZeroInitSize: 72
+  - Name: ExpectedOutInt # The result we expect
+    Format: Int16
+    Stride: 8
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InUInt
+    Format: UInt16
+    Stride: 8
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutUInt
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 72
+  - Name: ExpectedOutUInt # The result we expect
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InFloat
+    Format: Float16
+    Stride: 8
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutFloat
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 72
+  - Name: ExpectedOutFloat # The result we expect
+    Format: Float16
+    Stride: 8
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+Results:
+  - Result: TestInt
+    Rule: BufferExact
+    Actual: OutInt
+    Expected: ExpectedOutInt
+  - Result: TestUInt
+    Rule: BufferExact
+    Actual: OutUInt
+    Expected: ExpectedOutUInt
+  - Result: TestFloat
+    Rule: BufferExact
+    Actual: OutFloat
+    Expected: ExpectedOutFloat
+DescriptorSets:
+  - Resources:
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: InUInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: InFloat
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+# Tracked by https://github.com/llvm/offload-test-suite/issues/351
+# XFAIL: Metal
+
+# REQUIRES: Half, Int16
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,181 @@
+#--- source.hlsl
+
+StructuredBuffer<int4> InInt : register(t0);
+RWStructuredBuffer<int4> OutInt : register(u1);
+
+StructuredBuffer<uint4> InUInt : register(t2);
+RWStructuredBuffer<uint4> OutUInt : register(u3);
+
+StructuredBuffer<float4> InFloat : register(t4);
+RWStructuredBuffer<float4> OutFloat : register(u5);
+
+// Checks for edge-case floats
+StructuredBuffer<float> InEdgeFloat : register(t6);
+RWStructuredBuffer<float> OutEdgeFloat : register(u7);
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint OutIdx = TID.x * 3;
+
+  // Int
+  OutInt[OutIdx] = WaveReadLaneAt(InInt[TID.x], TID.x);
+  uint4 ThreadInInt = {InInt[TID.x].xyz, InInt[TID.x].w};
+  OutInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInInt, TID.x);
+  OutInt[OutIdx + 2].xy = WaveReadLaneAt(InInt[TID.x].xy, TID.x);
+
+  // UInt
+  OutUInt[OutIdx] = WaveReadLaneAt(InUInt[TID.x], TID.x);
+  uint4 ThreadInUInt = {InUInt[TID.x].xyz, InUInt[TID.x].w};
+  OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);
+  OutUInt[OutIdx + 2].xy = WaveReadLaneAt(InUInt[TID.x].xy, TID.x);
+
+  // Float
+  OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
+  uint4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);
+  OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
+
+  // Edge-Cases
+  OutEdgeFloat[TID.x] = WaveReadLaneAt(InEdgeFloat[TID.x], TID.x);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: InInt
+    Format: Int32
+    Stride: 16
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutInt
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 144
+  - Name: ExpectedOutInt # The result we expect
+    Format: Int32
+    Stride: 16
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InUInt
+    Format: UInt32
+    Stride: 16
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutUInt
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 144
+  - Name: ExpectedOutUInt # The result we expect
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InFloat
+    Format: Float32
+    Stride: 16
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutFloat
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 144
+  - Name: ExpectedOutFloat # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+  - Name: InEdgeFloat
+    Format: Float32
+    Stride: 4
+    Data: [inf, -inf, nan, 0 ]
+  - Name: OutEdgeFloat
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOutEdgeFloat # The result we expect
+    Format: Float32
+    Stride: 4
+    Data: [ inf, -inf, nan, 0]
+Results:
+  - Result: TestInt
+    Rule: BufferExact
+    Actual: OutInt
+    Expected: ExpectedOutInt
+  - Result: TestUInt
+    Rule: BufferExact
+    Actual: OutUInt
+    Expected: ExpectedOutUInt
+  - Result: TestFloat
+    Rule: BufferExact
+    Actual: OutFloat
+    Expected: ExpectedOutFloat
+  - Result: TestEdgeFloat
+    Rule: BufferExact
+    Actual: OutEdgeFloat
+    Expected: ExpectedOutEdgeFloat
+DescriptorSets:
+  - Resources:
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: InUInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: InFloat
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: InEdgeFloat
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: OutEdgeFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+...
+#--- end
+# Tracked by https://github.com/llvm/offload-test-suite/issues/351
+# XFAIL: Metal
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

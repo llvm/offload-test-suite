@@ -1,0 +1,122 @@
+#--- source.hlsl
+
+StructuredBuffer<int> InInt : register(t0);
+RWStructuredBuffer<int> OutBroadcast : register(u1);
+RWStructuredBuffer<int> OutShift : register(u2);
+RWStructuredBuffer<int> OutMix : register(u3);
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  OutBroadcast[TID.x] = WaveReadLaneAt(InInt[TID.x], 2);
+
+  uint PosShiftIndex = (TID.x + 1) % 4;
+  int PosValue = WaveReadLaneAt(InInt[TID.x], PosShiftIndex);
+  uint NegShiftIndex = (TID.x - 1) % 4;
+  int NegValue = WaveReadLaneAt(InInt[TID.x], NegShiftIndex);
+  OutShift[TID.x] = PosValue + NegValue;
+
+  uint MixIndex = 0;
+  switch (TID.x) {
+    case 0:
+      MixIndex = 2;
+      break;
+    case 1:
+      MixIndex = 3;
+      break;
+    case 2:
+      MixIndex = 1;
+      break;
+    default:
+      break;
+  }
+
+  OutMix[TID.x] = WaveReadLaneAt(InInt[TID.x], MixIndex);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: InInt
+    Format: Int32
+    Stride: 4
+    Data: [0, 1, 2, 3 ]
+  - Name: OutBroadcast
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOutBroadcast # The result we expect
+    Format: Int32
+    Stride: 4
+    Data: [ 2, 2, 2, 2 ]
+  - Name: OutShift
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOutShift # The result we expect
+    Format: Int32
+    Stride: 4
+    Data: [ 4, 2, 4, 2 ]
+  - Name: OutMix
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOutMix # The result we expect
+    Format: Int32
+    Stride: 4
+    Data: [ 2, 3, 1, 0 ]
+Results:
+  - Result: TestBroadcast
+    Rule: BufferExact
+    Actual: OutBroadcast
+    Expected: ExpectedOutBroadcast
+  - Result: TestShift
+    Rule: BufferExact
+    Actual: OutShift
+    Expected: ExpectedOutShift
+  - Result: TestMix
+    Rule: BufferExact
+    Actual: OutMix
+    Expected: ExpectedOutMix
+DescriptorSets:
+  - Resources:
+    - Name: InInt
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutBroadcast
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutShift
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutMix
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+# Tracked by https://github.com/llvm/offload-test-suite/issues/352
+# XFAIL: Clang-Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
