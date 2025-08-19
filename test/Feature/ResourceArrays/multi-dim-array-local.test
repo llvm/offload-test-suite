@@ -76,8 +76,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
-
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
 

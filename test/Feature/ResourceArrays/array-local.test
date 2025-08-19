@@ -79,8 +79,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
-
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
 

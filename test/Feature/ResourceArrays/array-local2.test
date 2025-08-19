@@ -74,8 +74,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
-
 # DXC-DirectX has a bug here because it does not create a local copy
 # of a function argument if the type is resource or resource array.
 https://github.com/microsoft/DirectXShaderCompiler/issues/7678
