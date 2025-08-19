@@ -1,0 +1,109 @@
+#--- source.hlsl
+StructuredBuffer<half2> A : register(t0);
+StructuredBuffer<half2> B : register(t1);
+StructuredBuffer<float> Acc : register(t2);
+
+RWStructuredBuffer<float> Out : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = dot2add(A[0], B[0], Acc[0]);
+  Out[1] = dot2add(A[1], B[1], Acc[1]);
+  Out[2] = dot2add(A[2], B[2], Acc[2]);
+  Out[3] = dot2add(A[3], B[3], Acc[3]);
+  Out[4] = dot2add(A[4], B[4], Acc[4]);
+  Out[5] = dot2add(A[5], B[5], Acc[5]);
+  Out[6] = dot2add(A[6], B[6], Acc[6]);
+  Out[7] = dot2add(A[7], B[7], Acc[7]);
+  Out[8] = dot2add(A[8], B[8], Acc[8]);
+  Out[9] = dot2add(A[9], B[9], Acc[9]);
+  Out[10] = dot2add(A[10], B[10], Acc[10]);
+  Out[11] = dot2add(A[11], B[11], Acc[11]);
+
+  Out[12] = dot2add(half2(1, 2), half2(3, 4), float(0));
+  Out[13] = dot2add(half2(-1, 2), half2(3, -4), float(10));
+  Out[14] = dot2add(half2(65504, 1), half2(1, 65504), float(0));
+  Out[15] = dot2add(half2(1, -65504), half2(-65504, 1), float(-10000000));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: A
+    Format: Float16
+    Stride: 4
+    Data: [ 0x3c00, 0x4000, 0x3c00, 0xc000, 0x3c00, 0x4000, 0xbc00, 0x4000, 0x3c00, 0x4000, 0xbc00, 0x4000, 0x3c00, 0x4000, 0xbc00, 0xc000, 0x7bff, 0x3c00, 0xfbff, 0x3c00, 0x3c00, 0x7bff, 0x3c00, 0xfbff ]
+    # 1, 2, 1, -2, 1, 2, -1, 2, 1, 2, -1, 2, 1, 2, -1, -2, 65504, 1, -65504, 1, 1, 65504, 1, -65504
+  - Name: B
+    Format: Float16
+    Stride: 4
+    Data: [ 0x4200, 0x4400, 0xc200, 0x4400, 0x4200, 0x4400, 0x4200, 0xc400, 0x4200, 0x4400, 0xc200, 0x4400, 0x4200, 0x4400, 0xc200, 0xc400, 0x3c00, 0x7bff, 0x3c00, 0xfbff, 0x7bff, 0x3c00, 0xfbff, 0x3c00 ]
+    # 3, 4, -3, 4, 3, 4, 3, -4, 3, 4, -3, 4, 3, 4, -3, -4, 1, 65504, 1, -65504, 65504, 1, -65504, 1
+  - Name: Acc
+    Format: Float32
+    Stride: 4
+    Data: [ 0, 0, 10, 10, -5, -5, -30, -30, 0, 0, 10000000, -10000000 ]
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    ZeroInitSize: 64
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [ 11, -11, 21, -1, 6, 6, -19, -19, 131008, -131008, 10131008, -10131008, 11, -1, 131008, -10131008 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Acc
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# https://github.com/llvm/offload-test-suite/issues/341
+# XFAIL: Metal
+
+# https://github.com/llvm/llvm-project/issues/149561
+# XFAIL: Clang-Vulkan
+
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7695
+# XFAIL: DXC-Vulkan
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
