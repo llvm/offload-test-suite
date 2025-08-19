@@ -1,0 +1,92 @@
+#--- source.hlsl
+StructuredBuffer<double4> M : register(t0);
+StructuredBuffer<double4> A : register(t1);
+StructuredBuffer<double4> B : register(t2);
+
+RWStructuredBuffer<double4> Out : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = mad(M[0], A[0], B[0]);
+  Out[1] = double4(mad(M[1].xyz, A[1].xyz, B[1].xyz), mad(M[1].w, A[1].w, B[1].w));
+  Out[2] = double4(mad(M[2].xy, A[2].xy, B[2].xy), mad(M[2].zw, A[2].zw, B[2].zw));
+  Out[3] = mad(double4(1.0, 1.5, 1e+308l, -1e+308l), double4(1.0, 10, 2, 2), double4(1.0, -5.5, 0, 0));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: M
+    Format: Float64
+    Stride: 32
+    Data: [ NaN, -Inf, 0x0.fffffffffffffp-1022, -0, 0, Inf, 1.0, -1.0, 0, 1, 1.5, -3.5 ]
+    # NaN, -Inf, denorm, -0, 0, Inf, 1.0, -1.0, 0, 1, 1.5, -3.5
+  - Name: A
+    Format: Float64
+    Stride: 32
+    Data: [ NaN, -Inf, 1, -0, 0, Inf, 1.0, -1.0, 0, 1, 10, 5 ]
+    # NaN, -Inf, 1, -0, 0, Inf, 1.0, -1.0, 0, 1, 10, 5
+  - Name: B
+    Format: Float64
+    Stride: 32
+    Data: [ NaN, -Inf, 0, -0, 0, Inf, 1.0, -1.0, 1, 0, -5.5, 1 ]
+    # NaN, -Inf, 0, -0, 0, Inf, 1.0, -1.0, 1, 0, -5.5, 1
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    ZeroInitSize: 128
+  - Name: ExpectedOut
+    Format: Float64
+    Stride: 32
+    Data: [ NaN, NaN, 0x0.fffffffffffffp-1022, 0, 0, Inf, 2, 0, 1, 1, 9.5, -16.5, 2, 9.5, Inf, -Inf ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: M
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# https://github.com/llvm/offload-test-suite/issues/358
+# XFAIL: DirectX-WARP
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl
+
+# RUN: %offloader %t/pipeline.yaml %t.o
