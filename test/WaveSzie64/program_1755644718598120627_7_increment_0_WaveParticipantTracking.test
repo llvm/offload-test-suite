@@ -1,0 +1,243 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_check_sum : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  _participant_check_sum[tid.x] = 0;
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 2)) {
+  case 0: {
+      if ((((((WaveGetLaneIndex() == 9) || (WaveGetLaneIndex() == 30)) || (WaveGetLaneIndex() == 37)) || (WaveGetLaneIndex() == 54)) || (WaveGetLaneIndex() == 60))) {
+        if ((((((WaveGetLaneIndex() == 7) || (WaveGetLaneIndex() == 19)) || (WaveGetLaneIndex() == 44)) || (WaveGetLaneIndex() == 60)) || (WaveGetLaneIndex() == 21))) {
+          result = (result + WaveActiveMin(result));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 1);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        for (uint i0 = 0; (i0 < 2); i0 = (i0 + 1)) {
+          if (((((WaveGetLaneIndex() == 6) || (WaveGetLaneIndex() == 38)) || (WaveGetLaneIndex() == 61)) || (WaveGetLaneIndex() == 44))) {
+            result = (result + WaveActiveSum(result));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+          for (uint i1 = 0; (i1 < 2); i1 = (i1 + 1)) {
+            if ((WaveGetLaneIndex() == 36)) {
+              result = (result + WaveActiveSum(8));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 0);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            if ((i1 == 1)) {
+              continue;
+            }
+            if ((i1 == 1)) {
+              break;
+            }
+          }
+          if ((((((WaveGetLaneIndex() == 8) || (WaveGetLaneIndex() == 26)) || (WaveGetLaneIndex() == 43)) || (WaveGetLaneIndex() == 50)) || (WaveGetLaneIndex() == 9))) {
+            result = (result + WaveActiveMax(result));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+          if ((i0 == 1)) {
+            continue;
+          }
+        }
+      } else {
+      if (((WaveGetLaneIndex() < 5) || (WaveGetLaneIndex() >= 46))) {
+        if (((WaveGetLaneIndex() < 1) || (WaveGetLaneIndex() >= 42))) {
+          result = (result + WaveActiveSum(6));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 8);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        switch ((WaveGetLaneIndex() % 4)) {
+        case 0: {
+            if ((WaveGetLaneIndex() < 8)) {
+              result = (result + WaveActiveSum(1));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 2);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            break;
+          }
+        case 1: {
+            if (((WaveGetLaneIndex() % 2) == 0)) {
+              result = (result + WaveActiveSum(2));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 0);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            break;
+          }
+        case 2: {
+            if (true) {
+              result = (result + WaveActiveSum(3));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 5);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            break;
+          }
+        case 3: {
+            if ((WaveGetLaneIndex() < 20)) {
+              result = (result + WaveActiveSum(4));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 0);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            break;
+          }
+        default: {
+            result = (result + WaveActiveSum(99));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            break;
+          }
+        }
+      }
+      if (((((WaveGetLaneIndex() == 7) || (WaveGetLaneIndex() == 34)) || (WaveGetLaneIndex() == 56)) || (WaveGetLaneIndex() == 16))) {
+        result = (result + WaveActiveMax(result));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 1);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+    }
+    break;
+  }
+  case 1: {
+    if (((WaveGetLaneIndex() % 2) == 0)) {
+      result = (result + WaveActiveSum(2));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 0);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+    }
+    break;
+  }
+  }
+  switch ((WaveGetLaneIndex() % 3)) {
+  case 0: {
+      if ((WaveGetLaneIndex() < 8)) {
+        result = (result + WaveActiveSum(1));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 3);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+      break;
+    }
+  case 1: {
+      switch ((WaveGetLaneIndex() % 3)) {
+      case 0: {
+          if (((WaveGetLaneIndex() < 2) || (WaveGetLaneIndex() >= 57))) {
+            if (((WaveGetLaneIndex() < 19) || (WaveGetLaneIndex() >= 50))) {
+              result = (result + WaveActiveMin((WaveGetLaneIndex() + 1)));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 0);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            if (((WaveGetLaneIndex() < 1) || (WaveGetLaneIndex() >= 42))) {
+              result = (result + WaveActiveMax((WaveGetLaneIndex() + 3)));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 0);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+          }
+          break;
+        }
+      case 1: {
+          for (uint i2 = 0; (i2 < 3); i2 = (i2 + 1)) {
+            if (((WaveGetLaneIndex() & 1) == 1)) {
+              result = (result + WaveActiveSum(result));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 11);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+            if (((WaveGetLaneIndex() & 1) == 1)) {
+              result = (result + WaveActiveMax(10));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 11);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+          }
+          break;
+        }
+      case 2: {
+          if (true) {
+            result = (result + WaveActiveSum(3));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+          break;
+        }
+      }
+      break;
+    }
+  case 2: {
+      for (uint i3 = 0; (i3 < 2); i3 = (i3 + 1)) {
+        if (((((WaveGetLaneIndex() == 3) || (WaveGetLaneIndex() == 39)) || (WaveGetLaneIndex() == 53)) || (WaveGetLaneIndex() == 41))) {
+          result = (result + WaveActiveMax(8));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 2);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        if ((((WaveGetLaneIndex() == 24) || (WaveGetLaneIndex() == 42)) || (WaveGetLaneIndex() == 21))) {
+          if (((((WaveGetLaneIndex() == 13) || (WaveGetLaneIndex() == 32)) || (WaveGetLaneIndex() == 44)) || (WaveGetLaneIndex() == 32))) {
+            result = (result + WaveActiveMin(result));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+        } else {
+        if ((WaveGetLaneIndex() < 18)) {
+          result = (result + WaveActiveMin(result));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 6);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+      }
+    }
+    break;
+  }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 64 threads
+Buffers:
+  - Name: _participant_check_sum
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 64
+  - Name: expected_participants
+    Format: UInt32
+    Stride: 4
+    Data: [3, 6, 3, 1, 1, 2, 1, 6, 2, 0, 0, 2, 0, 6, 2, 0, 1, 2, 0, 6, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0, 6, 0, 0, 1, 0, 0, 6, 0, 0, 0, 2, 0, 6, 0, 0, 2, 0, 1, 6, 2, 0, 1, 2, 0, 6, 2, 0, 2, 0, 1, 6, 2, 0]
+Results:
+  - Result: WaveOpValidation
+    Rule: BufferExact
+    Actual: _participant_check_sum
+    Expected: expected_participants
+DescriptorSets:
+  - Resources:
+    - Name: _participant_check_sum
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
