@@ -25,7 +25,7 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.a61298p+0, -0, 0, 0x1.a61298p+0, inf, 1, -1, nan, nan, nan,]
+    Data: [ nan, -inf, -0x1p-1, -0, 0, 0x1p-1, inf, 1, -1, nan, nan, nan,]
     #  NaN, -Inf, -0.5, -0, 0, 0.5, Inf, 1, -1,
   - Name: Out
     Format: Float32
@@ -34,7 +34,7 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.af122ap+0, 0.0, 0.0, 0x1.af122ap+0, inf, 1.175201, -1.175201, nan, nan, nan,]
+    Data: [ nan, -inf, -0x1.0acdp-1, 0.0, 0.0, 0x1.0acdp-1, inf, 1.175201, -1.175201, nan, nan, nan,]
     #  NaN, -Inf, -0.52109530549, 0.0, 0.0, 0.52109530549, Inf, 1.175201, -1.175201,
 Results:
   - Result: Test1
