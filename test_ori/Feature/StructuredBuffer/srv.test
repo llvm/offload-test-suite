@@ -1,0 +1,68 @@
+#--- source.hlsl
+struct S1 {
+  int4 i;
+};
+
+StructuredBuffer<S1> In : register(t0);
+RWStructuredBuffer<S1> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI].i = In[GI].i * 2.0;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Hex32
+    Stride: 16
+    Data: [0x00000000, 0x00000001, 0x00000002, 0x00000003]
+  - Name: Out
+    Format: Hex32
+    Stride: 16
+    ZeroInitSize: 16
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# https://github.com/llvm/llvm-project/issues/140739
+# UNSUPPORTED: Clang-Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: In
+# CHECK: Data: [
+# CHECK: 0x0,
+# CHECK: 0x1,
+# CHECK: 0x2,
+# CHECK: 0x3
+# CHECK: ]
+
+# CHECK: Name: Out
+# CHECK: Data: [
+# CHECK: 0x0,
+# CHECK: 0x2,
+# CHECK: 0x4,
+# CHECK: 0x6
+# CHECK: ]

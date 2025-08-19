@@ -1,0 +1,106 @@
+#--- source.hlsl
+RWStructuredBuffer<float> Nans : register(u0);
+RWStructuredBuffer<float> Infs : register(u1);
+RWStructuredBuffer<float> NegInfs : register(u2);
+RWStructuredBuffer<float> Mix : register(u3);
+
+[numthreads(32,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  Nans[TID.x % 8] = WaveActiveMax(Nans[TID.x % 8]);
+  Infs[TID.x % 8] = WaveActiveMax(Infs[TID.x % 8]);
+  NegInfs[TID.x % 8] = WaveActiveMax(NegInfs[TID.x % 8]);
+  Mix[TID.x % 8] = WaveActiveMax(Mix[TID.x % 8]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Nans
+    Format: Float32
+    Data: [ nan, nan, nan, nan ]
+  - Name: Infs
+    Format: Float32
+    Data: [ inf, inf, inf, inf ]
+  - Name: NegInfs
+    Format: Float32
+    Data: [ -inf, -inf, -inf, -inf ]
+  - Name: Mix
+    Format: Float32
+    Data: [ inf, -inf, nan, 0 ]
+DescriptorSets:
+  - Resources:
+    - Name: Nans
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Infs
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: NegInfs
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Mix
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.2 -Fo %t.o %t/source.hlsl %}
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# The behavior of this operation is consistent on Metal, so the test verifies that behavior.
+
+# The SPIR-V Spec for OpGroupNonUniformFMax says:
+# > From the set of Value(s) provided by active invocations within a subgroup,
+# > if for any two Values one of them is a NaN, the other is chosen. If all
+# > Value(s) that are used by the current invocation are NaN, then the result is
+# > an undefined value.
+
+# This makes Vulkan undefined for cases where all values are nan.
+
+# Also SPIR-V states:
+# > The identity I for Operation is -INF.
+
+# This makes it defined that any lane value of -INF is ignored.
+
+# DirectX driver implementations seem to match SPIR-V, except WARP, which does
+# not treat -INF as an identity.
+
+# XFAIL: DirectX-WARP
+
+# CHECK: Name: Nans
+# CHECK-NEXT: Format: Float32
+# METAL-NEXT: Data: [ 0, 0, 0, 0 ]
+# DX-NEXT: Data:
+# VULKAN-NEXT: Data:
+# CHECK: Name: Infs
+# CHECK-NEXT: Format: Float32
+# CHECK-NEXT: Data: [ inf, inf, inf, inf ]
+# CHECK: Name: NegInfs
+# CHECK-NEXT: Format: Float32
+# CHECK-NEXT: Data: [ 0, 0, 0, 0 ]
+# CHECK: Name: Mix
+# CHECK-NEXT: Format: Float32
+# CHECK-NEXT: Data: [ inf, inf, inf, inf ]
