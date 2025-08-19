@@ -12,8 +12,8 @@ void main(uint3 tid : SV_DispatchThreadID) {
     _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
     uint temp;
     InterlockedAdd(_index[0], 2, temp);
-    _participant_bit[_index[0]] = 1;
-    _participant_bit[_index[0] + 1] = WaveActiveBallot(true).x;
+    _participant_bit[temp] = 1;
+    _participant_bit[temp + 1] = WaveActiveBallot(true).x;
 } 
 else {
     if ((WaveGetLaneIndex() == 4) || (WaveGetLaneIndex() == 2)) {
@@ -22,8 +22,8 @@ else {
     _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
     uint temp;
     InterlockedAdd(_index[0], 2, temp);
-    _participant_bit[_index[0]] = 2;
-    _participant_bit[_index[0] + 1] = WaveActiveBallot(true).x;
+    _participant_bit[temp] = 2;
+    _participant_bit[temp + 1] = WaveActiveBallot(true).x;
 }
 }
 }
