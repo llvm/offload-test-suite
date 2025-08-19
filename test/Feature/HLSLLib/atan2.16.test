@@ -37,6 +37,7 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [ 0x3D7E, 0xBF12, 0x3E3C, 0x376B, 0x3D3C, 0x3D71, 0x3D8D, 0x3D9E, 0xC247, 0xC0B6, 0xC0B6, 0x3A48, 0x3D7E, 0xBF12, 0x3E3C, 0x376B ]
+    # 1.3730469, -1.7675781, 1.5585938, 0.46362305, 1.3085938, 1.3603516, 1.3876953, 1.4042969, -3.1386719, -2.3554688, -2.3554688, 0.78515625, 1.3730469, -1.7675781, 1.5585938, 0.46362305
 Results:
   - Result: Test0
     Rule: BufferFloatEpsilon
@@ -68,7 +69,10 @@ DescriptorSets:
         Binding: 2
 #--- end
 
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7691
+# XFAIL: DXC-Vulkan
+
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
