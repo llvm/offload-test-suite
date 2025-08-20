@@ -61,6 +61,7 @@ list(APPEND OFFLOADTEST_DEPS
   split-file
   imgdiff
   OffloadTestUnit
+  obj2yaml
   not)
 
 if (OFFLOADTEST_TEST_CLANG)
