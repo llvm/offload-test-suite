@@ -51,6 +51,7 @@ tools = [
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
+    config.available_features.add("%s-%s" % (API, config.offloadtest_os))
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("%s-WARP" % API)
         config.available_features.add("WARP-%s" % config.warp_arch)

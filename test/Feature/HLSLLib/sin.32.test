@@ -61,6 +61,8 @@ DescriptorSets:
 ...
 #--- end
 
+# https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
+# XFAIL: Vulkan-Darwin
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
