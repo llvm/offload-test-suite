@@ -63,7 +63,7 @@ DescriptorSets:
 #--- end
 
 # https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan
+# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # REQUIRES: Half
 # RUN: split-file %s %t

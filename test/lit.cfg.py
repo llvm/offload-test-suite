@@ -99,6 +99,10 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
 
+        # Add supported extensions.
+        for Extension in device["Extensions"]:
+            config.available_features.add(Extension["ExtensionName"])
+
 
 if config.offloadtest_test_warp:
     tools.append(
