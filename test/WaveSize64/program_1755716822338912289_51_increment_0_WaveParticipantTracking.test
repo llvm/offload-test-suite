@@ -1,0 +1,130 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_check_sum : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  _participant_check_sum[tid.x] = 0;
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 3)) {
+  case 0: {
+      if ((WaveGetLaneIndex() < 8)) {
+        result = (result + WaveActiveSum(1));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 3);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+    }
+  case 1: {
+      if (((WaveGetLaneIndex() < 13) || (WaveGetLaneIndex() >= 62))) {
+        if (((WaveGetLaneIndex() < 3) || (WaveGetLaneIndex() >= 60))) {
+          result = (result + WaveActiveSum(WaveGetLaneIndex()));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 3);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        uint counter0 = 0;
+        while ((counter0 < 3)) {
+          counter0 = (counter0 + 1);
+          if (((WaveGetLaneIndex() & 1) == 1)) {
+            result = (result + WaveActiveMin((WaveGetLaneIndex() + 3)));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 5);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+        }
+        if (((WaveGetLaneIndex() < 8) || (WaveGetLaneIndex() >= 49))) {
+          result = (result + WaveActiveMin(7));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 7);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+      } else {
+      if ((WaveGetLaneIndex() < 32)) {
+        result = (result + WaveActiveMax((WaveGetLaneIndex() + 4)));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 13);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+      if ((WaveGetLaneIndex() == 34)) {
+        if ((WaveGetLaneIndex() == 25)) {
+          result = (result + WaveActiveMax(result));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+      }
+    }
+    break;
+  }
+  case 2: {
+    if (true) {
+      result = (result + WaveActiveSum(3));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 21);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+    }
+    break;
+  }
+  }
+  uint counter1 = 0;
+  while ((counter1 < 3)) {
+    counter1 = (counter1 + 1);
+    for (uint i2 = 0; (i2 < 2); i2 = (i2 + 1)) {
+      if (((WaveGetLaneIndex() & 1) == 0)) {
+        result = (result + WaveActiveMin(result));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 32);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+      if ((i2 == 1)) {
+        continue;
+      }
+    }
+    if (((((WaveGetLaneIndex() == 9) || (WaveGetLaneIndex() == 39)) || (WaveGetLaneIndex() == 53)) || (WaveGetLaneIndex() == 52))) {
+      result = (result + WaveActiveSum(result));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 4);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+    }
+    if ((counter1 == 2)) {
+      break;
+    }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 64 threads
+Buffers:
+  - Name: _participant_check_sum
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 64
+  - Name: expected_participants
+    Format: UInt32
+    Stride: 4
+    Data: [7, 5, 5, 5, 5, 1, 6, 4, 5, 5, 4, 1, 4, 1, 5, 1, 5, 1, 5, 1, 5, 1, 5, 1, 5, 1, 5, 1, 5, 1, 5, 1, 5, 0, 4, 1, 4, 0, 5, 2, 4, 1, 4, 0, 5, 0, 4, 1, 4, 0, 5, 0, 6, 3, 4, 0, 5, 0, 4, 1, 4, 0, 5, 5]
+Results:
+  - Result: WaveOpValidation
+    Rule: BufferExact
+    Actual: _participant_check_sum
+    Expected: expected_participants
+DescriptorSets:
+  - Resources:
+    - Name: _participant_check_sum
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
