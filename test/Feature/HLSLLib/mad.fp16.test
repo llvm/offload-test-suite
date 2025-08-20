@@ -1,0 +1,90 @@
+#--- source.hlsl
+StructuredBuffer<half4> M : register(t0);
+StructuredBuffer<half4> A : register(t1);
+StructuredBuffer<half4> B : register(t2);
+
+RWStructuredBuffer<half4> Out : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = mad(M[0], A[0], B[0]);
+  Out[1] = half4(mad(M[1].xyz, A[1].xyz, B[1].xyz), mad(M[1].w, A[1].w, B[1].w));
+  Out[2] = half4(mad(M[2].xy, A[2].xy, B[2].xy), mad(M[2].zw, A[2].zw, B[2].zw));
+  Out[3] = mad(half4(1, 1.5, 300, -300), half4(1, 10, 300, 300), half4(1, -5.5, 1, -1));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: M
+    Format: Float16
+    Stride: 8
+    Data: [ 0x7e00, 0xfc00, 0x03FF, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x0000, 0x3c00, 0x3e00, 0xc300 ]
+    # NaN, -Inf, denorm, -0, 0, Inf, 1, -1, 0, 1, 1.5, -3.5
+  - Name: A
+    Format: Float16
+    Stride: 8
+    Data: [ 0x7e00, 0xfc00, 0x3c00, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x0000, 0x3c00, 0x4900, 0x4500 ]
+    # NaN, -Inf, 1, -0, 0, Inf, 1, -1, 0, 1, 10, 5
+  - Name: B
+    Format: Float16
+    Stride: 8
+    Data: [ 0x7e00, 0xfc00, 0x03FF, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x3c00, 0x0000, 0xc580, 0x3c00 ]
+    # NaN, -Inf, denorm, -0, 0, Inf, 1, -1, 1, 0, -5.5, 1
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0x7e00, 0x7e00, 0x07FE, 0x0000, 0x0000, 0x7c00, 0x4000, 0, 0x3c00, 0x3c00, 0x48c0, 0xcc20, 0x4000, 0x48c0, 0x7c00, 0xfc00 ]
+    # NaN, NaN, 0.00012195110, 0, 0, Inf, 2, 0, 1, 1, 9.5, -16.5, 2, 9.5, Inf, -Inf
+Results:
+  - Result: Test0
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: M
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+
+# RUN: %offloader %t/pipeline.yaml %t.o
