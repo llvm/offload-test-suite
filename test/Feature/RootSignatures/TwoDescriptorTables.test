@@ -58,9 +58,47 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
 # CHECK: Data:
 # CHECK-LABEL: Name: Out1
 # CHECK: Data: [ 20, 48, 84, 128 ]
 # CHECK-LABEL: Name: Out2
 # CHECK: Data: [ 40, 96, 168, 256 ]
+
+# OBJ: - Name:            RTS0
+# OBJ:   Size:            136
+# OBJ:   RootSignature:
+# OBJ:   Version:         2
+# OBJ:   NumRootParameters: 2
+# OBJ:   RootParametersOffset: 24
+# OBJ:   NumStaticSamplers: 0
+# OBJ:   StaticSamplersOffset: 136
+# OBJ:   Parameters:
+# OBJ: - ParameterType:   0
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Table:
+# OBJ:   NumRanges:       2
+# OBJ:   RangesOffset:    56
+# OBJ:   Ranges:
+# OBJ: - RangeType:       0
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 2
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ: - RangeType:       1
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 1
+# OBJ:   RegisterSpace:   4
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ: - ParameterType:   0
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Table:
+# OBJ:   NumRanges:       1
+# OBJ:   RangesOffset:    112
+# OBJ:   Ranges:
+# OBJ: - RangeType:       1
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 2
+# OBJ:   RegisterSpace:   4
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295

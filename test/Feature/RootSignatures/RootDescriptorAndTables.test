@@ -64,6 +64,38 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
 # CHECK-LABEL: Name: Out
 # CHECK: Data: [ 40, 192, 504, 1024 ]
+
+# OBJ: - Name:            RTS0
+# OBJ:   Size:            116
+# OBJ:   RootSignature:
+# OBJ:   Version:         2
+# OBJ:   NumRootParameters: 3
+# OBJ:   RootParametersOffset: 24
+# OBJ:   NumStaticSamplers: 0
+# OBJ:   StaticSamplersOffset: 116
+# OBJ:   Parameters:
+# OBJ: - ParameterType:   2
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Descriptor:
+# OBJ:   RegisterSpace:   0
+# OBJ:   ShaderRegister:  2
+# OBJ: - ParameterType:   0
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Table:
+# OBJ:   NumRanges:       1
+# OBJ:   RangesOffset:    80
+# OBJ:   Ranges:
+# OBJ: - RangeType:       0
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 2
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ: - ParameterType:   4
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Descriptor:
+# OBJ:   RegisterSpace:   4
+# OBJ:   ShaderRegister:  1
