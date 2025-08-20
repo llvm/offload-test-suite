@@ -150,6 +150,8 @@ else:
 
 config.available_features.add(HLSLCompiler)
 
+tools.append(ToolSubst("obj2yaml", FindTool("obj2yaml")))
+
 llvm_config.add_tool_substitutions(tools, config.llvm_tools_dir)
 
 api_query = os.path.join(config.llvm_tools_dir, "api-query")
