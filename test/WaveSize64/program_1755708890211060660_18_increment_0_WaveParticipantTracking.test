@@ -1,0 +1,97 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_check_sum : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  _participant_check_sum[tid.x] = 0;
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 2)) {
+  case 0: {
+      uint counter0 = 0;
+      while ((counter0 < 2)) {
+        counter0 = (counter0 + 1);
+        if ((WaveGetLaneIndex() == 13)) {
+          result = (result + WaveActiveMin(WaveGetLaneIndex()));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        uint counter1 = 0;
+        while ((counter1 < 2)) {
+          counter1 = (counter1 + 1);
+          if (((WaveGetLaneIndex() & 1) == 1)) {
+            result = (result + WaveActiveMax(result));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+        }
+      }
+      break;
+    }
+  case 1: {
+      for (uint i2 = 0; (i2 < 2); i2 = (i2 + 1)) {
+        if ((((WaveGetLaneIndex() == 19) || (WaveGetLaneIndex() == 55)) || (WaveGetLaneIndex() == 63))) {
+          result = (result + WaveActiveMax(10));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 3);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        if ((((WaveGetLaneIndex() == 29) || (WaveGetLaneIndex() == 38)) || (WaveGetLaneIndex() == 30))) {
+          result = (result + WaveActiveMin(result));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 1);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        if ((i2 == 1)) {
+          break;
+        }
+      }
+      break;
+    }
+  default: {
+      result = (result + WaveActiveSum(99));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 0);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      break;
+    }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 64 threads
+Buffers:
+  - Name: _participant_check_sum
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 64
+  - Name: expected_participants
+    Format: UInt32
+    Stride: 4
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 2]
+Results:
+  - Result: WaveOpValidation
+    Rule: BufferExact
+    Actual: _participant_check_sum
+    Expected: expected_participants
+DescriptorSets:
+  - Resources:
+    - Name: _participant_check_sum
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
