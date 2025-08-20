@@ -95,8 +95,75 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
 # CHECK-LABEL: Name: Out1
 # CHECK: Data: [ 20, 48, 84, 128 ]
 # CHECK-LABEL: Name: Out2
 # CHECK: Data: [ 40, 96, 168, 256 ]
+
+## Root Signature Header
+# OBJ: - Name:            RTS0
+# OBJ:   Size:            140
+# OBJ:   RootSignature:
+# OBJ:   Version:         2
+# OBJ:   NumRootParameters: 1
+# OBJ:   RootParametersOffset: 24
+# OBJ:   NumStaticSamplers: 0
+# OBJ:   StaticSamplersOffset: 140
+
+# OBJ: Parameters:
+
+## Descriptor Table
+# OBJ: - ParameterType:   0
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Table:
+# OBJ:   NumRanges:       4
+# OBJ:   RangesOffset:    44
+# OBJ:   Ranges:
+
+## SRV(t0, flags = DATA_STATIC)
+# OBJ: - RangeType:       0
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 0
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+## Only data flag set as expected:
+# OBJ:   DATA_STATIC:     true
+
+## SRV(t1, flags = DATA_STATIC_WHILE_SET_AT_EXECUTE)
+# OBJ: - RangeType:       0
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 1
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+## Only data flag set as expected:
+# OBJ:   DATA_STATIC_WHILE_SET_AT_EXECUTE: true
+
+## UAV(u1, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)
+# OBJ: - RangeType:       1
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 1
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+## Both flags set as expected:
+# OBJ:   DESCRIPTORS_VOLATILE: true
+# OBJ:   DATA_VOLATILE:   true
+
+## UAV(u2, flags = 0)
+# OBJ: - RangeType:       1
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 2
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+## No flags set as expected (verified using OBJ-NEXT below):
+
+## RootFlags(
+##   ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+##   CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED  |
+##   ALLOW_STREAM_OUTPUT 
+## )
+## RootFlags set as expected:
+# OBJ-NEXT:   AllowInputAssemblerInputLayout: true
+# OBJ:   AllowStreamOutput: true
+# OBJ:   CBVSRVUAVHeapDirectlyIndexed: true

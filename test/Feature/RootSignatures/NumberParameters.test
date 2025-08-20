@@ -90,8 +90,61 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
 # CHECK-LABEL: Name: Out1
 # CHECK: Data: [ 40, 192, 504, 1024 ]
 # CHECK-LABEL: Name: Out2
 # CHECK: Data: [ 80, 384, 1008, 2048 ]
+
+## Root Signature Header
+# OBJ: - Name:            RTS0
+# OBJ:   Size:            140
+# OBJ:   RootSignature:
+# OBJ:   Version:         2
+# OBJ:   NumRootParameters: 3
+# OBJ:   RootParametersOffset: 24
+# OBJ:   NumStaticSamplers: 0
+# OBJ:   StaticSamplersOffset: 140
+
+# OBJ: Parameters:
+
+## RootConstants(num32BitConstants = +61, b0)
+# OBJ: - ParameterType:   1
+# OBJ:  ShaderVisibility: 0
+# OBJ:  Constants:
+## Check positively signed integer
+# OBJ:  Num32BitValues:  61
+# OBJ:  RegisterSpace:   0
+# OBJ:  ShaderRegister:  0
+
+## DescriptorTable
+# OBJ: - ParameterType:   0
+# OBJ:  ShaderVisibility: 0
+# OBJ:   Table:
+# OBJ:   NumRanges:       2
+# OBJ:   RangesOffset:    80
+# OBJ:   Ranges:
+
+## SRV(t4294967294)
+# OBJ: - RangeType:       0
+# OBJ:   NumDescriptors:  1
+## Check edge-case
+# OBJ:   BaseShaderRegister: 4294967294
+# OBJ:   RegisterSpace:   0
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+
+## UAV(u1, space = 4294967279)
+# OBJ: - RangeType:       1
+# OBJ:   NumDescriptors:  1
+# OBJ:   BaseShaderRegister: 1
+## Check edge-case
+# OBJ:   RegisterSpace:   4294967279
+# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+
+## UAV(u2)
+# OBJ: - ParameterType:   4
+# OBJ:   ShaderVisibility: 0
+# OBJ:   Descriptor:
+# OBJ:   RegisterSpace:   0
+# OBJ:   ShaderRegister:  2
