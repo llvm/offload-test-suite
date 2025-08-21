@@ -155,9 +155,6 @@ void main(uint3 tid : SV_DispatchThreadID) {
     _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
 }
 }
-  if ((counter0 == 2)) {
-    break;
-}
 }
     if (((WaveGetLaneIndex() & 1) == 0)) {
     result = (result + WaveActiveMin(5));

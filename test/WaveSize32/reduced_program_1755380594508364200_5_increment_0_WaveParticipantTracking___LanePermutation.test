@@ -6,7 +6,8 @@ RWStructuredBuffer<uint> _index : register(u3);
 [numthreads(8, 1, 1)]
 void main(uint3 tid : SV_DispatchThreadID) {
   uint result = 0;
-    if ((WaveGetLaneIndex() == 5) || (WaveGetLaneIndex() == 7) || (WaveGetLaneIndex() == 3)) {
+  uint laneId = WaveGetLaneIndex();
+    if ((laneId == 5) || (laneId == 7) || (laneId == 3)) {
       uint _participantCount = WaveActiveSum(1);
       bool _isCorrect = (_participantCount == 3);
       _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
@@ -15,7 +16,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
       _participant_bit[temp] = 1;
       _participant_bit[temp + 1] = WaveActiveBallot(true).x;
   } else {
-    if ((WaveGetLaneIndex() == 4) || (WaveGetLaneIndex() == 2)) {
+    if ((laneId == 4) || (laneId == 2)) {
       uint _participantCount = WaveActiveSum(1);
       bool _isCorrect = (_participantCount == 2);
       _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
