@@ -7,25 +7,24 @@ RWStructuredBuffer<uint> _index : register(u3);
 void main(uint3 tid : SV_DispatchThreadID) {
   uint result = 0;
     if ((WaveGetLaneIndex() == 5) || (WaveGetLaneIndex() == 7) || (WaveGetLaneIndex() == 3)) {
-    uint _participantCount = WaveActiveSum(1);
-    bool _isCorrect = (_participantCount == 3);
-    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
-    uint temp;
-    InterlockedAdd(_index[0], 2, temp);
-    _participant_bit[temp] = 1;
-    _participant_bit[temp + 1] = WaveActiveBallot(true).x;
-} 
-else {
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 3);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      uint temp;
+      InterlockedAdd(_index[0], 2, temp);
+      _participant_bit[temp] = 1;
+      _participant_bit[temp + 1] = WaveActiveBallot(true).x;
+  } else {
     if ((WaveGetLaneIndex() == 4) || (WaveGetLaneIndex() == 2)) {
-    uint _participantCount = WaveActiveSum(1);
-    bool _isCorrect = (_participantCount == 2);
-    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
-    uint temp;
-    InterlockedAdd(_index[0], 2, temp);
-    _participant_bit[temp] = 2;
-    _participant_bit[temp + 1] = WaveActiveBallot(true).x;
-}
-}
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 2);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      uint temp;
+      InterlockedAdd(_index[0], 2, temp);
+      _participant_bit[temp] = 2;
+      _participant_bit[temp + 1] = WaveActiveBallot(true).x;
+    }
+  }
 }
 
 #--- pipeline.yaml
@@ -43,7 +42,7 @@ Buffers:
   - Name: expected_participants
     Format: UInt32
     Stride: 4
-    Data: [3, 0, 1, 3, 1, 1, 3, 0, 1, 1, 1, 1, 0, 0, 3, 1, 1, 2, 1, 0, 2, 0, 3, 1, 0, 2, 1, 0, 3, 2, 0, 2, 3, 0, 1, 3, 2, 1, 3, 0, 1, 1, 1, 1, 0, 0, 3, 1, 1, 2, 1, 0, 2, 0, 3, 1, 0, 2, 1, 0, 3, 2, 0, 2]
+    Data: [0, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   - Name: _participant_bit
     Format: UInt32
     Stride: 4
