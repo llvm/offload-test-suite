@@ -56,6 +56,8 @@ DescriptorSets:
         Binding: 1
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/370 XFAIL: DXC && DirectX-Intel
+
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
