@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        SKU: [windows-amd]
+        SKU: [windows-intel]
         TestTarget: [check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
