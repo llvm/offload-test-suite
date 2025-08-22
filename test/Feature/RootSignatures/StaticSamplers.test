@@ -130,7 +130,9 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# Unsupported: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: Clang
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
