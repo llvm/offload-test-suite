@@ -64,34 +64,34 @@ DescriptorSets:
 # CHECK-LABEL: Name: Out
 # CHECK: Data: [ 40, 192, 504, 1024 ]
 
-# OBJ: - Name:            RTS0
-# OBJ:   Size:            116
-# OBJ:   RootSignature:
-# OBJ:   Version:         2
-# OBJ:   NumRootParameters: 2
-# OBJ:   RootParametersOffset: 24
-# OBJ:   NumStaticSamplers: 0
-# OBJ:   StaticSamplersOffset: 116
-# OBJ:   Parameters:
-# OBJ: - ParameterType:   1
-# OBJ:   ShaderVisibility: 0
-# OBJ:   Constants:
-# OBJ:   Num32BitValues:  4
-# OBJ:   RegisterSpace:   0
-# OBJ:   ShaderRegister:  2
-# OBJ: - ParameterType:   0
-# OBJ:   ShaderVisibility: 0
-# OBJ:   Table:
-# OBJ:   NumRanges:       2
-# OBJ:   RangesOffset:    68
-# OBJ:   Ranges:
-# OBJ: - RangeType:       0
-# OBJ:   NumDescriptors:  1
-# OBJ:   BaseShaderRegister: 2
-# OBJ:   RegisterSpace:   0
-# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
-# OBJ: - RangeType:       1
-# OBJ:   NumDescriptors:  1
-# OBJ:   BaseShaderRegister: 1
-# OBJ:   RegisterSpace:   4
-# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ:      - Name:            RTS0
+# OBJ-NEXT:   Size:            116
+# OBJ-NEXT:   RootSignature:
+# OBJ-NEXT:     Version:         2
+# OBJ-NEXT:     NumRootParameters: 2
+# OBJ-NEXT:     RootParametersOffset: 24
+# OBJ-NEXT:     NumStaticSamplers: 0
+# OBJ-NEXT:     StaticSamplersOffset: 116
+# OBJ-NEXT:     Parameters:
+# OBJ-NEXT:     - ParameterType:   1
+# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       Constants:
+# OBJ-NEXT:       Num32BitValues:  4
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       ShaderRegister:  2
+# OBJ-NEXT:     - ParameterType:   0
+# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       Table:
+# OBJ-NEXT:       NumRanges:       2
+# OBJ-NEXT:       RangesOffset:    68
+# OBJ-NEXT:       Ranges:
+# OBJ-NEXT:       - RangeType:       0
+# OBJ-NEXT:         NumDescriptors:  1
+# OBJ-NEXT:         BaseShaderRegister: 2
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ-NEXT:       - RangeType:       1
+# OBJ-NEXT:         NumDescriptors:  1
+# OBJ-NEXT:         BaseShaderRegister: 1
+# OBJ-NEXT:         RegisterSpace:   4
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295

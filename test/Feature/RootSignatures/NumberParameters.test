@@ -98,53 +98,53 @@ DescriptorSets:
 # CHECK: Data: [ 80, 384, 1008, 2048 ]
 
 ## Root Signature Header
-# OBJ: - Name:            RTS0
-# OBJ:   Size:            140
-# OBJ:   RootSignature:
-# OBJ:   Version:         2
-# OBJ:   NumRootParameters: 3
-# OBJ:   RootParametersOffset: 24
-# OBJ:   NumStaticSamplers: 0
-# OBJ:   StaticSamplersOffset: 140
+# OBJ:      - Name:            RTS0
+# OBJ-NEXT:   Size:            140
+# OBJ-NEXT:   RootSignature:
+# OBJ-NEXT:     Version:         2
+# OBJ-NEXT:     NumRootParameters: 3
+# OBJ-NEXT:     RootParametersOffset: 24
+# OBJ-NEXT:     NumStaticSamplers: 0
+# OBJ-NEXT:     StaticSamplersOffset: 140
 
-# OBJ: Parameters:
+# OBJ-NEXT: Parameters:
 
 ## RootConstants(num32BitConstants = +61, b0)
-# OBJ: - ParameterType:   1
-# OBJ:  ShaderVisibility: 0
-# OBJ:  Constants:
+# OBJ-NEXT:     - ParameterType:   1
+# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       Constants:
 ## Check positively signed integer
-# OBJ:  Num32BitValues:  61
-# OBJ:  RegisterSpace:   0
-# OBJ:  ShaderRegister:  0
+# OBJ-NEXT:       Num32BitValues:  61
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       ShaderRegister:  0
 
 ## DescriptorTable
-# OBJ: - ParameterType:   0
-# OBJ:  ShaderVisibility: 0
-# OBJ:   Table:
-# OBJ:   NumRanges:       2
-# OBJ:   RangesOffset:    80
-# OBJ:   Ranges:
+# OBJ-NEXT:     - ParameterType:   0
+# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       Table:
+# OBJ-NEXT:       NumRanges:       2
+# OBJ-NEXT:       RangesOffset:    80
+# OBJ-NEXT:       Ranges:
 
 ## SRV(t4294967294)
-# OBJ: - RangeType:       0
-# OBJ:   NumDescriptors:  1
+# OBJ-NEXT:       - RangeType:       0
+# OBJ-NEXT:         NumDescriptors:  1
 ## Check edge-case
-# OBJ:   BaseShaderRegister: 4294967294
-# OBJ:   RegisterSpace:   0
-# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ-NEXT:         BaseShaderRegister: 4294967294
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u1, space = 4294967279)
-# OBJ: - RangeType:       1
-# OBJ:   NumDescriptors:  1
-# OBJ:   BaseShaderRegister: 1
+# OBJ-NEXT:       - RangeType:       1
+# OBJ-NEXT:         NumDescriptors:  1
+# OBJ-NEXT:         BaseShaderRegister: 1
 ## Check edge-case
-# OBJ:   RegisterSpace:   4294967279
-# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ-NEXT:         RegisterSpace:   4294967279
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u2)
-# OBJ: - ParameterType:   4
-# OBJ:   ShaderVisibility: 0
-# OBJ:   Descriptor:
-# OBJ:   RegisterSpace:   0
-# OBJ:   ShaderRegister:  2
+# OBJ-NEXT:       - ParameterType:   4
+# OBJ-NEXT:         ShaderVisibility: 0
+# OBJ-NEXT:         Descriptor:
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         ShaderRegister:  2

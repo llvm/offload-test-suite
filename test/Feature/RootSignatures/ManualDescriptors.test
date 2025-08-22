@@ -99,52 +99,51 @@ DescriptorSets:
 # CHECK: Data: [ 40, 96, 168, 256 ]
 
 ## Root Signature Header
-# OBJ: - Name:            RTS0
-# OBJ:   Size:            116
-# OBJ:   RootSignature:
-# OBJ:   Version:         2
-# OBJ:   NumRootParameters: 1
-# OBJ:   RootParametersOffset: 24
-# OBJ:   NumStaticSamplers: 0
-# OBJ:   StaticSamplersOffset: 116
-
-# OBJ: Parameters:
+# OBJ:      - Name:            RTS0
+# OBJ-NEXT:   Size:            116
+# OBJ-NEXT:     RootSignature:
+# OBJ-NEXT:     Version:         2
+# OBJ-NEXT:     NumRootParameters: 1
+# OBJ-NEXT:     RootParametersOffset: 24
+# OBJ-NEXT:     NumStaticSamplers: 0
+# OBJ-NEXT:     StaticSamplersOffset: 116
+# OBJ-NEXT:     Parameters:
 
 ## DescriptorTable
-# OBJ: - ParameterType:   0
-# OBJ:   ShaderVisibility: 0
-# OBJ:   Table:
-# OBJ:   NumRanges:       3
-# OBJ:   RangesOffset:    44
-# OBJ:   Ranges:
+# OBJ-NEXT:     - ParameterType:   0
+# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       Table:
+# OBJ-NEXT:       NumRanges:       3
+# OBJ-NEXT:       RangesOffset:    44
+# OBJ-NEXT:       Ranges:
 
 ## UAV(u2, offset = 3, numDescriptors = unbounded)
-# OBJ: - RangeType:       1
+# OBJ-NEXT:       - RangeType:       1
 ## Ensure unbounded descriptors
-# OBJ:   NumDescriptors:  -1
-# OBJ:   BaseShaderRegister: 2
-# OBJ:   RegisterSpace:   0
+# OBJ-NEXT:         NumDescriptors:  -1
+# OBJ-NEXT:         BaseShaderRegister: 2
+# OBJ-NEXT:         RegisterSpace:   0
 ## Ensure offset = 3
-# OBJ:   OffsetInDescriptorsFromTableStart: 3
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 3
 
 ## SRV(t0, offset = 0, numDescriptors = 2)
-# OBJ: - RangeType:       0
+# OBJ-NEXT:       - RangeType:       0
 ## Ensure 2 descriptors
-# OBJ:  NumDescriptors:  2
-# OBJ:  BaseShaderRegister: 0
-# OBJ:  RegisterSpace:   0
+# OBJ-NEXT:         NumDescriptors:  2
+# OBJ-NEXT:         BaseShaderRegister: 0
+# OBJ-NEXT:         RegisterSpace:   0
 ## Ensure offset = 0
-# OBJ:  OffsetInDescriptorsFromTableStart: 0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 0
 
 ## UAV(u1,
 ##  offset = DESCRIPTOR_RANGE_OFFSET_APPEND,
 ##  numDescriptors = 1
 ## )
-# OBJ: - RangeType:       1
+# OBJ-NEXT:       - RangeType:       1
 ## Ensure 1 descriptor
-# OBJ: NumDescriptors:  1
-# OBJ: BaseShaderRegister: 1
-# OBJ: RegisterSpace:   0
+# OBJ-NEXT:         NumDescriptors:  1
+# OBJ-NEXT:         BaseShaderRegister: 1
+# OBJ-NEXT:         RegisterSpace:   0
 
 ## Ensure append
-# OBJ: OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
