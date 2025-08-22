@@ -137,57 +137,55 @@ DescriptorSets:
 # RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
 ## Root Signature Header
-# OBJ: - Name:            RTS0
-# OBJ:   Size:            196
-# OBJ:   RootSignature:
-# OBJ:   Version:         2
-# OBJ:   NumRootParameters: 1
-# OBJ:   RootParametersOffset: 24
-# OBJ:   NumStaticSamplers: 2
-# OBJ:   StaticSamplersOffset: 92
-
-# OBJ:   Parameters:
+# OBJ:      - Name:            RTS0
+# OBJ-NEXT:   Size:            196
+# OBJ-NEXT:   RootSignature:
+# OBJ-NEXT:     Version:         2
+# OBJ-NEXT:     NumRootParameters: 1
+# OBJ-NEXT:     RootParametersOffset: 24
+# OBJ-NEXT:     NumStaticSamplers: 2
+# OBJ-NEXT:     StaticSamplersOffset: 92
+# OBJ-NEXT:     Parameters:
 
 ## Descriptor Table
-# OBJ: - ParameterType:   0
-# OBJ:   ShaderVisibility: 0
-# OBJ:   Table:
-# OBJ:   NumRanges:       2
-# OBJ:   RangesOffset:    44
-
-# OBJ:   Ranges:
+# OBJ:          - ParameterType:   0
+# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       Table:
+# OBJ-NEXT:       NumRanges:       2
+# OBJ-NEXT:       RangesOffset:    44
+# OBJ-NEXT:       Ranges:
 
 ## SRV(t0)
-# OBJ: - RangeType:       0
-# OBJ:   NumDescriptors:  1
-# OBJ:   BaseShaderRegister: 0
-# OBJ:   RegisterSpace:   0
-# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ:            - RangeType:       0
+# OBJ-NEXT:         NumDescriptors:  1
+# OBJ-NEXT:         BaseShaderRegister: 0
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u1, numDescriptors = 2)
-# OBJ: - RangeType:       1
-# OBJ:   NumDescriptors:  2
-# OBJ:   BaseShaderRegister: 1
-# OBJ:   RegisterSpace:   0
-# OBJ:   OffsetInDescriptorsFromTableStart: 4294967295
+# OBJ-NEXT:       - RangeType:       1
+# OBJ-NEXT:         NumDescriptors:  2
+# OBJ-NEXT:         BaseShaderRegister: 1
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
-# OBJ:   Samplers:
+# OBJ:          Samplers:
 
 ## StaticSampler(s0)
 ## Ensures the defaults are set as expected
-# OBJ: - Filter:          85
-# OBJ:   AddressU:        1
-# OBJ:   AddressV:        1
-# OBJ:   AddressW:        1
-# OBJ:   MipLODBias:      0
-# OBJ:   MaxAnisotropy:   16
-# OBJ:   ComparisonFunc:  4
-# OBJ:   BorderColor:     2
-# OBJ:   MinLOD:          0
-# OBJ:   MaxLOD:          3.40282e+38
-# OBJ:   ShaderRegister:  0
-# OBJ:   RegisterSpace:   0
-# OBJ:   ShaderVisibility: 0
+# OBJ-NEXT:     - Filter:          85
+# OBJ-NEXT:       AddressU:        1
+# OBJ-NEXT:       AddressV:        1
+# OBJ-NEXT:       AddressW:        1
+# OBJ-NEXT:       MipLODBias:      0
+# OBJ-NEXT:       MaxAnisotropy:   16
+# OBJ-NEXT:       ComparisonFunc:  4
+# OBJ-NEXT:       BorderColor:     2
+# OBJ-NEXT:       MinLOD:          0
+# OBJ-NEXT:       MaxLOD:          3.40282e+38
+# OBJ-NEXT:       ShaderRegister:  0
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       ShaderVisibility: 0
 
 ## StaticSampler(s1,
 ##   mipLODBias = -15.99,
@@ -197,16 +195,16 @@ DescriptorSets:
 ##   filter = FILTER_MAXIMUM_MIN_MAG_MIP_POINT
 ## )
 ## Ensures the specified values are set as expected
-# OBJ: - Filter:          384
-# OBJ:   AddressU:        1
-# OBJ:   AddressV:        2
-# OBJ:   AddressW:        1
-# OBJ:   MipLODBias:      -15.99
-# OBJ:   MaxAnisotropy:   16
-# OBJ:   ComparisonFunc:  4
-# OBJ:   BorderColor:     2
-# OBJ:   MinLOD:          32
-# OBJ:   MaxLOD:          32
-# OBJ:   ShaderRegister:  1
-# OBJ:   RegisterSpace:   0
-# OBJ:   ShaderVisibility: 0
+# OBJ:          - Filter:          384
+# OBJ-NEXT:       AddressU:        1
+# OBJ-NEXT:       AddressV:        2
+# OBJ-NEXT:       AddressW:        1
+# OBJ-NEXT:       MipLODBias:      -15.99
+# OBJ-NEXT:       MaxAnisotropy:   16
+# OBJ-NEXT:       ComparisonFunc:  4
+# OBJ-NEXT:       BorderColor:     2
+# OBJ-NEXT:       MinLOD:          32
+# OBJ-NEXT:       MaxLOD:          32
+# OBJ-NEXT:       ShaderRegister:  1
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       ShaderVisibility: 0
