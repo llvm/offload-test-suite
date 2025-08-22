@@ -55,7 +55,7 @@ DescriptorSets:
 # 
 # Intel has an issue with counters in resource arrays
 ## Temporary enabling this test to get the data needed to file an issue
-## XFAIL: DirectX-Intel
+## X F A I L: DirectX-Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
