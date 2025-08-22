@@ -97,7 +97,8 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/370 XFAIL: DXC && DirectX-Intel
+# Bug https://github.com/llvm/offload-test-suite/issues/370
+# XFAIL: DXC && DirectX-Intel
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
