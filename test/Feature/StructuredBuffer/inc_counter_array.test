@@ -54,8 +54,8 @@ DescriptorSets:
 # XFAIL: DirectX-WARP
 # 
 # Intel has an issue with counters in resource arrays
-## Temporary enabling this test to get the data needed to file an issue
-## X F A I L: DirectX-Intel
+# https://github.com/llvm/offload-test-suite/issues/376
+# XFAIL: DirectX-Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
