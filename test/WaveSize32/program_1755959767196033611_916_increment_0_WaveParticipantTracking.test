@@ -1,0 +1,93 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_check_sum : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  _participant_check_sum[tid.x] = 0;
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 4)) {
+  case 0: {
+      uint counter0 = 0;
+      while ((counter0 < 3)) {
+        counter0 = (counter0 + 1);
+        if ((WaveGetLaneIndex() == 13)) {
+          result = (result + WaveActiveMax((WaveGetLaneIndex() + 4)));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        if ((((WaveGetLaneIndex() == 12) || (WaveGetLaneIndex() == 18)) || (WaveGetLaneIndex() == 16))) {
+          if (((((WaveGetLaneIndex() == 6) || (WaveGetLaneIndex() == 13)) || (WaveGetLaneIndex() == 28)) || (WaveGetLaneIndex() == 8))) {
+            result = (result + WaveActiveSum(result));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+        }
+      }
+      break;
+    }
+  case 1: {
+      if (((WaveGetLaneIndex() % 2) == 0)) {
+        result = (result + WaveActiveSum(2));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 0);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+      break;
+    }
+  case 2: {
+      if ((((WaveGetLaneIndex() == 4) || (WaveGetLaneIndex() == 13)) || (WaveGetLaneIndex() == 23))) {
+        if (((WaveGetLaneIndex() == 10) || (WaveGetLaneIndex() == 23))) {
+          result = (result + WaveActiveSum(WaveGetLaneIndex()));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+      }
+      break;
+    }
+  case 3: {
+      if ((((WaveGetLaneIndex() == 1) || (WaveGetLaneIndex() == 11)) || (WaveGetLaneIndex() == 26))) {
+        if (((WaveGetLaneIndex() == 3) || (WaveGetLaneIndex() == 20))) {
+          result = (result + WaveActiveMin(1));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+        uint counter1 = 0;
+        while ((counter1 < 3)) {
+          counter1 = (counter1 + 1);
+          if ((WaveGetLaneIndex() == 5)) {
+            result = (result + WaveActiveMin((WaveGetLaneIndex() + 4)));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+          if (((((WaveGetLaneIndex() == 1) || (WaveGetLaneIndex() == 12)) || (WaveGetLaneIndex() == 16)) || (WaveGetLaneIndex() == 31))) {
+            if (((((WaveGetLaneIndex() == 5) || (WaveGetLaneIndex() == 10)) || (WaveGetLaneIndex() == 23)) || (WaveGetLaneIndex() == 30))) {
+              result = (result + WaveActiveMin(WaveGetLaneIndex()));
+              uint _participantCount = WaveActiveSum(1);
+              bool _isCorrect = (_participantCount == 0);
+              _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+            }
+          }
+        }
+        if ((((WaveGetLaneIndex() == 9) || (WaveGetLaneIndex() == 13)) || (WaveGetLaneIndex() == 25))) {
+          result = (result + WaveActiveMax(5));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+      }
+      break;
+    }
+  default: {
+      result = (result + WaveActiveSum(99));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 0);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      break;
+    }
+  }
+}
