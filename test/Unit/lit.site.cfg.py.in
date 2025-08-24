@@ -28,4 +28,3 @@ config.test_format = lit.formats.GoogleTest(
     "Tests",
     run_under=config.gtest_run_under,
 )
-
