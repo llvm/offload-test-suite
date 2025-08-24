@@ -1,0 +1,30 @@
+@LIT_SITE_CFG_IN_HEADER@
+
+import sys
+import os
+import subprocess
+
+import lit.formats
+
+config.offloadtest_obj_root = path(r"@OFFLOADTEST_BINARY_DIR@")
+config.offloadtest_src_root = path(r"@OFFLOADTEST_SOURCE_DIR@")
+config.llvm_build_mode = lit_config.substitute("@LLVM_BUILD_MODE@")
+config.gtest_run_under = lit_config.substitute(r"@LLVM_GTEST_RUN_UNDER@")
+
+# name: The name of this test suite.
+config.name = "OffloadTest-Unit"
+
+# suffixes: A list of file extensions to treat as test files.
+config.suffixes = []
+
+# test_source_root: The root path where tests are located.
+# test_exec_root: The root path where tests should be run.
+config.test_exec_root = os.path.join(config.offloadtest_obj_root, "unittests")
+config.test_source_root = config.test_exec_root
+
+# testFormat: The test format to use to interpret tests.
+config.test_format = lit.formats.GoogleTest(
+    config.llvm_build_mode,
+    "Tests",
+    run_under=config.gtest_run_under,
+)
