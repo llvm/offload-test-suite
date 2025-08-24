@@ -1,0 +1,45 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_check_sum : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  _participant_check_sum[tid.x] = 0;
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 2)) {
+  case 0: {
+      if ((((WaveGetLaneIndex() == 13) || (WaveGetLaneIndex() == 28)) || (WaveGetLaneIndex() == 11))) {
+        if ((((((WaveGetLaneIndex() == 3) || (WaveGetLaneIndex() == 11)) || (WaveGetLaneIndex() == 23)) || (WaveGetLaneIndex() == 28)) || (WaveGetLaneIndex() == 17))) {
+          if (((((WaveGetLaneIndex() == 6) || (WaveGetLaneIndex() == 16)) || (WaveGetLaneIndex() == 27)) || (WaveGetLaneIndex() == 12))) {
+            result = (result + WaveActiveSum(result));
+            uint _participantCount = WaveActiveSum(1);
+            bool _isCorrect = (_participantCount == 0);
+            _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+          }
+        }
+        if ((((WaveGetLaneIndex() == 10) || (WaveGetLaneIndex() == 21)) || (WaveGetLaneIndex() == 24))) {
+          result = (result + WaveActiveSum(WaveGetLaneIndex()));
+          uint _participantCount = WaveActiveSum(1);
+          bool _isCorrect = (_participantCount == 0);
+          _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+        }
+      }
+      break;
+    }
+  case 1: {
+      if (((WaveGetLaneIndex() % 2) == 0)) {
+        result = (result + WaveActiveSum(2));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 0);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+      break;
+    }
+  default: {
+      result = (result + WaveActiveSum(99));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 0);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      break;
+    }
+  }
+}

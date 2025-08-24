@@ -1,0 +1,101 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_check_sum : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  _participant_check_sum[tid.x] = 0;
+  uint result = 0;
+  if ((WaveGetLaneIndex() < 10)) {
+    result = (result + WaveActiveSum(1));
+    uint _participantCount = WaveActiveSum(1);
+    bool _isCorrect = (_participantCount == 10);
+    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+  } else {
+  if (((WaveGetLaneIndex() < 6) || (WaveGetLaneIndex() >= 23))) {
+    result = (result + WaveActiveMin((WaveGetLaneIndex() + 2)));
+    uint _participantCount = WaveActiveSum(1);
+    bool _isCorrect = (_participantCount == 9);
+    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+  } else {
+  if (((WaveGetLaneIndex() & 1) == 1)) {
+    result = (result + WaveActiveMax(3));
+    uint _participantCount = WaveActiveSum(1);
+    bool _isCorrect = (_participantCount == 6);
+    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+  } else {
+  if (((WaveGetLaneIndex() < 4) || (WaveGetLaneIndex() >= 25))) {
+    result = (result + WaveActiveSum((WaveGetLaneIndex() + 4)));
+    uint _participantCount = WaveActiveSum(1);
+    bool _isCorrect = (_participantCount == 0);
+    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+  } else {
+  if (((WaveGetLaneIndex() & 1) == 1)) {
+    result = (result + WaveActiveMin((WaveGetLaneIndex() + 5)));
+    uint _participantCount = WaveActiveSum(1);
+    bool _isCorrect = (_participantCount == 0);
+    _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+  }
+  }
+  }
+  }
+  }
+  if (((((WaveGetLaneIndex() == 4) || (WaveGetLaneIndex() == 16)) || (WaveGetLaneIndex() == 25)) || (WaveGetLaneIndex() == 10))) {
+    if ((((((WaveGetLaneIndex() == 1) || (WaveGetLaneIndex() == 12)) || (WaveGetLaneIndex() == 17)) || (WaveGetLaneIndex() == 24)) || (WaveGetLaneIndex() == 13))) {
+      result = (result + WaveActiveMin((WaveGetLaneIndex() + 1)));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 0);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+    }
+    for (uint i0 = 0; (i0 < 2); i0 = (i0 + 1)) {
+      if ((((WaveGetLaneIndex() == 13) || (WaveGetLaneIndex() == 23)) || (WaveGetLaneIndex() == 5))) {
+        result = (result + WaveActiveMax(result));
+        uint _participantCount = WaveActiveSum(1);
+        bool _isCorrect = (_participantCount == 0);
+        _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+      }
+    }
+    if ((((((WaveGetLaneIndex() == 5) || (WaveGetLaneIndex() == 9)) || (WaveGetLaneIndex() == 20)) || (WaveGetLaneIndex() == 28)) || (WaveGetLaneIndex() == 5))) {
+      result = (result + WaveActiveSum(WaveGetLaneIndex()));
+      uint _participantCount = WaveActiveSum(1);
+      bool _isCorrect = (_participantCount == 0);
+      _participant_check_sum[tid.x] = (_participant_check_sum[tid.x] + (_isCorrect ? 1 : 0));
+    }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 64 threads
+Buffers:
+  - Name: _participant_check_sum
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 64
+  - Name: expected_participants
+    Format: UInt32
+    Stride: 4
+    Data: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+Results:
+  - Result: WaveOpValidation
+    Rule: BufferExact
+    Actual: _participant_check_sum
+    Expected: expected_participants
+DescriptorSets:
+  - Resources:
+    - Name: _participant_check_sum
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
