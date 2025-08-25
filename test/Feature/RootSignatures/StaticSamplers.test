@@ -3,10 +3,10 @@
 Texture2D<float4> In : register(t0);
 
 SamplerState DefaultSampler: register(s0);
-SamplerState OtherSampler: register(s1);
+SamplerState SpecifiedSampler: register(s1);
 
 RWTexture2D<float4> DefaultOut : register(u1);
-RWTexture2D<float4> OtherOut : register(u2);
+RWTexture2D<float4> SpecifiedOut : register(u2);
 
 #define RootSig                                                                \
   "DescriptorTable( "                                                          \
@@ -31,8 +31,8 @@ void main(uint GI : SV_GroupIndex) {
   float4 DefaultColor = In.Sample(DefaultSampler, UV);
   DefaultOut[GID.xy] = DefaultColor.bgra;
 
-  float4 OtherColor = In.Sample(OtherSampler, UV);
-  OtherOut[GID.xy] = OtherColor.bgra;
+  float4 SpecifiedColor = In.Sample(SpecifiedSampler, UV);
+  SpecifiedOut[GID.xy] = SpecifiedColor.bgra;
 }
 
 //--- pipeline.yaml
@@ -61,7 +61,7 @@ Buffers:
       Height: 2
       Width: 2
       Depth: 16
-  - Name: OtherOut
+  - Name: SpecifiedOut
     Format: Float32
     Channels: 4
     ZeroInitSize: 64
@@ -81,10 +81,10 @@ Buffers:
       Width: 2
       Depth: 16
   ## Modifying the LOD parameters does not affect the output. However,
-  ## The applied filter will output [0, 0, 1, 1, ... 0, 0, 1, 1] and then
+  ## the applied filter will output [0, 0, 1, 1, ... 0, 0, 1, 1] and then
   ## setting addressV to mirror outputs [0, 0, 1, 1, ..., 1, 0, 0, 1] as shown
   ## below
-  - Name: ExpectedOtherOut
+  - Name: ExpectedSpecifiedOut
     Format: Float32
     Channels: 4
     Data: [0, 0, 1, 1,
@@ -100,10 +100,10 @@ Results:
     Rule: BufferExact
     Actual: DefaultOut
     Expected: ExpectedDefaultOut
-  - Result: OtherTest
+  - Result: SpecifiedTest
     Rule: BufferExact
-    Actual: OtherOut
-    Expected: ExpectedOtherOut
+    Actual: SpecifiedOut
+    Expected: ExpectedSpecifiedOut
 DescriptorSets:
   - Resources:
     - Name: In
@@ -120,7 +120,7 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: OtherOut
+    - Name: SpecifiedOut
       Kind: RWTexture2D
       DirectXBinding:
         Register: 2
