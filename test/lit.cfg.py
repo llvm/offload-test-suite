@@ -47,6 +47,10 @@ tools = [
     ToolSubst("imgdiff", FindTool("imgdiff")),
 ]
 
+def getHighestShaderModel(features):
+    sm = features.get("HighestShaderModel", 6.0)
+    major, minor = str(sm).split('.')
+    return int(major), int(minor)
 
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
@@ -73,6 +77,11 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("%s-AMD" % API)
 
     config.available_features.add("%s-%s" % (compiler, API))
+
+    HighestShaderModel = getHighestShaderModel(device["Features"])
+    if (6, 6) <= HighestShaderModel:
+        # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
+        config.available_features.add("Derivatives")
 
     if device["API"] == "DirectX":
         if device["Features"].get("Native16BitShaderOpsSupported", False):
