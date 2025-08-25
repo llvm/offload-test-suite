@@ -95,8 +95,75 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
 
 # CHECK-LABEL: Name: Out1
 # CHECK: Data: [ 20, 48, 84, 128 ]
 # CHECK-LABEL: Name: Out2
 # CHECK: Data: [ 40, 96, 168, 256 ]
+
+## Root Signature Header
+# OBJ:      - Name:            RTS0
+# OBJ-NEXT:   Size:            140
+# OBJ-NEXT:   RootSignature:
+# OBJ-NEXT:     Version:         2
+# OBJ-NEXT:     NumRootParameters: 1
+# OBJ-NEXT:     RootParametersOffset: 24
+# OBJ-NEXT:     NumStaticSamplers: 0
+# OBJ-NEXT:     StaticSamplersOffset: 140
+
+# OBJ-NEXT: Parameters:
+
+## Descriptor Table
+# OBJ-NEXT:   - ParameterType:   0
+# OBJ-NEXT:     ShaderVisibility: 0
+# OBJ-NEXT:     Table:
+# OBJ-NEXT:     NumRanges:       4
+# OBJ-NEXT:     RangesOffset:    44
+# OBJ-NEXT:     Ranges:
+
+## SRV(t0, flags = DATA_STATIC)
+# OBJ-NEXT:     - RangeType:       0
+# OBJ-NEXT:       NumDescriptors:  1
+# OBJ-NEXT:       BaseShaderRegister: 0
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
+## Only data flag set as expected:
+# OBJ-NEXT:       DATA_STATIC:     true
+
+## SRV(t1, flags = DATA_STATIC_WHILE_SET_AT_EXECUTE)
+# OBJ-NEXT:     - RangeType:       0
+# OBJ-NEXT:       NumDescriptors:  1
+# OBJ-NEXT:       BaseShaderRegister: 1
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
+## Only data flag set as expected:
+# OBJ-NEXT:       DATA_STATIC_WHILE_SET_AT_EXECUTE: true
+
+## UAV(u1, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)
+# OBJ-NEXT:     - RangeType:       1
+# OBJ-NEXT:       NumDescriptors:  1
+# OBJ-NEXT:       BaseShaderRegister: 1
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
+## Both flags set as expected:
+# OBJ-NEXT:       DESCRIPTORS_VOLATILE: true
+# OBJ-NEXT:       DATA_VOLATILE:   true
+
+## UAV(u2, flags = 0)
+# OBJ-NEXT:     - RangeType:       1
+# OBJ-NEXT:       NumDescriptors:  1
+# OBJ-NEXT:       BaseShaderRegister: 2
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
+## No flags set as expected (verified using OBJ-NEXT below):
+
+## RootFlags(
+##   ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT |
+##   CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED  |
+##   ALLOW_STREAM_OUTPUT 
+## )
+## RootFlags set as expected:
+# OBJ-NEXT:   AllowInputAssemblerInputLayout: true
+# OBJ-NEXT:   AllowStreamOutput: true
+# OBJ-NEXT:   CBVSRVUAVHeapDirectlyIndexed: true
