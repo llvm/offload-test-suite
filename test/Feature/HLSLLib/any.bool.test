@@ -1,0 +1,64 @@
+#--- source.hlsl
+StructuredBuffer<bool4> In : register(t0);
+
+RWStructuredBuffer<bool> Out : register(u1);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = any(In[0]);
+  Out[1] = any(In[1].xyz);
+  Out[2] = any(In[1].w);
+  Out[3] = any(In[2].xy);
+  Out[4] = any(In[2].zw);
+  Out[5] = any(bool4(0, 0, 0, 1));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Bool
+    Stride: 16
+    Data: [ 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 1 ]
+  - Name: Out
+    Format: Bool
+    Stride: 4
+    ZeroInitSize: 24
+  - Name: ExpectedOut
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0, 1, 1, 1, 1 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/140824
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
