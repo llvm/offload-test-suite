@@ -106,7 +106,7 @@ DescriptorSets:
 
 # REQUIRES: Double
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
 
 # CHECK: Test failed: Test1
