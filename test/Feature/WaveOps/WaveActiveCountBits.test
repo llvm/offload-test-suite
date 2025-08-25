@@ -5,7 +5,7 @@ RWStructuredBuffer<uint> Out : register(u1);
 [numthreads(4, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID) {
   bool B1 = false;
-  
+
   switch (value[threadID.x]) {
     case 0: // threads 0 and 1; result is number of active lanes (2)
       Out[threadID.x + 4] = WaveActiveCountBits(true); // threads 0 and 1
@@ -63,9 +63,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# https://github.com/llvm/llvm-project/issues/145513
-# XFAIL: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
