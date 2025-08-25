@@ -97,8 +97,11 @@ DescriptorSets:
 ...
 #--- end
 
-Tracked by https://github.com/llvm/offload-test-suite/issues/355
+# Tracked by https://github.com/llvm/offload-test-suite/issues/355
 # XFAIL: Metal
+# Tracked by https://github.com/KhronosGroup/SPIRV-Cross/issues/2538
+# XFAIL: Vulkan-Darwin
+
 
 # REQUIRES: Int64
 
