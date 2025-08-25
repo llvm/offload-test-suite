@@ -1,0 +1,84 @@
+#--- source.hlsl
+StructuredBuffer<float4> X : register(t0);
+StructuredBuffer<float4> Y : register(t1);
+StructuredBuffer<float4> S : register(t2);
+
+RWStructuredBuffer<float4> Out : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = lerp(X[0], Y[0], S[0]);
+  Out[1] = float4(lerp(X[1].xyz, Y[1].xyz, S[1].xyz), lerp(X[1].w, Y[1].w, S[1].w));
+  Out[2] = float4(lerp(X[2].xy, Y[2].xy, S[2].xy), lerp(X[2].zw, Y[2].zw, S[2].zw));
+  Out[3] = lerp(float4(1, 2, -3, 4), float4(8, -7, 6, 5), float4(0.25, 0.5, 0.75, 0));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 2, -3, 4, 0, 20.3, 30.5, 5, -5, -16, 1, 2 ]
+  - Name: Y
+    Format: Float32
+    Stride: 16
+    Data: [ 8, -7, 6, 5, 0, 60.3, 30.5, 15, -15, -8, 100, 200 ]
+  - Name: S
+    Format: Float32
+    Stride: 16
+    Data: [ 0.25, 0.5, 0.75, 0, 0.5, 0.4, 0.8, 0.8, 0.4, 0.6, 0.1, 0.9 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 2.75, -2.5, 3.75, 4, 0, 36.3, 30.5, 13, -9, -11.2, 10.9, 180.2, 2.75, -2.5, 3.75, 4 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: S
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
