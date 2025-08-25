@@ -21,13 +21,15 @@ function(setup_warp version)
     return()
   endif()
 
+  guess_nuget_arch(NUGET_ARCH)
+
   if (version STREQUAL "LKG")
     if (NUGET_ARCH STREQUAL "arm64")
       set(version "1.0.14.2")
     else()
       set(version "1.0.10.1")
     endif()
-    set(version_description "Latest Known Good (${version})")
+    set(version_description "Latest Known Good for ${NUGET_ARCH} (${version})")
   else ()
     set(version_description "Custom (${version})")
   endif()
@@ -40,8 +42,6 @@ function(setup_warp version)
   else()
     file(DOWNLOAD "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/${version}/" ${WARP_ARCHIVE})
   endif()
-
-  guess_nuget_arch(NUGET_ARCH)
 
   # This is all awfulness to work around the fact that the last known good WRAP
   # for x64 is before arm64 support was shipped via NuGet, and the packaging

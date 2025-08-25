@@ -187,6 +187,9 @@ DescriptorSets:
 #--- end
 # REQUIRES: Half
 
+# https://github.com/KhronosGroup/SPIRV-Cross/issues/2524
+# XFAIL: Vulkan-Darwin
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
