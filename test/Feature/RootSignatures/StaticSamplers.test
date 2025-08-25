@@ -19,7 +19,7 @@ RWTexture2D<float4> OtherOut : register(u2);
   "  minLOD = 32.0, "                                                          \
   "  maxLOD = 32.0, "                                                          \
   "  addressV = TEXTURE_ADDRESS_MIRROR, "                                      \
-  "  filter = FILTER_MAXIMUM_MIN_MAG_MIP_POINT "                                                           \
+  "  filter = FILTER_MAXIMUM_MIN_MAG_MIP_POINT "                               \
   ")"
 
 [RootSignature(RootSig)]
