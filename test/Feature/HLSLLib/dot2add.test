@@ -6,20 +6,9 @@ StructuredBuffer<float> Acc : register(t2);
 RWStructuredBuffer<float> Out : register(u3);
 
 
-[numthreads(1,1,1)]
-void main() {
-  Out[0] = dot2add(A[0], B[0], Acc[0]);
-  Out[1] = dot2add(A[1], B[1], Acc[1]);
-  Out[2] = dot2add(A[2], B[2], Acc[2]);
-  Out[3] = dot2add(A[3], B[3], Acc[3]);
-  Out[4] = dot2add(A[4], B[4], Acc[4]);
-  Out[5] = dot2add(A[5], B[5], Acc[5]);
-  Out[6] = dot2add(A[6], B[6], Acc[6]);
-  Out[7] = dot2add(A[7], B[7], Acc[7]);
-  Out[8] = dot2add(A[8], B[8], Acc[8]);
-  Out[9] = dot2add(A[9], B[9], Acc[9]);
-  Out[10] = dot2add(A[10], B[10], Acc[10]);
-  Out[11] = dot2add(A[11], B[11], Acc[11]);
+[numthreads(12,1,1)]
+void main(uint3 DTID : SV_DispatchThreadID) {
+  Out[DTID.x] = dot2add(A[DTID.x], B[DTID.x], Acc[DTID.x]);
 
   Out[12] = dot2add(half2(1, 2), half2(3, 4), float(0));
   Out[13] = dot2add(half2(-1, 2), half2(3, -4), float(10));
