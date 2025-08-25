@@ -10,10 +10,13 @@ RWStructuredBuffer<float> Out : register(u3);
 void main(uint3 DTID : SV_DispatchThreadID) {
   Out[DTID.x] = dot2add(A[DTID.x], B[DTID.x], Acc[DTID.x]);
 
-  Out[12] = dot2add(half2(1, 2), half2(3, 4), float(0));
-  Out[13] = dot2add(half2(-1, 2), half2(3, -4), float(10));
-  Out[14] = dot2add(half2(65504, 1), half2(1, 65504), float(0));
-  Out[15] = dot2add(half2(1, -65504), half2(-65504, 1), float(-10000000));
+  if (DTID.x == 0) {
+    // The constant cases are independent of thread id
+    Out[12] = dot2add(half2(1, 2), half2(3, 4), float(0));
+    Out[13] = dot2add(half2(-1, 2), half2(3, -4), float(10));
+    Out[14] = dot2add(half2(65504, 1), half2(1, 65504), float(0));
+    Out[15] = dot2add(half2(1, -65504), half2(-65504, 1), float(-10000000));
+  }
 }
 //--- pipeline.yaml
 
