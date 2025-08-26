@@ -383,6 +383,10 @@ void MappingTraits<offloadtest::Result>::mapping(IO &I,
     I.mapOptional("DenormMode", R.DM);
     break;
   }
+  case Rule::BufferParticipantPattern: {
+    I.mapRequired("GroupSize", R.GroupSize);
+    break;
+  }
   default:
     break;
   }
