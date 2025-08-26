@@ -330,13 +330,10 @@ private:
 #endif
 
     Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
-      Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
-      Features12.pNext = &Features13;
+    Features11.pNext = &Features12;
+    Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
-      Features13.pNext = &Features14;
+    Features13.pNext = &Features14;
 #endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
@@ -440,13 +437,10 @@ public:
 #endif
 
     Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
-      Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
-      Features12.pNext = &Features13;
+    Features11.pNext = &Features12;
+    Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
-      Features13.pNext = &Features14;
+    Features13.pNext = &Features14;
 #endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
