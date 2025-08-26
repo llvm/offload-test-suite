@@ -15,6 +15,8 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
+#include <map>
+#include <tuple>
 
 constexpr uint16_t Float16BitSign = 0x8000;
 constexpr uint16_t Float16BitExp = 0x7c00;
@@ -267,6 +269,53 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
+static bool testBufferParticipantPattern(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
+                                       unsigned GroupSize) {
+  // B1 is actual, B2 is expected
+  // GroupSize should be 3 for participant patterns (combinedId, maskLow, maskHigh)
+  if (GroupSize == 0 || GroupSize > B1->size() || GroupSize > B2->size())
+    return false;
+  
+  // Ensure buffer sizes are multiples of GroupSize
+  if (B1->size() % GroupSize != 0 || B2->size() % GroupSize != 0)
+    return false;
+  
+  // Parse patterns from both buffers
+  using PatternTuple = std::tuple<uint32_t, uint32_t, uint32_t>;
+  std::map<PatternTuple, unsigned> actualPatterns;
+  std::map<PatternTuple, unsigned> expectedPatterns;
+  
+  // Count patterns in actual buffer
+  const uint32_t* actualData = reinterpret_cast<const uint32_t*>(B1->Data.get());
+  for (size_t i = 0; i < B1->size() / sizeof(uint32_t); i += GroupSize) {
+    if (GroupSize == 3) {
+      PatternTuple pattern(actualData[i], actualData[i+1], actualData[i+2]);
+      actualPatterns[pattern]++;
+    }
+  }
+  
+  // Count patterns in expected buffer  
+  const uint32_t* expectedData = reinterpret_cast<const uint32_t*>(B2->Data.get());
+  for (size_t i = 0; i < B2->size() / sizeof(uint32_t); i += GroupSize) {
+    if (GroupSize == 3) {
+      PatternTuple pattern(expectedData[i], expectedData[i+1], expectedData[i+2]);
+      expectedPatterns[pattern]++;
+    }
+  }
+  
+  // Compare pattern counts
+  if (actualPatterns.size() != expectedPatterns.size())
+    return false;
+    
+  for (const auto& [pattern, count] : expectedPatterns) {
+    auto it = actualPatterns.find(pattern);
+    if (it == actualPatterns.end() || it->second != count)
+      return false;
+  }
+  
+  return true;
+}
+
 llvm::Error verifyResult(offloadtest::Result R) {
   switch (R.Rule) {
   case offloadtest::Rule::BufferExact: {
@@ -281,6 +330,11 @@ llvm::Error verifyResult(offloadtest::Result R) {
   }
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
+      return llvm::Error::success();
+    break;
+  }
+  case offloadtest::Rule::BufferParticipantPattern: {
+    if (testBufferParticipantPattern(R.ActualPtr, R.ExpectedPtr, R.GroupSize))
       return llvm::Error::success();
     break;
   }
