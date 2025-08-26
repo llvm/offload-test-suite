@@ -287,7 +287,8 @@ public:
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
-  static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter) {
+  static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
+                                         const DeviceConfig &Config) {
     ComPtr<ID3D12Device> Device;
     if (auto Err =
             HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
@@ -302,8 +303,9 @@ public:
     std::vector<char> DescVec(BufferSize);
     Adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, BufferSize,
                          (void *)DescVec.data());
-    if (auto Err = configureInfoQueue(Device.Get()))
-      return Err;
+    if (Config.EnableDebugLayer || Config.EnableValidationLayer)
+      if (auto Err = configureInfoQueue(Device.Get()))
+        return Err;
     return DXDevice(Adapter, Device, std::string(DescVec.data()));
   }
 
@@ -335,7 +337,6 @@ public:
 
   static llvm::Error configureInfoQueue(ID3D12Device *Device) {
 #ifdef _WIN32
-#ifndef NDEBUG
     ComPtr<ID3D12InfoQueue> InfoQueue;
     if (auto Err = HR::toError(Device->QueryInterface(InfoQueue.GetAddressOf()),
                                "Error initializing info queue"))
@@ -343,7 +344,6 @@ public:
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
-#endif
 #endif
     return llvm::Error::success();
   }
@@ -1208,7 +1208,7 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
             "Failed to acquire adapter")) {
       return Err;
     }
-    auto ExDevice = DXDevice::create(Adapter);
+    auto ExDevice = DXDevice::create(Adapter, Config);
     if (!ExDevice)
       return ExDevice.takeError();
     auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
