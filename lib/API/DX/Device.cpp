@@ -1169,18 +1169,19 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeDXDevices() {
+llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
 #ifdef _WIN32
-#ifndef NDEBUG
-  ComPtr<ID3D12Debug1> Debug1;
+  if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
+    ComPtr<ID3D12Debug1> Debug1;
 
-  if (auto Err = HR::toError(D3D12GetDebugInterface(IID_PPV_ARGS(&Debug1)),
-                             "failed to create D3D12 Debug Interface"))
-    return Err;
+    if (auto Err = HR::toError(D3D12GetDebugInterface(IID_PPV_ARGS(&Debug1)),
+                               "failed to create D3D12 Debug Interface"))
+      return Err;
 
-  Debug1->EnableDebugLayer();
-  Debug1->SetEnableGPUBasedValidation(true);
-#endif
+    if (Config.EnableDebugLayer)
+      Debug1->EnableDebugLayer();
+    Debug1->SetEnableGPUBasedValidation(Config.EnableValidationLayer);
+  }
 #endif
 
   ComPtr<IDXCoreAdapterFactory> Factory;

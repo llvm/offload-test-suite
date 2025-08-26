@@ -54,13 +54,13 @@ void Device::registerDevice(std::shared_ptr<Device> D) {
   DeviceContext::instance().registerDevice(D);
 }
 
-llvm::Error Device::initialize() {
+llvm::Error Device::initialize(const DeviceConfig Config) {
 #ifdef OFFLOADTEST_ENABLE_D3D12
-  if (auto Err = initializeDXDevices())
+  if (auto Err = initializeDXDevices(Config))
     return Err;
 #endif
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVKDevices())
+  if (auto Err = initializeVKDevices(Config))
     return Err;
   // Validation layers have internal state which require a specific destruction
   // ordering. Relying on the global dtor call for this is unreliable and can
@@ -70,7 +70,7 @@ llvm::Error Device::initialize() {
   atexit(Device::cleanupVKDevices);
 #endif
 #ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = initializeMtlDevices())
+  if (auto Err = initializeMtlDevices(Config))
     return Err;
 #endif
   return llvm::Error::success();

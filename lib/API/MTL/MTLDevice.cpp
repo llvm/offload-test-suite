@@ -304,6 +304,6 @@ public:
 
 } // namespace
 
-llvm::Error Device::initializeMtlDevices() {
+llvm::Error Device::initializeMtlDevices(const DeviceConfig /*Config*/) {
   return MTLContext::instance().initialize();
 }

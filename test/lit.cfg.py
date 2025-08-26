@@ -103,13 +103,13 @@ def setDeviceFeatures(config, device, compiler):
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
 
-
+offloader_args = []
 if config.offloadtest_test_warp:
-    tools.append(
-        ToolSubst("%offloader", command=FindTool("offloader"), extra_args=["-warp"])
-    )
-else:
-    tools.append(ToolSubst("%offloader", FindTool("offloader")))
+    offloader_args.append("-warp")
+if config.offloadtest_enable_debug:
+    offloader_args.append("-debug-layer")
+
+tools.append(ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args))
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
