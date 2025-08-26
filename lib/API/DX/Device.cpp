@@ -1178,8 +1178,7 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
                                "failed to create D3D12 Debug Interface"))
       return Err;
 
-    if (Config.EnableDebugLayer)
-      Debug1->EnableDebugLayer();
+    Debug1->EnableDebugLayer();
     Debug1->SetEnableGPUBasedValidation(Config.EnableValidationLayer);
   }
 #endif
