@@ -1,6 +1,6 @@
 #--- source.hlsl
-RWStructuredBuffer<uint> _participant_bit : register(u2);
-RWStructuredBuffer<uint> _wave_op_index : register(u3);
+RWStructuredBuffer<uint> _participant_bit : register(u0);
+RWStructuredBuffer<uint> _wave_op_index : register(u1);
 
 [numthreads(4, 1, 1)]
 void main(uint3 tid : SV_DispatchThreadID) {
@@ -323,17 +323,17 @@ DescriptorSets:
     - Name: _participant_bit
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 2
+        Register: 0
         Space: 0
       VulkanBinding:
-        Binding: 2
+        Binding: 0
     - Name: _wave_op_index
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 3
+        Register: 1
         Space: 0
       VulkanBinding:
-        Binding: 3
+        Binding: 1
 ...
 #--- end
 
