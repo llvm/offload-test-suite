@@ -57,7 +57,11 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("WARP-%s" % config.warp_arch)
     if "Intel" in device["Description"]:
         config.available_features.add("%s-Intel" % API)
-        if "UHD Graphics" in device["Description"] and API == "DirectX":
+        if (
+            "UHD Graphics" in device["Description"]
+            and API == "DirectX"
+            and config.offloadtest_enable_validation
+        ):
             # When Intel resolves the driver issue and tests XFAILing on the
             # feature below are resolved we can resolve
             # https://github.com/llvm/offload-test-suite/issues/226 by updating
@@ -103,11 +107,14 @@ def setDeviceFeatures(config, device, compiler):
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
 
+
 offloader_args = []
 if config.offloadtest_test_warp:
     offloader_args.append("-warp")
 if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
+if config.offloadtest_enable_validation:
+    offloader_args.append("-validation-layer")
 
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)

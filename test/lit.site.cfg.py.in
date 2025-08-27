@@ -20,6 +20,7 @@ config.offloadtest_enable_vulkan = @TEST_vk@
 config.offloadtest_enable_metal = @TEST_mtl@
 config.offloadtest_os = "@CMAKE_SYSTEM_NAME@"
 config.offloadtest_enable_debug = @OFFLOADTEST_ENABLE_DEBUG@
+config.offloadtest_enable_validation = @OFFLOADTEST_ENABLE_VALIDATION@
 
 import lit.llvm
 lit.llvm.initialize(lit_config, config)
