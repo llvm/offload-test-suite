@@ -74,7 +74,7 @@ Buffers:
   - Name: Out2
     Format: Int32
     Stride: 16
-    ZeroInitSize: 48 
+    ZeroInitSize: 48
   - Name: ExpectedOut2 # The result we expect
     Format: Int32
     Stride: 16
@@ -82,7 +82,7 @@ Buffers:
   - Name: Out3
     Format: Int32
     Stride: 16
-    ZeroInitSize: 48 
+    ZeroInitSize: 48
   - Name: ExpectedOut3 # The result we expect
     Format: Int32
     Stride: 16
@@ -175,6 +175,11 @@ DescriptorSets:
 
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7512
 # XFAIL: DXC-Vulkan
+
+# https://github.com/llvm/llvm-project/issues/149722
+# We're generating invalid SPIRV for this. I have _no_ idea why this isn't
+# failing on all Clang Vulkan tests.
+# XFAIL: Clang && Vulkan-Darwin
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

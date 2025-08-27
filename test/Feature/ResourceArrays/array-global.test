@@ -118,17 +118,16 @@ DescriptorSets:
 ...
 #--- end
 
-# Resource arrays are not yet implemented in Clang:
-# https://github.com/llvm/llvm-project/issues/133835
-# XFAIL: Clang
-
 # Offload tests are missing support for resource arrays on Metal
 # https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
+# https://github.com/llvm/llvm-project/issues/149561
+# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 // CHECK: Name: BufB

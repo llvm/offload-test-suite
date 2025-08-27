@@ -79,12 +79,13 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
-
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
 
+# https://github.com/llvm/llvm-project/issues/154669
+# XFAIL: Clang-Vulkan
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -65,9 +65,6 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/145513
-# XFAIL: Clang-Vulkan
-
 # XFAIL: NV-Reconvergence-Issue-320
 
 # RUN: split-file %s %t
