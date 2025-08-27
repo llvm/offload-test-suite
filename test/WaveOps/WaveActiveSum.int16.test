@@ -58,7 +58,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int16
-    Stride: 4
+    Stride: 2
     Data: [ 1, 10, 100, 1000]
   - Name: Out1
     Format: Int16
@@ -98,7 +98,7 @@ Buffers:
     Data: [ 4, 40, 400, 4000, 3, 30, 300, 3000, 2, 20, 200, 2000, 1, 10, 100, 1000 ]
   - Name: ExpectedOut5
     Format: Int16
-    Stride: 4
+    Stride: 2
     Data: [ 4, 8, 12, 16 ]
 Results:
   - Result: ExpectedOut1
