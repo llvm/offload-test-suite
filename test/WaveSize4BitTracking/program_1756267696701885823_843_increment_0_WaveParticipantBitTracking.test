@@ -164,7 +164,7 @@ Buffers:
   - Name: expected_bit_patterns
     Format: UInt32
     Stride: 4
-    Data: [768, 1, 0, 5888, 1, 0, 9104, 4, 0, 9728, 8, 0, 9728, 4, 0]
+    Data: [768, 1, 0, 5888, 1, 0, 9104, 4, 0, 9728, 12, 0, 9728, 12, 0]
   - Name: _wave_op_index
     Format: UInt32
     Stride: 4
