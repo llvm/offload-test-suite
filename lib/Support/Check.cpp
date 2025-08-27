@@ -16,6 +16,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
 #include <map>
+#include <sstream>
 #include <tuple>
 
 constexpr uint16_t Float16BitSign = 0x8000;
@@ -270,15 +271,19 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
 }
 
 static bool testBufferParticipantPattern(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
-                                       unsigned GroupSize) {
+                                       unsigned GroupSize, std::string& errorMsg) {
   // B1 is actual, B2 is expected
   // GroupSize should be 3 for participant patterns (combinedId, maskLow, maskHigh)
-  if (GroupSize == 0 || GroupSize > B1->size() || GroupSize > B2->size())
+  if (GroupSize == 0 || GroupSize > B1->size() || GroupSize > B2->size()) {
+    errorMsg = "Invalid GroupSize or buffer too small";
     return false;
+  }
   
   // Ensure buffer sizes are multiples of GroupSize
-  if (B1->size() % GroupSize != 0 || B2->size() % GroupSize != 0)
+  if (B1->size() % GroupSize != 0 || B2->size() % GroupSize != 0) {
+    errorMsg = "Buffer sizes must be multiples of GroupSize";
     return false;
+  }
   
   // Parse patterns from both buffers
   using PatternTuple = std::tuple<uint32_t, uint32_t, uint32_t>;
@@ -303,14 +308,51 @@ static bool testBufferParticipantPattern(offloadtest::Buffer *B1, offloadtest::B
     }
   }
   
-  // Compare pattern counts
-  if (actualPatterns.size() != expectedPatterns.size())
-    return false;
-    
+  // Compare pattern counts and collect differences
+  std::stringstream ss;
+  bool hasError = false;
+  
+  if (actualPatterns.size() != expectedPatterns.size()) {
+    ss << "Pattern count mismatch: actual has " << actualPatterns.size() 
+       << " unique patterns, expected has " << expectedPatterns.size() << " unique patterns\n";
+    hasError = true;
+  }
+  
+  // Check for missing patterns
   for (const auto& [pattern, count] : expectedPatterns) {
     auto it = actualPatterns.find(pattern);
-    if (it == actualPatterns.end() || it->second != count)
-      return false;
+    if (it == actualPatterns.end()) {
+      if (!hasError) ss << "Pattern differences found:\n";
+      hasError = true;
+      ss << "  Missing pattern (combineId=" << std::get<0>(pattern) 
+         << ", maskLow=0x" << std::hex << std::get<1>(pattern)
+         << ", maskHigh=0x" << std::get<2>(pattern) << std::dec 
+         << ") - expected count: " << count << ", actual count: 0\n";
+    } else if (it->second != count) {
+      if (!hasError) ss << "Pattern differences found:\n";
+      hasError = true;
+      ss << "  Pattern (combineId=" << std::get<0>(pattern) 
+         << ", maskLow=0x" << std::hex << std::get<1>(pattern)
+         << ", maskHigh=0x" << std::get<2>(pattern) << std::dec 
+         << ") - expected count: " << count << ", actual count: " << it->second << "\n";
+    }
+  }
+  
+  // Check for unexpected patterns
+  for (const auto& [pattern, count] : actualPatterns) {
+    if (expectedPatterns.find(pattern) == expectedPatterns.end()) {
+      if (!hasError) ss << "Pattern differences found:\n";
+      hasError = true;
+      ss << "  Unexpected pattern (combineId=" << std::get<0>(pattern) 
+         << ", maskLow=0x" << std::hex << std::get<1>(pattern)
+         << ", maskHigh=0x" << std::get<2>(pattern) << std::dec 
+         << ") - expected count: 0, actual count: " << count << "\n";
+    }
+  }
+  
+  if (hasError) {
+    errorMsg = ss.str();
+    return false;
   }
   
   return true;
@@ -334,9 +376,13 @@ llvm::Error verifyResult(offloadtest::Result R) {
     break;
   }
   case offloadtest::Rule::BufferParticipantPattern: {
-    if (testBufferParticipantPattern(R.ActualPtr, R.ExpectedPtr, R.GroupSize))
+    std::string errorMsg;
+    if (testBufferParticipantPattern(R.ActualPtr, R.ExpectedPtr, R.GroupSize, errorMsg))
       return llvm::Error::success();
-    break;
+    // Return error with detailed message
+    return llvm::make_error<llvm::StringError>(
+        "BufferParticipantPattern test failed for " + R.Name + ":\n" + errorMsg,
+        std::error_code());
   }
   }
   llvm::SmallString<256> Str;
