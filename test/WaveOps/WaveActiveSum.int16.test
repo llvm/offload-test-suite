@@ -7,7 +7,7 @@ RWStructuredBuffer<int16_t4> Out4 : register(u4); // test int16_t4
 RWStructuredBuffer<int16_t4> Out5 : register(u5); // constant folding
 
 [numthreads(4,1,1)]
-void main(int3 tid : SV_GroupThreadID)
+void main(uint3 tid : SV_GroupThreadID)
 {
     int16_t4 v = In[0];
 
@@ -170,6 +170,9 @@ DescriptorSets:
 #--- end
 
 # UNSUPPORTED: Clang
+
+# Tracked by https://github.com/llvm/offload-test-suite/issues/387
+# XFAIL: Metal
 
 # REQUIRES: Int16
 
