@@ -80,12 +80,12 @@ DescriptorSets: []
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       ShaderRegister:  2
-# OBJ-NEXT:     - ParameterType:   3
+# OBJ:          - ParameterType:   3
 # OBJ-NEXT:       ShaderVisibility: 0
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       ShaderRegister:  2
-# OBJ-NEXT:     - ParameterType:   4
+# OBJ:          - ParameterType:   4
 # OBJ-NEXT:       ShaderVisibility: 0
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   4

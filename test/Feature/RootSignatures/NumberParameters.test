@@ -135,7 +135,7 @@ DescriptorSets:
 # OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u1, space = 4294967279)
-# OBJ-NEXT:       - RangeType:       1
+# OBJ:            - RangeType:       1
 # OBJ-NEXT:         NumDescriptors:  1
 # OBJ-NEXT:         BaseShaderRegister: 1
 ## Check edge-case
@@ -143,7 +143,7 @@ DescriptorSets:
 # OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u2)
-# OBJ-NEXT:       - ParameterType:   4
+# OBJ:            - ParameterType:   4
 # OBJ-NEXT:         ShaderVisibility: 0
 # OBJ-NEXT:         Descriptor:
 # OBJ-NEXT:         RegisterSpace:   0

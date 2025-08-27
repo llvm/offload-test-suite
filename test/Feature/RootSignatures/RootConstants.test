@@ -79,18 +79,18 @@ DescriptorSets:
 # OBJ-NEXT:       Num32BitValues:  4
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       ShaderRegister:  2
-# OBJ-NEXT:     - ParameterType:   0
+# OBJ:          - ParameterType:   0
 # OBJ-NEXT:       ShaderVisibility: 0
 # OBJ-NEXT:       Table:
 # OBJ-NEXT:       NumRanges:       2
 # OBJ-NEXT:       RangesOffset:    68
 # OBJ-NEXT:       Ranges:
-# OBJ-NEXT:       - RangeType:       0
+# OBJ:            - RangeType:       0
 # OBJ-NEXT:         NumDescriptors:  1
 # OBJ-NEXT:         BaseShaderRegister: 2
 # OBJ-NEXT:         RegisterSpace:   0
 # OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
-# OBJ-NEXT:       - RangeType:       1
+# OBJ:            - RangeType:       1
 # OBJ-NEXT:         NumDescriptors:  1
 # OBJ-NEXT:         BaseShaderRegister: 1
 # OBJ-NEXT:         RegisterSpace:   4

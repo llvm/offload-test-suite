@@ -85,12 +85,12 @@ DescriptorSets:
 # OBJ-NEXT:         BaseShaderRegister: 2
 # OBJ-NEXT:         RegisterSpace:   0
 # OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
-# OBJ-NEXT:       - RangeType:       1
+# OBJ:            - RangeType:       1
 # OBJ-NEXT:         NumDescriptors:  1
 # OBJ-NEXT:         BaseShaderRegister: 1
 # OBJ-NEXT:         RegisterSpace:   4
 # OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
-# OBJ-NEXT:       - RangeType:       1
+# OBJ:            - RangeType:       1
 # OBJ-NEXT:         NumDescriptors:  1
 # OBJ-NEXT:         BaseShaderRegister: 2
 # OBJ-NEXT:         RegisterSpace:   4

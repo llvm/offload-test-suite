@@ -113,7 +113,7 @@ DescriptorSets:
 # OBJ-NEXT:     ShaderRegister:  0
 
 ## DescriptorTable
-# OBJ-NEXT:   - ParameterType:   0
+# OBJ:        - ParameterType:   0
 # OBJ-NEXT:     ShaderVisibility: 0
 # OBJ-NEXT:     Table:
 # OBJ-NEXT:     NumRanges:       2
@@ -128,14 +128,14 @@ DescriptorSets:
 # OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u1)
-# OBJ-NEXT:     - RangeType:       1
+# OBJ:          - RangeType:       1
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 1
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u2)
-# OBJ-NEXT:     - ParameterType:   4
+# OBJ:          - ParameterType:   4
 # OBJ-NEXT:       ShaderVisibility: 0
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   0

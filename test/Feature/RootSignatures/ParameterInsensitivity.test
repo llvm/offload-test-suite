@@ -115,4 +115,4 @@ DescriptorSets:
 # OBJ-NEXT:               BaseShaderRegister: 1
 # OBJ-NEXT:               RegisterSpace:   0
 # OBJ-NEXT:               OffsetInDescriptorsFromTableStart: 4294967295
-# OBJ-NEXT:     AllowInputAssemblerInputLayout: true
+# OBJ:          AllowInputAssemblerInputLayout: true
