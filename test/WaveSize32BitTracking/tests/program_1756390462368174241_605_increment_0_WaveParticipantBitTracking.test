@@ -1,0 +1,159 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_bit : register(u0);
+RWStructuredBuffer<uint> _wave_op_index : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint result = 0;
+  uint counter0 = 0;
+  while ((counter0 < 3)) {
+    counter0 = (counter0 + 1);
+    if (((WaveGetLaneIndex() < 1) || (WaveGetLaneIndex() >= 23))) {
+      result = (result + WaveActiveSum(result));
+      uint temp = 0;
+      InterlockedAdd(_wave_op_index[0], 3, temp);
+      _participant_bit[temp] = ((17 << 6) | (counter0 << 4));
+      uint4 ballot = WaveActiveBallot(1);
+      _participant_bit[(temp + 1)] = ballot.x;
+      _participant_bit[(temp + 2)] = ballot.y;
+    }
+    if ((WaveGetLaneIndex() == 20)) {
+      if ((WaveGetLaneIndex() == 3)) {
+        result = (result + WaveActiveMin(result));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = ((27 << 6) | (counter0 << 4));
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+      if (((WaveGetLaneIndex() < 9) || (WaveGetLaneIndex() >= 29))) {
+        if (((WaveGetLaneIndex() < 10) || (WaveGetLaneIndex() >= 29))) {
+          result = (result + WaveActiveMin(9));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((45 << 6) | (counter0 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+      }
+      if ((WaveGetLaneIndex() == 26)) {
+        result = (result + WaveActiveMax((WaveGetLaneIndex() + 4)));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = ((54 << 6) | (counter0 << 4));
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+    } else {
+    switch ((WaveGetLaneIndex() % 3)) {
+    case 0: {
+        if ((WaveGetLaneIndex() < 8)) {
+          result = (result + WaveActiveSum(1));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((64 << 6) | (counter0 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+        break;
+      }
+    case 1: {
+        if (((WaveGetLaneIndex() % 2) == 0)) {
+          result = (result + WaveActiveSum(2));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((73 << 6) | (counter0 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+        break;
+      }
+    case 2: {
+        if (true) {
+          result = (result + WaveActiveSum(3));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((78 << 6) | (counter0 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+        break;
+      }
+    default: {
+        result = (result + WaveActiveSum(99));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = ((82 << 6) | (counter0 << 4));
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+        break;
+      }
+    }
+    if ((WaveGetLaneIndex() >= 20)) {
+      result = (result + WaveActiveMax(result));
+      uint temp = 0;
+      InterlockedAdd(_wave_op_index[0], 3, temp);
+      _participant_bit[temp] = ((89 << 6) | (counter0 << 4));
+      uint4 ballot = WaveActiveBallot(1);
+      _participant_bit[(temp + 1)] = ballot.x;
+      _participant_bit[(temp + 2)] = ballot.y;
+    }
+  }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 64 threads
+Buffers:
+  - Name: _participant_bit
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 684
+  - Name: expected_bit_patterns
+    Format: UInt32
+    Stride: 4
+    Data: [1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 4112, 73, 0, 4112, 73, 0, 4112, 73, 0, 4128, 73, 0, 4128, 73, 0, 4128, 73, 0, 4144, 73, 0, 4144, 73, 0, 4144, 73, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1104, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1120, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 1136, 4286578689, 0, 4112, 73, 0, 4112, 73, 0, 4112, 73, 0, 4128, 73, 0, 4128, 73, 0, 4128, 73, 0, 4144, 73, 0, 4144, 73, 0, 4144, 73, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4688, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4704, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 4720, 272696336, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5008, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5024, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5040, 612518180, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5712, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5728, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0, 5744, 4292870144, 0]
+  - Name: _wave_op_index
+    Format: UInt32
+    Stride: 4
+    Data: [0]
+Results:
+  - Result: BitTrackingValidation
+    Rule: BufferParticipantPattern
+    GroupSize: 3
+    Actual: _participant_bit
+    Expected: expected_bit_patterns
+DescriptorSets:
+  - Resources:
+    - Name: _participant_bit
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: _wave_op_index
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
