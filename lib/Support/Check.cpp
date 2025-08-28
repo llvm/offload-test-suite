@@ -316,15 +316,15 @@ static bool testBufferParticipantPattern(offloadtest::Buffer *B1,
   std::map<PatternTuple, unsigned> ActualPatterns;
   std::map<PatternTuple, unsigned> ExpectedPatterns;
 
-  auto read_u32 = [](const char *Base, uint32_t WordIndex) -> uint32_t {
+  auto ReadU32 = [](const char *Base, uint32_t WordIndex) -> uint32_t {
     uint32_t V;
     std::memcpy(&V, Base + WordIndex * sizeof(uint32_t), sizeof(uint32_t));
     return V;
   };
 
   // Accumulate patterns from all chunks
-  auto* B1It = B1->Data.begin();
-  auto* B2It = B2->Data.begin();
+  auto *B1It = B1->Data.begin();
+  auto *B2It = B2->Data.begin();
   for (; B1It != B1->Data.end() && B2It != B2->Data.end(); ++B1It, ++B2It) {
     const char *ABuf = B1It->get(); // unique_ptr<char[]> -> char*
     const char *EBuf = B2It->get();
@@ -332,13 +332,13 @@ static bool testBufferParticipantPattern(offloadtest::Buffer *B1,
     for (uint32_t I = 0; I + GroupSize <= WordsPerChunk; I += GroupSize) {
       if (GroupSize == 3) {
         // Actual
-        PatternTuple Ap(read_u32(ABuf, I + 0), read_u32(ABuf, I + 1),
-                        read_u32(ABuf, I + 2));
+        const PatternTuple Ap(ReadU32(ABuf, I + 0), ReadU32(ABuf, I + 1),
+                              ReadU32(ABuf, I + 2));
         ++ActualPatterns[Ap];
 
         // Expected
-        const PatternTuple Ep(read_u32(EBuf, I + 0), read_u32(EBuf, I + 1),
-                        read_u32(EBuf, I + 2));
+        const PatternTuple Ep(ReadU32(EBuf, I + 0), ReadU32(EBuf, I + 1),
+                              ReadU32(EBuf, I + 2));
         ++ExpectedPatterns[Ep];
       } else {
         // If you plan to support other group sizes later, handle here.
@@ -522,13 +522,7 @@ llvm::Error verifyResult(offloadtest::Result R) {
                                      ErrorMsg))
       return llvm::Error::success();
     // Return error with detailed message
-    return llvm::make_error<llvm::StringError>(
-        "BufferParticipantPattern test failed for " + R.Name + ":\n" + ErrorMsg,
-        std::error_code());
-
-    std::ostringstream Oss;
-    Oss << std::defaultfloat << R.Epsilon;
-    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str() << "\n";
+    OS << "Comparison Rule: BufferParticipantPattern\n" << ErrorMsg << "\n";
     break;
   }
   }
