@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *' # run every 30 minutes
+    - cron: '0 */2 * * *' # run every 2 hours
 
 jobs:
   Windows-D3D12-AMD-DXC:
