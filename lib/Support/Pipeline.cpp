@@ -177,7 +177,7 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
   if (Arrays.empty()) {
     B.Size = 0;
     B.Data.clear();
-    for (uint32_t idx = 0; idx < B.ArraySize; ++idx)
+    for (uint32_t Idx = 0; Idx < B.ArraySize; ++Idx)
       B.Data.push_back(std::make_unique<char[]>(0));
     return;
   }
