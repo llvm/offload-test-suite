@@ -1238,7 +1238,7 @@ public:
     Instance = VK_NULL_HANDLE;
   }
 
-  llvm::Error initialize() {
+  llvm::Error initialize(const DeviceConfig Config) {
     // Create a Vulkan 1.1 instance to determine the API version
     VkApplicationInfo AppInfo = {};
     AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -1286,15 +1286,18 @@ public:
       auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
       AppInfo.apiVersion = TmpDev->getProps().apiVersion;
 
-#ifndef NDEBUG
-      const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
-      if (TmpDev->isLayerSupported(ValidationLayer))
-        Layers.push_back(ValidationLayer.data());
+      if (Config.EnableValidationLayer) {
+        const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
+        if (TmpDev->isLayerSupported(ValidationLayer))
+          Layers.push_back(ValidationLayer.data());
+      }
 
-      const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-      if (TmpDev->isExtensionSupported(DebugUtilsExtensionName))
-        Extensions.push_back(DebugUtilsExtensionName.data());
-#endif
+      if (Config.EnableDebugLayer) {
+        const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
+        if (TmpDev->isExtensionSupported(DebugUtilsExtensionName))
+          Extensions.push_back(DebugUtilsExtensionName.data());
+      }
+
       CreateInfo.ppEnabledLayerNames = Layers.data();
       CreateInfo.enabledLayerCount = Layers.size();
       CreateInfo.ppEnabledExtensionNames = Extensions.data();
@@ -1338,8 +1341,8 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeVKDevices() {
-  return VKContext::instance().initialize();
+llvm::Error Device::initializeVKDevices(const DeviceConfig Config) {
+  return VKContext::instance().initialize(Config);
 }
 
 void Device::cleanupVKDevices() { VKContext::instance().cleanup(); }
