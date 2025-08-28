@@ -1,10 +1,19 @@
 #--- source.hlsl
+// ints
 StructuredBuffer<int16_t4> In  : register(t0);
-RWStructuredBuffer<int16_t4> Out1 : register(u1); // test scalar
-RWStructuredBuffer<int16_t4> Out2 : register(u2); // test int16_t2
-RWStructuredBuffer<int16_t4> Out3 : register(u3); // test int16_t3
-RWStructuredBuffer<int16_t4> Out4 : register(u4); // test int16_t4
-RWStructuredBuffer<int16_t4> Out5 : register(u5); // constant folding
+RWStructuredBuffer<int16_t4> Out1 : register(u1);
+RWStructuredBuffer<int16_t4> Out2 : register(u2);
+RWStructuredBuffer<int16_t4> Out3 : register(u3);
+RWStructuredBuffer<int16_t4> Out4 : register(u4);
+RWStructuredBuffer<int16_t4> Out5 : register(u5);
+
+// uints
+StructuredBuffer<uint16_t4> UIn  : register(t6);
+RWStructuredBuffer<uint16_t4> UOut1 : register(u7);
+RWStructuredBuffer<uint16_t4> UOut2 : register(u8);
+RWStructuredBuffer<uint16_t4> UOut3 : register(u9);
+RWStructuredBuffer<uint16_t4> UOut4 : register(u10);
+RWStructuredBuffer<uint16_t4> UOut5 : register(u11);
 
 [numthreads(4,1,1)]
 void main(uint3 tid : SV_GroupThreadID)
@@ -46,6 +55,44 @@ void main(uint3 tid : SV_GroupThreadID)
 
     // constant folding case
     Out5[0] = WaveActiveSum(int16_t4(1,2,3,4));
+
+    // UINT case
+
+    uint16_t4 uv = UIn[0];
+
+    // Mask per "active lane set": only <=N lanes contribute
+    uint16_t us1 = WaveActiveSum((tid.x <= 0) ? uv.x : 0);
+    uint16_t us2 = WaveActiveSum((tid.x <= 1) ? uv.x : 0);
+    uint16_t us3 = WaveActiveSum((tid.x <= 2) ? uv.x : 0);
+    uint16_t us4 = WaveActiveSum((tid.x <= 3) ? uv.x : 0);
+
+    uint16_t2 uv2_1 = WaveActiveSum((tid.x <= 0) ? uv.xy : uint16_t2(0,0));
+    uint16_t2 uv2_2 = WaveActiveSum((tid.x <= 1) ? uv.xy : uint16_t2(0,0));
+    uint16_t2 uv2_3 = WaveActiveSum((tid.x <= 2) ? uv.xy : uint16_t2(0,0));
+    uint16_t2 uv2_4 = WaveActiveSum((tid.x <= 3) ? uv.xy : uint16_t2(0,0));
+
+    uint16_t3 uv3_1 = WaveActiveSum((tid.x <= 0) ? uv.xyz : uint16_t3(0,0,0));
+    uint16_t3 uv3_2 = WaveActiveSum((tid.x <= 1) ? uv.xyz : uint16_t3(0,0,0));
+    uint16_t3 uv3_3 = WaveActiveSum((tid.x <= 2) ? uv.xyz : uint16_t3(0,0,0));
+    uint16_t3 uv3_4 = WaveActiveSum((tid.x <= 3) ? uv.xyz : uint16_t3(0,0,0));
+
+    uint16_t4 uv4_1 = WaveActiveSum((tid.x <= 0) ? uv : uint16_t4(0,0,0,0));
+    uint16_t4 uv4_2 = WaveActiveSum((tid.x <= 1) ? uv : uint16_t4(0,0,0,0));
+    uint16_t4 uv4_3 = WaveActiveSum((tid.x <= 2) ? uv : uint16_t4(0,0,0,0));
+    uint16_t4 uv4_4 = WaveActiveSum((tid.x <= 3) ? uv : uint16_t4(0,0,0,0));
+
+    uint16_t uscalars[4] = { us1, us2, us3, us4 };
+    uint16_t2 uvec2s [4] = { uv2_1, uv2_2, uv2_3, uv2_4 };
+    uint16_t3 uvec3s [4] = { uv3_1, uv3_2, uv3_3, uv3_4 };
+    uint16_t4 uvec4s [4] = { uv4_1, uv4_2, uv4_3, uv4_4 };
+
+    UOut1[tid.x].x   = uscalars[idx];
+    UOut2[tid.x].xy  = uvec2s[idx];
+    UOut3[tid.x].xyz = uvec3s[idx];
+    UOut4[tid.x]     = uvec4s[idx];
+
+    // constant folding case
+    UOut5[0] = WaveActiveSum(uint16_t4(1,2,3,4));
 }
 
 //--- pipeline.yaml
@@ -100,6 +147,50 @@ Buffers:
     Format: Int16
     Stride: 2
     Data: [ 4, 8, 12, 16 ]
+  - Name: UIn
+    Format: UInt16
+    Stride: 2
+    Data: [ 1, 10, 100, 1000]
+  - Name: UOut1
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 32  
+  - Name: UOut2
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: UOut3
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: UOut4
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 32
+  - Name: UOut5
+    Format: UInt16
+    Stride: 8
+    ZeroInitSize: 8
+  - Name: UExpectedOut1
+    Format: UInt16
+    Stride: 8
+    Data: [ 4, 0, 0, 0, 3, 0, 0, 0, 2, 0, 0, 0, 1, 0, 0, 0 ]
+  - Name: UExpectedOut2
+    Format: UInt16
+    Stride: 8
+    Data: [ 4, 40, 0, 0, 3, 30, 0, 0, 2, 20, 0, 0, 1, 10, 0, 0 ]
+  - Name: UExpectedOut3
+    Format: UInt16
+    Stride: 8
+    Data: [ 4, 40, 400, 0, 3, 30, 300, 0, 2, 20, 200, 0, 1, 10, 100, 0 ]
+  - Name: UExpectedOut4
+    Format: UInt16
+    Stride: 8
+    Data: [ 4, 40, 400, 4000, 3, 30, 300, 3000, 2, 20, 200, 2000, 1, 10, 100, 1000 ]
+  - Name: UExpectedOut5
+    Format: UInt16
+    Stride: 2
+    Data: [ 4, 8, 12, 16 ]
 Results:
   - Result: ExpectedOut1
     Rule: BufferExact
@@ -121,6 +212,26 @@ Results:
     Rule: BufferExact
     Actual: Out5
     Expected: ExpectedOut5
+  - Result: UExpectedOut1
+    Rule: BufferExact
+    Actual: UOut1
+    Expected: UExpectedOut1
+  - Result: UExpectedOut2
+    Rule: BufferExact
+    Actual: UOut2
+    Expected: UExpectedOut2
+  - Result: UExpectedOut3
+    Rule: BufferExact
+    Actual: UOut3
+    Expected: UExpectedOut3
+  - Result: UExpectedOut4
+    Rule: BufferExact
+    Actual: UOut4
+    Expected: UExpectedOut4
+  - Result: UExpectedOut5
+    Rule: BufferExact
+    Actual: UOut5
+    Expected: UExpectedOut5
 DescriptorSets:
   - Resources:
     - Name: In
@@ -165,6 +276,48 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 5
+    - Name: UIn
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: UOut1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: UOut2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: UOut3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
+    - Name: UOut4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+    - Name: UOut5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 11
+        Space: 0
+      VulkanBinding:
+        Binding: 11
 
 ...
 #--- end
