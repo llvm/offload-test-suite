@@ -108,13 +108,12 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
 template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
   if (I.outputting()) {
     if (B.ArraySize == 1) {
-      // single buffer output
       llvm::MutableArrayRef<T> Arr(reinterpret_cast<T *>(B.Data.back().get()),
                                    B.Size / sizeof(T));
       I.mapRequired("Data", Arr);
     } else {
-      // array of buffers output
       llvm::SmallVector<llvm::MutableArrayRef<T>> Arrays;
+      Arrays.reserve(B.ArraySize);
       for (const auto &D : B.Data)
         Arrays.emplace_back(reinterpret_cast<T *>(D.get()), B.Size / sizeof(T));
       I.mapRequired("Data", Arrays);
@@ -122,14 +121,34 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
     return;
   }
 
-  // zero-initialized buffer(s)
-  int64_t ZeroInitSize;
+  int64_t ZeroInitSize = 0;
+  int64_t SizeElems = 0;
+  std::optional<T> Fill;
   I.mapOptional("ZeroInitSize", ZeroInitSize, 0);
+  I.mapOptional("Fill", Fill);
+  I.mapOptional("Size", SizeElems, 0);
+
   if (ZeroInitSize > 0) {
     B.Size = ZeroInitSize;
-    for (uint32_t I = 0; I < B.ArraySize; I++) {
+    B.Data.clear();
+    for (uint32_t Idx = 0; Idx < B.ArraySize; ++Idx) {
       B.Data.push_back(std::make_unique<char[]>(B.Size));
-      memset(B.Data.back().get(), 0, B.Size);
+      std::memset(B.Data.back().get(), 0, B.Size);
+    }
+    return;
+  }
+
+  if (Fill.has_value()) {
+    if (SizeElems == 0) {
+      I.setError("'Size' must be provided when using 'Fill'");
+      return;
+    }
+    B.Size = SizeElems * sizeof(T);
+    B.Data.clear();
+    for (uint32_t Idx = 0; Idx < B.ArraySize; ++Idx) {
+      B.Data.push_back(std::make_unique<char[]>(B.Size));
+      std::fill_n(reinterpret_cast<T *>(B.Data.back().get()), SizeElems,
+                  Fill.value());
     }
     return;
   }
@@ -139,29 +158,43 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
     llvm::SmallVector<T, 64> Arr;
     I.mapRequired("Data", Arr);
     B.Size = Arr.size() * sizeof(T);
+    B.Data.clear();
     B.Data.push_back(std::make_unique<char[]>(B.Size));
-    memcpy(B.Data.back().get(), Arr.data(), B.Size);
+    std::memcpy(B.Data.back().get(), Arr.data(), B.Size);
     return;
   }
 
   // array of buffers input
   llvm::SmallVector<llvm::SmallVector<T>> Arrays;
   I.mapRequired("Data", Arrays);
-  B.Size = Arrays.back().size() * sizeof(T);
 
-  uint32_t ActualSize = 0;
-  for (auto Arr : Arrays) {
+  if (Arrays.size() != B.ArraySize) {
+    I.setError(llvm::Twine("Expected ") + std::to_string(B.ArraySize) +
+               " buffers, found " + std::to_string(Arrays.size()));
+    return;
+  }
+
+  if (Arrays.empty()) {
+    B.Size = 0;
+    B.Data.clear();
+    for (uint32_t idx = 0; idx < B.ArraySize; ++idx)
+      B.Data.push_back(std::make_unique<char[]>(0));
+    return;
+  }
+
+  B.Size = Arrays.front().size() * sizeof(T);
+  for (const auto &Arr : Arrays) {
     if (Arr.size() * sizeof(T) != B.Size) {
       I.setError("All buffers must have the same size.");
       return;
     }
-    B.Data.push_back(std::make_unique<char[]>(B.Size));
-    memcpy(B.Data.back().get(), Arr.data(), B.Size);
-    ActualSize++;
   }
-  if (ActualSize != B.ArraySize)
-    I.setError(Twine("Expected ") + std::to_string(B.ArraySize) +
-               " buffers, found " + std::to_string(ActualSize));
+
+  B.Data.clear();
+  for (const auto &Arr : Arrays) {
+    B.Data.push_back(std::make_unique<char[]>(B.Size));
+    std::memcpy(B.Data.back().get(), Arr.data(), B.Size);
+  }
 }
 
 // Counter(s) can contain one counter value for a singular resource
@@ -246,42 +279,6 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     setData<uint32_t>(I, B); // Because sizeof(bool) is 1 but HLSL
                              // represents a bool using 4 bytes.
     break;
-#define DATA_CASE(Enum, Type)                                                  \
-  case DataFormat::Enum: {                                                     \
-    if (I.outputting()) {                                                      \
-      llvm::MutableArrayRef<Type> Arr(reinterpret_cast<Type *>(B.Data.get()),  \
-                                      B.Size / sizeof(Type));                  \
-      I.mapRequired("Data", Arr);                                              \
-    } else {                                                                   \
-      int64_t ZeroInitSize;                                                    \
-      int64_t Size = 0;                                                        \
-      std::optional<Type> Fill;                                                \
-      I.mapOptional("ZeroInitSize", ZeroInitSize, 0);                          \
-      I.mapOptional("Fill", Fill);                                             \
-      I.mapOptional("Size", Size, 0);                                          \
-      if (ZeroInitSize > 0) {                                                  \
-        B.Size = ZeroInitSize;                                                 \
-        B.Data.reset(new char[B.Size]);                                        \
-        memset(B.Data.get(), 0, B.Size);                                       \
-        break;                                                                 \
-      }                                                                        \
-      if (Fill.has_value()) {                                                  \
-        if (Size == 0)                                                         \
-          return I.setError("'Size' must be provided when using 'Fill'");      \
-        B.Size = Size * sizeof(Type);                                          \
-        B.Data.reset(new char[B.Size]);                                        \
-        std::fill_n(reinterpret_cast<Type *>(B.Data.get()), Size,              \
-                    Fill.value());                                             \
-        break;                                                                 \
-      }                                                                        \
-      llvm::SmallVector<Type, 64> Arr;                                         \
-      I.mapRequired("Data", Arr);                                              \
-      B.Size = Arr.size() * sizeof(Type);                                      \
-      B.Data.reset(new char[B.Size]);                                          \
-      memcpy(B.Data.get(), Arr.data(), B.Size);                                \
-    }                                                                          \
-    break;                                                                     \
-  }
   }
 
   I.mapOptional("OutputProps", B.OutputProps);
