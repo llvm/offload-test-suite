@@ -172,7 +172,7 @@ DescriptorSets:
 # UNSUPPORTED: Clang
 
 # Tracked by this issue: https://github.com/llvm/offload-test-suite/issues/355
-# XFAIL: Metal
+# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl %}
