@@ -26,7 +26,8 @@ int main(int ArgC, char **ArgV) {
 
   const ExitOnError ExitOnErr("api-query: error: ");
 
-  if (auto Err = Device::initialize())
+  const DeviceConfig Config;
+  if (auto Err = Device::initialize(Config))
     logAllUnhandledErrors(std::move(Err), errs(), "api-query: error: ");
 
   outs() << "Devices:\n";
