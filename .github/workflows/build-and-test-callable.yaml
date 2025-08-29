@@ -145,6 +145,9 @@ jobs:
         uses: llvm/actions/setup-windows@main
         with:
           arch: arm64
+      - name: Install Python Dependencies
+        run: |
+          pip3 install -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Detect Clang
         id: Test-Clang
         shell: bash
