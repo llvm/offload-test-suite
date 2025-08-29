@@ -324,6 +324,9 @@ DescriptorSets:
 
 # UNSUPPORTED: Clang
 
+# Tracked by https://github.com/llvm/offload-test-suite/issues/393
+# XFAIL: Metal
+
 # REQUIRES: Int16
 
 # RUN: split-file %s %t

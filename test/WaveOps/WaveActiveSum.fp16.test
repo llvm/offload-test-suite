@@ -170,7 +170,7 @@ DescriptorSets:
 #--- end
 
 # UNSUPPORTED: Clang
-# REQUIRED: Half
+# REQUIRES: Half
 
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl %}
