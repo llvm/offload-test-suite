@@ -65,7 +65,8 @@ DescriptorSets:
 # no hlk tests for 16 bit log so unsure of correct answers for some
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7564
 # XFAIL: DXC
-# XFAIL: Clang
+
+
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl

@@ -55,10 +55,7 @@ DescriptorSets:
 ...
 #--- end
 
-# llvm/llvm-project#141089
-# XFAIL: Clang-Vulkan
-
-# https://github.com/llvm/llvm-project/issues/145571
+# Bug https://github.com/llvm/llvm-project/issues/145571
 # XFAIL: Clang && DirectX-NV
 
 # A bug in the Metal Shader Converter caused it to mis-translate this operation.

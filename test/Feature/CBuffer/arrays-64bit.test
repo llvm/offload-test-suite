@@ -63,9 +63,6 @@ DescriptorSets:
 # DXC's vulkan support does not layout cbuffers compatibly with DXIL
 # UNSUPPORTED: Vulkan
 
-# https://github.com/llvm/llvm-project/issues/110722
-# XFAIL: Clang
-
 # REQUIRES: Double, Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
