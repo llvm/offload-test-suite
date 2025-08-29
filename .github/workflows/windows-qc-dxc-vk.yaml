@@ -1,4 +1,4 @@
-name: Windows Vulkan AMD DXC
+name: Windows Vulkan QC DXC
 
 permissions:
   contents: read
@@ -10,11 +10,11 @@ on:
     - cron: '0 */2 * * *' # run every 2 hours
 
 jobs:
-  Windows-VK-AMD-DXC:
+  Windows-VK-QC-DXC:
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
-      SKU: windows-amd
+      SKU: windows-qc
       BuildType: Debug
       TestTarget: check-hlsl-vk
       OffloadTest-branch: ${{ github.ref }}
