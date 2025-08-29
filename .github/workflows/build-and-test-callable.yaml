@@ -150,6 +150,8 @@ jobs:
         with:
           cache: 'pip'
           cache-dependency-path: '${{ github.workspace }}/OffloadTest/test/requirements.txt'
+      - name: Install python requirements
+        run: pip install -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Detect Clang
         id: Test-Clang
         shell: bash
