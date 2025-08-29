@@ -15,7 +15,7 @@ RWStructuredBuffer<uint4> UOut4 : register(u10);
 RWStructuredBuffer<uint4> UOut5 : register(u11);
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID)
+void main(int3 tid : SV_GroupThreadID)
 {
     int4 v = In[0];
 

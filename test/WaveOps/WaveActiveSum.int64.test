@@ -46,7 +46,7 @@ void main(int3 tid : SV_GroupThreadID)
     int64_t3 vec3s [4] = { v3_1, v3_2, v3_3, v3_4 };
     int64_t4 vec4s [4] = { v4_1, v4_2, v4_3, v4_4 };
 
-    int64_t idx = 3 - tid.x;
+    int idx = 3 - tid.x;
 
     Out1[tid.x].x   = scalars[idx];
     Out2[tid.x].xy  = vec2s[idx];
