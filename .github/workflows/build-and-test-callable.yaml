@@ -145,9 +145,11 @@ jobs:
         uses: llvm/actions/setup-windows@main
         with:
           arch: arm64
-      - name: Install Python Dependencies
-        run: |
-          pip install -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Setup Python env
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38 # v5.4.0
+        with:
+          cache: 'pip'
+          cache-dependency-path: '${{ github.workspace }}/OffloadTest/test/requirements.txt'
       - name: Detect Clang
         id: Test-Clang
         shell: bash
