@@ -1,4 +1,4 @@
-name: Windows D3D12 AMD Clang
+name: Windows D3D12 QC Clang
 
 permissions:
   contents: read
@@ -10,11 +10,11 @@ on:
     - cron: '0 */2 * * *' # run every 2 hours
 
 jobs:
-  Windows-D3D12-AMD-Clang:
+  Windows-D3D12-QC-Clang:
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
-      SKU: windows-amd
+      SKU: windows-qc
       TestTarget: check-hlsl-clang-d3d12
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
