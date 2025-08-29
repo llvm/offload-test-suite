@@ -1,0 +1,46 @@
+# Example test case using BufferParticipantPattern rule for WaveParticipantBitTracking
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [8, 1, 1]  # 8 threads
+Buffers:
+  # Actual output from the shader (may have patterns in any order)
+  - Name: ParticipantOutput
+    Format: UInt32
+    ZeroInitSize: 96  # Space for multiple patterns (3 uint32 per pattern)
+  
+  # Expected patterns - order doesn't matter, but pattern counts must match
+  - Name: ExpectedPatterns  
+    Format: UInt32
+    Data: [
+      # Pattern 1: Wave op ID 69, loop iteration 0, participants 0,1,2,3
+      4416, 0x000F, 0x0000,  # (69<<6)|0, mask for threads 0-3, high mask
+      4416, 0x000F, 0x0000,  # Duplicate 1
+      4416, 0x000F, 0x0000,  # Duplicate 2  
+      4416, 0x000F, 0x0000,  # Duplicate 3 (4 participants = 4 copies)
+      
+      # Pattern 2: Wave op ID 70, loop iteration 1, participants 4,5,6,7
+      4496, 0x00F0, 0x0000,  # (70<<6)|(1<<4), mask for threads 4-7, high mask
+      4496, 0x00F0, 0x0000,  # Duplicate 1
+      4496, 0x00F0, 0x0000,  # Duplicate 2
+      4496, 0x00F0, 0x0000,  # Duplicate 3 (4 participants = 4 copies)
+    ]
+
+Results:
+  - Result: ValidateParticipantPatterns
+    Rule: BufferParticipantPattern
+    GroupSize: 3  # Each pattern consists of 3 uint32 values
+    Actual: ParticipantOutput
+    Expected: ExpectedPatterns
+
+DescriptorSets:
+  - Resources:
+    - Name: ParticipantOutput
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...

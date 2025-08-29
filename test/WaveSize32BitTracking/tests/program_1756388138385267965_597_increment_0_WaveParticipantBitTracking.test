@@ -1,0 +1,137 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_bit : register(u0);
+RWStructuredBuffer<uint> _wave_op_index : register(u1);
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 2)) {
+  case 0: {
+      if ((WaveGetLaneIndex() < 8)) {
+        result = (result + WaveActiveSum(1));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = (9 << 6);
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+      break;
+    }
+  case 1: {
+      if (((WaveGetLaneIndex() % 2) == 0)) {
+        result = (result + WaveActiveSum(2));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = (18 << 6);
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+      break;
+    }
+  }
+  switch ((WaveGetLaneIndex() % 2)) {
+  case 0: {
+      if ((WaveGetLaneIndex() < 8)) {
+        result = (result + WaveActiveSum(1));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = (28 << 6);
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+      break;
+    }
+  case 1: {
+      for (uint i0 = 0; (i0 < 3); i0 = (i0 + 1)) {
+        if (((WaveGetLaneIndex() < 6) || (WaveGetLaneIndex() >= 21))) {
+          result = (result + WaveActiveSum((WaveGetLaneIndex() + 1)));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((49 << 6) | (i0 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+        for (uint i1 = 0; (i1 < 3); i1 = (i1 + 1)) {
+          if ((((WaveGetLaneIndex() == 5) || (WaveGetLaneIndex() == 10)) || (WaveGetLaneIndex() == 26))) {
+            result = (result + WaveActiveSum(WaveGetLaneIndex()));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (((72 << 6) | (i0 << 4)) | (i1 << 2));
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          if ((i1 == 1)) {
+            continue;
+          }
+          if ((i1 == 2)) {
+            break;
+          }
+        }
+        if (((WaveGetLaneIndex() < 3) || (WaveGetLaneIndex() >= 27))) {
+          result = (result + WaveActiveMin(WaveGetLaneIndex()));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((89 << 6) | (i0 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+      }
+      break;
+    }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 64 threads
+Buffers:
+  - Name: _participant_bit
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 336
+  - Name: expected_bit_patterns
+    Format: UInt32
+    Stride: 4
+    Data: [576, 85, 0, 576, 85, 0, 576, 85, 0, 576, 85, 0, 1792, 85, 0, 1792, 85, 0, 1792, 85, 0, 1792, 85, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 4608, 32, 0, 4612, 32, 0, 4616, 32, 0, 4624, 32, 0, 4628, 32, 0, 4632, 32, 0, 4640, 32, 0, 4644, 32, 0, 4648, 32, 0, 5696, 2818572290, 0, 5696, 2818572290, 0, 5696, 2818572290, 0, 5696, 2818572290, 0, 5712, 2818572290, 0, 5712, 2818572290, 0, 5712, 2818572290, 0, 5712, 2818572290, 0, 5728, 2818572290, 0, 5728, 2818572290, 0, 5728, 2818572290, 0, 5728, 2818572290, 0, 576, 85, 0, 576, 85, 0, 576, 85, 0, 576, 85, 0, 1792, 85, 0, 1792, 85, 0, 1792, 85, 0, 1792, 85, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3136, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3152, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 3168, 2862612522, 0, 4608, 32, 0, 4612, 32, 0, 4616, 32, 0, 4624, 32, 0, 4628, 32, 0, 4632, 32, 0, 4640, 32, 0, 4644, 32, 0, 4648, 32, 0, 5696, 2818572290, 0, 5696, 2818572290, 0, 5696, 2818572290, 0, 5696, 2818572290, 0, 5712, 2818572290, 0, 5712, 2818572290, 0, 5712, 2818572290, 0, 5712, 2818572290, 0, 5728, 2818572290, 0, 5728, 2818572290, 0, 5728, 2818572290, 0, 5728, 2818572290, 0]
+  - Name: _wave_op_index
+    Format: UInt32
+    Stride: 4
+    Data: [0]
+Results:
+  - Result: BitTrackingValidation
+    Rule: BufferParticipantPattern
+    GroupSize: 3
+    Actual: _participant_bit
+    Expected: expected_bit_patterns
+DescriptorSets:
+  - Resources:
+    - Name: _participant_bit
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: _wave_op_index
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

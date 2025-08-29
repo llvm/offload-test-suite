@@ -25,7 +25,7 @@ namespace offloadtest {
 
 enum class Stages { Compute };
 
-enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
+enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon, BufferParticipantPattern };
 
 enum class DenormMode { Any, FTZ, Preserve };
 
@@ -131,6 +131,7 @@ struct Result {
   DenormMode DM = DenormMode::Any;
   unsigned ULPT; // ULP Tolerance
   double Epsilon;
+  unsigned GroupSize = 0; // For BufferParticipantPattern rule
 };
 
 struct Resource {
@@ -357,6 +358,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
     ENUM_CASE(BufferExact);
     ENUM_CASE(BufferFloatULP);
     ENUM_CASE(BufferFloatEpsilon);
+    ENUM_CASE(BufferParticipantPattern);
 #undef ENUM_CASE
   }
 };
