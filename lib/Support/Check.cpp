@@ -16,7 +16,9 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
+#include <map>
 #include <sstream>
+#include <tuple>
 
 constexpr uint16_t Float16BitSign = 0x8000;
 constexpr uint16_t Float16BitExp = 0x7c00;
@@ -277,6 +279,127 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
+static bool testBufferParticipantPattern(offloadtest::Buffer *B1,
+                                         offloadtest::Buffer *B2,
+                                         unsigned GroupSize,
+                                         std::string &ErrorMsg) {
+  // Expect 3 x uint32_t: (combinedId, maskLow, maskHigh)
+  if (GroupSize == 0) {
+    ErrorMsg = "Invalid GroupSize (must be > 0)";
+    return false;
+  }
+
+  // Basic structural checks similar to testBufferExact
+  if (B1->ArraySize != B2->ArraySize || B1->size() != B2->size()) {
+    ErrorMsg = "Mismatched buffer shape (ArraySize or per-chunk size differs)";
+    return false;
+  }
+
+  // We operate on 32-bit words
+  if ((B1->size() % sizeof(uint32_t)) != 0) {
+    ErrorMsg = "Chunk size is not a multiple of 4 bytes";
+    return false;
+  }
+  if ((B2->size() % sizeof(uint32_t)) != 0) {
+    ErrorMsg = "Expected chunk size is not a multiple of 4 bytes";
+    return false;
+  }
+
+  const uint32_t WordsPerChunk =
+      static_cast<uint32_t>(B1->size() / sizeof(uint32_t));
+  if (WordsPerChunk % GroupSize != 0) {
+    ErrorMsg = "Words per chunk must be a multiple of GroupSize";
+    return false;
+  }
+
+  using PatternTuple = std::tuple<uint32_t, uint32_t, uint32_t>;
+  std::map<PatternTuple, unsigned> ActualPatterns;
+  std::map<PatternTuple, unsigned> ExpectedPatterns;
+
+  auto ReadU32 = [](const char *Base, uint32_t WordIndex) -> uint32_t {
+    uint32_t V;
+    std::memcpy(&V, Base + WordIndex * sizeof(uint32_t), sizeof(uint32_t));
+    return V;
+  };
+
+  // Accumulate patterns from all chunks
+  auto *B1It = B1->Data.begin();
+  auto *B2It = B2->Data.begin();
+  for (; B1It != B1->Data.end() && B2It != B2->Data.end(); ++B1It, ++B2It) {
+    const char *ABuf = B1It->get(); // unique_ptr<char[]> -> char*
+    const char *EBuf = B2It->get();
+
+    for (uint32_t I = 0; I + GroupSize <= WordsPerChunk; I += GroupSize) {
+      if (GroupSize == 3) {
+        // Actual
+        const PatternTuple Ap(ReadU32(ABuf, I + 0), ReadU32(ABuf, I + 1),
+                              ReadU32(ABuf, I + 2));
+        ++ActualPatterns[Ap];
+
+        // Expected
+        const PatternTuple Ep(ReadU32(EBuf, I + 0), ReadU32(EBuf, I + 1),
+                              ReadU32(EBuf, I + 2));
+        ++ExpectedPatterns[Ep];
+      } else {
+        // If you plan to support other group sizes later, handle here.
+      }
+    }
+  }
+
+  // Compare pattern multisets
+  std::stringstream Ss;
+  bool HasError = false;
+
+  if (ActualPatterns.size() != ExpectedPatterns.size()) {
+    Ss << "Pattern kind count mismatch: actual has " << ActualPatterns.size()
+       << " unique patterns, expected has " << ExpectedPatterns.size()
+       << " unique patterns\n";
+    HasError = true;
+  }
+
+  // Missing / count-mismatched patterns
+  for (const auto &[pattern, expCount] : ExpectedPatterns) {
+    auto It = ActualPatterns.find(pattern);
+    if (It == ActualPatterns.end()) {
+      if (!HasError)
+        Ss << "Pattern differences found:\n";
+      HasError = true;
+      Ss << "  Missing pattern (combineId=" << std::get<0>(pattern)
+         << ", maskLow=0x" << std::hex << std::get<1>(pattern)
+         << ", maskHigh=0x" << std::get<2>(pattern) << std::dec
+         << ") - expected count: " << expCount << ", actual count: 0\n";
+    } else if (It->second != expCount) {
+      if (!HasError)
+        Ss << "Pattern differences found:\n";
+      HasError = true;
+      Ss << "  Pattern (combineId=" << std::get<0>(pattern) << ", maskLow=0x"
+         << std::hex << std::get<1>(pattern) << ", maskHigh=0x"
+         << std::get<2>(pattern) << std::dec
+         << ") - expected count: " << expCount
+         << ", actual count: " << It->second << "\n";
+    }
+  }
+
+  // Unexpected patterns
+  for (const auto &[pattern, actCount] : ActualPatterns) {
+    if (ExpectedPatterns.find(pattern) == ExpectedPatterns.end()) {
+      if (!HasError)
+        Ss << "Pattern differences found:\n";
+      HasError = true;
+      Ss << "  Unexpected pattern (combineId=" << std::get<0>(pattern)
+         << ", maskLow=0x" << std::hex << std::get<1>(pattern)
+         << ", maskHigh=0x" << std::get<2>(pattern) << std::dec
+         << ") - expected count: 0, actual count: " << actCount << "\n";
+    }
+  }
+
+  if (HasError) {
+    ErrorMsg = Ss.str();
+    return false;
+  }
+  return true;
+}
+
 template <typename T>
 static std::string bitPatternAsHex64(const T &Val,
                                      offloadtest::Rule ComparisonRule) {
@@ -391,10 +514,15 @@ llvm::Error verifyResult(offloadtest::Result R) {
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
-
-    std::ostringstream Oss;
-    Oss << std::defaultfloat << R.Epsilon;
-    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str() << "\n";
+    break;
+  }
+  case offloadtest::Rule::BufferParticipantPattern: {
+    std::string ErrorMsg;
+    if (testBufferParticipantPattern(R.ActualPtr, R.ExpectedPtr, R.GroupSize,
+                                     ErrorMsg))
+      return llvm::Error::success();
+    // Return error with detailed message
+    OS << "Comparison Rule: BufferParticipantPattern\n" << ErrorMsg << "\n";
     break;
   }
   }

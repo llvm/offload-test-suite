@@ -57,6 +57,7 @@ autoconf/autom4te.cache
 .zed
 # pythonenv for github Codespaces
 pythonenv*
+seeds
 # clangd index. (".clangd" is a config file now, thus trailing slash)
 .clangd/
 .cache

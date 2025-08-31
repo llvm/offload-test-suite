@@ -1,0 +1,345 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> _participant_bit : register(u0);
+RWStructuredBuffer<uint> _wave_op_index : register(u1);
+
+[numthreads(32, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  uint result = 0;
+  switch ((WaveGetLaneIndex() % 3)) {
+  case 0: {
+      switch ((WaveGetLaneIndex() % 3)) {
+      case 0: {
+          if ((WaveGetLaneIndex() < 8)) {
+            result = (result + WaveActiveSum(1));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (12 << 6);
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          break;
+        }
+      case 1: {
+          if (((WaveGetLaneIndex() % 2) == 0)) {
+            result = (result + WaveActiveSum(2));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (21 << 6);
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          break;
+        }
+      case 2: {
+          for (uint i0 = 0; (i0 < 3); i0 = (i0 + 1)) {
+            if ((((((WaveGetLaneIndex() == 1) || (WaveGetLaneIndex() == 4)) || (WaveGetLaneIndex() == 11)) || (WaveGetLaneIndex() == 15)) || (WaveGetLaneIndex() == 14))) {
+              if (((((WaveGetLaneIndex() == 1) || (WaveGetLaneIndex() == 9)) || (WaveGetLaneIndex() == 14)) || (WaveGetLaneIndex() == 5))) {
+                result = (result + WaveActiveMax((WaveGetLaneIndex() + 3)));
+                uint temp = 0;
+                InterlockedAdd(_wave_op_index[0], 3, temp);
+                _participant_bit[temp] = ((69 << 6) | (i0 << 4));
+                uint4 ballot = WaveActiveBallot(1);
+                _participant_bit[(temp + 1)] = ballot.x;
+                _participant_bit[(temp + 2)] = ballot.y;
+              }
+              if (((((WaveGetLaneIndex() == 3) || (WaveGetLaneIndex() == 8)) || (WaveGetLaneIndex() == 11)) || (WaveGetLaneIndex() == 11))) {
+                result = (result + WaveActiveSum(8));
+                uint temp = 0;
+                InterlockedAdd(_wave_op_index[0], 3, temp);
+                _participant_bit[temp] = ((88 << 6) | (i0 << 4));
+                uint4 ballot = WaveActiveBallot(1);
+                _participant_bit[(temp + 1)] = ballot.x;
+                _participant_bit[(temp + 2)] = ballot.y;
+              }
+            }
+            if (((WaveGetLaneIndex() < 2) || (WaveGetLaneIndex() >= 11))) {
+              result = (result + WaveActiveMax(result));
+              uint temp = 0;
+              InterlockedAdd(_wave_op_index[0], 3, temp);
+              _participant_bit[temp] = ((99 << 6) | (i0 << 4));
+              uint4 ballot = WaveActiveBallot(1);
+              _participant_bit[(temp + 1)] = ballot.x;
+              _participant_bit[(temp + 2)] = ballot.y;
+            }
+          }
+          break;
+        }
+      }
+      break;
+    }
+  case 1: {
+      if (((WaveGetLaneIndex() % 2) == 0)) {
+        result = (result + WaveActiveSum(2));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = (108 << 6);
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+      break;
+    }
+  case 2: {
+      switch ((WaveGetLaneIndex() % 3)) {
+      case 0: {
+          if ((WaveGetLaneIndex() < 8)) {
+            result = (result + WaveActiveSum(1));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (118 << 6);
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          break;
+        }
+      case 1: {
+          if (((WaveGetLaneIndex() % 2) == 0)) {
+            result = (result + WaveActiveSum(2));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (127 << 6);
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          break;
+        }
+      case 2: {
+          if (true) {
+            result = (result + WaveActiveSum(3));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (132 << 6);
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          break;
+        }
+      default: {
+          result = (result + WaveActiveSum(99));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = (136 << 6);
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+          break;
+        }
+      }
+      break;
+    }
+  default: {
+      result = (result + WaveActiveSum(99));
+      uint temp = 0;
+      InterlockedAdd(_wave_op_index[0], 3, temp);
+      _participant_bit[temp] = (140 << 6);
+      uint4 ballot = WaveActiveBallot(1);
+      _participant_bit[(temp + 1)] = ballot.x;
+      _participant_bit[(temp + 2)] = ballot.y;
+      break;
+    }
+  }
+  switch ((WaveGetLaneIndex() % 2)) {
+  case 0: {
+      for (uint i1 = 0; (i1 < 2); i1 = (i1 + 1)) {
+        if (((WaveGetLaneIndex() < 2) || (WaveGetLaneIndex() >= 12))) {
+          result = (result + WaveActiveSum(result));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((162 << 6) | (i1 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+        for (uint i2 = 0; (i2 < 3); i2 = (i2 + 1)) {
+          if ((WaveGetLaneIndex() == 13)) {
+            result = (result + WaveActiveSum(result));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (((177 << 6) | (i1 << 4)) | (i2 << 2));
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          if ((WaveGetLaneIndex() == 15)) {
+            result = (result + WaveActiveMax(result));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (((184 << 6) | (i1 << 4)) | (i2 << 2));
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+          if ((i2 == 1)) {
+            continue;
+          }
+        }
+      }
+      break;
+    }
+  case 1: {
+      uint counter3 = 0;
+      while ((counter3 < 3)) {
+        counter3 = (counter3 + 1);
+        if ((WaveGetLaneIndex() == 1)) {
+          result = (result + WaveActiveMax(result));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = ((201 << 6) | (counter3 << 4));
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+      }
+      break;
+    }
+  }
+  if ((WaveGetLaneIndex() == 14)) {
+    if ((WaveGetLaneIndex() == 15)) {
+      result = (result + WaveActiveMin((WaveGetLaneIndex() + 5)));
+      uint temp = 0;
+      InterlockedAdd(_wave_op_index[0], 3, temp);
+      _participant_bit[temp] = (213 << 6);
+      uint4 ballot = WaveActiveBallot(1);
+      _participant_bit[(temp + 1)] = ballot.x;
+      _participant_bit[(temp + 2)] = ballot.y;
+    }
+    switch ((WaveGetLaneIndex() % 2)) {
+    case 0: {
+        if ((WaveGetLaneIndex() < 8)) {
+          result = (result + WaveActiveSum(1));
+          uint temp = 0;
+          InterlockedAdd(_wave_op_index[0], 3, temp);
+          _participant_bit[temp] = (223 << 6);
+          uint4 ballot = WaveActiveBallot(1);
+          _participant_bit[(temp + 1)] = ballot.x;
+          _participant_bit[(temp + 2)] = ballot.y;
+        }
+        break;
+      }
+    case 1: {
+        if ((((((WaveGetLaneIndex() == 3) || (WaveGetLaneIndex() == 7)) || (WaveGetLaneIndex() == 9)) || (WaveGetLaneIndex() == 13)) || (WaveGetLaneIndex() == 8))) {
+          if ((((((WaveGetLaneIndex() == 2) || (WaveGetLaneIndex() == 5)) || (WaveGetLaneIndex() == 11)) || (WaveGetLaneIndex() == 15)) || (WaveGetLaneIndex() == 15))) {
+            result = (result + WaveActiveMin(result));
+            uint temp = 0;
+            InterlockedAdd(_wave_op_index[0], 3, temp);
+            _participant_bit[temp] = (265 << 6);
+            uint4 ballot = WaveActiveBallot(1);
+            _participant_bit[(temp + 1)] = ballot.x;
+            _participant_bit[(temp + 2)] = ballot.y;
+          }
+        }
+        break;
+      }
+    default: {
+        result = (result + WaveActiveSum(99));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = (269 << 6);
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+        break;
+      }
+    }
+    if ((WaveGetLaneIndex() == 10)) {
+      result = (result + WaveActiveSum(4));
+      uint temp = 0;
+      InterlockedAdd(_wave_op_index[0], 3, temp);
+      _participant_bit[temp] = (276 << 6);
+      uint4 ballot = WaveActiveBallot(1);
+      _participant_bit[(temp + 1)] = ballot.x;
+      _participant_bit[(temp + 2)] = ballot.y;
+    }
+  } else {
+  if ((WaveGetLaneIndex() == 0)) {
+    result = (result + WaveActiveMin(5));
+    uint temp = 0;
+    InterlockedAdd(_wave_op_index[0], 3, temp);
+    _participant_bit[temp] = (283 << 6);
+    uint4 ballot = WaveActiveBallot(1);
+    _participant_bit[(temp + 1)] = ballot.x;
+    _participant_bit[(temp + 2)] = ballot.y;
+  }
+  for (uint i4 = 0; (i4 < 3); i4 = (i4 + 1)) {
+    if (((WaveGetLaneIndex() < 2) || (WaveGetLaneIndex() >= 10))) {
+      result = (result + WaveActiveMax(7));
+      uint temp = 0;
+      InterlockedAdd(_wave_op_index[0], 3, temp);
+      _participant_bit[temp] = ((302 << 6) | (i4 << 4));
+      uint4 ballot = WaveActiveBallot(1);
+      _participant_bit[(temp + 1)] = ballot.x;
+      _participant_bit[(temp + 2)] = ballot.y;
+    }
+    uint counter5 = 0;
+    while ((counter5 < 3)) {
+      counter5 = (counter5 + 1);
+      if (((((WaveGetLaneIndex() == 0) || (WaveGetLaneIndex() == 6)) || (WaveGetLaneIndex() == 11)) || (WaveGetLaneIndex() == 13))) {
+        result = (result + WaveActiveMax(WaveGetLaneIndex()));
+        uint temp = 0;
+        InterlockedAdd(_wave_op_index[0], 3, temp);
+        _participant_bit[temp] = (((328 << 6) | (i4 << 4)) | (counter5 << 2));
+        uint4 ballot = WaveActiveBallot(1);
+        _participant_bit[(temp + 1)] = ballot.x;
+        _participant_bit[(temp + 2)] = ballot.y;
+      }
+    }
+    if ((i4 == 2)) {
+      break;
+    }
+  }
+  }
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]  # Single dispatch for 32 threads
+Buffers:
+  - Name: _participant_bit
+    Format: UInt32
+    Stride: 4
+    Fill: 0
+    Size: 462
+  - Name: expected_bit_patterns
+    Format: UInt32
+    Stride: 4
+    Data: [768, 73, 0, 768, 73, 0, 768, 73, 0, 6912, 1040, 0, 6912, 1040, 0, 8448, 18724, 0, 8448, 18724, 0, 8448, 18724, 0, 8448, 18724, 0, 8448, 18724, 0, 10368, 20481, 0, 10368, 20481, 0, 10368, 20481, 0, 10384, 20481, 0, 10384, 20481, 0, 10384, 20481, 0, 12880, 2, 0, 12896, 2, 0, 12912, 2, 0, 18112, 1, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 20996, 10305, 0, 20996, 10305, 0, 20996, 10305, 0, 20996, 10305, 0, 21000, 10305, 0, 21000, 10305, 0, 21000, 10305, 0, 21000, 10305, 0, 21004, 10305, 0, 21004, 10305, 0, 21004, 10305, 0, 21004, 10305, 0, 21012, 10305, 0, 21012, 10305, 0, 21012, 10305, 0, 21012, 10305, 0, 21016, 10305, 0, 21016, 10305, 0, 21016, 10305, 0, 21016, 10305, 0, 21020, 10305, 0, 21020, 10305, 0, 21020, 10305, 0, 21020, 10305, 0, 21028, 10305, 0, 21028, 10305, 0, 21028, 10305, 0, 21028, 10305, 0, 21032, 10305, 0, 21032, 10305, 0, 21032, 10305, 0, 21032, 10305, 0, 21036, 10305, 0, 21036, 10305, 0, 21036, 10305, 0, 21036, 10305, 0, 768, 73, 0, 768, 73, 0, 768, 73, 0, 6912, 1040, 0, 6912, 1040, 0, 8448, 18724, 0, 8448, 18724, 0, 8448, 18724, 0, 8448, 18724, 0, 8448, 18724, 0, 10368, 20481, 0, 10368, 20481, 0, 10368, 20481, 0, 10384, 20481, 0, 10384, 20481, 0, 10384, 20481, 0, 12880, 2, 0, 12896, 2, 0, 12912, 2, 0, 18112, 1, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19328, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19344, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 19360, 48131, 0, 20996, 10305, 0, 20996, 10305, 0, 20996, 10305, 0, 20996, 10305, 0, 21000, 10305, 0, 21000, 10305, 0, 21000, 10305, 0, 21000, 10305, 0, 21004, 10305, 0, 21004, 10305, 0, 21004, 10305, 0, 21004, 10305, 0, 21012, 10305, 0, 21012, 10305, 0, 21012, 10305, 0, 21012, 10305, 0, 21016, 10305, 0, 21016, 10305, 0, 21016, 10305, 0, 21016, 10305, 0, 21020, 10305, 0, 21020, 10305, 0, 21020, 10305, 0, 21020, 10305, 0, 21028, 10305, 0, 21028, 10305, 0, 21028, 10305, 0, 21028, 10305, 0, 21032, 10305, 0, 21032, 10305, 0, 21032, 10305, 0, 21032, 10305, 0, 21036, 10305, 0, 21036, 10305, 0, 21036, 10305, 0, 21036, 10305, 0]
+  - Name: _wave_op_index
+    Format: UInt32
+    Stride: 4
+    Data: [0]
+Results:
+  - Result: BitTrackingValidation
+    Rule: BufferParticipantPattern
+    GroupSize: 3
+    Actual: _participant_bit
+    Expected: expected_bit_patterns
+DescriptorSets:
+  - Resources:
+    - Name: _participant_bit
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: _wave_op_index
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
