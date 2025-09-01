@@ -138,6 +138,9 @@ DescriptorSets:
 # Tracked by https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
 
+# Bug tracked by https://github.com/llvm/offload-test-suite/issues/396
+# XFAIL: DirectX-WARP
+
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t
