@@ -37,6 +37,7 @@ void main(uint3 tid : SV_GroupThreadID)
     half3 vec3s [4] = { v3_1, v3_2, v3_3, v3_4 };
     half4 vec4s [4] = { v4_1, v4_2, v4_3, v4_4 };
 
+
     Out1[tid.x].x   = scalars[tid.x];
     Out2[tid.x].xy  = vec2s[tid.x];
     Out3[tid.x].xyz = vec3s[tid.x];
@@ -168,6 +169,10 @@ DescriptorSets:
 #--- end
 
 # XFAIL: Clang
+
+# Tracked by https://github.com/llvm/offload-test-suite/issues/393
+# XFAIL: Metal
+
 # REQUIRES: Half
 
 # RUN: split-file %s %t
