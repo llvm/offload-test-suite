@@ -47,9 +47,10 @@ tools = [
     ToolSubst("imgdiff", FindTool("imgdiff")),
 ]
 
+
 def getHighestShaderModel(features):
     sm = features.get("HighestShaderModel", 6.0)
-    major, minor = str(sm).split('.')
+    major, minor = str(sm).split(".")
     return int(major), int(minor)
 
 def setDeviceFeatures(config, device, compiler):
