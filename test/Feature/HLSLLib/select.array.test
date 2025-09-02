@@ -3,9 +3,9 @@
 [[vk::binding(0)]]
 StructuredBuffer<bool> Cond : register(t0);
 [[vk::binding(1)]]
-RWStructuredBuffer<float2> TrueVal[2] : register(u1);
+StructuredBuffer<float2> TrueVal[2] : register(t1);
 [[vk::binding(2)]]
-RWStructuredBuffer<float2> FalseVal[2] : register(u3);
+StructuredBuffer<float2> FalseVal[2] : register(t3);
 
 [[vk::binding(3)]]
 RWStructuredBuffer<float2> Out[2] : register(u5);
@@ -65,14 +65,14 @@ DescriptorSets:
       VulkanBinding:
         Binding: 0
     - Name: TrueVal
-      Kind: RWStructuredBuffer
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
     - Name: FalseVal
-      Kind: RWStructuredBuffer
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
