@@ -55,6 +55,7 @@ def getHighestShaderModel(features):
     major, minor = str(sm).split(".")
     return int(major), int(minor)
 
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
