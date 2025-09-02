@@ -133,7 +133,7 @@ DescriptorSets:
 # Unsupported: https://github.com/llvm/llvm-project/issues/101558
 # XFAIL: Clang
 
-# REQUIRES: Derivatives
+# REQUIRES: DerivativesInCompute
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl

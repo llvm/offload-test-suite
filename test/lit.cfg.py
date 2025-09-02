@@ -85,7 +85,7 @@ def setDeviceFeatures(config, device, compiler):
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
         # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
-        config.available_features.add("Derivatives")
+        config.available_features.add("DerivativesInCompute")
 
     if device["API"] == "DirectX":
         if device["Features"].get("Native16BitShaderOpsSupported", False):
