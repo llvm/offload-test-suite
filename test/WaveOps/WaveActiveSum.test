@@ -7,10 +7,11 @@ void main(uint3 threadID : SV_DispatchThreadID) {
   switch (value[threadID.x]) {
     case 0:
       sum += WaveActiveSum(1);
+      break;
     default:
-      sum += WaveActiveSum(10);
       break;
   }
+  sum += WaveActiveSum(10);
   value[threadID.x] = sum;
 }
 
@@ -37,12 +38,9 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
 # RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.1 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# XFAIL: Vulkan-NV
 
 # CHECK: Data: [ 42, 42, 40, 40 ]
