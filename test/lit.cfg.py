@@ -49,7 +49,7 @@ tools = [
 
 
 def getHighestShaderModel(features):
-    if sm == None:
+    if features == None:
         return 6, 0
     sm = features.get("HighestShaderModel", 6.0)
     major, minor = str(sm).split(".")
