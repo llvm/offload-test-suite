@@ -3,17 +3,17 @@
 // This test verified handling of multi-dimensional resource arrays
 // used as a local variable and function argument
 
-RWBuffer<float> BufA : register(u0);
-RWBuffer<float> BufB : register(u1);
-RWBuffer<float> Out  : register(u2);
+RWStructuredBuffer<float> BufA : register(u0);
+RWStructuredBuffer<float> BufB : register(u1);
+RWStructuredBuffer<float> Out  : register(u2);
 
-float foo(RWBuffer<float> A[2][3], uint Index) {
+float foo(RWStructuredBuffer<float> A[2][3], uint Index) {
     return A[0][0][Index] + (A[0][1][Index] + 1) * 10 + (A[0][2][Index] + 2) * 100 +
            A[1][0][Index] + (A[1][1][Index] + 0.1) / 10 + (A[1][2][Index] + 0.2) / 100;
 }
 
 float bar(uint Index) {
-  RWBuffer<float> LocalArray[2][3];
+  RWStructuredBuffer<float> LocalArray[2][3];
   for (int i = 0; i < 3; i++) {
     LocalArray[0][i] = BufA;
     LocalArray[1][i] = BufB;
@@ -51,25 +51,25 @@ Buffers:
             876.678, 987.789 ]
 Results:
   - Result: BufOut
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.001
+    Rule: BufferFloatULP
+    ULPT: 10
     Actual: BufOut
     Expected: ExpectedOut
 
 DescriptorSets:
   - Resources:
     - Name: BufA
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
     - Name: BufB
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
     - Name: BufOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0

@@ -6,17 +6,17 @@
 // The test verifies that this modification of local array B does not affect
 // array A.
 
-RWBuffer<int> X : register(u0);
-RWBuffer<int> Y : register(u1);
+RWStructuredBuffer<int> X : register(u0);
+RWStructuredBuffer<int> Y : register(u1);
 
-void SomeFn(RWBuffer<int> B[2], uint Idx, int Val0) {
+void SomeFn(RWStructuredBuffer<int> B[2], uint Idx, int Val0) {
   B[0] = Y;
   B[0][Idx] = Val0;
 }
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  RWBuffer<int> A[2] = {X, Y};
+  RWStructuredBuffer<int> A[2] = {X, Y};
   SomeFn(A, GI, 1);
   A[0][GI] = 2;
 }
@@ -58,14 +58,14 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: BufX
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
     - Name: BufY
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0

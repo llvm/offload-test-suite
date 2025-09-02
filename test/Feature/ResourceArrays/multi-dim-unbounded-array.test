@@ -2,7 +2,7 @@
 
 // This test verified handling of unbounded multi-dimensional resource array.
 
-RWBuffer<int> Buf[][2] : register(u0);
+RWStructuredBuffer<int> Buf[][2] : register(u0);
 
 [numthreads(4,2,1)]
 void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
@@ -53,7 +53,7 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: Buf
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
