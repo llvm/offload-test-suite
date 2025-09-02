@@ -6,13 +6,16 @@ RWStructuredBuffer<uint> Out : register(u1);
 void main(uint3 threadID : SV_DispatchThreadID) {
   bool B1 = false;
 
-  if (value[threadID.x] == 0)
-    Out[threadID.x + 4] = WaveActiveCountBits(true); // threads 0 and 1
+  if (value[threadID.x] == 0) // thread 0 and 1.
+    Out[threadID.x + 4] = WaveActiveCountBits(true);
+  // thread 0-3 set b1 to true.
   if (value[threadID.x] == 0 || value[threadID.x] == 1)
-    B1 = true; // set b1 to true for thread 3
-  else
-    Out[threadID.x + 4] = WaveActiveCountBits(false); // thread 2; expect 0
-  // should be 3 because B1 set to true for threads 0,1, and 3.
+    B1 = true;
+  else // thread 4
+    Out[threadID.x + 4] = WaveActiveCountBits(false);
+
+  // Out[threadID.x + 4] on thread 3 is never written to and should remain 0.
+  // All threads count 3 because B1 set to true for threads 0,1, and 3.
   uint Count = WaveActiveCountBits(B1);
   Out[threadID.x] = Count;
 }
@@ -31,11 +34,11 @@ Buffers:
   - Name: Out
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 28
+    ZeroInitSize: 32
   - Name: ExpectedOut
     Format: UInt32
     Stride: 4
-    Data: [3, 3, 3, 3, 2, 2, 0]
+    Data: [3, 3, 3, 3, 2, 2, 0, 0]
 Results:
   - Result: Test
     Rule: BufferExact
