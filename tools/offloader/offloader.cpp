@@ -55,6 +55,12 @@ static cl::opt<std::string>
 static cl::opt<bool>
     Quiet("quiet", cl::desc("Suppress printing the pipeline as output"));
 
+static cl::opt<bool> Debug("debug-layer",
+                           cl::desc("Enable runtime debug layers"));
+
+static cl::opt<bool> Validation("validation-layer",
+                                cl::desc("Enable runtime validation layers"));
+
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
@@ -80,7 +86,9 @@ int main(int ArgC, char **ArgV) {
 
 int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
-  logAllUnhandledErrors(Device::initialize(), errs(), "gpu-exec: warning: ");
+  const DeviceConfig Config = {Debug, Validation};
+  logAllUnhandledErrors(Device::initialize(Config), errs(),
+                        "gpu-exec: warning: ");
 
   const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;

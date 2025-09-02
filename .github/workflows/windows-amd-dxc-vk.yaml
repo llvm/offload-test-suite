@@ -7,7 +7,7 @@ permissions:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */2 * * *' # run every 2 hours
+    - cron: '0 */6 * * *' # run every 6 hours
 
 jobs:
   Windows-VK-AMD-DXC:

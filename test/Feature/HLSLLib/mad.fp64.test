@@ -82,9 +82,6 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/358
-# XFAIL: DirectX-WARP
-
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl

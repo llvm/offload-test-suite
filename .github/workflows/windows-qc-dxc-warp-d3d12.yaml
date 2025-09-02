@@ -1,4 +1,4 @@
-name: Windows D3D12 AMD DXC
+name: Windows ARM64 D3D12 Warp DXC
 
 permissions:
   contents: read
@@ -7,15 +7,15 @@ permissions:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * * *' # run every 6 hours
+    - cron: '0 */2 * * *' # run every 2 hours
 
 jobs:
-  Windows-D3D12-AMD-DXC:
+  Windows-ARM64-D3D12-Warp-DXC:
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
-      SKU: windows-amd
+      SKU: windows-qc
       BuildType: Debug
-      TestTarget: check-hlsl-d3d12
+      TestTarget: check-hlsl-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

@@ -89,11 +89,6 @@ DescriptorSets:
 # https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbithigh.64bit.hlsl
 # UNSUPPORTED: DXC-Vulkan
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7502
-# Bug: WARP firstbithigh(s64 -1) should return -1 but returns 32 on older versions of
-# Warp. This was fixed for x86 in 1.0.14, but not for arm64.
-# XFAIL: DirectX-WARP
-
 # Bug https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang-Vulkan
 

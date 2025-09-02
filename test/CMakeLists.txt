@@ -54,6 +54,9 @@ function(try_compile_hlsl output)
   message(STATUS "${output} - ${${output}}")
 endfunction()
 
+option(OFFLOADTEST_ENABLE_DEBUG "Enable available runtime debug layers (defaults On)." ON)
+option(OFFLOADTEST_ENABLE_VALIDATION "Enable available runtime validation layers (defaults Off)." OFF)
+
 list(APPEND OFFLOADTEST_DEPS
   api-query
   offloader
@@ -61,6 +64,7 @@ list(APPEND OFFLOADTEST_DEPS
   split-file
   imgdiff
   OffloadTestUnit
+  obj2yaml
   not)
 
 if (OFFLOADTEST_TEST_CLANG)
@@ -99,7 +103,9 @@ if (OFFLOADTEST_ENABLE_METAL)
   list(APPEND platforms_to_test mtl)
 endif()
 
-llvm_canonicalize_cmake_booleans(OFFLOADTEST_TEST_CLANG)
+llvm_canonicalize_cmake_booleans(OFFLOADTEST_TEST_CLANG
+                                 OFFLOADTEST_ENABLE_DEBUG
+                                 OFFLOADTEST_ENABLE_VALIDATION)
 
 foreach(platform ${platforms_to_test})
   set(TEST_${platform} False)
