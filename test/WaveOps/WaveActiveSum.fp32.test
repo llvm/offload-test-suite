@@ -12,37 +12,36 @@ void main(uint3 tid : SV_GroupThreadID)
     float4 v = In[0];
 
     // Mask per "active lane set": only <=N lanes contribute
-    float s1 = WaveActiveSum((tid.x <= 0) ? v.x : 0);
-    float s2 = WaveActiveSum((tid.x <= 1) ? v.x : 0);
-    float s3 = WaveActiveSum((tid.x <= 2) ? v.x : 0);
-    float s4 = WaveActiveSum((tid.x <= 3) ? v.x : 0);
+    float s1 = tid.x <= 0 ? WaveActiveSum( v.x ) : 0;
+    float s2 = tid.x <= 1 ? WaveActiveSum( v.x ) : 0;
+    float s3 = tid.x <= 2 ? WaveActiveSum( v.x ) : 0;
+    float s4 = tid.x <= 3 ? WaveActiveSum( v.x ) : 0;
 
-    float2 v2_1 = WaveActiveSum((tid.x <= 0) ? v.xy : float2(0,0));
-    float2 v2_2 = WaveActiveSum((tid.x <= 1) ? v.xy : float2(0,0));
-    float2 v2_3 = WaveActiveSum((tid.x <= 2) ? v.xy : float2(0,0));
-    float2 v2_4 = WaveActiveSum((tid.x <= 3) ? v.xy : float2(0,0));
+    float2 v2_1 = tid.x <= 0 ? WaveActiveSum( v.xy ) : float2(0,0);
+    float2 v2_2 = tid.x <= 1 ? WaveActiveSum( v.xy ) : float2(0,0);
+    float2 v2_3 = tid.x <= 2 ? WaveActiveSum( v.xy ) : float2(0,0);
+    float2 v2_4 = tid.x <= 3 ? WaveActiveSum( v.xy ) : float2(0,0);
 
-    float3 v3_1 = WaveActiveSum((tid.x <= 0) ? v.xyz : float3(0,0,0));
-    float3 v3_2 = WaveActiveSum((tid.x <= 1) ? v.xyz : float3(0,0,0));
-    float3 v3_3 = WaveActiveSum((tid.x <= 2) ? v.xyz : float3(0,0,0));
-    float3 v3_4 = WaveActiveSum((tid.x <= 3) ? v.xyz : float3(0,0,0));
+    float3 v3_1 = tid.x <= 0 ? WaveActiveSum( v.xyz ) : float3(0,0,0);
+    float3 v3_2 = tid.x <= 1 ? WaveActiveSum( v.xyz ) : float3(0,0,0);
+    float3 v3_3 = tid.x <= 2 ? WaveActiveSum( v.xyz ) : float3(0,0,0);
+    float3 v3_4 = tid.x <= 3 ? WaveActiveSum( v.xyz ) : float3(0,0,0);
 
-    float4 v4_1 = WaveActiveSum((tid.x <= 0) ? v : float4(0,0,0,0));
-    float4 v4_2 = WaveActiveSum((tid.x <= 1) ? v : float4(0,0,0,0));
-    float4 v4_3 = WaveActiveSum((tid.x <= 2) ? v : float4(0,0,0,0));
-    float4 v4_4 = WaveActiveSum((tid.x <= 3) ? v : float4(0,0,0,0));
+    float4 v4_1 = tid.x <= 0 ? WaveActiveSum( v ) : float4(0,0,0,0);
+    float4 v4_2 = tid.x <= 1 ? WaveActiveSum( v ) : float4(0,0,0,0);
+    float4 v4_3 = tid.x <= 2 ? WaveActiveSum( v ) : float4(0,0,0,0);
+    float4 v4_4 = tid.x <= 3 ? WaveActiveSum( v ) : float4(0,0,0,0);
 
     float scalars[4] = { s1, s2, s3, s4 };
     float2 vec2s [4] = { v2_1, v2_2, v2_3, v2_4 };
     float3 vec3s [4] = { v3_1, v3_2, v3_3, v3_4 };
     float4 vec4s [4] = { v4_1, v4_2, v4_3, v4_4 };
 
-    int idx = 3 - tid.x;
 
-    Out1[tid.x].x   = scalars[idx];
-    Out2[tid.x].xy  = vec2s[idx];
-    Out3[tid.x].xyz = vec3s[idx];
-    Out4[tid.x]     = vec4s[idx];
+    Out1[tid.x].x   = scalars[tid.x];
+    Out2[tid.x].xy  = vec2s[tid.x];
+    Out3[tid.x].xyz = vec3s[tid.x];
+    Out4[tid.x]     = vec4s[tid.x];
 
     // constant folding case
     Out5[0] = WaveActiveSum(float4(1,2,3,4));
@@ -83,19 +82,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: Float32
     Stride: 16
-    Data: [ 4.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0 ]
+    Data: [ 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0 ]
   - Name: ExpectedOut2
     Format: Float32
     Stride: 16
-    Data: [ 4.0, 40.0, 0.0, 0.0, 3.0, 30.0, 0.0, 0.0, 2.0, 20.0, 0.0, 0.0, 1.0, 10.0, 0.0, 0.0 ]
+    Data: [ 1.0, 10.0, 0.0, 0.0, 2.0, 20.0, 0.0, 0.0, 3.0, 30.0, 0.0, 0.0, 4.0, 40.0, 0.0, 0.0 ]
   - Name: ExpectedOut3
     Format: Float32
     Stride: 16
-    Data: [ 4.0, 40.0, 400.0, 0.0, 3.0, 30.0, 300.0, 0.0, 2.0, 20.0, 200.0, 0.0, 1.0, 10.0, 100.0, 0.0 ]
+    Data: [ 1.0, 10.0, 100.0, 0.0, 2.0, 20.0, 200.0, 0.0, 3.0, 30.0, 300.0, 0.0, 4.0, 40.0, 400.0, 0.0 ]
   - Name: ExpectedOut4
     Format: Float32
     Stride: 16
-    Data: [ 4.0, 40.0, 400.0, 4000.0, 3.0, 30.0, 300.0, 3000.0, 2.0, 20.0, 200.0, 2000.0, 1.0, 10.0, 100.0, 1000.0 ]
+    Data: [ 1.0, 10.0, 100.0, 1000.0, 2.0, 20.0, 200.0, 2000.0, 3.0, 30.0, 300.0, 3000.0, 4.0, 40.0, 400.0, 4000.0 ]
   - Name: ExpectedOut5
     Format: Float32
     Stride: 16
@@ -169,7 +168,8 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# XFAIL: Clang
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl %}
 # RUN: %if Vulkan %{ %dxc_target -T cs_6_5 -fspv-target-env=vulkan1.1 -Fo %t.o %t/source.hlsl %}

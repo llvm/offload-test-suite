@@ -12,37 +12,35 @@ void main(uint3 tid : SV_GroupThreadID)
     half4 v = In[0];
 
     // Mask per "active lane set": only <=N lanes contribute
-    half s1 = WaveActiveSum((tid.x <= 0) ? v.x : 0);
-    half s2 = WaveActiveSum((tid.x <= 1) ? v.x : 0);
-    half s3 = WaveActiveSum((tid.x <= 2) ? v.x : 0);
-    half s4 = WaveActiveSum((tid.x <= 3) ? v.x : 0);
+    half s1 = tid.x <= 0 ? WaveActiveSum( v.x ) : 0;
+    half s2 = tid.x <= 1 ? WaveActiveSum( v.x ) : 0;
+    half s3 = tid.x <= 2 ? WaveActiveSum( v.x ) : 0;
+    half s4 = tid.x <= 3 ? WaveActiveSum( v.x ) : 0;
 
-    half2 v2_1 = WaveActiveSum((tid.x <= 0) ? v.xy : half2(0,0));
-    half2 v2_2 = WaveActiveSum((tid.x <= 1) ? v.xy : half2(0,0));
-    half2 v2_3 = WaveActiveSum((tid.x <= 2) ? v.xy : half2(0,0));
-    half2 v2_4 = WaveActiveSum((tid.x <= 3) ? v.xy : half2(0,0));
+    half2 v2_1 = tid.x <= 0 ? WaveActiveSum( v.xy ) : half2(0,0);
+    half2 v2_2 = tid.x <= 1 ? WaveActiveSum( v.xy ) : half2(0,0);
+    half2 v2_3 = tid.x <= 2 ? WaveActiveSum( v.xy ) : half2(0,0);
+    half2 v2_4 = tid.x <= 3 ? WaveActiveSum( v.xy ) : half2(0,0);
 
-    half3 v3_1 = WaveActiveSum((tid.x <= 0) ? v.xyz : half3(0,0,0));
-    half3 v3_2 = WaveActiveSum((tid.x <= 1) ? v.xyz : half3(0,0,0));
-    half3 v3_3 = WaveActiveSum((tid.x <= 2) ? v.xyz : half3(0,0,0));
-    half3 v3_4 = WaveActiveSum((tid.x <= 3) ? v.xyz : half3(0,0,0));
+    half3 v3_1 = tid.x <= 0 ? WaveActiveSum( v.xyz ) : half3(0,0,0);
+    half3 v3_2 = tid.x <= 1 ? WaveActiveSum( v.xyz ) : half3(0,0,0);
+    half3 v3_3 = tid.x <= 2 ? WaveActiveSum( v.xyz ) : half3(0,0,0);
+    half3 v3_4 = tid.x <= 3 ? WaveActiveSum( v.xyz ) : half3(0,0,0);
 
-    half4 v4_1 = WaveActiveSum((tid.x <= 0) ? v : half4(0,0,0,0));
-    half4 v4_2 = WaveActiveSum((tid.x <= 1) ? v : half4(0,0,0,0));
-    half4 v4_3 = WaveActiveSum((tid.x <= 2) ? v : half4(0,0,0,0));
-    half4 v4_4 = WaveActiveSum((tid.x <= 3) ? v : half4(0,0,0,0));
+    half4 v4_1 = tid.x <= 0 ? WaveActiveSum( v ) : half4(0,0,0,0);
+    half4 v4_2 = tid.x <= 1 ? WaveActiveSum( v ) : half4(0,0,0,0);
+    half4 v4_3 = tid.x <= 2 ? WaveActiveSum( v ) : half4(0,0,0,0);
+    half4 v4_4 = tid.x <= 3 ? WaveActiveSum( v ) : half4(0,0,0,0);
 
     half scalars[4] = { s1, s2, s3, s4 };
     half2 vec2s [4] = { v2_1, v2_2, v2_3, v2_4 };
     half3 vec3s [4] = { v3_1, v3_2, v3_3, v3_4 };
     half4 vec4s [4] = { v4_1, v4_2, v4_3, v4_4 };
 
-    int idx = 3 - tid.x;
-
-    Out1[tid.x].x   = scalars[idx];
-    Out2[tid.x].xy  = vec2s[idx];
-    Out3[tid.x].xyz = vec3s[idx];
-    Out4[tid.x]     = vec4s[idx];
+    Out1[tid.x].x   = scalars[tid.x];
+    Out2[tid.x].xy  = vec2s[tid.x];
+    Out3[tid.x].xyz = vec3s[tid.x];
+    Out4[tid.x]     = vec4s[tid.x];
 
     // constant folding case
     Out5[0] = WaveActiveSum(half4(1,2,3,4));
@@ -83,19 +81,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: Float16
     Stride: 8
-    Data: [ 0x4400, 0x0, 0x0, 0x0, 0x4200, 0x0, 0x0, 0x0, 0x4000, 0x0, 0x0, 0x0, 0x3c00, 0x0, 0x0, 0x0 ]
+    Data: [ 0x3c00, 0x0, 0x0, 0x0, 0x4000, 0x0, 0x0, 0x0, 0x4200, 0x0, 0x0, 0x0, 0x4400, 0x0, 0x0, 0x0 ]
   - Name: ExpectedOut2
     Format: Float16
     Stride: 8
-    Data: [ 0x4400, 0x5100, 0x0, 0x0, 0x4200, 0x4f80, 0x0, 0x0, 0x4000, 0x4d00, 0x0, 0x0, 0x3c00, 0x4900, 0x0, 0x0 ]
+    Data: [ 0x3c00, 0x4900, 0x0, 0x0, 0x4000, 0x4d00, 0x0, 0x0, 0x4200, 0x4f80, 0x0, 0x0, 0x4400, 0x5100, 0x0, 0x0 ]
   - Name: ExpectedOut3
     Format: Float16
     Stride: 8
-    Data: [ 0x4400, 0x5100, 0x5e40, 0x0, 0x4200, 0x4f80, 0x5cb0, 0x0, 0x4000, 0x4d00, 0x5a40, 0x0, 0x3c00, 0x4900, 0x5640, 0x0 ]
+    Data: [ 0x3c00, 0x4900, 0x5640, 0x0, 0x4000, 0x4d00, 0x5a40, 0x0, 0x4200, 0x4f80, 0x5cb0, 0x0, 0x4400, 0x5100, 0x5e40, 0x0 ]
   - Name: ExpectedOut4
     Format: Float16
     Stride: 8
-    Data: [ 0x4400, 0x5100, 0x5e40, 0x6bd0, 0x4200, 0x4f80, 0x5cb0, 0x69dc, 0x4000, 0x4d00, 0x5a40, 0x67d0, 0x3c00, 0x4900, 0x5640, 0x63d0 ]
+    Data: [ 0x3c00, 0x4900, 0x5640, 0x63d0, 0x4000, 0x4d00, 0x5a40, 0x67d0, 0x4200, 0x4f80, 0x5cb0, 0x69dc, 0x4400, 0x5100, 0x5e40, 0x6bd0 ]
   - Name: ExpectedOut5
     Format: Float16
     Stride: 8
@@ -169,7 +167,7 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# XFAIL: Clang
 # REQUIRES: Half
 
 # RUN: split-file %s %t
