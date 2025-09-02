@@ -2,7 +2,7 @@
 
 StructuredBuffer<bool4> In1 : register(t0);
 StructuredBuffer<bool4> In2 : register(t1);
-RWStructuredBuffer<bool4> Out : register(u1);
+RWStructuredBuffer<bool4> Out : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
@@ -60,10 +60,10 @@ DescriptorSets:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 1
+        Register: 2
         Space: 0
       VulkanBinding:
-        Binding: 1
+        Binding: 2
 ...
 #--- end
 
