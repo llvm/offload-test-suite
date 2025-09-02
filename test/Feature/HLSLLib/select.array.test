@@ -1,0 +1,94 @@
+#--- source.hlsl
+
+[[vk::binding(0)]]
+StructuredBuffer<bool> Cond : register(t0);
+[[vk::binding(1)]]
+RWStructuredBuffer<float2> TrueVal[2] : register(u1);
+[[vk::binding(2)]]
+RWStructuredBuffer<float2> FalseVal[2] : register(u3);
+
+[[vk::binding(3)]]
+RWStructuredBuffer<float2> Out[2] : register(u5);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0][0] = select(Cond[0], TrueVal[0][0], FalseVal[0][0]);
+  Out[1][0] = select(Cond[1], TrueVal[1][0], FalseVal[1][0]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Cond
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0 ]
+  - Name: TrueVal
+    Format: Float32
+    ArraySize: 2
+    Data:
+      - [ 1.1, 2.2 ]
+      - [ 3.3, 4.4 ]
+  - Name: FalseVal
+    Format: Float32
+    ArraySize: 2
+    Data:
+      - [ -1.1, -2.2 ]
+      - [ -3.3, -4.4 ]
+  - Name: Out
+    Format: Float32
+    ArraySize: 2
+    ZeroInitSize: 8
+  - Name: ExpectedOut
+    Format: Float32
+    ArraySize: 2
+    Data:
+      - [ 1.1, 2.2 ]
+      - [ -3.3, -4.4 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Cond
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TrueVal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: FalseVal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# UNSUPPORTED: DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
