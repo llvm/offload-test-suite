@@ -142,6 +142,23 @@ DescriptorSets:
 # XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl 
 # RUN: %offloader %t/pipeline.yaml %t.o 
+
+// These checks added to verify YAML printing of arrays.
+// CHECK: Name: BufB
+// CHECK: Format: Int32
+// CHECK: ArraySize: 4
+// CHECK: Data:
+// CHECK:   - [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+// CHECK:   - [ 0, 2, 4, 6, 8, 10, 12, 14 ]
+// CHECK:   - [ 0, 3, 6, 9, 12, 15, 18, 21 ]
+// CHECK:   - [ 0, 4, 8, 12, 16, 20, 24, 28 ]
+
+// CHECK: Name: BufD
+// CHECK: Format: Float32
+// CHECK: ArraySize: 2
+// CHECK: Data:
+// CHECK: - [ 0, 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817 ]
+// CHECK: - [ 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817, 
+// CHECK:     2.54648 ]
