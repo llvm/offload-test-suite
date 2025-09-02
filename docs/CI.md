@@ -31,7 +31,7 @@ Configurations:
 
 ### Experimental Configurfations
 
-Experimental configuraitons are new testing configurations that have been
+Experimental configurations are testing configurations that have been
 recently added and are not yet completely passing. These configurations are not
 included in pre-merge testing unless a PR has the `test-all` label applied to
 it.
