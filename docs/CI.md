@@ -54,27 +54,43 @@ Configurations:
 * CPU: Apple M1
 * GPU: Apple M1
 * RAM: 16 GiB
+* Configurations:
+  * macOS Metal
 
 ### Windows AMD GPU
 
 * CPU: AMD Ryzen 7 9700X
 * GPU: AMD Radeon RX 9070
 * RAM: 32 GiB
+* Configurations:
+  * Windows AMD GPU DirectX
+  * Windows AMD GPU Vulkan
 
 ### Windows Intel GPU
 
 * CPU: Intel Core i9-10900
 * GPU: Intel UHD Graphics 630
 * RAM: 64 GiB
+* Configurations:
+  * Windows Intel GPU DirectX
+  * Windows Intel GPU Vulkan
+  * Windows WARP LKG x64
 
 ### Windows NVIDIA GPU
 
 * CPU: Intel(R) Core(TM) i5-14400F
 * GPU: NVIDIA GeForce RTX 5070
 * RAM: 16 GiB
+* Configurations:
+  * Windows NVIDIA GPU DirectX
+  * Windows NVIDIA GPU Vulkan
 
 ### Windows Qualcomm GPU
 
 * CPU: Qualcomm Snapdragon X Plus - X1P-64-100
 * GPU: Qualcomm Adreno X1-85
 * RAM: 32 GiB
+* Configurations:
+  * Windows QC GPU DirectX
+  * Windows QC GPU Vulkan
+  * Windows WARP LKG arm64
