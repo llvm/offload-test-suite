@@ -70,7 +70,7 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7702
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7702
 # XFAIL: DXC-Vulkan
 
 # REQUIRES: Half

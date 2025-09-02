@@ -62,7 +62,7 @@ DescriptorSets:
 # UHD drivers. This issue does not reproduce when compiled with Clang because
 # LLVM's load-store optimization performs correct optimizations that hide the
 # problem.
-# Tracking issue: https://github.com/llvm/offload-test-suite/issues/226
+# Bug https://github.com/llvm/offload-test-suite/issues/226
 # XFAIL: Intel-Memory-Coherence-Issue-226 && !Clang
 
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7494

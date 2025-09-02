@@ -82,7 +82,7 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# https://github.com/llvm/offload-test-suite/issues/358
+# Bug https://github.com/llvm/offload-test-suite/issues/358
 # XFAIL: DirectX-WARP
 
 # REQUIRES: Double

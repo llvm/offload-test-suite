@@ -38,23 +38,23 @@ DescriptorSets:
 #--- end
 
 # Offload tests are missing support for counters on Vulkan
-# https://github.com/llvm/offload-test-suite/issues/303
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/303
 # XFAIL: Vulkan
 
 # Offload tests are missing support for counters and resource arrays on Metal
-# https://github.com/llvm/offload-test-suite/issues/304
-# https://github.com/llvm/offload-test-suite/issues/305
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/304
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
-# https://github.com/llvm/llvm-project/issues/154407
+# Bug https://github.com/llvm/llvm-project/issues/154407
 # XFAIL: Clang-DirectX
 
 # WARP has an issue counters in resource arrays
-# Internal issue #58567630
+# Bug Internal issue #58567630
 # XFAIL: DirectX-WARP
 # 
 # Intel has an issue with counters in resource arrays
-# https://github.com/llvm/offload-test-suite/issues/376
+# Bug https://github.com/llvm/offload-test-suite/issues/376
 # XFAIL: DirectX-Intel
 
 # RUN: split-file %s %t
