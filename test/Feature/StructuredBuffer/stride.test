@@ -19,11 +19,11 @@ Shaders:
 Buffers:
   - Name: In
     Format: Float32
-    Stride: 32
+    Stride: 16
     Data: [ 1, 2, 3, 4, 5, 6, 7, 8 ]
   - Name: Out
     Format: Float32
-    Stride: 4
+    Stride: 16
     ZeroInitSize: 32
 DescriptorSets:
   - Resources:
