@@ -5,8 +5,8 @@ struct S {
 };
 
 StructuredBuffer<bool> Cond : register(t0);
-RWStructuredBuffer<S> TrueVal : register(u1);
-RWStructuredBuffer<S> FalseVal : register(u2);
+StructuredBuffer<S> TrueVal : register(u1);
+StructuredBuffer<S> FalseVal : register(u2);
 
 RWStructuredBuffer<S> Out : register(u3);
 
@@ -59,14 +59,14 @@ DescriptorSets:
       VulkanBinding:
         Binding: 0
     - Name: TrueVal
-      Kind: RWStructuredBuffer
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
     - Name: FalseVal
-      Kind: RWStructuredBuffer
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
