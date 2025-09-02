@@ -350,12 +350,12 @@ DescriptorSets:
 ...
 #--- end
 
-# clang-dxc doesn't support the -fvk-use-scalar-layout flag yet
-# UNSUPPORTED: Clang-Vulkan
+# Unimplemented: clang-dxc doesn't support the -fvk-use-scalar-layout flag yet
+# XFAIL: Clang-Vulkan
 
 # CBuffer bindings seem to be broken under metal
-# https://github.com/llvm/offload-test-suite/issues/55
-# UNSUPPORTED: Metal
+# Bug https://github.com/llvm/offload-test-suite/issues/55
+# XFAIL: Metal
 
 # No idea what is going on here, but the results are _way_ off.
 # XFAIL: Vulkan-Darwin
