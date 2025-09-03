@@ -15,7 +15,7 @@ RWStructuredBuffer<uint4> UOut4 : register(u10);
 RWStructuredBuffer<uint4> UOut5 : register(u11);
 
 [numthreads(4,1,1)]
-void main(int3 tid : SV_GroupThreadID)
+void main(uint3 tid : SV_GroupThreadID)
 {
     int4 v = In[0];
 
@@ -319,12 +319,14 @@ DescriptorSets:
 ...
 #--- end
 
-# XFAIL: Clang
 
 # Tracked by https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
+# Tracked by https://github.com/llvm/offload-test-suite/issues/426
+# XFAIL: Clang
+
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_5 -fspv-target-env=vulkan1.1 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o 

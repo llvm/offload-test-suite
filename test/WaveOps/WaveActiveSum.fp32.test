@@ -168,9 +168,10 @@ DescriptorSets:
 ...
 #--- end
 
+# Tracked by https://github.com/llvm/offload-test-suite/issues/426
 # XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_5 -fspv-target-env=vulkan1.1 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o 

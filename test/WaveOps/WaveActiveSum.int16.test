@@ -16,7 +16,7 @@ RWStructuredBuffer<uint16_t4> UOut4 : register(u10);
 RWStructuredBuffer<uint16_t4> UOut5 : register(u11);
 
 [numthreads(4,1,1)]
-void main(int3 tid : SV_GroupThreadID)
+void main(uint3 tid : SV_GroupThreadID)
 {
     int16_t4 v = In[0];
 
@@ -322,6 +322,7 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
+# Tracked by https://github.com/llvm/offload-test-suite/issues/426
 # XFAIL: Clang
 
 # Tracked by https://github.com/llvm/offload-test-suite/issues/393
@@ -329,5 +330,5 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -enable-16bit-types  -T cs_6_5 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -enable-16bit-types  -T cs_6_5 -fspv-target-env=vulkan1.1 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -enable-16bit-types  -T cs_6_5 -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o 
