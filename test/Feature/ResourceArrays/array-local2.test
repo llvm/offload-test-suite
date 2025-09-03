@@ -80,7 +80,8 @@ DescriptorSets:
 # XFAIL: DXC-DirectX
 
 # DXC-Vulkan support for arrays of RWStructuredBuffer are pretty broken.
-# XFAIL: https://github.com/microsoft/DirectXShaderCompiler/issues/7727
+# Tracked by https://github.com/microsoft/DirectXShaderCompiler/issues/7727
+# XFAIL: DXC-Vulkan
 
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
