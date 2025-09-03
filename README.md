@@ -52,6 +52,16 @@ The offload test suite's code is clang-tidy clean for a limited ruleset.
 If you have clang-tidy installed locally you can enable clang-tidy by adding `-DOFFLOADTEST_USE_CLANG_TIDY=On` to your CMake invocation.
 You can also add `-DOFFLOADTEST_CLANG_TIDY_APPLY_FIX=On` to enable automatically applying the clang-tidy fix-its for any warnings that have automated fixes.
 
+# Failing tests
+
+Tests which are failing can be prevented from running using `XFAIL` and `UNSUPPORTED`. When `XFAIL`ing a test make sure to add a comment above
+linking the appropriate issue and whether the failure is due to a bug or an unimplemented feature.
+
+```
+# Bug/Unimplemented <link to issue>
+# XFAIL: Clang-Vulkan
+```
+
 # YAML Pipeline Format
 
 This framework provides a YAML representation for describing GPU pipelines and buffers. The format is implemented by the `API/Pipeline.{h|cpp}` sources. The following is an example pipeline YAML description:
