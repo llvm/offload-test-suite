@@ -2,13 +2,13 @@
 
 // This test verified handling of unbounded multi-dimensional resource array.
 
-RWBuffer<int> Buf[][2] : register(u0);
+RWStructuredBuffer<int> Buf[][2] : register(u0);
 
 [numthreads(4,2,1)]
 void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
   for (int i = 0; i < 4; i++) {
-    Buf[GTI.x][GTI.y][i] = Buf[GTI.x][GTI.y][i] + 100 * GI;
-  } 
+    Buf[NonUniformResourceIndex(GTI.x)][NonUniformResourceIndex(GTI.y)][i] = Buf[NonUniformResourceIndex(GTI.x)][NonUniformResourceIndex(GTI.y)][i] + 100 * GI;
+  }
 }
 
 //--- pipeline.yaml
@@ -53,14 +53,16 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: Buf
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# This test requires NonUniformResourceIndex.
+# Tracked by https://github.com/llvm/llvm-project/issues/156713
+# XFAIL: Clang
 
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal

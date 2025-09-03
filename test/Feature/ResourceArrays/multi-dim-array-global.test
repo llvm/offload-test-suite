@@ -2,8 +2,8 @@
 
 // This test verified handling of global multi-dimensional resource arrays.
 
-RWBuffer<int> In[2][3] : register(u0);
-RWBuffer<int> Out[2][3] : register(u6);
+RWStructuredBuffer<int> In[2][3] : register(u0);
+RWStructuredBuffer<int> Out[2][3] : register(u6);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
@@ -57,12 +57,12 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: BufIn
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
     - Name: BufOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 6
         Space: 0
