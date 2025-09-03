@@ -12,7 +12,7 @@ float foo(RWStructuredBuffer<float> A[2], uint Index) {
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  Out[GI] = foo(In[GI], GI);
+  Out[GI] = foo(In[NonUniformResourceIndex(GI)], GI);
 }
 
 //--- pipeline.yaml
@@ -65,7 +65,9 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# This test requires NonUniformResourceIndex.
+# Tracked by https://github.com/llvm/llvm-project/issues/156713
+# XFAIL: Clang
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
