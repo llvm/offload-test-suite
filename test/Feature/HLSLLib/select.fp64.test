@@ -1,4 +1,15 @@
 #--- source.hlsl
+
+// This test tests all the following scenarios for select:
+//   - Scalar condition, scalar true/false values
+//   - Vector condition, vector true/false values
+//   - Vector condition, scalar true value, vector false value
+//   - Vector condition, vector true value, scalar false value
+//   - Vector condition, scalar true/false values
+// For each vector condition scenario, there are tests for vec4, vec3, and vec2.
+// For the scalar condition scenario, there are four tests. One uses the buffers 
+// for inputs and the other three use constants.
+
 StructuredBuffer<bool> Cond : register(t0);
 StructuredBuffer<double4> TrueVal : register(t1);
 StructuredBuffer<double4> FalseVal : register(t2);
