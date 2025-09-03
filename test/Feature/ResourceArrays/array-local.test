@@ -85,6 +85,9 @@ DescriptorSets:
 # https://github.com/llvm/llvm-project/issues/154669
 # XFAIL: Clang-Vulkan
 
+# DXC-Vulkan support for arrays of RWStructuredBuffer are pretty broken.
+# XFAIL: https://github.com/microsoft/DirectXShaderCompiler/issues/7727
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

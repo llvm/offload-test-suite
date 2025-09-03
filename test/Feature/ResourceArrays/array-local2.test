@@ -76,8 +76,11 @@ DescriptorSets:
 
 # DXC-DirectX has a bug here because it does not create a local copy
 # of a function argument if the type is resource or resource array.
-https://github.com/microsoft/DirectXShaderCompiler/issues/7678
+# https://github.com/microsoft/DirectXShaderCompiler/issues/7678
 # XFAIL: DXC-DirectX
+
+# DXC-Vulkan support for arrays of RWStructuredBuffer are pretty broken.
+# XFAIL: https://github.com/microsoft/DirectXShaderCompiler/issues/7727
 
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
