@@ -67,7 +67,7 @@ Buffers:
   - Name: ExpectedBufC
     Format: Int32
     ArraySize: 2
-    Data: 
+    Data:
       - [ 0, 2, 4, 6, 8, 10, 12, 14 ]
       - [ 2, 4, 6, 8, 10, 12, 14, 16 ]
 
@@ -142,8 +142,8 @@ DescriptorSets:
 # XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl 
-# RUN: %offloader %t/pipeline.yaml %t.o 
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 // These checks added to verify YAML printing of arrays.
 // CHECK: Name: BufB
@@ -160,5 +160,5 @@ DescriptorSets:
 // CHECK: ArraySize: 2
 // CHECK: Data:
 // CHECK: - [ 0, 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817 ]
-// CHECK: - [ 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817, 
+// CHECK: - [ 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817,
 // CHECK:     2.54648 ]
