@@ -168,7 +168,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Tracked by https://github.com/llvm/offload-test-suite/issues/426
+# Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
 # REQUIRES: Double
