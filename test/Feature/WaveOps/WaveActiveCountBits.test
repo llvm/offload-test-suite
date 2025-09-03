@@ -9,12 +9,12 @@ void main(uint3 threadID : SV_DispatchThreadID) {
   if (value[threadID.x] == 0) // thread 0 and 1.
     Out[threadID.x + 4] = WaveActiveCountBits(true);
   // thread 0-3 set b1 to true.
-  if (value[threadID.x] == 0 || value[threadID.x] == 1)
+  if (value[threadID.x] == 0 || value[threadID.x] == 2)
     B1 = true;
-  else // thread 4
+  else // thread 3
     Out[threadID.x + 4] = WaveActiveCountBits(false);
 
-  // Out[threadID.x + 4] on thread 3 is never written to and should remain 0.
+  // Out[threadID.x + 4] on thread 4 is never written to and should remain 0.
   // All threads count 3 because B1 set to true for threads 0,1, and 3.
   uint Count = WaveActiveCountBits(B1);
   Out[threadID.x] = Count;
