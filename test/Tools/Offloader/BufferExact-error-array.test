@@ -47,7 +47,7 @@ DescriptorSets:
 #--- end
 
 # Offload tests are missing support for resource arrays on Metal
-# https://github.com/llvm/offload-test-suite/issues/305
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
 # RUN: split-file %s %t

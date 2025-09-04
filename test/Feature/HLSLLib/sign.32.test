@@ -173,12 +173,12 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7512
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7512
 # XFAIL: DXC-Vulkan
 
-# https://github.com/llvm/llvm-project/issues/149722
 # We're generating invalid SPIRV for this. I have _no_ idea why this isn't
 # failing on all Clang Vulkan tests.
+# Bug https://github.com/llvm/llvm-project/issues/149722
 # XFAIL: Clang && Vulkan-Darwin
 
 # RUN: split-file %s %t
