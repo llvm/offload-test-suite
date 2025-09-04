@@ -329,6 +329,5 @@ DescriptorSets:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -enable-16bit-types  -T cs_6_5 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -enable-16bit-types  -T cs_6_5 -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o 
