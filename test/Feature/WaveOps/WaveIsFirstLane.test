@@ -65,6 +65,7 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/320
 # XFAIL: NV-Reconvergence-Issue-320
 
 # RUN: split-file %s %t

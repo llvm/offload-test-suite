@@ -56,7 +56,7 @@ DescriptorSets:
         Binding: 1
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/140824
+# Bug https://github.com/llvm/llvm-project/issues/140824
 # XFAIL: Clang
 
 # RUN: split-file %s %t
