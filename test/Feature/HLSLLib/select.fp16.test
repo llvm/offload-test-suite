@@ -1,0 +1,118 @@
+#--- source.hlsl
+
+// This test tests all the following scenarios for select:
+//   - Scalar condition, scalar true/false values
+//   - Vector condition, vector true/false values
+//   - Vector condition, scalar true value, vector false value
+//   - Vector condition, vector true value, scalar false value
+//   - Vector condition, scalar true/false values
+// For each vector condition scenario, there are tests for vec4, vec3, and vec2.
+// For the scalar condition scenario, there are four tests. One uses the buffers 
+// for inputs and the other three use constants.
+
+StructuredBuffer<bool> Cond : register(t0);
+StructuredBuffer<half4> TrueVal : register(t1);
+StructuredBuffer<half4> FalseVal : register(t2);
+
+RWStructuredBuffer<half4> Out : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  bool4 Cond0 = bool4(Cond[0], Cond[1], Cond[2], Cond[3]);
+  bool3 Cond1 = bool3(Cond[4], Cond[5], Cond[6]);
+  bool2 Cond2 = bool2(Cond[8], Cond[9]);
+  bool2 Cond3 = bool2(Cond[10], Cond[11]);
+
+  // vec4
+  Out[0] = select(Cond0, TrueVal[0], FalseVal[0]);
+  Out[1] = select(Cond0, TrueVal[0].x, FalseVal[0]);
+  Out[2] = select(Cond0, TrueVal[0], FalseVal[0].x);
+  Out[3] = select(Cond0, TrueVal[0].x, FalseVal[0].x);
+  // vec3 + scalar
+  Out[4] = half4(select(Cond1, TrueVal[1].xyz, FalseVal[1].xyz), select(Cond[7], TrueVal[1].w, FalseVal[1].w));
+  Out[5] = half4(select(Cond1, TrueVal[1].x, FalseVal[1].xyz), select(bool(1), half(1), half(-1)));
+  Out[6] = half4(select(Cond1, TrueVal[1].xyz, FalseVal[1].x), select(bool(0), half(2), half(-2)));
+  Out[7] = half4(select(Cond1, TrueVal[1].x, FalseVal[1].x), select(bool(1), half(3), half(-3)));
+  // vec2
+  Out[8] = half4(select(Cond2, TrueVal[2].xy, FalseVal[2].xy), select(Cond3, TrueVal[2].z, FalseVal[2].zw));
+  Out[9] = half4(select(Cond2, TrueVal[2].xy, FalseVal[2].x), select(Cond3, TrueVal[2].z, FalseVal[2].z));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Cond
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1 ]
+  - Name: TrueVal
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3c00, 0x4000, 0x4200, 0x4400, 0x4466, 0xc580, 0x469a, 0x4248, 0xc900, 0xcd00, 0x4b80, 0xce40 ]
+    # 1, 2, 3, 4, 4.4, -5.5, 6.6, 3.1415, -10, -20, 15, -25
+  - Name: FalseVal
+    Format: Float16
+    Stride: 8
+    Data: [ 0xbc00, 0xc000, 0xc200, 0xc400, 0x47b3, 0x4866, 0xc8f3, 0x211f, 0x5640, 0x5a40, 0xcb80, 0x4e40 ]
+    # -1, -2, -3, -4, 7.7, 8.8, -9.9, 0.01, 100, 200, -15, 25
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    ZeroInitSize: 80
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 
+      0x3c00, 0xc000, 0x4200, 0xc400, 0x3c00, 0xc000, 0x3c00, 0xc400, 0x3c00, 0xbc00, 0x4200, 0xbc00, 0x3c00, 0xbc00, 0x3c00, 0xbc00,
+      0x4466, 0xc580, 0xc8f3, 0x211f, 0x4466, 0x4466, 0xc8f3, 0x3c00, 0x4466, 0xc580, 0x47b3, 0xc000, 0x4466, 0x4466, 0x47b3, 0x4200,
+      0xc900, 0x5a40, 0xcb80, 0x4b80, 0xc900, 0x5640, 0xcb80, 0x4b80
+    ]
+    # 1, -2, 3, -4, 1, -2, 1, -4, 1, -1, 3, -1, 1, -1, 1, -1,
+    # 4.4, -5.5, -9.9, 0.01, 4.4, 4.4, -9.9, 1, 4.4, -5.5, 7.7, -2, 4.4, 4.4, 7.7, 3,
+    # -10, 200, -15, 15, -10, 100, -15, 15
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Cond
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TrueVal
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: FalseVal
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -80,7 +80,7 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/145752
+# Bug https://github.com/llvm/llvm-project/issues/145752
 # XFAIL: Clang-DirectX || Clang-Metal
 
 # RUN: split-file %s %t

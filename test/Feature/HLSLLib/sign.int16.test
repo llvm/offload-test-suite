@@ -94,7 +94,7 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7512
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7512
 # XFAIL: DXC-Vulkan
 
 # REQUIRES: Int16

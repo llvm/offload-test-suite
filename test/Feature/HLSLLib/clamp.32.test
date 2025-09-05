@@ -1,0 +1,206 @@
+#--- source.hlsl
+StructuredBuffer<int4> In0 : register(t0);
+StructuredBuffer<int4> In1 : register(t1);
+StructuredBuffer<int4> In2 : register(t2);
+StructuredBuffer<uint4> In3 : register(t3);
+StructuredBuffer<uint4> In4 : register(t4);
+StructuredBuffer<uint4> In5 : register(t5);
+StructuredBuffer<float4> In6 : register(t6);
+StructuredBuffer<float4> In7 : register(t7);
+StructuredBuffer<float4> In8 : register(t8);
+
+RWStructuredBuffer<int4> Out0 : register(u9);
+RWStructuredBuffer<uint4> Out1 : register(u10);
+RWStructuredBuffer<float4> Out2 : register(u11);
+
+[numthreads(1,1,1)]
+void main() {
+  Out0[0] = clamp(In0[0], In1[0], In2[0]);
+  Out0[1] = int4(clamp(In0[1].xyz, In1[1].xyz, In2[1].xyz), clamp(In0[1].w, In1[1].w, In2[1].w));
+  Out0[2] = int4(clamp(In0[2].xy, In1[2].xy, In2[2].xy), clamp(In0[2].zw, In1[2].zw, In2[2].zw));
+  Out0[3] = clamp(int4(100, 90, 0, 8), int4(-2147483648, 100, -10, 5), int4(2147483647, 100, 10, 6));
+
+  Out1[0] = clamp(In3[0], In4[0], In5[0]);
+  Out1[1] = uint4(clamp(In3[1].xyz, In4[1].xyz, In5[1].xyz), clamp(In3[1].w, In4[1].w, In5[1].w));
+  Out1[2] = uint4(clamp(In3[2].xy, In4[2].xy, In5[2].xy), clamp(In3[2].zw, In4[2].zw, In5[2].zw));
+  Out1[3] = clamp(uint4(0, 10, 5000, 4294967295), uint4(0, 11, 100, 10), uint4(2, 12, 4999, 4294967295));
+
+  Out2[0] = clamp(In6[0], In7[0], In8[0]);
+  Out2[1] = float4(clamp(In6[1].xyz, In7[1].xyz, In8[1].xyz), clamp(In6[1].w, In7[1].w, In8[1].w));
+  Out2[2] = float4(clamp(In6[2].xy, In7[2].xy, In8[2].xy), clamp(In6[2].zw, In7[2].zw, In8[2].zw));
+  Out2[3] = clamp(float4(-1.5, 0, 100.1, 0.0025), float4(-2, -0.25, 100.2, -1), float4(3, 5.5, 500, 1));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Int32
+    Stride: 16
+    Data: [100, 90, 0, 8, -2147483648, 2147483647,100, 90, 0, 8, -2147483648, 2147483647]
+  - Name: In1
+    Format: Int32
+    Stride: 16
+    Data: [-2147483648, 100, -10, 5, -2147483648, 100, -10, 5, -2147483648, 100, -10, 5]
+  - Name: In2
+    Format: Int32
+    Stride: 16
+    Data: [2147483647, 100, 10, 6, 2147483647, 100, 10, 6, 2147483647, 100, 10, 6]
+  - Name: In3
+    Format: UInt32
+    Stride: 16
+    Data: [0, 10, 5000, 4294967295, 0, 10, 5000, 4294967295, 0, 10, 5000, 4294967295]
+  - Name: In4
+    Format: UInt32
+    Stride: 16
+    Data: [0, 11, 100, 10, 0, 11, 100, 10, 0, 11, 100, 10]
+  - Name: In5
+    Format: UInt32
+    Stride: 16
+    Data: [2, 12, 4999, 4294967295, 2, 12, 4999, 4294967295, 2, 12, 4999, 4294967295]
+  - Name: In6
+    Format: Float32
+    Stride: 16
+    Data: [-1.5, 0, 100.1, 0.0025, -1.5, 0, 100.1, 0.0025, -1.5, 0, 100.1, 0.0025]
+  - Name: In7
+    Format: Float32
+    Stride: 16
+    Data: [-2, -0.25, 100.2, -1, -2, -0.25, 100.2, -1, -2, -0.25, 100.2, -1]
+  - Name: In8
+    Format: Float32
+    Stride: 16
+    Data: [3, 5.5, 500, 1, 3, 5.5, 500, 1, 3, 5.5, 500, 1]
+  - Name: Out0
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOut0
+    Format: Int32
+    Stride: 16
+    Data: [ 100, 100, 0, 6, -2147483648, 100, 10, 6, 0, 100, -10, 6, 100, 100, 0, 6 ]
+  - Name: Out1
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOut1
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 11, 4999, 4294967295, 0, 11, 4999, 4294967295, 0, 11, 4999, 4294967295, 0, 11, 4999, 4294967295 ]
+  - Name: Out2
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOut2
+    Format: Float32
+    Stride: 16
+    Data: [ -1.5, 0, 100.2, 0.0025, -1.5, 0, 100.2, 0.0025, -1.5, 0, 100.2, 0.0025, -1.5, 0, 100.2, 0.0025 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: In3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: In4
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: In5
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: In6
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: In7
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: In8
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 11
+        Space: 0
+      VulkanBinding:
+        Binding: 11
+#--- end
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
