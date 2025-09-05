@@ -324,7 +324,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/430
-# XFAIL: Warp
+# XFAIL: WARP
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
