@@ -1,0 +1,327 @@
+#--- source.hlsl
+StructuredBuffer<int4> In  : register(t0);
+RWStructuredBuffer<int4> Out1 : register(u1); // test scalar
+RWStructuredBuffer<int4> Out2 : register(u2); // test int2
+RWStructuredBuffer<int4> Out3 : register(u3); // test int3
+RWStructuredBuffer<int4> Out4 : register(u4); // test int4
+RWStructuredBuffer<int4> Out5 : register(u5); // constant folding
+
+// uints
+StructuredBuffer<uint4> UIn  : register(t6);
+RWStructuredBuffer<uint4> UOut1 : register(u7);
+RWStructuredBuffer<uint4> UOut2 : register(u8);
+RWStructuredBuffer<uint4> UOut3 : register(u9);
+RWStructuredBuffer<uint4> UOut4 : register(u10);
+RWStructuredBuffer<uint4> UOut5 : register(u11);
+
+[numthreads(4,1,1)]
+void main(uint3 tid : SV_GroupThreadID)
+{
+    int4 v = In[tid.x];
+
+    int s1 = WaveActiveMax( v.x );
+    int s2 = tid.x < 3 ? WaveActiveMax( v.x ) : 0;
+    int s3 = tid.x < 2 ? WaveActiveMax( v.x ) : 0;
+    int s4 = tid.x < 1 ? WaveActiveMax( v.x ) : 0;
+
+    int2 v2_1 = WaveActiveMax( v.xy );
+    int2 v2_2 = tid.x < 3 ? WaveActiveMax( v.xy ) : int2(0,0);
+    int2 v2_3 = tid.x < 2 ? WaveActiveMax( v.xy ) : int2(0,0);
+    int2 v2_4 = tid.x < 1 ? WaveActiveMax( v.xy ) : int2(0,0);
+
+    int3 v3_1 = WaveActiveMax( v.xyz );
+    int3 v3_2 = tid.x < 3 ? WaveActiveMax( v.xyz ) : int3(0,0,0);
+    int3 v3_3 = tid.x < 2 ? WaveActiveMax( v.xyz ) : int3(0,0,0);
+    int3 v3_4 = tid.x < 1 ? WaveActiveMax( v.xyz ) : int3(0,0,0);
+
+    int4 v4_1 = WaveActiveMax( v );
+    int4 v4_2 = tid.x < 3 ? WaveActiveMax( v ) : int4(0,0,0,0);
+    int4 v4_3 = tid.x < 2 ? WaveActiveMax( v ) : int4(0,0,0,0);
+    int4 v4_4 = tid.x < 1 ? WaveActiveMax( v ) : int4(0,0,0,0);
+
+    int scalars[4] = { s4, s3, s2, s1 };
+    int2 vec2s [4] = { v2_4, v2_3, v2_2, v2_1 };
+    int3 vec3s [4] = { v3_4, v3_3, v3_2, v3_1 };
+    int4 vec4s [4] = { v4_4, v4_3, v4_2, v4_1 };    
+
+    Out1[tid.x].x   = scalars[tid.x];
+    Out2[tid.x].xy  = vec2s[tid.x];
+    Out3[tid.x].xyz = vec3s[tid.x];
+    Out4[tid.x]     = vec4s[tid.x];
+
+    // constant folding case
+    Out5[0] = WaveActiveMax(int4(1,2,3,4));
+
+    // UINT case
+
+    uint4 uv = UIn[tid.x];
+
+    uint us1 = WaveActiveMax( uv.x );
+    uint us2 = tid.x < 3 ? WaveActiveMax( uv.x ) : 0;
+    uint us3 = tid.x < 2 ? WaveActiveMax( uv.x ) : 0;
+    uint us4 = tid.x < 1 ? WaveActiveMax( uv.x ) : 0;
+
+    uint2 uv2_1 = WaveActiveMax( uv.xy );
+    uint2 uv2_2 = tid.x < 3 ? WaveActiveMax( uv.xy ) : uint2(0,0);
+    uint2 uv2_3 = tid.x < 2 ? WaveActiveMax( uv.xy ) : uint2(0,0);
+    uint2 uv2_4 = tid.x < 1 ? WaveActiveMax( uv.xy ) : uint2(0,0);
+
+    uint3 uv3_1 = WaveActiveMax( uv.xyz );
+    uint3 uv3_2 = tid.x < 3 ? WaveActiveMax( uv.xyz ) : uint3(0,0,0);
+    uint3 uv3_3 = tid.x < 2 ? WaveActiveMax( uv.xyz ) : uint3(0,0,0);
+    uint3 uv3_4 = tid.x < 1 ? WaveActiveMax( uv.xyz ) : uint3(0,0,0);
+
+    uint4 uv4_1 = WaveActiveMax( uv );
+    uint4 uv4_2 = tid.x < 3 ? WaveActiveMax( uv ) : uint4(0,0,0,0);
+    uint4 uv4_3 = tid.x < 2 ? WaveActiveMax( uv ) : uint4(0,0,0,0);
+    uint4 uv4_4 = tid.x < 1 ? WaveActiveMax( uv ) : uint4(0,0,0,0);
+
+    uint uscalars[4] = { us4, us3, us2, us1 };
+    uint2 uvec2s [4] = { uv2_4, uv2_3, uv2_2, uv2_1 };
+    uint3 uvec3s [4] = { uv3_4, uv3_3, uv3_2, uv3_1 };
+    uint4 uvec4s [4] = { uv4_4, uv4_3, uv4_2, uv4_1 };    
+
+    UOut1[tid.x].x   = uscalars[tid.x];
+    UOut2[tid.x].xy  = uvec2s[tid.x];
+    UOut3[tid.x].xyz = uvec3s[tid.x];
+    UOut4[tid.x]     = uvec4s[tid.x];
+
+    // constant folding case
+    UOut5[0] = WaveActiveMax(uint4(1,2,3,4));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 16    
+    Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
+  - Name: Out1
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 64  
+  - Name: Out2
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: Out3
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: Out4
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: Out5
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 16
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0 ]
+  - Name: ExpectedOut2
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 10, 0, 0, 2, 20, 0, 0, 3, 30, 0, 0, 4, 40, 0, 0 ]
+  - Name: ExpectedOut3
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 10, 100, 0, 2, 20, 200, 0, 3, 30, 300, 0, 4, 40, 400, 0 ]
+  - Name: ExpectedOut4
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
+  - Name: ExpectedOut5
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 2, 3, 4 ]
+  - Name: UIn
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
+  - Name: UOut1
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 64  
+  - Name: UOut2
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: UOut3
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: UOut4
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: UOut5
+    Format: UInt32
+    Stride: 16
+    ZeroInitSize: 16
+  - Name: UExpectedOut1
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4, 0, 0, 0 ]
+  - Name: UExpectedOut2
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 10, 0, 0, 2, 20, 0, 0, 3, 30, 0, 0, 4, 40, 0, 0 ]
+  - Name: UExpectedOut3
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 10, 100, 0, 2, 20, 200, 0, 3, 30, 300, 0, 4, 40, 400, 0 ]
+  - Name: UExpectedOut4
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
+  - Name: UExpectedOut5
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 2, 3, 4 ]
+
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
+  - Result: UExpectedOut1
+    Rule: BufferExact
+    Actual: UOut1
+    Expected: UExpectedOut1
+  - Result: UExpectedOut2
+    Rule: BufferExact
+    Actual: UOut2
+    Expected: UExpectedOut2
+  - Result: UExpectedOut3
+    Rule: BufferExact
+    Actual: UOut3
+    Expected: UExpectedOut3
+  - Result: UExpectedOut4
+    Rule: BufferExact
+    Actual: UOut4
+    Expected: UExpectedOut4
+  - Result: UExpectedOut5
+    Rule: BufferExact
+    Actual: UOut5
+    Expected: UExpectedOut5
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: UIn
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: UOut1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: UOut2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: UOut3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
+    - Name: UOut4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+    - Name: UOut5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 11
+        Space: 0
+      VulkanBinding:
+        Binding: 11
+
+...
+#--- end
+
+# XFAIL: Clang
+
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o 
