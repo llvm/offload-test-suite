@@ -168,7 +168,8 @@ DescriptorSets:
 
 # XFAIL: Clang
 
-
+# Tracked by https://github.com/llvm/offload-test-suite/issues/393
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
