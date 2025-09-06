@@ -61,7 +61,7 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
+# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
 # XFAIL: Vulkan-Darwin
 
 # REQUIRES: Half

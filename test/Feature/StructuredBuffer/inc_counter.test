@@ -32,11 +32,11 @@ DescriptorSets:
 #--- end
 
 # Offload tests are missing support for counters on Vulcan
-# https://github.com/llvm/offload-test-suite/issues/303
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/303
 # XFAIL: Vulkan
 
 # Offload tests are missing support for counters on Metal
-# https://github.com/llvm/offload-test-suite/issues/304
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/304
 # XFAIL: Metal
 
 # RUN: split-file %s %t

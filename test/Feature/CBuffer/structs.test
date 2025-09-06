@@ -98,7 +98,7 @@ DescriptorSets:
 # UNSUPPORTED: Vulkan
 
 +# Clang trips on 2-element vectors in structs:
-+# https://github.com/llvm/llvm-project/issues/123968
++# Bug https://github.com/llvm/llvm-project/issues/123968
 +# XFAIL: Clang
 
 # RUN: split-file %s %t

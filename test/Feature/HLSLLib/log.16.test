@@ -11,8 +11,8 @@ void main() {
   Out[1] = Tmp;
   half4 Tmp2 = {log(In[2].xy), log(In[2].zw)};
   Out[2] = Tmp2;
+  Out[3] = log(half4(5, 10, 4.5, 0.25));
 }
-
 
 //--- pipeline.yaml
 
@@ -25,17 +25,17 @@ Buffers:
   - Name: In
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x8001, 0x8000, 0x0000, 0x0001, 0x7c00, 0xbc00, 0x4170, 0x4764, 0x5640, 0x7e00,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, -1, 2.718281828, 7.389056, 100,
+    Data: [ 0x4500, 0x4900, 0x4480, 0x3400, 0x4100, 0x4d20, 0x5240, 0x3c00, 0x4170, 0x4764, 0x5640, 0x7e00,]
+    # 5, 10, 4.5, 0x3400, 2.5, 20.5, 50, 1, 2.718281828, 7.389056, 100,
   - Name: Out
     Format: Float16
     Stride: 8
-    ZeroInitSize: 24
+    ZeroInitSize: 32
   - Name: ExpectedOut # The result we expect
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0x7e00, 0xfc00, 0xfc00, 0xfc00, 0xfc00, 0x7c00, 0x7e00, 0x3c00, 0x4000, 0x449b, 0x7e00,]
-    #  NaN, NaN, -Inf, -Inf, -Inf, -Inf, Inf, NaN, 1.0, 1.99999998, 4.6051701,
+    Data: [ 0x3E6F, 0x409B, 0x3E05, 0xBD8B, 0x3B54, 0x420A, 0x43D2, 0x0, 0x3C00, 0x4000, 0x449B, 0x7FFF, 0x3E70, 0x409B, 0x3E04, 0xBD8C ]
+    # 1.6083984, 2.3027344, 1.5048828, -1.3857422, 0.9160156, 3.0195313, 3.9101563, 0, 1.0, 2, 4.6054688, nan, 1.609375, 2.3027344, 1.5039063, -1.3867188
 Results:
   - Result: Test1
     Rule: BufferFloatULP
@@ -61,12 +61,10 @@ DescriptorSets:
 ...
 #--- end
 
-# 16bit-hlk-issue-7564
-# no hlk tests for 16 bit log so unsure of correct answers for some
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7564
-# XFAIL: DXC
-# XFAIL: Clang
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7702
+# XFAIL: DXC-Vulkan
+
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -Gis -HV 202x -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -48,6 +48,14 @@ tools = [
 ]
 
 
+def getHighestShaderModel(features):
+    if features == None:
+        return 6, 0
+    sm = features.get("HighestShaderModel", 6.0)
+    major, minor = str(sm).split(".")
+    return int(major), int(minor)
+
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
@@ -71,8 +79,15 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("NV-Reconvergence-Issue-320")
     if "AMD" in device["Description"]:
         config.available_features.add("%s-AMD" % API)
+    if "Qualcomm" in device["Description"]:
+        config.available_features.add("%s-QC" % API)
 
     config.available_features.add("%s-%s" % (compiler, API))
+
+    HighestShaderModel = getHighestShaderModel(device["Features"])
+    if (6, 6) <= HighestShaderModel:
+        # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
+        config.available_features.add("DerivativesInCompute")
 
     if device["API"] == "DirectX":
         if device["Features"].get("Native16BitShaderOpsSupported", False):
@@ -87,7 +102,6 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
-        config.available_features.add("Int64")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
@@ -104,12 +118,17 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add(Extension["ExtensionName"])
 
 
+offloader_args = []
 if config.offloadtest_test_warp:
-    tools.append(
-        ToolSubst("%offloader", command=FindTool("offloader"), extra_args=["-warp"])
-    )
-else:
-    tools.append(ToolSubst("%offloader", FindTool("offloader")))
+    offloader_args.append("-warp")
+if config.offloadtest_enable_debug:
+    offloader_args.append("-debug-layer")
+if config.offloadtest_enable_validation:
+    offloader_args.append("-validation-layer")
+
+tools.append(
+    ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
+)
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
@@ -176,7 +195,7 @@ for device in devices["Devices"]:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
         target_device = device
-    # Bail from th eloop if we found a device that matches what we're looking for.
+    # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
         break
 

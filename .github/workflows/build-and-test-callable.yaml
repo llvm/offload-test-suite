@@ -135,11 +135,16 @@ jobs:
           ref: main
           path: golden-images
           fetch-depth: 1
-      - name: Setup Windows
-        if: inputs.OS == 'windows'
+      - name: Setup Windows x64
+        if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@main
         with:
           arch: amd64
+      - name: Setup Windows
+        if: inputs.OS == 'windows' && runner.arch == 'ARM64'
+        uses: llvm/actions/setup-windows@main
+        with:
+          arch: arm64
       - name: Detect Clang
         id: Test-Clang
         shell: bash

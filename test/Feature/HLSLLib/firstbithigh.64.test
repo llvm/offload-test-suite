@@ -82,22 +82,17 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# Fails with 'gpu-exec: error: Failed to materializeAll.:'
+# Bug: Fails with 'gpu-exec: error: Failed to materializeAll.:'
 # XFAIL: Metal
 
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
-# https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5
+# https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbithigh.64bit.hlsl
 # UNSUPPORTED: DXC-Vulkan
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7502
-# WARP firstbithigh(s64 -1) should return -1 but returns 32 on older versions of
-# Warp. This was fixed for x86 in 1.0.14, but not for arm64.
-# XFAIL: DirectX-WARP
-
-# https://github.com/llvm/llvm-project/issues/143171
+# Bug https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang-Vulkan
 
-# https://github.com/llvm/llvm-project/issues/145752
+# Bug https://github.com/llvm/llvm-project/issues/145752
 # XFAIL: Clang-DirectX
 
 # RUN: split-file %s %t

@@ -355,8 +355,8 @@ DescriptorSets:
 # XFAIL: Clang-Vulkan
 
 # CBuffer bindings seem to be broken under metal
-# https://github.com/llvm/offload-test-suite/issues/55
-# UNSUPPORTED: Metal
+# Bug https://github.com/llvm/offload-test-suite/issues/55
+# XFAIL: Metal
 
 # No idea what is going on here, but the results are _way_ off.
 # XFAIL: Vulkan-Darwin

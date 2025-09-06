@@ -81,7 +81,7 @@ DescriptorSets:
 # runtime computed values for case 3 (clang will likely do the same once it
 # learns to constant evaluate `dot`).
 
-# https://github.com/llvm/llvm-project/issues/149561
+# Bug https://github.com/llvm/llvm-project/issues/149561
 # XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # REQUIRES: Half
