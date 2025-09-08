@@ -1,0 +1,179 @@
+#--- source.hlsl
+StructuredBuffer<float4> In  : register(t0);
+RWStructuredBuffer<float4> Out1 : register(u1); // test scalar
+RWStructuredBuffer<float4> Out2 : register(u2); // test float2
+RWStructuredBuffer<float4> Out3 : register(u3); // test float3
+RWStructuredBuffer<float4> Out4 : register(u4); // test float4
+RWStructuredBuffer<float4> Out5 : register(u5); // constant folding
+
+[numthreads(4,1,1)]
+void main(uint3 tid : SV_GroupThreadID)
+{
+    float4 v = In[tid.x];
+
+    // Mask per "active lane set": only >= N lanes contribute
+    float s1 = tid.x >= 3 ? WaveReadLaneFirst( v.x ) : 0;
+    float s2 = tid.x >= 2 ? WaveReadLaneFirst( v.x ) : 0;
+    float s3 = tid.x >= 1 ? WaveReadLaneFirst( v.x ) : 0;
+    float s4 = tid.x >= 0 ? WaveReadLaneFirst( v.x ) : 0;
+
+    float2 v2_1 = tid.x >= 3 ? WaveReadLaneFirst( v.xy ) : float2(0,0);
+    float2 v2_2 = tid.x >= 2 ? WaveReadLaneFirst( v.xy ) : float2(0,0);
+    float2 v2_3 = tid.x >= 1 ? WaveReadLaneFirst( v.xy ) : float2(0,0);
+    float2 v2_4 = tid.x >= 0 ? WaveReadLaneFirst( v.xy ) : float2(0,0);
+
+    float3 v3_1 = tid.x >= 3 ? WaveReadLaneFirst( v.xyz ) : float3(0,0,0);
+    float3 v3_2 = tid.x >= 2 ? WaveReadLaneFirst( v.xyz ) : float3(0,0,0);
+    float3 v3_3 = tid.x >= 1 ? WaveReadLaneFirst( v.xyz ) : float3(0,0,0);
+    float3 v3_4 = tid.x >= 0 ? WaveReadLaneFirst( v.xyz ) : float3(0,0,0);
+
+    float4 v4_1 = tid.x >= 3 ? WaveReadLaneFirst( v ) : float4(0,0,0,0);
+    float4 v4_2 = tid.x >= 2 ? WaveReadLaneFirst( v ) : float4(0,0,0,0);
+    float4 v4_3 = tid.x >= 1 ? WaveReadLaneFirst( v ) : float4(0,0,0,0);
+    float4 v4_4 = tid.x >= 0 ? WaveReadLaneFirst( v ) : float4(0,0,0,0);
+
+    float scalars[4] = { s4, s3, s2, s1 };
+    float2 vec2s [4] = { v2_4, v2_3, v2_2, v2_1 };
+    float3 vec3s [4] = { v3_4, v3_3, v3_2, v3_1 };
+    float4 vec4s [4] = { v4_4, v4_3, v4_2, v4_1 };  
+
+    Out1[tid.x].x   = scalars[tid.x];
+    Out2[tid.x].xy  = vec2s[tid.x];
+    Out3[tid.x].xyz = vec3s[tid.x];
+    Out4[tid.x]     = vec4s[tid.x];
+
+    // constant folding case
+    Out5[0] = WaveReadLaneFirst(float4(1,2,3,4));    
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16    
+    Data: [ 1.0, 10.0, 100.0, 1000.0, 2.0, 20.0, 200.0, 2000.0, 3.0, 30.0, 300.0, 3000.0, 4.0, 40.0, 400.0, 4000.0 ]
+  - Name: Out1
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64  
+  - Name: Out2
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: Out3
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: Out4
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: Out5
+    Format: Float32
+    Stride: 16
+    ZeroInitSize: 16
+  - Name: ExpectedOut1
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0, 0.0, 0.0, 0.0 ]
+  - Name: ExpectedOut2
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 10.0, 0.0, 0.0, 2.0, 20.0, 0.0, 0.0, 3.0, 30.0, 0.0, 0.0, 4.0, 40.0, 0.0, 0.0 ]
+  - Name: ExpectedOut3
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 10.0, 100.0, 0.0, 2.0, 20.0, 200.0, 0.0, 3.0, 30.0, 300.0, 0.0, 4.0, 40.0, 400.0, 0.0 ]
+  - Name: ExpectedOut4
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 10.0, 100.0, 1000.0, 2.0, 20.0, 200.0, 2000.0, 3.0, 30.0, 300.0, 3000.0, 4.0, 40.0, 400.0, 4000.0 ]
+  - Name: ExpectedOut5
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 2, 3, 4 ] 
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
+  
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+
+# Tracked by https://github.com/llvm/offload-test-suite/issues/393
+# XFAIL: Metal
+
+# Bug https://github.com/llvm/llvm-project/issues/156775
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o 
