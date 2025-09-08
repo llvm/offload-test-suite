@@ -319,15 +319,13 @@ DescriptorSets:
 ...
 #--- end
 
+# REQUIRES: Int64
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
-
-# Bug https://github.com/llvm/offload-test-suite/issues/433
-# XFAIL: DirectX-WARP
 
 
 # RUN: split-file %s %t
