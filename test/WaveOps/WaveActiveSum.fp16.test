@@ -171,7 +171,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
-# Tracked by https://github.com/llvm/offload-test-suite/issues/393
+# Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
 # REQUIRES: Half

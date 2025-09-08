@@ -325,7 +325,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
-# Tracked by this issue: https://github.com/llvm/offload-test-suite/issues/355
+# Bug https://github.com/llvm/offload-test-suite/issues/355
 # XFAIL: Metal
 
 # RUN: split-file %s %t
