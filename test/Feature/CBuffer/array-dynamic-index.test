@@ -1,0 +1,86 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> VOut : register(u1);
+RWStructuredBuffer<uint4> WOut : register(u2);
+cbuffer Constants : register(b0) {
+  uint v[4];
+  uint4 w[4];
+}
+[numthreads(4, 1, 1)]
+void main(uint GI : SV_GroupIndex) {
+  VOut[GI] = v[GI];
+  WOut[GI] = w[GI];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [
+      0x7, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x6, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x5, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x4, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x0, 0x1, 0x2, 0x3,
+      0x4, 0x5, 0x6, 0x7,
+      0x8, 0x9, 0xa, 0xb,
+      0xc, 0xd, 0xe, 0xf,
+    ]
+  - Name: VOut
+    Format: UInt32
+    FillSize: 16
+  - Name: WOut
+    Format: UInt32
+    Channels: 4
+    FillSize: 64
+  - Name: ExpectedVOut
+    Format: UInt32
+    Data: [ 7, 6, 5, 4 ]
+  - Name: ExpectedWOut
+    Format: UInt32
+    Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, ]
+Results:
+  - Result: CheckV
+    Rule: BufferExact
+    Actual: VOut
+    Expected: ExpectedVOut
+  - Result: CheckW
+    Rule: BufferExact
+    Actual: WOut
+    Expected: ExpectedWOut
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: VOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: WOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/144573
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
