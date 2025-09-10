@@ -5,8 +5,8 @@ struct S {
 };
 
 StructuredBuffer<bool> Cond : register(t0);
-StructuredBuffer<S> TrueVal : register(u1);
-StructuredBuffer<S> FalseVal : register(u2);
+StructuredBuffer<S> TrueVal : register(t1);
+StructuredBuffer<S> FalseVal : register(t2);
 
 RWStructuredBuffer<S> Out : register(u3);
 
