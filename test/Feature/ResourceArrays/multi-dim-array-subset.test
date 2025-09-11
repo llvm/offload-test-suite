@@ -7,7 +7,7 @@ RWStructuredBuffer<float> In[4][2] : register(u0);
 RWStructuredBuffer<float> Out : register(u0, space1);
 
 float foo(RWStructuredBuffer<float> A[2], uint Index) {
-  return A[0][NonUniformResourceIndex(Index)] + A[1][NonUniformResourceIndex(Index)];
+  return A[0][Index] + A[1][Index];
 }
 
 [numthreads(4,1,1)]
@@ -68,6 +68,10 @@ DescriptorSets:
 # This test requires NonUniformResourceIndex.
 # Tracked by https://github.com/llvm/llvm-project/issues/156713
 # XFAIL: Clang
+
+# NURI not correctly propagated by DXC.
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7756
+# XFAIL: DirectX-AMD && DXC
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
