@@ -17,7 +17,7 @@ void main() {
   asuint(In0[2].zw, Tmp0.zw, Tmp1.zw);
   Lows[2] = Tmp0;
   Highs[2] = Tmp1;
-  asuint(double4(10, 0, 5.57, 111.111), Lows[3], Highs[3]);
+  asuint(double4(10, 0, 11111111.0, 2222222222.0), Lows[3], Highs[3]);
 }
 //--- pipeline.yaml
 
@@ -38,7 +38,7 @@ Buffers:
   - Name: ExpectedLows
     Format: UInt32
     Stride: 16
-    Data: [ 0, 0, 343597384, 2680059593, 0, 2576980378, 2576980378, 1717986918, 858993459, 2696277389, 3944497965, 2680059593, 0, 0, 536870912, 2684354560 ]
+    Data: [ 0x0, 0x0, 0x147ae148, 0x9fbe76c9, 0x0, 0x9999999a, 0x9999999a, 0x66666666, 0x33333333, 0xa0b5ed8d, 0xeb1c432d, 0x9fbe76c9, 0x0, 0x0, 0xe0000000, 0x71c00000 ]
   - Name: Highs
     Format: UInt32
     Stride: 16
@@ -46,7 +46,7 @@ Buffers:
   - Name: ExpectedHighs
     Format: UInt32
     Stride: 16
-    Data: [ 1076101120, 0, 1075201966, 1079756570, 1077182464, 1077844377, 1078221209, 1078552166, 3226366771, 3199256311, 3207214818, 3230385946, 1076101120, 0, 1075201966, 1079756570 ]
+    Data: [ 0x40240000, 0x0, 0x401647ae, 0x405bc71a, 0x40348000, 0x403e9999, 0x40445999, 0x40496666, 0xc04e7333, 0xbeb0c6f7, 0xbf2a36e2, 0xc08bc71a, 0x40240000, 0x0, 0x41653158, 0x41e08e8d ]
 Results:
   - Result: Test0
     Rule: BufferExact
