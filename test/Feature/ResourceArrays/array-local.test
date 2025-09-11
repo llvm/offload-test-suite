@@ -82,7 +82,7 @@ DescriptorSets:
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
 
-# https://github.com/llvm/llvm-project/issues/154669
+# Bug https://github.com/llvm/llvm-project/issues/154669
 # XFAIL: Clang-Vulkan
 
 # DXC-Vulkan support for arrays of RWStructuredBuffer are pretty broken.

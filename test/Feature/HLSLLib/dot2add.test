@@ -86,13 +86,13 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# https://github.com/llvm/offload-test-suite/issues/341
+# Bug https://github.com/llvm/offload-test-suite/issues/341
 # XFAIL: Metal
 
-# https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan
+# Bug https://github.com/llvm/llvm-project/issues/149561
+# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7695
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7695
 # XFAIL: DXC-Vulkan
 
 # REQUIRES: Half

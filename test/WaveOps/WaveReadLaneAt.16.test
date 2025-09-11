@@ -135,8 +135,11 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
-# Tracked by https://github.com/llvm/offload-test-suite/issues/351
+# Bug https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
+
+# Bug tracked by https://github.com/llvm/offload-test-suite/issues/396
+# XFAIL: DirectX-WARP
 
 # REQUIRES: Half, Int16
 

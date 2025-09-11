@@ -5,19 +5,22 @@ Experimental Runtime test suite for HLSL
 
 | Testing Machine | DXC | Clang |
 |-----------------|-----|-------|
-| Windows DirectX12 AMD GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-d3d12.yaml/badge.svg) |
+| **Tier 1 Targets** |
 | Windows DirectX12 Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 NVIDIA GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 Qualcomm GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-d3d12.yaml/badge.svg) |
 | Windows DirectX12 Warp (x64 LKG) | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-warp-d3d12.yaml/badge.svg) |
 | Windows DirectX12 Warp (arm64 LKG) | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-warp-d3d12.yaml/badge.svg) |
-| Windows DirectX12 Warp (1.0.15-preview) | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-warp-preview-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-warp-preview-d3d12.yaml/badge.svg) |
-| Windows Vulkan AMD GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-vk.yaml/badge.svg) |
 | Windows Vulkan Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-vk.yaml/badge.svg) |
+| **Tier 2 Targets** |
+| macOS Apple M1 | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
+| **Experimental Targets** |
+| Windows DirectX12 AMD GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-d3d12.yaml/badge.svg) |
+| Windows DirectX12 NVIDIA GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-d3d12.yaml/badge.svg) |
+| Windows DirectX12 Qualcomm GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-d3d12.yaml/badge.svg) |
+| Windows Vulkan AMD GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-vk.yaml/badge.svg) |
 | Windows Vulkan NVIDIA GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-vk.yaml/badge.svg) |
 | Windows Vulkan Qualcomm GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-vk.yaml/badge.svg) |
-| macOS Apple M1 | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
 
+See the [Continuous Integration](docs/CI.md) documentation for the description of support tiers and builder hardware.
 
 # Prerequisites
 
@@ -51,6 +54,16 @@ compiler to use by passing:
 The offload test suite's code is clang-tidy clean for a limited ruleset.
 If you have clang-tidy installed locally you can enable clang-tidy by adding `-DOFFLOADTEST_USE_CLANG_TIDY=On` to your CMake invocation.
 You can also add `-DOFFLOADTEST_CLANG_TIDY_APPLY_FIX=On` to enable automatically applying the clang-tidy fix-its for any warnings that have automated fixes.
+
+# Failing tests
+
+Tests which are failing can be prevented from running using `XFAIL` and `UNSUPPORTED`. When `XFAIL`ing a test make sure to add a comment above
+linking the appropriate issue and whether the failure is due to a bug or an unimplemented feature.
+
+```
+# Bug/Unimplemented <link to issue>
+# XFAIL: Clang-Vulkan
+```
 
 # YAML Pipeline Format
 

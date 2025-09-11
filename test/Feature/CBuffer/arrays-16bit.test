@@ -59,7 +59,7 @@ DescriptorSets:
 # DXC's vulkan support does not layout cbuffers compatibly with DXIL
 # UNSUPPORTED: Vulkan
 
-# https://github.com/llvm/llvm-project/issues/138996
+# Bug https://github.com/llvm/llvm-project/issues/138996
 # XFAIL: Clang
 
 # RUN: split-file %s %t

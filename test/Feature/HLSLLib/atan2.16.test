@@ -69,9 +69,6 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7691
-# XFAIL: DXC-Vulkan
-
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

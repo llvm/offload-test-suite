@@ -62,7 +62,7 @@ DescriptorSets:
 # problem.
 # This test fails randomly but inconsistently without validation enabled. With
 # validation enabled it fails consistently every time.
-# Tracking issue: https://github.com/llvm/offload-test-suite/issues/226
+# Bug https://github.com/llvm/offload-test-suite/issues/226
 # XFAIL: Intel-Memory-Coherence-Issue-226 && !Clang
 
 # RUN: split-file %s %t

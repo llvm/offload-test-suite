@@ -57,10 +57,10 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7680
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7680
 # XFAIL: DXC-Vulkan
 
-# https://github.com/llvm/llvm-project/issues/152049
+# Bug https://github.com/llvm/llvm-project/issues/152049
 # XFAIL: Clang-Vulkan
 
 # REQUIRES: Int64

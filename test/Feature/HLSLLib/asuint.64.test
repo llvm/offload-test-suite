@@ -81,10 +81,10 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7666
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7666
 # XFAIL: DXC-Vulkan
 
-# https://github.com/llvm/llvm-project/issues/153091
+# Bug https://github.com/llvm/llvm-project/issues/153091
 # XFAIL: Clang-Vulkan
 
 # REQUIRES: Double

@@ -186,7 +186,7 @@ DescriptorSets:
 #--- end
 # REQUIRES: Half
 
-# https://github.com/KhronosGroup/SPIRV-Cross/issues/2524
+# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2524
 # XFAIL: Vulkan-Darwin
 
 # RUN: split-file %s %t
