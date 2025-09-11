@@ -207,9 +207,6 @@ DescriptorSets:
         Binding: 11
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/140095
-# XFAIL: Clang-Vulkan
-
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7706
 # XFAIL: DXC-Vulkan
 
