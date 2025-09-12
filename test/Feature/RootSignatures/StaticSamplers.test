@@ -152,22 +152,22 @@ DescriptorSets:
 # OBJ-NEXT:     Parameters:
 
 ## Descriptor Table
-# OBJ:          - ParameterType:   0
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ:          - ParameterType:   DescriptorTable
+# OBJ-NEXT:       ShaderVisibility: All
 # OBJ-NEXT:       Table:
 # OBJ-NEXT:       NumRanges:       2
 # OBJ-NEXT:       RangesOffset:    44
 # OBJ-NEXT:       Ranges:
 
 ## SRV(t0)
-# OBJ:            - RangeType:       0
+# OBJ:            - RangeType:       SRV
 # OBJ-NEXT:         NumDescriptors:  1
 # OBJ-NEXT:         BaseShaderRegister: 0
 # OBJ-NEXT:         RegisterSpace:   0
 # OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u1, numDescriptors = 2)
-# OBJ-NEXT:       - RangeType:       1
+# OBJ-NEXT:       - RangeType:       UAV
 # OBJ-NEXT:         NumDescriptors:  2
 # OBJ-NEXT:         BaseShaderRegister: 1
 # OBJ-NEXT:         RegisterSpace:   0
@@ -177,19 +177,19 @@ DescriptorSets:
 
 ## StaticSampler(s0)
 ## Ensures the defaults are set as expected
-# OBJ-NEXT:     - Filter:          85
-# OBJ-NEXT:       AddressU:        1
-# OBJ-NEXT:       AddressV:        1
-# OBJ-NEXT:       AddressW:        1
+# OBJ-NEXT:     - Filter:          Anisotropic
+# OBJ-NEXT:       AddressU:        Wrap
+# OBJ-NEXT:       AddressV:        Wrap
+# OBJ-NEXT:       AddressW:        Wrap
 # OBJ-NEXT:       MipLODBias:      0
 # OBJ-NEXT:       MaxAnisotropy:   16
-# OBJ-NEXT:       ComparisonFunc:  4
-# OBJ-NEXT:       BorderColor:     2
+# OBJ-NEXT:       ComparisonFunc:  LessEqual
+# OBJ-NEXT:       BorderColor:     OpaqueWhite
 # OBJ-NEXT:       MinLOD:          0
 # OBJ-NEXT:       MaxLOD:          3.40282e+38
 # OBJ-NEXT:       ShaderRegister:  0
 # OBJ-NEXT:       RegisterSpace:   0
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       ShaderVisibility: All
 
 ## StaticSampler(s1,
 ##   mipLODBias = -15.99,
@@ -199,16 +199,16 @@ DescriptorSets:
 ##   filter = FILTER_MAXIMUM_MIN_MAG_MIP_POINT
 ## )
 ## Ensures the specified values are set as expected
-# OBJ:          - Filter:          384
-# OBJ-NEXT:       AddressU:        1
-# OBJ-NEXT:       AddressV:        2
-# OBJ-NEXT:       AddressW:        1
+# OBJ:          - Filter:          MaximumMinMagMipPoint
+# OBJ-NEXT:       AddressU:        Wrap
+# OBJ-NEXT:       AddressV:        Mirror
+# OBJ-NEXT:       AddressW:        Wrap
 # OBJ-NEXT:       MipLODBias:      -15.99
 # OBJ-NEXT:       MaxAnisotropy:   16
-# OBJ-NEXT:       ComparisonFunc:  4
-# OBJ-NEXT:       BorderColor:     2
+# OBJ-NEXT:       ComparisonFunc:  LessEqual
+# OBJ-NEXT:       BorderColor:     OpaqueWhite
 # OBJ-NEXT:       MinLOD:          32
 # OBJ-NEXT:       MaxLOD:          32
 # OBJ-NEXT:       ShaderRegister:  1
 # OBJ-NEXT:       RegisterSpace:   0
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:       ShaderVisibility: All

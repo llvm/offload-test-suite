@@ -115,15 +115,15 @@ DescriptorSets:
 # OBJ-NEXT: Parameters:
 
 ## Descriptor Table
-# OBJ-NEXT:   - ParameterType:   0
-# OBJ-NEXT:     ShaderVisibility: 0
+# OBJ-NEXT:   - ParameterType:   DescriptorTable
+# OBJ-NEXT:     ShaderVisibility: All
 # OBJ-NEXT:     Table:
 # OBJ-NEXT:     NumRanges:       4
 # OBJ-NEXT:     RangesOffset:    44
 # OBJ-NEXT:     Ranges:
 
 ## SRV(t0, flags = DATA_STATIC)
-# OBJ-NEXT:     - RangeType:       0
+# OBJ-NEXT:     - RangeType:       SRV
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 0
 # OBJ-NEXT:       RegisterSpace:   0
@@ -132,7 +132,7 @@ DescriptorSets:
 # OBJ-NEXT:       DATA_STATIC:     true
 
 ## SRV(t1, flags = DATA_STATIC_WHILE_SET_AT_EXECUTE)
-# OBJ-NEXT:     - RangeType:       0
+# OBJ-NEXT:     - RangeType:       SRV
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 1
 # OBJ-NEXT:       RegisterSpace:   0
@@ -141,7 +141,7 @@ DescriptorSets:
 # OBJ-NEXT:       DATA_STATIC_WHILE_SET_AT_EXECUTE: true
 
 ## UAV(u1, flags = DESCRIPTORS_VOLATILE | DATA_VOLATILE)
-# OBJ-NEXT:     - RangeType:       1
+# OBJ-NEXT:     - RangeType:       UAV
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 1
 # OBJ-NEXT:       RegisterSpace:   0
@@ -151,7 +151,7 @@ DescriptorSets:
 # OBJ-NEXT:       DATA_VOLATILE:   true
 
 ## UAV(u2, flags = 0)
-# OBJ-NEXT:     - RangeType:       1
+# OBJ-NEXT:     - RangeType:       UAV
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 2
 # OBJ-NEXT:       RegisterSpace:   0
