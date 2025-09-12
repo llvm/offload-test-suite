@@ -105,38 +105,38 @@ DescriptorSets:
 # OBJ-NEXT: Parameters:
 
 ## RootConstants(num32BitConstants = 4, b0)
-# OBJ-NEXT:   - ParameterType:   1
-# OBJ-NEXT:     ShaderVisibility: 0
+# OBJ-NEXT:   - ParameterType:   Constants32Bit
+# OBJ-NEXT:     ShaderVisibility: All
 # OBJ-NEXT:     Constants:
 # OBJ-NEXT:     Num32BitValues:  4
 # OBJ-NEXT:     RegisterSpace:   0
 # OBJ-NEXT:     ShaderRegister:  0
 
 ## DescriptorTable
-# OBJ:        - ParameterType:   0
-# OBJ-NEXT:     ShaderVisibility: 0
+# OBJ:        - ParameterType:   DescriptorTable
+# OBJ-NEXT:     ShaderVisibility: All
 # OBJ-NEXT:     Table:
 # OBJ-NEXT:     NumRanges:       2
 # OBJ-NEXT:     RangesOffset:    80
 # OBJ-NEXT:     Ranges:
 
 ## SRV(t0)
-# OBJ-NEXT:     - RangeType:       0
+# OBJ-NEXT:     - RangeType:       SRV
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 0
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u1)
-# OBJ:          - RangeType:       1
+# OBJ:          - RangeType:       UAV
 # OBJ-NEXT:       NumDescriptors:  1
 # OBJ-NEXT:       BaseShaderRegister: 1
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       OffsetInDescriptorsFromTableStart: 4294967295
 
 ## UAV(u2)
-# OBJ:          - ParameterType:   4
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ:          - ParameterType:   UAV
+# OBJ-NEXT:       ShaderVisibility: All
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       ShaderRegister:  2

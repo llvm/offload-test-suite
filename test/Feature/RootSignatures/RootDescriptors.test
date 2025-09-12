@@ -75,18 +75,18 @@ DescriptorSets: []
 # OBJ-NEXT:     NumStaticSamplers: 0
 # OBJ-NEXT:     StaticSamplersOffset: 96
 # OBJ-NEXT:     Parameters:
-# OBJ-NEXT:     - ParameterType:   2
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ-NEXT:     - ParameterType: CBV
+# OBJ-NEXT:       ShaderVisibility: All
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       ShaderRegister:  2
-# OBJ:          - ParameterType:   3
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ:          - ParameterType:   SRV
+# OBJ-NEXT:       ShaderVisibility: All
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   0
 # OBJ-NEXT:       ShaderRegister:  2
-# OBJ:          - ParameterType:   4
-# OBJ-NEXT:       ShaderVisibility: 0
+# OBJ:          - ParameterType:   UAV
+# OBJ-NEXT:       ShaderVisibility: All
 # OBJ-NEXT:       Descriptor:
 # OBJ-NEXT:       RegisterSpace:   4
 # OBJ-NEXT:       ShaderRegister:  1
