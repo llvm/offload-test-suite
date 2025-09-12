@@ -3,16 +3,16 @@
 // This test verified handling of subsets of multi-dimensional resource
 // arrays used in a function argument.
 
-RWBuffer<float> In[4][2] : register(u0);
-RWBuffer<float> Out : register(u0, space1);
+RWStructuredBuffer<float> In[4][2] : register(u0);
+RWStructuredBuffer<float> Out : register(u0, space1);
 
-float foo(RWBuffer<float> A[2], uint Index) {
+float foo(RWStructuredBuffer<float> A[2], uint Index) {
   return A[0][Index] + A[1][Index];
 }
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  Out[GI] = foo(In[GI], GI);
+  Out[GI] = foo(In[NonUniformResourceIndex(GI)], GI);
 }
 
 //--- pipeline.yaml
@@ -45,27 +45,33 @@ Buffers:
 
 Results:
   - Result: BufOut
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.00001
+    Rule: BufferFloatULP
+    ULPT: 1     # Float addition should be within 1 ULP on all hardware.
     Actual: BufOut
     Expected: ExpectedOut
 
 DescriptorSets:
   - Resources:
     - Name: BufIn
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
     - Name: BufOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 1
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# This test requires NonUniformResourceIndex.
+# Tracked by https://github.com/llvm/llvm-project/issues/156713
+# XFAIL: Clang
+
+# NURI not correctly propagated by DXC.
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7756
+# XFAIL: DirectX-AMD && DXC
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
@@ -74,6 +80,5 @@ DescriptorSets:
 # UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
