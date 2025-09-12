@@ -350,7 +350,7 @@ DescriptorSets:
 ...
 #--- end
 
-# CBuffer not implemented in Clang's Vulkan implementation.
+# Unimplemented: CBuffer not implemented in Clang's Vulkan implementation.
 # https://github.com/llvm/llvm-project/issues/124597
 # XFAIL: Clang-Vulkan
 
