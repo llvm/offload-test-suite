@@ -5,15 +5,11 @@ RWStructuredBuffer<uint> Out : register(u1);
 [numthreads(4, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID) {
   bool B1 = false;
-  switch (value[threadID.x]) {
-    case 0:
-    case 2: // threads 0, 1, 2; result for each false
-      Out[threadID.x] = WaveActiveAnyTrue(B1);
-      B1 = true;
-      break;
-    default: // thread 3; result is false
-      Out[threadID.x] = WaveActiveAnyTrue(B1);
-      break;
+  if (value[threadID.x] == 0 || value[threadID.x] == 2) {
+    Out[threadID.x] = WaveActiveAnyTrue(B1);
+    B1 = true;
+  } else {
+    Out[threadID.x] = WaveActiveAnyTrue(B1);
   }
   // result for all threads is true because B1 is true for threads 0-2
   Out[threadID.x + 4] = WaveActiveAnyTrue(B1);
