@@ -114,55 +114,9 @@ static std::string getMessageSeverityString(
 static VkBool32
 debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
               VkDebugUtilsMessageTypeFlagsEXT MessageType,
-              const VkDebugUtilsMessengerCallbackDataEXT *Data, void *) {
-  // Only interested in messages from the validation layers.
-  if (!(MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT))
-    return VK_FALSE;
+              const VkDebugUtilsMessengerCallbackDataEXT *Data, void *);
 
-  llvm::dbgs() << "Validation " << getMessageSeverityString(MessageSeverity);
-  llvm::dbgs() << ": [ " << Data->pMessageIdName << " ]\n";
-  llvm::dbgs() << Data->pMessage;
-
-  for (uint32_t I = 0; I < Data->objectCount; I++) {
-    llvm::dbgs() << '\n';
-    if (Data->pObjects[I].pObjectName) {
-      llvm::dbgs() << "[" << Data->pObjects[I].pObjectName << "]";
-    }
-  }
-  llvm::dbgs() << '\n';
-
-  // Return true to turn the validation error or warning into an error in the
-  // vulkan API. This should causes tests to fail.
-  const bool IsErrorOrWarning =
-      MessageSeverity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
-                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT);
-  if (IsErrorOrWarning)
-    return VK_TRUE;
-
-  // Continue to run even with VERBOSE and INFO messages.
-  return VK_FALSE;
-}
-
-static VkDebugUtilsMessengerEXT registerDebugUtilCallback(VkInstance Instance) {
-  VkDebugUtilsMessengerCreateInfoEXT CreateInfo = {};
-  CreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-  CreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
-                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-  CreateInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
-                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-  CreateInfo.pfnUserCallback = debugCallback;
-  CreateInfo.pUserData = nullptr; // Optional
-  auto Func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-      Instance, "vkCreateDebugUtilsMessengerEXT");
-  if (Func == nullptr)
-    return VK_NULL_HANDLE;
-
-  VkDebugUtilsMessengerEXT DebugMessenger;
-  Func(Instance, &CreateInfo, nullptr, &DebugMessenger);
-  return DebugMessenger;
-}
+static VkDebugUtilsMessengerEXT registerDebugUtilCallback(VkInstance Instance);
 
 namespace {
 
@@ -1170,50 +1124,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeProgram(Pipeline &P) override {
-    InvocationState State;
-    if (auto Err = createDevice(State))
-      return Err;
-    llvm::outs() << "Physical device created.\n";
-    if (auto Err = createCommandBuffer(State))
-      return Err;
-    llvm::outs() << "Copy command buffer created.\n";
-    if (auto Err = createBuffers(P, State))
-      return Err;
-    llvm::outs() << "Memory buffers created.\n";
-    if (auto Err = executeCommandBuffer(State))
-      return Err;
-    llvm::outs() << "Executed copy command buffer.\n";
-    if (auto Err = createCommandBuffer(State))
-      return Err;
-    llvm::outs() << "Execute command buffer created.\n";
-    if (auto Err = createDescriptorPool(P, State))
-      return Err;
-    llvm::outs() << "Descriptor pool created.\n";
-    if (auto Err = createDescriptorSets(P, State))
-      return Err;
-    llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createShaderModule(P.Shaders[0].Shader->getBuffer(), State))
-      return Err;
-    llvm::outs() << "Shader module created.\n";
-    if (auto Err = createPipeline(P, State))
-      return Err;
-    llvm::outs() << "Compute pipeline created.\n";
-    if (auto Err = createComputeCommands(P, State))
-      return Err;
-    llvm::outs() << "Compute commands created.\n";
-    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
-      return Err;
-    llvm::outs() << "Executed compute command buffer.\n";
-    if (auto Err = readBackData(P, State))
-      return Err;
-    llvm::outs() << "Compute pipeline created.\n";
-
-    if (auto Err = cleanup(State))
-      return Err;
-    llvm::outs() << "Cleanup complete.\n";
-    return llvm::Error::success();
-  }
+  llvm::Error executeProgram(Pipeline &P) override;
 };
 
 class VKContext {
@@ -1221,6 +1132,7 @@ private:
   VkInstance Instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
   llvm::SmallVector<std::shared_ptr<VKDevice>> Devices;
+  std::optional<llvm::Error> Err = std::nullopt;
 
   VKContext() = default;
   ~VKContext() { cleanup(); }
@@ -1230,6 +1142,22 @@ public:
   static VKContext &instance() {
     static VKContext Ctx;
     return Ctx;
+  }
+
+  void raiseError(llvm::Error E) {
+    if (Err.has_value())
+      Err = llvm::joinErrors(std::move(*Err), std::move(E));
+    else
+      Err = std::move(E);
+  }
+
+  bool hasError() const { return Err.has_value(); }
+
+  llvm::Error takeError() {
+    assert(Err.has_value());
+    llvm::Error E = std::move(*Err);
+    Err = std::nullopt;
+    return E;
   }
 
   void cleanup() {
@@ -1322,10 +1250,8 @@ public:
       return llvm::createStringError(std::errc::no_such_device,
                                      "Unknown Vulkan initialization error %d",
                                      Res);
-
-#ifndef NDEBUG
-    DebugMessenger = registerDebugUtilCallback(Instance);
-#endif
+    if (Config.EnableValidationLayer || Config.EnableDebugLayer)
+      DebugMessenger = registerDebugUtilCallback(Instance);
 
     DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
@@ -1352,3 +1278,136 @@ llvm::Error Device::initializeVKDevices(const DeviceConfig Config) {
 }
 
 void Device::cleanupVKDevices() { VKContext::instance().cleanup(); }
+
+class VKValidationError : public llvm::ErrorInfo<VKValidationError> {
+public:
+  static char ID;
+
+  VKValidationError(VkDebugUtilsMessageSeverityFlagBitsEXT Severity,
+                    const VkDebugUtilsMessengerCallbackDataEXT *Data)
+      : MessageSeverity(Severity) {
+    MessageID = Data->pMessageIdName;
+    Message = Data->pMessage;
+    for (uint32_t I = 0; I < Data->objectCount; I++)
+      if (Data->pObjects[I].pObjectName)
+        Objects.emplace_back(std::string(Data->pObjects[I].pObjectName));
+  }
+
+  void log(llvm::raw_ostream &OS) const override {
+    OS << "Validation " << getMessageSeverityString(MessageSeverity);
+    OS << ": [ " << MessageID << " ]\n";
+    OS << Message;
+
+    for (const auto &S : Objects)
+      OS << "\n[" << S << "]";
+    OS << '\n';
+  }
+
+  std::error_code convertToErrorCode() const override {
+    return llvm::inconvertibleErrorCode();
+  }
+
+private:
+  VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity;
+  std::string Message;
+  std::string MessageID;
+  std::vector<std::string> Objects;
+};
+
+char VKValidationError::ID = 0;
+
+static VkBool32
+debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity,
+              VkDebugUtilsMessageTypeFlagsEXT MessageType,
+              const VkDebugUtilsMessengerCallbackDataEXT *Data, void *) {
+  // Only interested in messages from the validation layers.
+  if (!(MessageType & VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT))
+    return VK_FALSE;
+
+  llvm::Error Err = llvm::make_error<VKValidationError>(MessageSeverity, Data);
+
+  // Return true to turn the validation error or warning into an error in the
+  // vulkan API. This should causes tests to fail.
+  const bool IsErrorOrWarning =
+      MessageSeverity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT |
+                         VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT);
+  if (IsErrorOrWarning) {
+    VKContext::instance().raiseError(std::move(Err));
+    return VK_TRUE;
+  }
+
+  // Log verbose an info messages and continue.
+  llvm::logAllUnhandledErrors(std::move(Err), llvm::dbgs());
+
+  // Continue to run even with VERBOSE and INFO messages.
+  return VK_FALSE;
+}
+
+static VkDebugUtilsMessengerEXT registerDebugUtilCallback(VkInstance Instance) {
+  VkDebugUtilsMessengerCreateInfoEXT CreateInfo = {};
+  CreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+  CreateInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                               VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+  CreateInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
+                           VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+  CreateInfo.pfnUserCallback = debugCallback;
+  CreateInfo.pUserData = nullptr; // Optional
+  auto Func = (PFN_vkCreateDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+      Instance, "vkCreateDebugUtilsMessengerEXT");
+  if (Func == nullptr)
+    return VK_NULL_HANDLE;
+
+  VkDebugUtilsMessengerEXT DebugMessenger;
+  Func(Instance, &CreateInfo, nullptr, &DebugMessenger);
+  return DebugMessenger;
+}
+
+llvm::Error VKDevice::executeProgram(Pipeline &P) {
+  InvocationState State;
+  if (auto Err = createDevice(State))
+    return Err;
+  llvm::outs() << "Physical device created.\n";
+  if (auto Err = createCommandBuffer(State))
+    return Err;
+  llvm::outs() << "Copy command buffer created.\n";
+  if (auto Err = createBuffers(P, State))
+    return Err;
+  llvm::outs() << "Memory buffers created.\n";
+  if (auto Err = executeCommandBuffer(State))
+    return Err;
+  llvm::outs() << "Executed copy command buffer.\n";
+  if (auto Err = createCommandBuffer(State))
+    return Err;
+  llvm::outs() << "Execute command buffer created.\n";
+  if (auto Err = createDescriptorPool(P, State))
+    return Err;
+  llvm::outs() << "Descriptor pool created.\n";
+  if (auto Err = createDescriptorSets(P, State))
+    return Err;
+  llvm::outs() << "Descriptor sets created.\n";
+  if (auto Err = createShaderModule(P.Shaders[0].Shader->getBuffer(), State))
+    return Err;
+  llvm::outs() << "Shader module created.\n";
+  if (auto Err = createPipeline(P, State))
+    return Err;
+  llvm::outs() << "Compute pipeline created.\n";
+  if (auto Err = createComputeCommands(P, State))
+    return Err;
+  llvm::outs() << "Compute commands created.\n";
+  if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    return Err;
+  llvm::outs() << "Executed compute command buffer.\n";
+  if (auto Err = readBackData(P, State))
+    return Err;
+  llvm::outs() << "Compute pipeline created.\n";
+
+  if (auto Err = cleanup(State))
+    return Err;
+  llvm::outs() << "Cleanup complete.\n";
+
+  if (VKContext::instance().hasError())
+    return VKContext::instance().takeError();
+  return llvm::Error::success();
+}
