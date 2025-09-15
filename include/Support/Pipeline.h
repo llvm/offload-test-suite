@@ -23,11 +23,7 @@
 
 namespace offloadtest {
 
-enum class Stages {
-  Compute,
-  Vertex,
-  Pixel
-};
+enum class Stages { Compute, Vertex, Pixel };
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -78,28 +74,28 @@ struct OutputProperties {
 };
 
 static inline uint32_t getFormatSize(DataFormat Format) {
-    switch (Format) {
-    case DataFormat::Hex8:
-      return 1;
-    case DataFormat::Hex16:
-    case DataFormat::UInt16:
-    case DataFormat::Int16:
-    case DataFormat::Float16:
-      return 2;
-    case DataFormat::Hex32:
-    case DataFormat::UInt32:
-    case DataFormat::Int32:
-    case DataFormat::Float32:
-    case DataFormat::Bool:
-      return 4;
-    case DataFormat::Hex64:
-    case DataFormat::UInt64:
-    case DataFormat::Int64:
-    case DataFormat::Float64:
-      return 8;
-    }
-    llvm_unreachable("All cases covered.");
+  switch (Format) {
+  case DataFormat::Hex8:
+    return 1;
+  case DataFormat::Hex16:
+  case DataFormat::UInt16:
+  case DataFormat::Int16:
+  case DataFormat::Float16:
+    return 2;
+  case DataFormat::Hex32:
+  case DataFormat::UInt32:
+  case DataFormat::Int32:
+  case DataFormat::Float32:
+  case DataFormat::Bool:
+    return 4;
+  case DataFormat::Hex64:
+  case DataFormat::UInt64:
+  case DataFormat::Int64:
+  case DataFormat::Float64:
+    return 8;
   }
+  llvm_unreachable("All cases covered.");
+}
 
 struct Buffer {
   std::string Name;
@@ -118,9 +114,7 @@ struct Buffer {
 
   uint32_t size() const { return Size; }
 
-  uint32_t getSingleElementSize() const {
-    return getFormatSize(Format);
-  }
+  uint32_t getSingleElementSize() const { return getFormatSize(Format); }
 
   uint32_t getElementSize() const {
     if (Stride > 0)
@@ -264,9 +258,7 @@ struct VertexAttribute {
   int Offset;
   std::string Name;
 
-  uint32_t size() const {
-    return getFormatSize(Format) * Channels;
-  }
+  uint32_t size() const { return getFormatSize(Format) * Channels; }
 };
 
 struct IOBindings {
@@ -327,9 +319,7 @@ struct Pipeline {
     return nullptr;
   }
 
-  bool isGraphics() const {
-    return !isCompute();
-  }
+  bool isGraphics() const { return !isCompute(); }
 
   bool isCompute() const {
     return Shaders.size() == 1 && Shaders[0].Stage == Stages::Compute;
