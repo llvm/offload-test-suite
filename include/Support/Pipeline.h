@@ -23,7 +23,11 @@
 
 namespace offloadtest {
 
-enum class Stages { Compute };
+enum class Stages {
+  Compute,
+  Vertex,
+  Pixel
+};
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -73,24 +77,7 @@ struct OutputProperties {
   int Depth;
 };
 
-struct Buffer {
-  std::string Name;
-  DataFormat Format;
-  int Channels;
-  int Stride;
-  uint32_t ArraySize;
-  // Data can contain one block of data for a singular resource
-  // or multiple blocks for a resource array.
-  llvm::SmallVector<std::unique_ptr<char[]>> Data;
-  size_t Size;
-  OutputProperties OutputProps;
-  // Counters can contain one counter value for a singular resource
-  // or multiple values for an array of resources with counters.
-  llvm::SmallVector<uint32_t> Counters;
-
-  uint32_t size() const { return Size; }
-
-  uint32_t getSingleElementSize() const {
+static inline uint32_t getFormatSize(DataFormat Format) {
     switch (Format) {
     case DataFormat::Hex8:
       return 1;
@@ -112,6 +99,27 @@ struct Buffer {
       return 8;
     }
     llvm_unreachable("All cases covered.");
+  }
+
+struct Buffer {
+  std::string Name;
+  DataFormat Format;
+  int Channels;
+  int Stride;
+  uint32_t ArraySize;
+  // Data can contain one block of data for a singular resource
+  // or multiple blocks for a resource array.
+  llvm::SmallVector<std::unique_ptr<char[]>> Data;
+  size_t Size;
+  OutputProperties OutputProps;
+  // Counters can contain one counter value for a singular resource
+  // or multiple values for an array of resources with counters.
+  llvm::SmallVector<uint32_t> Counters;
+
+  uint32_t size() const { return Size; }
+
+  uint32_t getSingleElementSize() const {
+    return getFormatSize(Format);
   }
 
   uint32_t getElementSize() const {
@@ -222,7 +230,6 @@ struct Resource {
 struct DescriptorSet {
   llvm::SmallVector<Resource> Resources;
 };
-
 namespace dx {
 enum class RootParamKind {
   Constant,
@@ -251,6 +258,37 @@ struct RuntimeSettings {
   dx::Settings DX;
 };
 
+struct VertexAttribute {
+  DataFormat Format;
+  int Channels;
+  int Offset;
+  std::string Name;
+
+  uint32_t size() const {
+    return getFormatSize(Format) * Channels;
+  }
+};
+
+struct IOBindings {
+  std::string VertexBuffer;
+  Buffer *VertexBufferPtr;
+  llvm::SmallVector<VertexAttribute> VertexAttributes;
+
+  std::string RenderTarget;
+  Buffer *RTargetBufferPtr;
+
+  uint32_t getVertexStride() const {
+    uint32_t Stride = 0;
+    for (auto VA : VertexAttributes)
+      Stride += VA.size();
+    return Stride;
+  }
+
+  uint32_t getVertexCount() const {
+    return VertexBufferPtr->size() / getVertexStride();
+  }
+};
+
 struct Shader {
   Stages Stage;
   std::string Entry;
@@ -261,6 +299,8 @@ struct Shader {
 struct Pipeline {
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
+
+  IOBindings Bindings;
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -286,6 +326,14 @@ struct Pipeline {
         return &B;
     return nullptr;
   }
+
+  bool isGraphics() const {
+    return !isCompute();
+  }
+
+  bool isCompute() const {
+    return Shaders.size() == 1 && Shaders[0].Stage == Stages::Compute;
+  }
 };
 } // namespace offloadtest
 
@@ -295,6 +343,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
 
 namespace llvm {
 namespace yaml {
@@ -325,6 +374,14 @@ template <> struct MappingTraits<offloadtest::DirectXBinding> {
 
 template <> struct MappingTraits<offloadtest::VulkanBinding> {
   static void mapping(IO &I, offloadtest::VulkanBinding &B);
+};
+
+template <> struct MappingTraits<offloadtest::IOBindings> {
+  static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::VertexAttribute> {
+  static void mapping(IO &I, offloadtest::VertexAttribute &A);
 };
 
 template <> struct MappingTraits<offloadtest::OutputProperties> {
@@ -412,6 +469,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
   static void enumeration(IO &I, offloadtest::Stages &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
     ENUM_CASE(Compute);
+    ENUM_CASE(Vertex);
+    ENUM_CASE(Pixel);
 #undef ENUM_CASE
   }
 };
