@@ -42,7 +42,6 @@ void main(uint3 tid : SV_GroupThreadID) {
   uint index = (tid.x * 3) % 4;
   SharedData[tid.x] = In[0][index];
   GroupMemoryBarrierWithGroupSync();
-
   Out[3][tid.x] = SharedData[tid.x];
 }
 
@@ -89,6 +88,10 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+
+# No lowering to DXIL Barrier/SPIRV OpMemoryBarrier
+# Unsupported https://github.com/llvm/llvm-project/issues/99121
+# UNSUPPORTED: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
