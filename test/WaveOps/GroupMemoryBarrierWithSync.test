@@ -1,0 +1,95 @@
+#--- source.hlsl
+StructuredBuffer<uint4> In  : register(t0);
+RWStructuredBuffer<uint4> Out : register(u1);
+
+groupshared uint4 SharedData;
+
+[numthreads(4,1,1)]
+void main(uint3 tid : SV_GroupThreadID) {
+
+  // Basic broadcast
+  if (tid.x == 0) {
+    for (uint i = 0; i < 10; i++) {
+      SharedData = i * In[0];
+    }
+  }
+  GroupMemoryBarrierWithGroupSync();
+  Out[0][tid.x] = SharedData[tid.x];
+
+  // Divergent blocking
+  int offset = tid.x < 2 ? 0 : 2;
+  switch (offset) {
+    case 0:
+      Out[1][tid.x] = SharedData[tid.x];
+      GroupMemoryBarrierWithGroupSync();
+      break;
+    case 2:
+      Out[1][tid.x] = 2 * SharedData[tid.x];
+      GroupMemoryBarrierWithGroupSync();
+      break;
+  }
+
+  // Interlocked accumulation within for loop
+  for (uint i = 0; i < 4; i++) {
+    if (tid.x == i) {
+      SharedData[0] += In[0][tid.x];
+      Out[2][tid.x] = SharedData[0];
+    }
+    GroupMemoryBarrierWithGroupSync();
+  }
+
+  // Strided writes
+  uint index = (tid.x * 3) % 4;
+  SharedData[tid.x] = In[0][index];
+  GroupMemoryBarrierWithGroupSync();
+
+  Out[3][tid.x] = SharedData[tid.x];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 4
+    Data: [ 1, 10, 100, 1000]
+  - Name: Out
+    Format: Int32
+    Stride: 16
+    ZeroInitSize: 64
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 16
+    Data: [ 9, 90, 900, 9000,  9, 90, 1800, 18000, 10, 20, 120, 1120, 1, 1000, 100, 10 ]
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
