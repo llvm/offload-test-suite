@@ -44,7 +44,7 @@ Buffers:
   - Name: Out
     Format: Hex32
     Stride: 52
-    ZeroInitSize: 52
+    FillSize: 52
 DescriptorSets:
   - Resources:
     - Name: CBVectors

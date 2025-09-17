@@ -48,7 +48,7 @@ Buffers:
   - Name: Out0
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut0
     Format: UInt32
     Stride: 16
@@ -56,7 +56,7 @@ Buffers:
   - Name: Out1
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut1
     Format: UInt32
     Stride: 16
@@ -64,7 +64,7 @@ Buffers:
   - Name: Out2
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 16

@@ -74,7 +74,7 @@ Buffers:
 
   - Name: Out
     Format: Int32
-    ZeroInitSize: 32
+    FillSize: 32
 
   - Name: ExpectedOut
     Format: Int32

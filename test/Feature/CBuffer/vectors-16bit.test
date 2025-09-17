@@ -37,7 +37,7 @@ Buffers:
     Format: Hex16
     # Warp doesn't seem to be able to handle a stride of 10 so we use 12 here
     Stride: 12
-    ZeroInitSize: 12
+    FillSize: 12
 DescriptorSets:
   - Resources:
     - Name: CBVectors

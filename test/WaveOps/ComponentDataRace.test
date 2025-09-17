@@ -28,7 +28,7 @@ Buffers:
   - Name: Out
     Format: UInt32
     Channels: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOut
     Format: UInt32
     Channels: 4

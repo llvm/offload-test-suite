@@ -48,7 +48,7 @@ Buffers:
   - Name: BufB
     Format: Int32
     ArraySize: 4
-    ZeroInitSize: 32
+    FillSize: 32
 
   - Name: ExpectedBufB
     Format: Int32
@@ -62,7 +62,7 @@ Buffers:
   - Name: BufC
     Format: Int32
     ArraySize: 2
-    ZeroInitSize: 32
+    FillSize: 32
 
   - Name: ExpectedBufC
     Format: Int32
@@ -74,7 +74,7 @@ Buffers:
   - Name: BufD
     Format: Float32
     ArraySize: 2
-    ZeroInitSize: 32
+    FillSize: 32
 
   - Name: ExpectedBufD
     Format: Float32

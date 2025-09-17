@@ -50,7 +50,7 @@ Buffers:
     Data: [ 1, 2, 3, 4]
   - Name: Out
     Format: Int32
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOut
     Format: Int32
     Data: [ 1, 2, 3, 4 ]

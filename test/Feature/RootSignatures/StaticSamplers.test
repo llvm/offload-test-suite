@@ -56,7 +56,7 @@ Buffers:
   - Name: DefaultOut
     Format: Float32
     Channels: 4
-    ZeroInitSize: 64
+    FillSize: 64
     OutputProps:
       Height: 2
       Width: 2
@@ -64,7 +64,7 @@ Buffers:
   - Name: SpecifiedOut
     Format: Float32
     Channels: 4
-    ZeroInitSize: 64
+    FillSize: 64
     OutputProps:
       Height: 2
       Width: 2

@@ -144,7 +144,7 @@ Buffers:
   - Name: Out0
     Format: Float32
     Stride: 16
-    ZeroInitSize: 160
+    FillSize: 160
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
@@ -156,7 +156,7 @@ Buffers:
   - Name: Out1
     Format: Int32
     Stride: 16
-    ZeroInitSize: 160
+    FillSize: 160
   - Name: ExpectedOut1
     Format: Int32
     Stride: 16
@@ -168,7 +168,7 @@ Buffers:
   - Name: Out2
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 160
+    FillSize: 160
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 16
@@ -180,7 +180,7 @@ Buffers:
   - Name: Out3
     Format: Bool
     Stride: 16
-    ZeroInitSize: 160
+    FillSize: 160
   - Name: ExpectedOut3
     Format: Bool
     Stride: 16
