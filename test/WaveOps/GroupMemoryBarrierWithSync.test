@@ -1,48 +1,61 @@
 #--- source.hlsl
-StructuredBuffer<uint4> In  : register(t0);
-RWStructuredBuffer<uint4> Out : register(u1);
+RWStructuredBuffer<uint4> Out : register(u0);
 
 groupshared uint4 SharedData;
+groupshared uint4 Indices[128];
 
-[numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID) {
+// Note: Placing GroupMemoryBarrierWithGroupSync in divergent control branches
+// is undefined, and hence, untested
 
-  // Basic broadcast
-  if (tid.x == 0) {
-    for (uint i = 0; i < 10; i++) {
-      SharedData = i * In[0];
-    }
+[numthreads(128,4,1)]
+void main(uint3 ThreadID : SV_GroupThreadID) {
+
+  // Basic Broadcast
+  if (ThreadID.x == 127 && ThreadID.y == 3) {
+    SharedData = 1;
   }
+
+  // Prevents SharedData being read below before being initialized
   GroupMemoryBarrierWithGroupSync();
-  Out[0][tid.x] = SharedData[tid.x];
 
-  // Divergent blocking
-  int offset = tid.x < 2 ? 0 : 2;
-  switch (offset) {
-    case 0:
-      Out[1][tid.x] = SharedData[tid.x];
-      GroupMemoryBarrierWithGroupSync();
-      break;
-    case 2:
-      Out[1][tid.x] = 2 * SharedData[tid.x];
-      GroupMemoryBarrierWithGroupSync();
-      break;
+  if (ThreadID.x == 0) {
+    Out[0][ThreadID.y] = SharedData[ThreadID.y];
   }
 
-  // Interlocked accumulation within for loop
-  for (uint i = 0; i < 4; i++) {
-    if (tid.x == i) {
-      SharedData[0] += In[0][tid.x];
-      Out[2][tid.x] = SharedData[0];
+  // Prevents SharedData being updated below before written to Out[0]
+  GroupMemoryBarrierWithGroupSync();
+
+  // Interlocked Accumulation
+  for (uint I = 0; I < 128; I++) {
+    if (ThreadID.x == I) {
+      SharedData[ThreadID.y] = SharedData[ThreadID.y] + 1;
     }
+
+    // Prevents SharedData datarace across ThreadID.x, and,
+    // SharedData being written before fully accumulated
     GroupMemoryBarrierWithGroupSync();
   }
 
-  // Strided writes
-  uint index = (tid.x * 3) % 4;
-  SharedData[tid.x] = In[0][index];
+  if (ThreadID.x == 127) {
+    Out[1][ThreadID.y] = SharedData[ThreadID.y];
+  }
+
+  // Strided Read/Write:
+  Indices[ThreadID.x][ThreadID.y] = ThreadID.x + ThreadID.y * 128;
+
+  // Prevents Indices from being read before initialized
   GroupMemoryBarrierWithGroupSync();
-  Out[3][tid.x] = SharedData[tid.x];
+
+  uint2 MappedIdx = {(ThreadID.x * 37) % 128, (ThreadID.y * 3 % 4)};
+  uint ToIdx = Indices[MappedIdx.x][MappedIdx.y];
+
+  if (ThreadID.x == 23) { // 23 is picked arbitrarily
+    // Expected mapping:
+    //   x: 23 -> 83, y: 0 -> 0, 1 -> 3, 2 -> 2
+    //
+    // Out[2] = [83, 83 + 3 * 128, 83 + 2 * 128, 83 + 128]
+    Out[2][ThreadID.y] = ToIdx;
+  }
 }
 
 //--- pipeline.yaml
@@ -53,22 +66,17 @@ Shaders:
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-  - Name: In
-    Format: UInt32
-    Channels: 4
-    Data: [ 1, 10, 100, 1000]
   - Name: Out
     Format: UInt32
     Channels: 4
-    ZeroInitSize: 64
+    ZeroInitSize: 48
   - Name: ExpectedOut
     Format: UInt32
     Channels: 4
     Data: [
-      9, 90, 900, 9000,   # Broadcast
-      9, 90, 1800, 18000, # Divergent
-      10, 20, 120, 1120,  # Accumulation
-      1, 1000, 100, 10    # Strided Reorder
+      1, 1, 1, 1,         # Broadcast
+      129, 129, 129, 129, # Accumulation
+      83, 467, 339, 211,  # Strided Read/Write
     ]
 Results:
   - Result: ExpectedOut
@@ -77,20 +85,13 @@ Results:
     Expected: ExpectedOut
 DescriptorSets:
   - Resources:
-    - Name: In
-      Kind: StructuredBuffer
+    - Name: Out
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 1
-        Space: 0
-      VulkanBinding:
-        Binding: 1
 ...
 #--- end
 
