@@ -54,17 +54,22 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
-    Format: Int32
-    Stride: 4
+    Format: UInt32
+    Channels: 4
     Data: [ 1, 10, 100, 1000]
   - Name: Out
-    Format: Int32
-    Stride: 16
+    Format: UInt32
+    Channels: 4
     ZeroInitSize: 64
   - Name: ExpectedOut
-    Format: Int32
-    Stride: 16
-    Data: [ 9, 90, 900, 9000,  9, 90, 1800, 18000, 10, 20, 120, 1120, 1, 1000, 100, 10 ]
+    Format: UInt32
+    Channels: 4
+    Data: [
+      9, 90, 900, 9000,   # Broadcast
+      9, 90, 1800, 18000, # Divergent
+      10, 20, 120, 1120,  # Accumulation
+      1, 1000, 100, 10    # Strided Reorder
+    ]
 Results:
   - Result: ExpectedOut
     Rule: BufferExact
