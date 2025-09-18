@@ -7,16 +7,16 @@
 // results compare for array BufC and BufD.
 
 [[vk::binding(0)]]
-RWBuffer<int> A[2] : register(u0);
+RWStructuredBuffer<int> A[2] : register(u0);
 
 [[vk::binding(1)]]
 RWStructuredBuffer<int> B[4] : register(u4);
 
 [[vk::binding(2)]]
-RWBuffer<int> C[2] : register(u8);
+RWStructuredBuffer<int> C[2] : register(u8);
 
 [[vk::binding(3)]]
-RWBuffer<float> D[2] : register(u10);
+RWStructuredBuffer<float> D[2] : register(u10);
 
 [numthreads(4,2,1)]
 void main(uint GI : SV_GroupIndex) {
@@ -27,7 +27,7 @@ void main(uint GI : SV_GroupIndex) {
     C[i][GI] = A[i][GI] * 2;
   }
   for (int i = 0; i < 2; i++) {
-    D[i][GI] = (float)A[i][GI] / 3.14159f;
+    D[i][GI] = (float)A[i][GI] / 1.5f;
   }
 }
 
@@ -50,6 +50,15 @@ Buffers:
     ArraySize: 4
     ZeroInitSize: 32
 
+  - Name: ExpectedBufB
+    Format: Int32
+    ArraySize: 4
+    Data:
+      - [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+      - [ 0, 2, 4, 6, 8, 10, 12, 14 ]
+      - [ 0, 3, 6, 9, 12, 15, 18, 21 ]
+      - [ 0, 4, 8, 12, 16, 20, 24, 28 ]
+
   - Name: BufC
     Format: Int32
     ArraySize: 2
@@ -58,7 +67,7 @@ Buffers:
   - Name: ExpectedBufC
     Format: Int32
     ArraySize: 2
-    Data: 
+    Data:
       - [ 0, 2, 4, 6, 8, 10, 12, 14 ]
       - [ 2, 4, 6, 8, 10, 12, 14, 16 ]
 
@@ -71,24 +80,31 @@ Buffers:
     Format: Float32
     ArraySize: 2
     Data:
-      - [ 0, 0.32, 0.64, 0.94, 1.27, 1.59, 1.91, 2.23 ]
-      - [ 0.32, 0.64, 0.95, 1.27, 1.59, 1.91, 2.23, 2.54 ]
+      - [ 0x0.0000000000000p+0, 0x1.5555560000000p-1, 0x1.5555560000000p+0, 0x1.0000000000000p+1, 0x1.5555560000000p+1, 0x1.aaaaac0000000p+1, 0x1.0000000000000p+2, 0x1.2aaaac0000000p+2 ]
+      # [ 0, 0.666667, 1.33333, 2, 2.66667, 3.33333, 4, 4.66667 ]
+      - [ 0x1.5555560000000p-1, 0x1.5555560000000p+0, 0x1.0000000000000p+1, 0x1.5555560000000p+1, 0x1.aaaaac0000000p+1, 0x1.0000000000000p+2, 0x1.2aaaac0000000p+2, 0x1.5555560000000p+2 ]
+      # [ 0.666667, 1.33333, 2, 2.66667, 3.33333, 4, 4.66667, 5.33333 ]
 Results:
+  - Result: BufB
+    Rule: BufferExact
+    Actual: BufB
+    Expected: ExpectedBufB
+
   - Result: BufC
     Rule: BufferExact
     Actual: BufC
     Expected: ExpectedBufC
 
   - Result: BufD
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.05
+    Rule: BufferFloatULP
+    ULPT: 5
     Actual: BufD
     Expected: ExpectedBufD
 
 DescriptorSets:
   - Resources:
     - Name: BufA
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
@@ -102,14 +118,14 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
     - Name: BufC
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 8
         Space: 0
       VulkanBinding:
         Binding: 2
     - Name: BufD
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 10
         Space: 0
@@ -122,14 +138,12 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
-
 # RUN: split-file %s %t
 # RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fspv-extension=DXC -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
+// These checks added to verify YAML printing of arrays.
 // CHECK: Name: BufB
 // CHECK: Format: Int32
 // CHECK: ArraySize: 4
@@ -143,6 +157,5 @@ DescriptorSets:
 // CHECK: Format: Float32
 // CHECK: ArraySize: 2
 // CHECK: Data:
-// CHECK: - [ 0, 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817 ]
-// CHECK: - [ 0.31831, 0.63662, 0.95493, 1.27324, 1.59155, 1.90986, 2.22817, 
-// CHECK:     2.54648 ]
+// CHECK: - [ 0, 0.666667, 1.33333, 2, 2.66667, 3.33333, 4, 4.66667 ]
+// CHECK: - [ 0.666667, 1.33333, 2, 2.66667, 3.33333, 4, 4.66667, 5.33333 ]
