@@ -96,8 +96,8 @@ DescriptorSets:
 #--- end
 
 # No lowering to DXIL Barrier/SPIRV OpMemoryBarrier
-# Unsupported https://github.com/llvm/llvm-project/issues/99121
-# UNSUPPORTED: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/99121
+# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
