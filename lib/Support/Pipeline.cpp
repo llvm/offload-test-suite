@@ -29,6 +29,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapRequired("Buffers", P.Buffers);
   I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
+  I.mapOptional("Bindings", P.Bindings);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
@@ -38,6 +39,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
       }
     }
+
     // Initialize result Buffers
     for (auto &R : P.Results) {
       R.ActualPtr = P.getBuffer(R.Actual);
@@ -85,6 +87,20 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       I.setError(Twine("Expected ") + std::to_string(P.Sets.size()) +
                  " DescriptorTable root parameters, found " +
                  std::to_string(DescriptorTableCount));
+
+    if (!P.Bindings.VertexBuffer.empty()) {
+      P.Bindings.VertexBufferPtr = P.getBuffer(P.Bindings.VertexBuffer);
+      if (!P.Bindings.VertexBufferPtr)
+        I.setError(Twine("Referenced vertex buffer ") +
+                   P.Bindings.VertexBuffer + " not found!");
+    }
+
+    if (!P.Bindings.RenderTarget.empty()) {
+      P.Bindings.RTargetBufferPtr = P.getBuffer(P.Bindings.RenderTarget);
+      if (!P.Bindings.RTargetBufferPtr)
+        I.setError(Twine("Referenced render target buffer ") +
+                   P.Bindings.RenderTarget + " not found!");
+    }
   }
 }
 
@@ -269,6 +285,21 @@ void MappingTraits<offloadtest::DirectXBinding>::mapping(
 void MappingTraits<offloadtest::VulkanBinding>::mapping(
     IO &I, offloadtest::VulkanBinding &B) {
   I.mapRequired("Binding", B.Binding);
+}
+
+void MappingTraits<offloadtest::VertexAttribute>::mapping(
+    IO &I, offloadtest::VertexAttribute &A) {
+  I.mapRequired("Format", A.Format);
+  I.mapRequired("Channels", A.Channels);
+  I.mapRequired("Offset", A.Offset);
+  I.mapRequired("Name", A.Name);
+}
+
+void MappingTraits<offloadtest::IOBindings>::mapping(
+    IO &I, offloadtest::IOBindings &B) {
+  I.mapOptional("VertexBuffer", B.VertexBuffer);
+  I.mapOptional("VertexAttributes", B.VertexAttributes);
+  I.mapOptional("RenderTarget", B.RenderTarget);
 }
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(
