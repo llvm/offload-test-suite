@@ -81,6 +81,10 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/444
 # XFAIL: Metal
 
+# Bug https://github.com/llvm/offload-test-suite/issues/445
+# XFAIL: DirectX-Intel
+# XFAIL: Vulkan-Intel
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
