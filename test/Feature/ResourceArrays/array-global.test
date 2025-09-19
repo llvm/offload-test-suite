@@ -138,11 +138,9 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
-
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
+# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fspv-extension=DXC -Fo %t.o %t/source.hlsl %}
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 // These checks added to verify YAML printing of arrays.
