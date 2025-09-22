@@ -81,6 +81,10 @@ DescriptorSets:
         Binding: 3
 #--- end
 
+# Select is meant to replace the pre-HLSL-2021 ternary operators. In DXC, these operators
+# didn't support struct types, so select doesn't either.
+# For more context see here:
+# https://github.com/microsoft/hlsl-specs/blob/main/proposals/0040-select-type-support.md
 # UNSUPPORTED: DXC
 
 # RUN: split-file %s %t
