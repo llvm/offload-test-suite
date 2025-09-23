@@ -56,7 +56,7 @@ DescriptorSets:
 #--- end
 
 # Clang doesn't support the `vk::binding` attribute.
-# UNSUPPORTED: Clang-Vulkan
+# UNSUPPORTED: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/DescriptorSets.hlsl

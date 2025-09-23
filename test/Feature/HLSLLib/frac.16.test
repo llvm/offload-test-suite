@@ -62,7 +62,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
-# XFAIL: Vulkan-Darwin
+# XFAIL: Vulkan && Darwin
 
 # REQUIRES: Half
 # RUN: split-file %s %t

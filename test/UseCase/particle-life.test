@@ -352,14 +352,14 @@ DescriptorSets:
 
 # Unimplemented: CBuffer not implemented in Clang's Vulkan implementation.
 # https://github.com/llvm/llvm-project/issues/124597
-# XFAIL: Clang-Vulkan
+# XFAIL: Clang && Vulkan
 
 # CBuffer bindings seem to be broken under metal
 # Bug https://github.com/llvm/offload-test-suite/issues/55
 # XFAIL: Metal
 
 # No idea what is going on here, but the results are _way_ off.
-# XFAIL: Vulkan-Darwin
+# XFAIL: Vulkan && Darwin
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/particle-life.hlsl
