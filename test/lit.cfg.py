@@ -81,7 +81,7 @@ def setDeviceFeatures(config, device, compiler):
     if "AMD" in device["Description"]:
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
-        config.available_features.add("%QC")
+        config.available_features.add("QC")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
