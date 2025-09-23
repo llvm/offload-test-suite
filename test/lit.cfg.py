@@ -59,13 +59,13 @@ def getHighestShaderModel(features):
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
-    config.available_features.add("%s-%s" % (API, config.offloadtest_os))
+    config.available_features.add(compiler)
+    config.available_features.add(config.offloadtest_os)
     if "Microsoft Basic Render Driver" in device["Description"]:
-        config.available_features.add("%s-WARP" % API)
-        config.available_features.add("WARP-%s" % config.warp_arch)
         config.available_features.add("WARP")
+        config.available_features.add(config.warp_arch)
     if "Intel" in device["Description"]:
-        config.available_features.add("%s-Intel" % API)
+        config.available_features.add("Intel")
         if "UHD Graphics" in device["Description"] and API == "DirectX":
             # When Intel resolves the driver issue and tests XFAILing on the
             # feature below are resolved we can resolve
@@ -73,17 +73,15 @@ def setDeviceFeatures(config, device, compiler):
             # this check to only XFAIL on old driver versions.
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
-        config.available_features.add("%s-NV" % API)
+        config.available_features.add("NV")
         NV50SeriesRegex = re.compile("NVIDIA GeForce [A-Z]+ 50[0-9]+")
         NV50SeriesMatch = NV50SeriesRegex.match(device["Description"])
         if NV50SeriesMatch and API == "DirectX":
             config.available_features.add("NV-Reconvergence-Issue-320")
     if "AMD" in device["Description"]:
-        config.available_features.add("%s-AMD" % API)
+        config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
-        config.available_features.add("%s-QC" % API)
-
-    config.available_features.add("%s-%s" % (compiler, API))
+        config.available_features.add("%QC")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
