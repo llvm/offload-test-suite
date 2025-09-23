@@ -40,9 +40,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Tracking issue: https://github.com/llvm/llvm-project/issues/148270
-# XFAIL: Intel
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -E CSMain -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
