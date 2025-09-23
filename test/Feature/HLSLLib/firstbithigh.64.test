@@ -87,7 +87,7 @@ DescriptorSets:
 
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
 # https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbithigh.64bit.hlsl
-# UNSUPPORTED: DXC-Vulkan
+# UNSUPPORTED: DXC && Vulkan
 
 # Bug https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang && Vulkan

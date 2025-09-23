@@ -69,7 +69,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/344
 # XFAIL: Clang && Metal
 
-# UNSUPPORTED: DXC-Vulkan
+# UNSUPPORTED: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
