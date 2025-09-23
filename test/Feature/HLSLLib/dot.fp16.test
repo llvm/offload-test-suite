@@ -15,7 +15,7 @@ void main() {
 
   Out[4] = dot(X[0].xyz, Y[0].xyz);
   Out[5] = dot(half3(1.125, -2.5, -4.75), half3(7.29, 3.14, -1.1));
-  
+
   Out[6] = dot(X[0], Y[0]);
   Out[7] = dot(half4(1.125, -2.5, -4.75, 6.625), half4(7.29, 3.14, -1.1, -3.5));
 }
@@ -80,9 +80,6 @@ DescriptorSets:
 # DXC is producing a compile-time value at a significantly higher precision than
 # runtime computed values for case 3 (clang will likely do the same once it
 # learns to constant evaluate `dot`).
-
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # REQUIRES: Half
 # RUN: split-file %s %t
