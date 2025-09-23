@@ -65,9 +65,6 @@ DescriptorSets:
         Binding: 3
 ...
 #--- end
-# Unimplemented: CBuffer not implemented in Clang's Vulkan implementation.
-# https://github.com/llvm/llvm-project/issues/124597
-# XFAIL: Clang-Vulkan
 
 # DXC's vulkan backend doesn't drop unused bindings, so it isn't possible to
 # specify descriptor sets that are valid for both DirectX and Vulkan there.
