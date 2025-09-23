@@ -48,7 +48,7 @@ DescriptorSets:
 
 # Intel has an issue with counters in resource arrays
 # Bug https://github.com/llvm/offload-test-suite/issues/376
-# XFAIL: DirectX-Intel
+# XFAIL: DirectX && Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

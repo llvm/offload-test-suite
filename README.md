@@ -62,7 +62,7 @@ linking the appropriate issue and whether the failure is due to a bug or an unim
 
 ```
 # Bug/Unimplemented <link to issue>
-# XFAIL: Clang-Vulkan
+# XFAIL: Clang && Vulkan
 ```
 
 # YAML Pipeline Format

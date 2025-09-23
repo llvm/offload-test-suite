@@ -68,7 +68,7 @@ DescriptorSets:
 
 # DXC's vulkan backend doesn't drop unused bindings, so it isn't possible to
 # specify descriptor sets that are valid for both DirectX and Vulkan there.
-# UNSUPPORTED: DXC-Vulkan
+# UNSUPPORTED: DXC && Vulkan
 
 # CBuffer bindings seem to be broken under metal
 # https://github.com/llvm/offload-test-suite/issues/55

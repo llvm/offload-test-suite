@@ -81,7 +81,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/445
-# XFAIL: DirectX-Intel
+# XFAIL: DirectX && Intel
 
 # The data-race is not observed on WARP
 # Bug https://github.com/llvm/llvm-project/issues/160208
