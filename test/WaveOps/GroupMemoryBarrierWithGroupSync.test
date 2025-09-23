@@ -83,8 +83,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/445
 # XFAIL: DirectX-Intel
 
+# The data-race is not observed on WARP
 # Bug https://github.com/llvm/llvm-project/issues/160208
-# XFAIL: Clang
+# XFAIL: Clang && !WARP
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
