@@ -15,7 +15,7 @@ void main() {
 
   Out[4] = dot(X[2], Y[2]);
   Out[5] = dot(double(-4.75), double(-1.1));
-  
+
   Out[6] = dot(X[3], Y[3]);
   Out[7] = dot(double(6.625), double(-3.5));
 }
@@ -73,9 +73,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 2
 #--- end
-
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # REQUIRES: Double
 # RUN: split-file %s %t

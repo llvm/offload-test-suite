@@ -23,7 +23,7 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [0x4940, 0xd638, 0x4500, 0x3400, 0, 0x6056, 0x4940, 0xd638, 0x4500, 0x3400, 0, 0x6056]
-    # 10.5, -99.5, 5, 0.25, 0, 555, 10.5, -99.5, 5, 0.25, 0, 555 
+    # 10.5, -99.5, 5, 0.25, 0, 555, 10.5, -99.5, 5, 0.25, 0, 555
   - Name: In1
     Format: Float16
     Stride: 8
@@ -68,9 +68,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 2
 #--- end
- 
-# Bug https://github.com/llvm/llvm-project/issues/149561 
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # REQUIRES: Half
 # RUN: split-file %s %t

@@ -22,7 +22,7 @@ void main() {
 
   Out0[4] = dot(X0[0].xyz, Y0[0].xyz);
   Out0[5] = dot(float3(1.125, -2.5, -4.75), float3(7.29, 3.14, -1.1));
-  
+
   Out0[6] = dot(X0[0], Y0[0]);
   Out0[7] = dot(float4(1.125, -2.5, -4.75, 6.625), float4(7.29, 3.14, -1.1, -3.5));
 
@@ -188,9 +188,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 8
 #--- end
-
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
