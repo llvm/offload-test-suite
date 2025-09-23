@@ -362,6 +362,6 @@ DescriptorSets:
 # XFAIL: Vulkan-Darwin
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/particle-life.hlsl
 # TODO: Specify -rootsig-define ROOT_SIGNATURE
 # RUN: %offloader %t/particle-life.yaml %t.o
