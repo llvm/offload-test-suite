@@ -24,7 +24,7 @@ Buffers:
   - Name: In
     Format: UInt32
     Channels: 4
-    Data: [ 0, 1, 2, 3 ]
+    Data: [ 1, 2, 3, 4 ]
   - Name: Out
     Format: UInt32
     Channels: 4
@@ -32,7 +32,7 @@ Buffers:
   - Name: ExpectedOut
     Format: UInt32
     Channels: 4
-    Data: [ 0, 1, 2, 3 ]
+    Data: [ 1, 2, 3, 4 ]
 Results:
   - Result: ExpectedOut
     Rule: BufferExact
