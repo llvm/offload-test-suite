@@ -76,9 +76,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/444
-# XFAIL: Metal
-
 # Bug https://github.com/llvm/offload-test-suite/issues/445
 # XFAIL: DirectX && Intel
 
