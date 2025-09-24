@@ -16,9 +16,8 @@ RWStructuredBuffer<Scalars> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0].a1 = a1;
-  Out[0].a2 = a2;
-  Out[0].a3 = a3;
+  Scalars S = {a1,a2,a3};
+  Out[0] = S;
 }
 
 //--- pipeline.yaml
