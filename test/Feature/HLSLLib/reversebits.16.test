@@ -32,7 +32,7 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: UInt16
     Stride: 8
-    Data: [ 0, 32768, 4096, 0x0080, 0xFFFE, 0xFFFF, 0xAAAA, 0x0F0F, 0x11F0, 0xC003, 0, 128 ]    
+    Data: [ 0, 32768, 4096, 0x0080, 0xFFFE, 0xFFFF, 0xAAAA, 0x0F0F, 0x11F0, 0xC003, 0, 128 ]
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -56,9 +56,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7680
-# XFAIL: DXC && Vulkan
 
 # Bug https://github.com/llvm/llvm-project/issues/152049
 # XFAIL: Clang && Vulkan
