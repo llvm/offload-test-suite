@@ -1,5 +1,9 @@
 #--- source.hlsl
 
+// This test is added to continue having a test to track the Intel && DXC bug
+// below, that only appears in the combination of using
+// GroupMemoryBarrierWithGroupSync and concurrently writing to uint4 components
+
 RWStructuredBuffer<uint4> Out : register(u0);
 
 groupshared uint4 SharedData;

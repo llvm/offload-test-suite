@@ -1,11 +1,11 @@
 #--- source.hlsl
 
+// Note: Placing GroupMemoryBarrierWithGroupSync in divergent control branches
+// is undefined, and hence, untested
+
 RWStructuredBuffer<uint> Out : register(u0);
 
 groupshared uint Counter;
-
-// Note: Placing GroupMemoryBarrierWithGroupSync in divergent control branches
-// is undefined, and hence, untested
 
 [numthreads(512,1,1)]
 void main(uint3 ThreadID : SV_GroupThreadID) {

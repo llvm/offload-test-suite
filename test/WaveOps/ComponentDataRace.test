@@ -1,11 +1,11 @@
 #--- source.hlsl
 
-RWStructuredBuffer<uint4> In : register(u0);
-RWStructuredBuffer<uint4> Out : register(u1);
-
 // This tests that we can concurrently write to the components of a uint4,
 // as though it was an array. The large group size is used to force the write
 // to occur across multiple waves so that the datarace can be observed
+
+RWStructuredBuffer<uint4> In : register(u0);
+RWStructuredBuffer<uint4> Out : register(u1);
 
 [numthreads(128,4,1)]
 void main(uint3 ThreadID : SV_GroupThreadID) {
