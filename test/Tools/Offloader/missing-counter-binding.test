@@ -1,15 +1,13 @@
 #--- source.hlsl
-RWStructuredBuffer<uint> Out : register(u0);
+RWStructuredBuffer<int> Out : register(u0);
 
 [numthreads(1,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  Out.DecrementCounter();
-  Out.DecrementCounter();
-  Out.DecrementCounter();
-  Out[GI] = Out.DecrementCounter();
+  Out.IncrementCounter();
+  Out[GI] = 0;
 }
 
-//--- pipeline.yaml
+#--- pipeline.yaml
 ---
 Shaders:
   - Stage: Compute
@@ -30,23 +28,14 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-        CounterBinding: 1
 ...
 #--- end
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/137032
 # XFAIL: Clang && Vulkan
 
-# Offload tests are missing support for counters on Metal
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/304
-# XFAIL: Metal
-
+# REQUIRES: Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK: Name: Out
-# CHECK: Counter: 4294967292
-# CHECK: Data: [
-# CHECK: 0xFFFFFFFC
-# CHECK: ]
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+# CHECK: No CounterBinding provided for resource 'Out' with a counter

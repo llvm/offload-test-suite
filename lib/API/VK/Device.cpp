@@ -254,6 +254,7 @@ private:
     Buffer *BufferPtr;
     VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     llvm::SmallVector<ResourceRef> ResourceRefs;
+    llvm::SmallVector<ResourceRef> CounterResourceRefs;
   };
 
   struct CompiledShader {
@@ -688,6 +689,31 @@ public:
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
       }
     }
+    if (R.HasCounter) {
+      for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
+        uint32_t CounterValue = 0;
+        auto ExHostBuf = createBuffer(IS,
+                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+                                      sizeof(uint32_t), &CounterValue);
+        if (!ExHostBuf)
+          return ExHostBuf.takeError();
+
+        auto ExDeviceBuf = createBuffer(
+            IS,
+            getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sizeof(uint32_t));
+        if (!ExDeviceBuf)
+          return ExDeviceBuf.takeError();
+        VkBufferCopy Copy = {};
+        Copy.size = sizeof(uint32_t);
+        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
+                        &Copy);
+        Bundle.CounterResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
+      }
+    }
     IS.Resources.push_back(Bundle);
     return llvm::Error::success();
   }
@@ -850,6 +876,9 @@ public:
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
         DescriptorCounts[getDescriptorType(R.Kind)] += R.BufferPtr->ArraySize;
+        if (R.HasCounter)
+          DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
+              R.BufferPtr->ArraySize;
       }
     }
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
@@ -886,11 +915,24 @@ public:
           return llvm::createStringError(std::errc::invalid_argument,
                                          "No VulkanBinding provided for '%s'",
                                          R.Name.c_str());
+        if (R.HasCounter && !R.VKBinding->CounterBinding)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "No CounterBinding provided for resource '%s' with a counter",
+              R.Name.c_str());
         Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
         Binding.descriptorCount = R.BufferPtr->ArraySize;
         Binding.stageFlags = IS.getFullShaderStageMask();
         Bindings.push_back(Binding);
+        if (R.HasCounter) {
+          VkDescriptorSetLayoutBinding CounterBinding = {};
+          CounterBinding.binding = *R.VKBinding->CounterBinding;
+          CounterBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+          CounterBinding.descriptorCount = R.BufferPtr->ArraySize;
+          CounterBinding.stageFlags = IS.getFullShaderStageMask();
+          Bindings.push_back(CounterBinding);
+        }
       }
       VkDescriptorSetLayoutCreateInfo LayoutCreateInfo = {};
       LayoutCreateInfo.sType =
@@ -947,6 +989,8 @@ public:
           BufferInfoCount += Count;
         else
           BufferViewCount += Count;
+        if (R.HasCounter)
+          BufferInfoCount += Count;
       }
     }
 
@@ -1038,6 +1082,27 @@ public:
         llvm::outs() << "Updating Descriptor [" << OverallResIdx << "] { "
                      << SetIdx << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
+
+        if (R.HasCounter) {
+          IndexOfFirstBufferDataInArray = BufferInfos.size();
+          for (auto ResRef : IS.Resources[OverallResIdx].CounterResourceRefs) {
+            const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
+                                               VK_WHOLE_SIZE};
+            BufferInfos.push_back(BI);
+          }
+
+          VkWriteDescriptorSet CounterWDS = {};
+          CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+          CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
+          CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          CounterWDS.descriptorCount = R.BufferPtr->ArraySize;
+          CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+          CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
+          llvm::outs() << "Updating Counter Descriptor [" << OverallResIdx
+                       << "] { " << SetIdx << ", " << RIdx << " }\n";
+          llvm::outs() << "Binding = " << CounterWDS.dstBinding << "\n";
+          WriteDescriptors.push_back(CounterWDS);
+        }
       }
     }
     assert(ImageInfos.size() == ImageInfoCount &&
@@ -1497,12 +1562,24 @@ public:
       vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
                       &CopyRegion);
 
+    VkBufferCopy CounterCopyRegion = {};
+    CounterCopyRegion.size = sizeof(uint32_t);
+    for (auto &ResRef : R.CounterResourceRefs)
+      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
+                      &CounterCopyRegion);
+
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     Barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
+      Barrier.buffer = ResRef.Host.Buffer;
+      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                           &Barrier, 0, nullptr);
+    }
+    for (auto &ResRef : R.CounterResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
       vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
@@ -1609,6 +1686,19 @@ public:
           memcpy(DataIt->get(), Mapped, R.size());
           vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
         }
+        if (R.HasCounter) {
+          R.BufferPtr->Counters.clear();
+          for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
+            uint32_t *Mapped = nullptr;
+            auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
+            vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
+                        (void **)&Mapped);
+            Range.memory = CounterRef.Host.Memory;
+            vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+            R.BufferPtr->Counters.push_back(*Mapped);
+            vkUnmapMemory(IS.Device, CounterRef.Host.Memory);
+          }
+        }
       }
     }
 
@@ -1651,6 +1741,12 @@ public:
           vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
           vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
         }
+        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+      }
+      for (auto &ResRef : R.CounterResourceRefs) {
+        vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
+        vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
         vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
         vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
       }
