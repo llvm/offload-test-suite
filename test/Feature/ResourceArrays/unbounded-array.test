@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-// This test verified handling of unbounded resource array.
+// This test verified handling of unbounded resource array with NonUniformResourceIndex.
 
 [[vk::binding(0)]]
 RWBuffer<int> Buf[] : register(u0);
@@ -63,8 +63,8 @@ DescriptorSets:
 ...
 #--- end
 
-# This test requires NonUniformResourceIndex.
-# Tracked by https://github.com/llvm/llvm-project/issues/156713
+# This test fails due to a bug in Clang that generates DXIL container that does not pass validation
+# https://github.com/llvm/llvm-project/issues/159679
 # XFAIL: Clang
 
 # Resource arrays are not yet supported on Metal
