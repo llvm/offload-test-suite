@@ -7,7 +7,7 @@
 RWStructuredBuffer<uint4> In : register(u0);
 RWStructuredBuffer<uint4> Out : register(u1);
 
-[numthreads(128,4,1)]
+[numthreads(128, 4, 1)]
 void main(uint3 ThreadID : SV_GroupThreadID) {
   if (ThreadID.x == 0) {
     Out[0][ThreadID.y] = In[0][ThreadID.y];
@@ -57,7 +57,7 @@ DescriptorSets:
 ...
 #--- end
 
-# The data-race is not observed on WARP
+# Clang introduces a data-race (but it is not observable on WARP)
 # Bug https://github.com/llvm/llvm-project/issues/160208
 # XFAIL: Clang && !WARP
 
