@@ -1,8 +1,8 @@
 #--- source.hlsl
 
 // This test is added to continue having a test to track the Intel && DXC bug
-// below, that only appears in the combination of using
-// GroupMemoryBarrierWithGroupSync and concurrently writing to uint4 components
+// below. This bug only appears when using GroupMemoryBarrierWithGroupSync
+// while concurrently writing to uint4 components.
 
 RWStructuredBuffer<uint4> Out : register(u0);
 
@@ -16,9 +16,9 @@ void main(uint3 ThreadID : SV_GroupThreadID) {
   GroupMemoryBarrierWithGroupSync();
 
   for (uint I = 0; I < 128; I++) {
-	if (ThreadID.x == I) {
+    if (ThreadID.x == I) {
       SharedData[ThreadID.y] = SharedData[ThreadID.y] + 1;
-	}
+    }
     GroupMemoryBarrierWithGroupSync();
   }
 
