@@ -61,7 +61,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/160208
 # XFAIL: Clang && !WARP
 
-# Bug
+# Bug https://github.com/llvm/offload-test-suite/issues/452
 # XFAIL: DXC && Metal
 
 # RUN: split-file %s %t
