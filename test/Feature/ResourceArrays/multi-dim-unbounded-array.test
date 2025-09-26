@@ -1,6 +1,7 @@
 #--- source.hlsl
 
-// This test verified handling of unbounded multi-dimensional resource array.
+// Verify handling of unbounded multi-dimensional resource array
+// with NonUniformResourceIndex.
 
 RWStructuredBuffer<int> Buf[][2] : register(u0);
 
@@ -60,8 +61,7 @@ DescriptorSets:
 ...
 #--- end
 
-# This test requires NonUniformResourceIndex.
-# Tracked by https://github.com/llvm/llvm-project/issues/156713
+# Bug https://github.com/llvm/llvm-project/issues/159679
 # XFAIL: Clang
 
 # Resource arrays are not yet supported on Metal
