@@ -40,11 +40,6 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       }
     }
 
-    for (auto &D : P.Sets)
-      for (auto &R : D.Resources)
-        if (R.HasCounter)
-          R.BufferPtr->Counters.resize(R.BufferPtr->ArraySize);
-
     // Initialize result Buffers
     for (auto &R : P.Results) {
       R.ActualPtr = P.getBuffer(R.Actual);

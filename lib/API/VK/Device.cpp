@@ -1675,14 +1675,15 @@ public:
           vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
         }
         if (R.HasCounter) {
+          R.BufferPtr->Counters.clear();
           for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
-            void *Mapped = nullptr;
+            uint32_t *Mapped = nullptr;
             auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
             vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
-                        &Mapped);
+                        (void **)&Mapped);
             Range.memory = CounterRef.Host.Memory;
             vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-            memcpy(&R.BufferPtr->Counters[I], Mapped, sizeof(uint32_t));
+            R.BufferPtr->Counters.push_back(*Mapped);
             vkUnmapMemory(IS.Device, CounterRef.Host.Memory);
           }
         }
