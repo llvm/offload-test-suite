@@ -139,7 +139,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug tracked by https://github.com/llvm/offload-test-suite/issues/396
-# XFAIL: DirectX-WARP
+# XFAIL: DirectX && WARP
 
 # REQUIRES: Half, Int16
 

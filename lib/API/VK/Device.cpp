@@ -98,6 +98,17 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   }
 }
 
+static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
+  switch (Stage) {
+  case Stages::Compute:
+    return VK_SHADER_STAGE_COMPUTE_BIT;
+  case Stages::Vertex:
+    return VK_SHADER_STAGE_VERTEX_BIT;
+  case Stages::Pixel:
+    return VK_SHADER_STAGE_FRAGMENT_BIT;
+  }
+}
+
 static std::string getMessageSeverityString(
     VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity) {
   if (MessageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
@@ -164,6 +175,23 @@ static VkDebugUtilsMessengerEXT registerDebugUtilCallback(VkInstance Instance) {
   return DebugMessenger;
 }
 
+static llvm::Expected<uint32_t>
+getMemoryIndex(VkPhysicalDevice Device, uint32_t MemoryTypeBits,
+               VkMemoryPropertyFlags MemoryFlags) {
+  VkPhysicalDeviceMemoryProperties MemProperties;
+  vkGetPhysicalDeviceMemoryProperties(Device, &MemProperties);
+  for (uint32_t I = 0; I < MemProperties.memoryTypeCount; ++I) {
+    const uint32_t Bit = (1u << I);
+    if ((MemoryTypeBits & Bit) == 0)
+      continue;
+    if ((MemProperties.memoryTypes[I].propertyFlags & MemoryFlags) ==
+        MemoryFlags)
+      return I;
+  }
+  return llvm::createStringError(std::errc::not_enough_memory,
+                                 "Could not identify appropriate memory.");
+}
+
 namespace {
 
 class VKDevice : public offloadtest::Device {
@@ -224,7 +252,14 @@ private:
     VkDescriptorType DescriptorType;
     uint64_t Size;
     Buffer *BufferPtr;
+    VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     llvm::SmallVector<ResourceRef> ResourceRefs;
+  };
+
+  struct CompiledShader {
+    Stages Stage;
+    std::string Entry;
+    VkShaderModule Shader;
   };
 
   struct InvocationState {
@@ -233,16 +268,34 @@ private:
     VkCommandPool CmdPool;
     VkCommandBuffer CmdBuffer;
     VkPipelineLayout PipelineLayout;
-    VkDescriptorPool Pool;
+    VkDescriptorPool Pool = nullptr;
     VkPipelineCache PipelineCache;
-    VkShaderModule Shader;
     VkPipeline Pipeline;
 
+    // FrameBuffer associated data for offscreen rendering.
+    VkFramebuffer FrameBuffer;
+    ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
+                                          nullptr};
+    ImageRef DepthStencil = {0, 0, 0};
+    std::optional<ResourceRef> VertexBuffer = std::nullopt;
+
+    VkRenderPass RenderPass;
+    uint32_t ShaderStageMask = 0;
+
+    llvm::SmallVector<CompiledShader> Shaders;
     llvm::SmallVector<VkDescriptorSetLayout> DescriptorSetLayouts;
     llvm::SmallVector<ResourceBundle> Resources;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
     llvm::SmallVector<VkImageView> ImageViews;
+
+    uint32_t getFullShaderStageMask() {
+      if (0 != ShaderStageMask)
+        return ShaderStageMask;
+      for (const auto &S : Shaders)
+        ShaderStageMask |= getShaderStageFlag(S.Stage);
+      return ShaderStageMask;
+    }
   };
 
 public:
@@ -330,10 +383,13 @@ private:
 #endif
 
     Features.pNext = &Features11;
-    Features11.pNext = &Features12;
-    Features12.pNext = &Features13;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+      Features11.pNext = &Features12;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+      Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    Features13.pNext = &Features14;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+      Features13.pNext = &Features14;
 #endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
@@ -395,24 +451,36 @@ private:
 public:
   llvm::Error createDevice(InvocationState &IS) {
 
-    // Find a queue that supports compute
+    // Find a queue family that supports both graphics and compute.
     uint32_t QueueCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, 0);
-    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps =
-        std::unique_ptr<VkQueueFamilyProperties[]>(
-            new VkQueueFamilyProperties[QueueCount]);
+    vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, nullptr);
+    if (QueueCount == 0)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "No queue families reported.");
+
+    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps(
+        new VkQueueFamilyProperties[QueueCount]);
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount,
                                              QueueFamilyProps.get());
-    uint32_t QueueIdx = 0;
-    for (; QueueIdx < QueueCount; ++QueueIdx)
-      if (QueueFamilyProps.get()[QueueIdx].queueFlags & VK_QUEUE_COMPUTE_BIT)
+
+    int SelectedIdx = -1;
+    for (uint32_t I = 0; I < QueueCount; ++I) {
+      const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
+      // Prefer family supporting both GRAPHICS and COMPUTE
+      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
+        SelectedIdx = static_cast<int>(I);
         break;
-    if (QueueIdx >= QueueCount)
+      }
+    }
+
+    if (SelectedIdx == -1)
       return llvm::createStringError(std::errc::no_such_device,
-                                     "No compute queue found.");
+                                     "No suitable queue family found.");
+
+    const uint32_t QueueIdx = static_cast<uint32_t>(SelectedIdx);
 
     VkDeviceQueueCreateInfo QueueInfo = {};
-    const float QueuePriority = 0.0f;
+    const float QueuePriority = 1.0f;
     QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     QueueInfo.queueFamilyIndex = QueueIdx;
     QueueInfo.queueCount = 1;
@@ -437,10 +505,13 @@ public:
 #endif
 
     Features.pNext = &Features11;
-    Features11.pNext = &Features12;
-    Features12.pNext = &Features13;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+      Features11.pNext = &Features12;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+      Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    Features13.pNext = &Features14;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+      Features13.pNext = &Features14;
 #endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
@@ -502,22 +573,12 @@ public:
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
 
-    VkPhysicalDeviceMemoryProperties MemProperties;
-    vkGetPhysicalDeviceMemoryProperties(Device, &MemProperties);
-    uint32_t MemIdx = 0;
-    for (; MemIdx < MemProperties.memoryTypeCount;
-         ++MemIdx, MemReqs.memoryTypeBits >>= 1) {
-      if ((MemReqs.memoryTypeBits & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
-          ((MemProperties.memoryTypes[MemIdx].propertyFlags & MemoryFlags) ==
-           MemoryFlags)) {
-        break;
-      }
-    }
-    if (MemIdx >= MemProperties.memoryTypeCount)
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Could not identify appropriate memory.");
+    llvm::Expected<uint32_t> MemIdx =
+        getMemoryIndex(Device, MemReqs.memoryTypeBits, MemoryFlags);
+    if (!MemIdx)
+      return MemIdx.takeError();
 
-    AllocInfo.memoryTypeIndex = MemIdx;
+    AllocInfo.memoryTypeIndex = *MemIdx;
 
     if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
@@ -547,7 +608,8 @@ public:
   }
 
   llvm::Expected<ResourceRef> createImage(InvocationState &IS, Resource &R,
-                                          BufferRef &Host) {
+                                          BufferRef &Host,
+                                          int UsageOverride = 0) {
     const offloadtest::Buffer &B = *R.BufferPtr;
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -562,11 +624,15 @@ public:
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
                               static_cast<uint32_t>(B.OutputProps.Height), 1};
-    ImageCreateInfo.usage =
-        VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-        (R.isReadWrite()
-             ? (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-             : VK_IMAGE_USAGE_SAMPLED_BIT);
+    if (UsageOverride == 0) {
+      ImageCreateInfo.usage =
+          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+          (R.isReadWrite()
+               ? (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+               : VK_IMAGE_USAGE_SAMPLED_BIT);
+    } else {
+      ImageCreateInfo.usage = UsageOverride;
+    }
 
     VkImage Image;
     if (vkCreateImage(IS.Device, &ImageCreateInfo, nullptr, &Image))
@@ -626,6 +692,50 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    // Create an optimal image used as the depth stencil attachment
+    VkImageCreateInfo ImageCi = {};
+    ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageCi.imageType = VK_IMAGE_TYPE_2D;
+    ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    // Use example's height and width
+    ImageCi.extent = {
+        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Width),
+        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Height),
+        1};
+    ImageCi.mipLevels = 1;
+    ImageCi.arrayLayers = 1;
+    ImageCi.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageCi.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    ImageCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (vkCreateImage(IS.Device, &ImageCi, nullptr, &IS.DepthStencil.Image))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Depth stencil creation failed.");
+
+    // Allocate memory for the image (device local) and bind it to our image
+    VkMemoryAllocateInfo MemAlloc{};
+    MemAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    VkMemoryRequirements MemReqs;
+    vkGetImageMemoryRequirements(IS.Device, IS.DepthStencil.Image, &MemReqs);
+    MemAlloc.allocationSize = MemReqs.size;
+    llvm::Expected<uint32_t> MemIdx = getMemoryIndex(
+        Device, MemReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (!MemIdx)
+      return MemIdx.takeError();
+
+    MemAlloc.memoryTypeIndex = *MemIdx;
+    if (vkAllocateMemory(IS.Device, &MemAlloc, nullptr,
+                         &IS.DepthStencil.Memory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Depth stencil memory allocation failed.");
+    if (vkBindImageMemory(IS.Device, IS.DepthStencil.Image,
+                          IS.DepthStencil.Memory, 0))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Depth stencil memory binding failed.");
+    return llvm::Error::success();
+  }
+
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
@@ -633,6 +743,62 @@ public:
           return Err;
       }
     }
+
+    if (P.isGraphics()) {
+      if (!P.Bindings.RTargetBufferPtr)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "No RenderTarget buffer specified for graphics pipeline.");
+      Resource FrameBuffer = {
+          ResourceKind::Texture2D,     "RenderTarget", {}, {},
+          P.Bindings.RTargetBufferPtr, false};
+      IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
+      IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
+      IS.FrameBufferResource.ImageLayout =
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      auto ExHostBuf = createBuffer(
+          IS,
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, FrameBuffer.size(),
+          FrameBuffer.BufferPtr->Data[0].get());
+      if (!ExHostBuf)
+        return ExHostBuf.takeError();
+      auto ExImageRef = createImage(IS, FrameBuffer, *ExHostBuf,
+                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                        VK_IMAGE_USAGE_SAMPLED_BIT |
+                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+      if (!ExImageRef)
+        return ExImageRef.takeError();
+      IS.FrameBufferResource.ResourceRefs.push_back(*ExImageRef);
+      if (auto Err = createDepthStencil(P, IS))
+        return Err;
+
+      if (P.Bindings.VertexBufferPtr == nullptr)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "No Vertex buffer specified for graphics pipeline.");
+      const Resource VertexBuffer = {
+          ResourceKind::StructuredBuffer, "VertexBuffer", {}, {},
+          P.Bindings.VertexBufferPtr,     false};
+      auto ExVHostBuf =
+          createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),
+                       VertexBuffer.BufferPtr->Data[0].get());
+      if (!ExVHostBuf)
+        return ExVHostBuf.takeError();
+      auto ExDeviceBuf = createBuffer(
+          IS,
+          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer.size());
+      if (!ExDeviceBuf)
+        return ExDeviceBuf.takeError();
+      VkBufferCopy Copy = {};
+      Copy.size = VertexBuffer.size();
+      vkCmdCopyBuffer(IS.CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
+                      &Copy);
+      IS.VertexBuffer = ResourceRef(*ExVHostBuf, *ExDeviceBuf);
+    }
+
     return llvm::Error::success();
   }
 
@@ -698,14 +864,16 @@ public:
       }
     }
 
-    VkDescriptorPoolCreateInfo PoolCreateInfo = {};
-    PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    PoolCreateInfo.poolSizeCount = PoolSizes.size();
-    PoolCreateInfo.pPoolSizes = PoolSizes.data();
-    PoolCreateInfo.maxSets = P.Sets.size();
-    if (vkCreateDescriptorPool(IS.Device, &PoolCreateInfo, nullptr, &IS.Pool))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create descriptor pool.");
+    if (P.Sets.size() > 0) {
+      VkDescriptorPoolCreateInfo PoolCreateInfo = {};
+      PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+      PoolCreateInfo.poolSizeCount = PoolSizes.size();
+      PoolCreateInfo.pPoolSizes = PoolSizes.data();
+      PoolCreateInfo.maxSets = P.Sets.size();
+      if (vkCreateDescriptorPool(IS.Device, &PoolCreateInfo, nullptr, &IS.Pool))
+        return llvm::createStringError(std::errc::device_or_resource_busy,
+                                       "Failed to create descriptor pool.");
+    }
     return llvm::Error::success();
   }
 
@@ -721,7 +889,7 @@ public:
         Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
         Binding.descriptorCount = R.BufferPtr->ArraySize;
-        Binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        Binding.stageFlags = IS.getFullShaderStageMask();
         Bindings.push_back(Binding);
       }
       VkDescriptorSetLayoutCreateInfo LayoutCreateInfo = {};
@@ -747,6 +915,9 @@ public:
                                &IS.PipelineLayout))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create pipeline layout.");
+
+    if (P.Sets.size() == 0)
+      return llvm::Error::success();
 
     VkDescriptorSetAllocateInfo DSAllocInfo = {};
     DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -880,14 +1051,160 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createShaderModule(llvm::StringRef Program, InvocationState &IS) {
-    VkShaderModuleCreateInfo ShaderCreateInfo = {};
-    ShaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    ShaderCreateInfo.codeSize = Program.size();
-    ShaderCreateInfo.pCode = reinterpret_cast<const uint32_t *>(Program.data());
-    if (vkCreateShaderModule(IS.Device, &ShaderCreateInfo, nullptr, &IS.Shader))
-      return llvm::createStringError(std::errc::not_supported,
-                                     "Failed to create shader module.");
+  llvm::Error createShaderModules(Pipeline &P, InvocationState &IS) {
+    for (const auto &Shader : P.Shaders) {
+      const llvm::StringRef Program = Shader.Shader->getBuffer();
+      VkShaderModuleCreateInfo ShaderCreateInfo = {};
+      ShaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+      ShaderCreateInfo.codeSize = Program.size();
+      ShaderCreateInfo.pCode =
+          reinterpret_cast<const uint32_t *>(Program.data());
+      CompiledShader CS = {Shader.Stage, Shader.Entry, 0};
+      if (vkCreateShaderModule(IS.Device, &ShaderCreateInfo, nullptr,
+                               &CS.Shader))
+        return llvm::createStringError(std::errc::not_supported,
+                                       "Failed to create shader module.");
+      IS.Shaders.emplace_back(CS);
+    }
+    return llvm::Error::success();
+  }
+
+  llvm::Error createRenderPass(Pipeline &P, InvocationState &IS) {
+    std::array<VkAttachmentDescription, 2> Attachments = {};
+
+    Attachments[0].format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
+                                        P.Bindings.RTargetBufferPtr->Channels);
+    Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+    Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    Attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    Attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    Attachments[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+    Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    Attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    Attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    Attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    Attachments[1].finalLayout =
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference ColorReference = {};
+    ColorReference.attachment = 0;
+    ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference DepthReference = {};
+    DepthReference.attachment = 1;
+    DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription SubpassDescription = {};
+    SubpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    SubpassDescription.colorAttachmentCount = 1;
+    SubpassDescription.pColorAttachments = &ColorReference;
+    SubpassDescription.pDepthStencilAttachment = &DepthReference;
+    SubpassDescription.inputAttachmentCount = 0;
+    SubpassDescription.pInputAttachments = nullptr;
+    SubpassDescription.preserveAttachmentCount = 0;
+    SubpassDescription.pPreserveAttachments = nullptr;
+    SubpassDescription.pResolveAttachments = nullptr;
+
+    std::array<VkSubpassDependency, 2> Dependencies = {};
+
+    Dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    Dependencies[0].dstSubpass = 0;
+    Dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    Dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    Dependencies[0].srcAccessMask =
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    Dependencies[0].dstAccessMask =
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+    Dependencies[0].dependencyFlags = 0;
+
+    Dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
+    Dependencies[1].dstSubpass = 0;
+    Dependencies[1].srcStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    Dependencies[1].dstStageMask =
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    Dependencies[1].srcAccessMask = 0;
+    Dependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                    VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+    Dependencies[1].dependencyFlags = 0;
+
+    VkRenderPassCreateInfo RPCI = {};
+    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
+    RPCI.pAttachments = Attachments.data();
+    RPCI.subpassCount = 1;
+    RPCI.pSubpasses = &SubpassDescription;
+    RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
+    RPCI.pDependencies = Dependencies.data();
+
+    if (vkCreateRenderPass(IS.Device, &RPCI, nullptr, &IS.RenderPass))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create render pass.");
+    return llvm::Error::success();
+  }
+
+  llvm::Error createFrameBuffer(Pipeline &P, InvocationState &IS) {
+    std::array<VkImageView, 2> Views = {};
+    VkImageViewCreateInfo ViewCreateInfo = {};
+    ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
+                                        P.Bindings.RTargetBufferPtr->Channels);
+    ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                                 VK_COMPONENT_SWIZZLE_B,
+                                 VK_COMPONENT_SWIZZLE_A};
+    ViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    ViewCreateInfo.subresourceRange.baseMipLevel = 0;
+    ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
+    ViewCreateInfo.subresourceRange.layerCount = 1;
+    ViewCreateInfo.subresourceRange.levelCount = 1;
+    ViewCreateInfo.image = IS.FrameBufferResource.ResourceRefs[0].Image.Image;
+    if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &Views[0]))
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create frame buffer image view.");
+    IS.ImageViews.push_back(Views[0]);
+
+    VkImageViewCreateInfo DepthStencilViewCi = {};
+    DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    DepthStencilViewCi.subresourceRange = {};
+    DepthStencilViewCi.subresourceRange.aspectMask =
+        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    DepthStencilViewCi.subresourceRange.baseMipLevel = 0;
+    DepthStencilViewCi.subresourceRange.levelCount = 1;
+    DepthStencilViewCi.subresourceRange.baseArrayLayer = 0;
+    DepthStencilViewCi.subresourceRange.layerCount = 1;
+    DepthStencilViewCi.image = IS.DepthStencil.Image;
+    if (vkCreateImageView(IS.Device, &DepthStencilViewCi, nullptr, &Views[1]))
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create depth stencil image view.");
+    IS.ImageViews.push_back(Views[1]);
+
+    VkFramebufferCreateInfo FbufCreateInfo = {};
+    FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    FbufCreateInfo.renderPass = IS.RenderPass;
+    FbufCreateInfo.attachmentCount = Views.size();
+    FbufCreateInfo.pAttachments = Views.data();
+    FbufCreateInfo.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
+    FbufCreateInfo.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
+    FbufCreateInfo.layers = 1;
+
+    if (vkCreateFramebuffer(IS.Device, &FbufCreateInfo, nullptr,
+                            &IS.FrameBuffer))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create frame buffer.");
     return llvm::Error::success();
   }
 
@@ -899,20 +1216,137 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create pipeline cache.");
 
-    VkPipelineShaderStageCreateInfo StageInfo = {};
-    StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-    StageInfo.module = IS.Shader;
-    StageInfo.pName = P.Shaders[0].Entry.c_str();
+    if (P.isCompute()) {
+      const CompiledShader &S = IS.Shaders[0];
+      assert(IS.Shaders.size() == 1 &&
+             "Currently only support one compute shader");
+      VkPipelineShaderStageCreateInfo StageInfo = {};
+      StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+      StageInfo.module = S.Shader;
+      StageInfo.pName = S.Entry.c_str();
 
-    VkComputePipelineCreateInfo PipelineCreateInfo = {};
-    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-    PipelineCreateInfo.stage = StageInfo;
+      VkComputePipelineCreateInfo PipelineCreateInfo = {};
+      PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+      PipelineCreateInfo.stage = StageInfo;
+      PipelineCreateInfo.layout = IS.PipelineLayout;
+      if (vkCreateComputePipelines(IS.Device, IS.PipelineCache, 1,
+                                   &PipelineCreateInfo, nullptr, &IS.Pipeline))
+        return llvm::createStringError(std::errc::device_or_resource_busy,
+                                       "Failed to create pipeline.");
+      return llvm::Error::success();
+    }
+
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo> Stages;
+    for (const auto &S : IS.Shaders) {
+      VkPipelineShaderStageCreateInfo StageInfo = {};
+      StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      StageInfo.stage = getShaderStageFlag(S.Stage);
+      StageInfo.module = S.Shader;
+      StageInfo.pName = S.Entry.c_str();
+      Stages.emplace_back(StageInfo);
+    }
+
+    VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
+    InputAssemblyCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    InputAssemblyCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineRasterizationStateCreateInfo RastStateCI = {};
+    RastStateCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RastStateCI.polygonMode = VK_POLYGON_MODE_FILL;
+    RastStateCI.cullMode = VK_CULL_MODE_NONE;
+    RastStateCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RastStateCI.depthClampEnable = VK_FALSE;
+    RastStateCI.rasterizerDiscardEnable = VK_FALSE;
+    RastStateCI.depthBiasEnable = VK_FALSE;
+    RastStateCI.lineWidth = 1.0f;
+
+    VkPipelineColorBlendAttachmentState BlendState = {};
+    BlendState.colorWriteMask = 0xf;
+    BlendState.blendEnable = VK_FALSE;
+    VkPipelineColorBlendStateCreateInfo BlendStateCI = {};
+    BlendStateCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    BlendStateCI.attachmentCount = 1;
+    BlendStateCI.pAttachments = &BlendState;
+
+    VkPipelineViewportStateCreateInfo ViewStateCI = {};
+    ViewStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewStateCI.viewportCount = 1;
+    ViewStateCI.scissorCount = 1;
+
+    const VkDynamicState DynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                            VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo DynamicStateCI = {};
+    DynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicStateCI.pDynamicStates = &DynamicStates[0];
+    DynamicStateCI.dynamicStateCount = 2;
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilStateCI = {};
+    DepthStencilStateCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    DepthStencilStateCI.depthTestEnable = VK_TRUE;
+    DepthStencilStateCI.depthWriteEnable = VK_TRUE;
+    DepthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    DepthStencilStateCI.depthBoundsTestEnable = VK_FALSE;
+    DepthStencilStateCI.back.failOp = VK_STENCIL_OP_KEEP;
+    DepthStencilStateCI.back.passOp = VK_STENCIL_OP_KEEP;
+    DepthStencilStateCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    DepthStencilStateCI.stencilTestEnable = VK_FALSE;
+    DepthStencilStateCI.front = DepthStencilStateCI.back;
+
+    VkPipelineMultisampleStateCreateInfo MultisampleStateCI = {};
+    MultisampleStateCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    const uint32_t Stride = P.Bindings.getVertexStride();
+
+    VkVertexInputBindingDescription VertexInputBinding{};
+    VertexInputBinding.binding = 0;
+    VertexInputBinding.stride = Stride;
+    VertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    llvm::SmallVector<VkVertexInputAttributeDescription> Attributes;
+    for (size_t I = 0; I < P.Bindings.VertexAttributes.size(); ++I) {
+      const VertexAttribute &VA = P.Bindings.VertexAttributes[I];
+      VkVertexInputAttributeDescription VkVA = {};
+      VkVA.location = I;
+      VkVA.binding = 0;
+      VkVA.format = getVKFormat(VA.Format, VA.Channels);
+      VkVA.offset = VA.Offset;
+      Attributes.push_back(VkVA);
+    }
+
+    VkPipelineVertexInputStateCreateInfo VertexInputStateCi = {};
+    VertexInputStateCi.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VertexInputStateCi.vertexBindingDescriptionCount = 1;
+    VertexInputStateCi.pVertexBindingDescriptions = &VertexInputBinding;
+    VertexInputStateCi.vertexAttributeDescriptionCount = Attributes.size();
+    VertexInputStateCi.pVertexAttributeDescriptions = Attributes.data();
+
+    VkGraphicsPipelineCreateInfo PipelineCreateInfo = {};
+    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCreateInfo.stageCount = Stages.size();
+    PipelineCreateInfo.pStages = Stages.data();
+    PipelineCreateInfo.pVertexInputState = &VertexInputStateCi;
+    PipelineCreateInfo.pInputAssemblyState = &InputAssemblyCI;
+    PipelineCreateInfo.pRasterizationState = &RastStateCI;
+    PipelineCreateInfo.pColorBlendState = &BlendStateCI;
+    PipelineCreateInfo.pMultisampleState = &MultisampleStateCI;
+    PipelineCreateInfo.pViewportState = &ViewStateCI;
+    PipelineCreateInfo.pDepthStencilState = &DepthStencilStateCI;
+    PipelineCreateInfo.pDynamicState = &DynamicStateCI;
+    PipelineCreateInfo.renderPass = IS.RenderPass;
     PipelineCreateInfo.layout = IS.PipelineLayout;
-    if (vkCreateComputePipelines(IS.Device, IS.PipelineCache, 1,
-                                 &PipelineCreateInfo, nullptr, &IS.Pipeline))
+
+    if (vkCreateGraphicsPipelines(IS.Device, IS.PipelineCache, 1,
+                                  &PipelineCreateInfo, nullptr, &IS.Pipeline))
       return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create pipeline.");
+                                     "Failed to create graphics pipeline.");
 
     return llvm::Error::success();
   }
@@ -942,8 +1376,9 @@ public:
       ImageBarrier.subresourceRange = SubRange;
       ImageBarrier.srcAccessMask = 0;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      ImageBarrier.oldLayout = R.ImageLayout;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      R.ImageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
@@ -1001,8 +1436,9 @@ public:
       ImageBarrier.subresourceRange = SubRange;
       ImageBarrier.srcAccessMask = 0;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-      ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      ImageBarrier.oldLayout = R.ImageLayout;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      R.ImageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
@@ -1074,19 +1510,74 @@ public:
     }
   }
 
-  llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error createCommands(Pipeline &P, InvocationState &IS) {
     for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
-    vkCmdBindPipeline(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                      IS.Pipeline);
-    vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
-                            IS.PipelineLayout, 0, IS.DescriptorSets.size(),
-                            IS.DescriptorSets.data(), 0, 0);
-    const llvm::ArrayRef<int> DispatchSize =
-        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-    vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
-                  DispatchSize[2]);
+    if (P.isGraphics()) {
+      VkClearValue ClearValues[2] = {};
+      ClearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
+      ClearValues[1].depthStencil = {1.0f, 0};
+
+      VkRenderPassBeginInfo RenderPassBeginInfo = {};
+      RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      RenderPassBeginInfo.renderPass = IS.RenderPass;
+      RenderPassBeginInfo.framebuffer = IS.FrameBuffer;
+      RenderPassBeginInfo.renderArea.extent.width =
+          P.Bindings.RTargetBufferPtr->OutputProps.Width;
+      RenderPassBeginInfo.renderArea.extent.height =
+          P.Bindings.RTargetBufferPtr->OutputProps.Height;
+      RenderPassBeginInfo.clearValueCount = 2;
+      RenderPassBeginInfo.pClearValues = ClearValues;
+
+      vkCmdBeginRenderPass(IS.CmdBuffer, &RenderPassBeginInfo,
+                           VK_SUBPASS_CONTENTS_INLINE);
+
+      VkViewport Viewport = {};
+      Viewport.x = 0.0f;
+      Viewport.y = 0.0f;
+      Viewport.width =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
+      Viewport.height =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
+      Viewport.minDepth = 0.0f;
+      Viewport.maxDepth = 1.0f;
+      vkCmdSetViewport(IS.CmdBuffer, 0, 1, &Viewport);
+
+      VkRect2D Scissor = {};
+      Scissor.offset = {0, 0};
+      Scissor.extent.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
+      Scissor.extent.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
+      vkCmdSetScissor(IS.CmdBuffer, 0, 1, &Scissor);
+    }
+
+    const VkPipelineBindPoint BindPoint = P.isGraphics()
+                                              ? VK_PIPELINE_BIND_POINT_GRAPHICS
+                                              : VK_PIPELINE_BIND_POINT_COMPUTE;
+    vkCmdBindPipeline(IS.CmdBuffer, BindPoint, IS.Pipeline);
+    if (IS.DescriptorSets.size() > 0)
+      vkCmdBindDescriptorSets(IS.CmdBuffer, BindPoint, IS.PipelineLayout, 0,
+                              IS.DescriptorSets.size(),
+                              IS.DescriptorSets.data(), 0, 0);
+
+    if (P.isCompute()) {
+      const llvm::ArrayRef<int> DispatchSize =
+          llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
+      vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
+                    DispatchSize[2]);
+      llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
+                   << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
+    } else {
+      VkDeviceSize Offsets[1]{0};
+      assert(IS.VertexBuffer.has_value());
+      vkCmdBindVertexBuffers(IS.CmdBuffer, 0, 1,
+                             &IS.VertexBuffer->Device.Buffer, Offsets);
+      // instanceCount must be >=1 to draw; previously was 0 which draws nothing
+      vkCmdDraw(IS.CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
+      llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
+      vkCmdEndRenderPass(IS.CmdBuffer);
+      copyResourceDataToHost(IS, IS.FrameBufferResource);
+    }
 
     for (auto &R : IS.Resources)
       copyResourceDataToHost(IS, R);
@@ -1120,6 +1611,25 @@ public:
         }
       }
     }
+
+    // Copy back the frame buffer data if this was a graphics pipeline.
+    if (P.isGraphics()) {
+      VkMappedMemoryRange Range = {};
+      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      Range.offset = 0;
+      Range.size = VK_WHOLE_SIZE;
+      const ResourceRef &ResRef = IS.FrameBufferResource.ResourceRefs[0];
+
+      void *Mapped = nullptr;
+      vkMapMemory(IS.Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
+
+      Range.memory = ResRef.Host.Memory;
+      vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+
+      const Buffer &B = *P.Bindings.RTargetBufferPtr;
+      memcpy(B.Data[0].get(), Mapped, B.size());
+      vkUnmapMemory(IS.Device, ResRef.Host.Memory);
+    }
     return llvm::Error::success();
   }
 
@@ -1146,9 +1656,30 @@ public:
       }
     }
 
+    if (IS.getFullShaderStageMask() != VK_SHADER_STAGE_COMPUTE_BIT) {
+      if (IS.VertexBuffer.has_value()) {
+        vkDestroyBuffer(IS.Device, IS.VertexBuffer->Device.Buffer, nullptr);
+        vkFreeMemory(IS.Device, IS.VertexBuffer->Device.Memory, nullptr);
+        vkDestroyBuffer(IS.Device, IS.VertexBuffer->Host.Buffer, nullptr);
+        vkFreeMemory(IS.Device, IS.VertexBuffer->Host.Memory, nullptr);
+      }
+      for (auto &ResRef : IS.FrameBufferResource.ResourceRefs) {
+        // We know the device resource is an image, so no need to check it.
+        vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
+        vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
+        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+      }
+      vkDestroyImage(IS.Device, IS.DepthStencil.Image, nullptr);
+      vkFreeMemory(IS.Device, IS.DepthStencil.Memory, nullptr);
+      vkDestroyFramebuffer(IS.Device, IS.FrameBuffer, nullptr);
+      vkDestroyRenderPass(IS.Device, IS.RenderPass, nullptr);
+    }
+
     vkDestroyPipeline(IS.Device, IS.Pipeline, nullptr);
 
-    vkDestroyShaderModule(IS.Device, IS.Shader, nullptr);
+    for (auto &S : IS.Shaders)
+      vkDestroyShaderModule(IS.Device, S.Shader, nullptr);
 
     vkDestroyPipelineCache(IS.Device, IS.PipelineCache, nullptr);
 
@@ -1157,7 +1688,8 @@ public:
     for (auto &L : IS.DescriptorSetLayouts)
       vkDestroyDescriptorSetLayout(IS.Device, L, nullptr);
 
-    vkDestroyDescriptorPool(IS.Device, IS.Pool, nullptr);
+    if (IS.Pool)
+      vkDestroyDescriptorPool(IS.Device, IS.Pool, nullptr);
 
     vkDestroyCommandPool(IS.Device, IS.CmdPool, nullptr);
     vkDestroyDevice(IS.Device, nullptr);
@@ -1169,11 +1701,22 @@ public:
     if (auto Err = createDevice(State))
       return Err;
     llvm::outs() << "Physical device created.\n";
+    if (auto Err = createShaderModules(P, State))
+      return Err;
+    llvm::outs() << "Shader module created.\n";
     if (auto Err = createCommandBuffer(State))
       return Err;
     llvm::outs() << "Copy command buffer created.\n";
     if (auto Err = createBuffers(P, State))
       return Err;
+    if (P.isGraphics()) {
+      if (auto Err = createRenderPass(P, State))
+        return Err;
+      llvm::outs() << "Render pass created.\n";
+      if (auto Err = createFrameBuffer(P, State))
+        return Err;
+      llvm::outs() << "Frame buffer created.\n";
+    }
     llvm::outs() << "Memory buffers created.\n";
     if (auto Err = executeCommandBuffer(State))
       return Err;
@@ -1187,15 +1730,12 @@ public:
     if (auto Err = createDescriptorSets(P, State))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createShaderModule(P.Shaders[0].Shader->getBuffer(), State))
-      return Err;
-    llvm::outs() << "Shader module created.\n";
     if (auto Err = createPipeline(P, State))
       return Err;
     llvm::outs() << "Compute pipeline created.\n";
-    if (auto Err = createComputeCommands(P, State))
+    if (auto Err = createCommands(P, State))
       return Err;
-    llvm::outs() << "Compute commands created.\n";
+    llvm::outs() << "Commands created.\n";
     if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
       return Err;
     llvm::outs() << "Executed compute command buffer.\n";

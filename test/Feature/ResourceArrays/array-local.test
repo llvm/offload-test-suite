@@ -3,16 +3,16 @@
 // This test verified handling of resource arrays used as a local
 // variable and function argument.
 
-RWBuffer<float> BufA : register(u0);
-RWBuffer<float> BufB : register(u1);
-RWBuffer<float> Out  : register(u2);
+RWStructuredBuffer<float> BufA : register(u0);
+RWStructuredBuffer<float> BufB : register(u1);
+RWStructuredBuffer<float> Out  : register(u2);
 
-float foo(RWBuffer<float> ArgArray[2], uint Index) {
+float foo(RWStructuredBuffer<float> ArgArray[2], uint Index) {
     return ArgArray[0][Index] + ArgArray[1][Index] * 10;
 }
 
 float bar(uint Index) {
-  RWBuffer<float> LocalArray[2];
+  RWStructuredBuffer<float> LocalArray[2];
   LocalArray[0] = BufA;
   LocalArray[1] = BufB;
   return foo(LocalArray, Index);
@@ -48,29 +48,29 @@ Buffers:
 
 Results:
   - Result: BufOut
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.0001
+    Rule: BufferFloatULP
+    ULPT: 5
     Actual: BufOut
     Expected: ExpectedOut
 
 DescriptorSets:
   - Resources:
     - Name: BufA
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
     - Name: BufB
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
     - Name: BufOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
@@ -83,9 +83,12 @@ DescriptorSets:
 # UNSUPPORTED: Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/154669
-# XFAIL: Clang-Vulkan
+# XFAIL: Clang && Vulkan
+
+# DXC-Vulkan support for arrays of RWStructuredBuffer are pretty broken.
+# Tracked by https://github.com/microsoft/DirectXShaderCompiler/issues/7727
+# XFAIL: DXC && Vulkan
 
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -118,7 +118,7 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
+# UNSUPPORTED: Clang && Vulkan
 # Clang-Vulkan is unsupported because of two validation errors
 # This issue tracks its resolution: https://github.com/llvm/offload-test-suite/issues/285
 # REQUIRES: Half

@@ -66,8 +66,7 @@ DescriptorSets:
 #--- end
 
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.2 -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # The behavior of this operation is consistent on Metal, so the test verifies that behavior.
@@ -88,7 +87,7 @@ DescriptorSets:
 # DirectX driver implementations seem to match SPIR-V, except WARP, which does
 # not treat -INF as an identity.
 
-# XFAIL: DirectX-WARP
+# XFAIL: DirectX && WARP
 
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32

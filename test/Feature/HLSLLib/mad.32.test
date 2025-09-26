@@ -207,11 +207,8 @@ DescriptorSets:
         Binding: 11
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/140095
-# XFAIL: Clang-Vulkan
-
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7706
-# XFAIL: DXC-Vulkan
+# XFAIL: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
