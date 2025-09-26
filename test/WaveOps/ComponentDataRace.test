@@ -1,0 +1,69 @@
+#--- source.hlsl
+
+// This tests that we can concurrently write to the components of a uint4
+// as though it is an array. The large group size is used to force the write
+// to occur across multiple waves so that the datarace can be observed.
+
+RWStructuredBuffer<uint4> In : register(u0);
+RWStructuredBuffer<uint4> Out : register(u1);
+
+[numthreads(128, 4, 1)]
+void main(uint3 ThreadID : SV_GroupThreadID) {
+  if (ThreadID.x == 0) {
+    Out[0][ThreadID.y] = In[0][ThreadID.y];
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: UInt32
+    Channels: 4
+    Data: [ 1, 2, 3, 4 ]
+  - Name: Out
+    Format: UInt32
+    Channels: 4
+    ZeroInitSize: 16
+  - Name: ExpectedOut
+    Format: UInt32
+    Channels: 4
+    Data: [ 1, 2, 3, 4 ]
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Clang introduces a data-race (but it is not observable on WARP)
+# Bug https://github.com/llvm/llvm-project/issues/160208
+# XFAIL: Clang && !WARP
+
+# Bug https://github.com/llvm/offload-test-suite/issues/452
+# XFAIL: DXC && Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
