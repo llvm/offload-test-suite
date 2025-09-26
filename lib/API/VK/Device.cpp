@@ -876,6 +876,9 @@ public:
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
         DescriptorCounts[getDescriptorType(R.Kind)] += R.BufferPtr->ArraySize;
+        if (R.HasCounter)
+          DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
+              R.BufferPtr->ArraySize;
       }
     }
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
