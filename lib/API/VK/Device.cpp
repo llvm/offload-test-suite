@@ -1098,6 +1098,8 @@ public:
           CounterWDS.descriptorCount = R.BufferPtr->ArraySize;
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
+          llvm::outs() << "Updating Counter Descriptor [" << OverallResIdx
+                       << "] { " << SetIdx << ", " << RIdx << " }\n";
           WriteDescriptors.push_back(CounterWDS);
         }
       }
@@ -1558,6 +1560,9 @@ public:
     for (auto &ResRef : R.ResourceRefs)
       vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
                       &CopyRegion);
+    for (auto &ResRef : R.CounterResourceRefs)
+      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
+                      &CopyRegion);
 
     VkBufferCopy CounterCopyRegion = {};
     CounterCopyRegion.size = sizeof(uint32_t);
@@ -1571,6 +1576,12 @@ public:
     Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
+      Barrier.buffer = ResRef.Host.Buffer;
+      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                           &Barrier, 0, nullptr);
+    }
+    for (auto &ResRef : R.CounterResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
       vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
