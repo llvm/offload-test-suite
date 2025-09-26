@@ -690,7 +690,7 @@ public:
       }
     }
     if (R.HasCounter) {
-      for (uint32_t i = 0; i < R.BufferPtr->ArraySize; ++i) {
+      for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
         uint32_t CounterValue = 0;
         auto ExHostBuf = createBuffer(IS,
                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -1675,14 +1675,14 @@ public:
           vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
         }
         if (R.HasCounter) {
-          for (uint32_t i = 0; i < R.BufferPtr->ArraySize; ++i) {
+          for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
             void *Mapped = nullptr;
-            auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[i];
+            auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
             vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
                         &Mapped);
             Range.memory = CounterRef.Host.Memory;
             vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-            memcpy(&R.BufferPtr->Counters[i], Mapped, sizeof(uint32_t));
+            memcpy(&R.BufferPtr->Counters[I], Mapped, sizeof(uint32_t));
             vkUnmapMemory(IS.Device, CounterRef.Host.Memory);
           }
         }
