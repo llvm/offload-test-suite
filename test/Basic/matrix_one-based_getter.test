@@ -1,0 +1,66 @@
+#--- source.hlsl
+
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  float2x2 A;
+
+  A._11 = In[0];
+  A._12 = In[1];
+  A._21 = In[2];
+  A._22 = In[3];
+
+  Out[0] = A._11;
+  Out[1] = A._12;
+  Out[2] = A._21;
+  Out[3] = A._22;
+
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4]
+  - Name: Out
+    Format: Int32
+    Data: [ 1, 2, 3, 4]
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: In
+# CHECK: Format: Int32
+# CHECK: Data: [ 1, 2, 3, 4 ]
+# CHECK: Name: Out
+# CHECK: Format: Int32
+# CHECK: Data: [ 1, 2, 3, 4 ]

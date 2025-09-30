@@ -1,0 +1,126 @@
+#--- source.hlsl
+
+RWBuffer<int> In : register(u0);
+RWBuffer<int> DivOut : register(u1);
+RWBuffer<int> MulOut : register(u2);
+RWBuffer<int> AddOut : register(u3);
+RWBuffer<int> SubOut : register(u4);
+
+[numthreads(1,1,1)]
+void main() {
+  float2x3 A = float2x3(In[0], In[1], In[2], 
+                        In[3], In[4], In[5]); 
+  
+  DivOut[0] = A[0][0] / 2;
+  DivOut[1] = A[0][1] / 2;
+  DivOut[2] = A[0][2] / 2;
+  DivOut[3] = A[1][0] / 2;
+  DivOut[4] = A[1][1] / 2;
+  DivOut[5] = A[1][2] / 2;
+
+  MulOut[0] = A[0][0] * 2;
+  MulOut[1] = A[0][1] * 2;
+  MulOut[2] = A[0][2] * 2;
+  MulOut[3] = A[1][0] * 2;
+  MulOut[4] = A[1][1] * 2;
+  MulOut[5] = A[1][2] * 2;
+
+  AddOut[0] = A[0][0] + 1;
+  AddOut[1] = A[0][1] + 1;
+  AddOut[2] = A[0][2] + 1;
+  AddOut[3] = A[1][0] + 1;
+  AddOut[4] = A[1][1] + 1;
+  AddOut[5] = A[1][2] + 1;
+
+  SubOut[0] = A[0][0] - 1;
+  SubOut[1] = A[0][1] - 1;
+  SubOut[2] = A[0][2] - 1;
+  SubOut[3] = A[1][0] - 1;
+  SubOut[4] = A[1][1] - 1;
+  SubOut[5] = A[1][2] - 1;
+
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 2, 4, 6, 8, 10, 12 ]
+  - Name: DivOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6 ]
+  - Name: MulOut
+    Format: Int32
+    Data: [ 4, 8, 12, 16, 20, 24 ]
+  - Name: AddOut
+    Format: Int32
+    Data: [ 3, 5, 7, 9, 11, 13 ]
+  - Name: SubOut
+    Format: Int32
+    Data: [ 1, 3, 5, 7, 9, 11 ]
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: DivOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: MulOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: AddOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: SubOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: In
+# CHECK: Format: Int32
+# CHECK: Data: [ 2, 4, 6, 8, 10, 12 ]
+# CHECK: Name: DivOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 1, 2, 3, 4, 5, 6 ]
+# CHECK: Name: MulOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 4, 8, 12, 16, 20, 24 ]
+# CHECK: Name: AddOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 3, 5, 7, 9, 11, 13 ]
+# CHECK: Name: SubOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 1, 3, 5, 7, 9, 11 ]
