@@ -83,24 +83,24 @@ DescriptorSets:
     - Name: MulOut
       Kind: RWBuffer
       DirectXBinding:
-        Register: 1
+        Register: 2
         Space: 0
       VulkanBinding:
-        Binding: 1
+        Binding: 2
     - Name: AddOut
       Kind: RWBuffer
       DirectXBinding:
-        Register: 1
+        Register: 3
         Space: 0
       VulkanBinding:
-        Binding: 1
+        Binding: 3
     - Name: SubOut
       Kind: RWBuffer
       DirectXBinding:
-        Register: 1
+        Register: 4
         Space: 0
       VulkanBinding:
-        Binding: 1
+        Binding: 4
 ...
 #--- end
 
