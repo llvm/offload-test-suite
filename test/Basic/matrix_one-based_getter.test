@@ -5,7 +5,7 @@ RWBuffer<int> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  float2x2 A;
+  int2x2 A;
 
   A._11 = In[0];
   A._12 = In[1];
