@@ -32,7 +32,7 @@ Buffers:
     Data: [ 1, 2, 3, 4]
   - Name: Out
     Format: Int32
-    Data: [ 1, 2, 3, 4]
+    Data: [ 0,0,0,0 ]
 DescriptorSets:
   - Resources:
     - Name: In
@@ -45,7 +45,6 @@ DescriptorSets:
     - Name: Out
       Kind: RWBuffer
       DirectXBinding:
-
         Register: 1
         Space: 0
       VulkanBinding:

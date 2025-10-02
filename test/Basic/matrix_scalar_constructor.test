@@ -30,7 +30,7 @@ Buffers:
     Data: [ 1, 2, 3, 4, 5, 6]
   - Name: Out
     Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6]
+    Data: [ 0,0,0,0,0,0 ]
 DescriptorSets:
   - Resources:
     - Name: In
