@@ -34,12 +34,14 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
+        CounterBinding: 1
 ...
 #--- end
 
-# Offload tests are missing support for counters on Vulkan
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/303
-# XFAIL: Vulkan
+# Unimplemented https://github.com/llvm/llvm-project/issues/137032
+# XFAIL: Clang && Vulkan
 
 # Offload tests are missing support for counters and resource arrays on Metal
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304
@@ -48,14 +50,14 @@ DescriptorSets:
 
 # Intel has an issue with counters in resource arrays
 # Bug https://github.com/llvm/offload-test-suite/issues/376
-# XFAIL: DirectX && Intel
+# XFAIL: Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s %if DirectX %{ --check-prefixes=CHECK,DX-CHECK %}
 
-# CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
-# CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
+# DX-CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
+# DX-CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
 
 # CHECK: Name: Out
 # CHECK: Counters: [ 1, 2, 3, 4 ]

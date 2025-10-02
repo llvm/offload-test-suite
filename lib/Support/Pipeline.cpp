@@ -285,6 +285,7 @@ void MappingTraits<offloadtest::DirectXBinding>::mapping(
 void MappingTraits<offloadtest::VulkanBinding>::mapping(
     IO &I, offloadtest::VulkanBinding &B) {
   I.mapRequired("Binding", B.Binding);
+  I.mapOptional("CounterBinding", B.CounterBinding);
 }
 
 void MappingTraits<offloadtest::VertexAttribute>::mapping(

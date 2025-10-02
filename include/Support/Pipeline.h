@@ -65,6 +65,7 @@ struct DirectXBinding {
 
 struct VulkanBinding {
   uint32_t Binding;
+  std::optional<uint32_t> CounterBinding;
 };
 
 struct OutputProperties {
