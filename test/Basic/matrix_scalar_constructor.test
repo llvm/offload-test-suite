@@ -6,7 +6,7 @@ RWBuffer<int> Out : register(u1);
 [numthreads(6,1,1)]
 void main(uint GI : SV_GroupIndex) {
   int2x3 A = int2x3(In[0], In[1], In[2], 
-                        In[3], In[4], In[5]); 
+                    In[3], In[4], In[5]); 
   
   int row = GI / 2;
   int col = GI % 2;
@@ -26,7 +26,15 @@ Buffers:
     Data: [ 1, 2, 3, 4, 5, 6]
   - Name: Out
     Format: Int32
-    Data: [ 0,0,0,0,0,0 ]
+    ZeroInitSize: 24
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 4, 2, 5, 3, 6 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
 DescriptorSets:
   - Resources:
     - Name: In
@@ -49,11 +57,4 @@ DescriptorSets:
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK: Name: In
-# CHECK: Format: Int32
-# CHECK: Data: [ 1, 2, 3, 4, 5, 6 ]
-# CHECK: Name: Out
-# CHECK: Format: Int32
-# CHECK: Data: [ 1, 4, 2, 5, 3, 6 ]
+# RUN: %offloader %t/pipeline.yaml %t.o

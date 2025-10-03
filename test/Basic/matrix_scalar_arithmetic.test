@@ -9,7 +9,7 @@ RWBuffer<int> SubOut : register(u4);
 [numthreads(6,1,1)]
 void main(uint GI : SV_GroupIndex) {
   int2x3 A = int2x3(In[0], In[1], In[2], 
-                        In[3], In[4], In[5]); 
+                    In[3], In[4], In[5]); 
   
   int row = GI / 2;
   int col = GI % 2;
@@ -32,16 +32,16 @@ Buffers:
     Data: [ 2, 4, 6, 8, 10, 12 ]
   - Name: DivOut
     Format: Int32
-    Data: [ 0,0,0,0,0,0 ]
+    ZeroInitSize: 24
   - Name: MulOut
     Format: Int32
-    Data: [ 0,0,0,0,0,0 ]
+    ZeroInitSize: 24
   - Name: AddOut
     Format: Int32
-    Data: [ 0,0,0,0,0,0 ]
+    ZeroInitSize: 24
   - Name: SubOut
     Format: Int32
-    Data: [ 0,0,0,0,0,0 ]
+    ZeroInitSize: 24
 DescriptorSets:
   - Resources:
     - Name: In

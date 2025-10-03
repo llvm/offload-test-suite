@@ -19,7 +19,6 @@ void main(uint GI : SV_GroupIndex) {
     case 3:
       A._m11 = In[GI];
       break;
-
   }
 
   switch(GI) {
@@ -35,7 +34,6 @@ void main(uint GI : SV_GroupIndex) {
     case 3:
       Out[GI] = A._m11;
       break;
-
   }
 }
 
@@ -52,7 +50,15 @@ Buffers:
     Data: [ 1, 2, 3, 4]
   - Name: Out
     Format: Int32
-    Data: [ 0,0,0,0 ]
+    ZeroInitSize: 16
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
 DescriptorSets:
   - Resources:
     - Name: In
@@ -75,11 +81,4 @@ DescriptorSets:
 # UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK: Name: In
-# CHECK: Format: Int32
-# CHECK: Data: [ 1, 2, 3, 4 ]
-# CHECK: Name: Out
-# CHECK: Format: Int32
-# CHECK: Data: [ 1, 2, 3, 4 ]
+# RUN: %offloader %t/pipeline.yaml %t.o
