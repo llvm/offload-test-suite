@@ -3,18 +3,14 @@
 RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 
-[numthreads(1,1,1)]
-void main() {
+[numthreads(6,1,1)]
+void main(uint GI : SV_GroupIndex) {
   int2x3 A = int2x3(In[0], In[1], In[2], 
                         In[3], In[4], In[5]); 
   
-  Out[0] = A[0][0];
-  Out[1] = A[0][1];
-  Out[2] = A[0][2];
-  Out[3] = A[1][0];
-  Out[4] = A[1][1];
-  Out[5] = A[1][2];
-
+  int row = GI / 2;
+  int col = GI % 2;
+  Out[GI] = A[col][row];
 }
 
 //--- pipeline.yaml
@@ -60,4 +56,4 @@ DescriptorSets:
 # CHECK: Data: [ 1, 2, 3, 4, 5, 6 ]
 # CHECK: Name: Out
 # CHECK: Format: Int32
-# CHECK: Data: [ 1, 2, 3, 4, 5, 6 ]
+# CHECK: Data: [ 1, 4, 2, 5, 3, 6 ]

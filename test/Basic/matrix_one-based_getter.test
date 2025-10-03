@@ -3,20 +3,40 @@
 RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 
-[numthreads(1,1,1)]
-void main() {
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
   int2x2 A;
+  switch(GI) {
+    case 0:
+      A._11 = In[GI];
+      break;
+    case 1:
+      A._12 = In[GI];
+      break;
+    case 2:
+      A._21 = In[GI];
+      break;
+    case 3:
+      A._22 = In[GI];
+      break;
 
-  A._11 = In[0];
-  A._12 = In[1];
-  A._21 = In[2];
-  A._22 = In[3];
+  }
 
-  Out[0] = A._11;
-  Out[1] = A._12;
-  Out[2] = A._21;
-  Out[3] = A._22;
+  switch(GI) {
+    case 0:
+      Out[GI] = A._11;
+      break;
+    case 1:
+      Out[GI] = A._12;
+      break;
+    case 2:
+      Out[GI] = A._21;
+      break;
+    case 3:
+      Out[GI] = A._22;
+      break;
 
+  }
 }
 
 //--- pipeline.yaml
