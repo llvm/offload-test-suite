@@ -1,0 +1,86 @@
+#--- source.hlsl
+
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Out : register(u1);
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  int2x2 A;
+  switch(GI) {
+    case 0:
+      A._11 = In[GI];
+      break;
+    case 1:
+      A._12 = In[GI];
+      break;
+    case 2:
+      A._21 = In[GI];
+      break;
+    case 3:
+      A._22 = In[GI];
+      break;
+
+  }
+
+  switch(GI) {
+    case 0:
+      Out[GI] = A._11;
+      break;
+    case 1:
+      Out[GI] = A._12;
+      break;
+    case 2:
+      Out[GI] = A._21;
+      break;
+    case 3:
+      Out[GI] = A._22;
+      break;
+
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4]
+  - Name: Out
+    Format: Int32
+    ZeroInitSize: 16
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
