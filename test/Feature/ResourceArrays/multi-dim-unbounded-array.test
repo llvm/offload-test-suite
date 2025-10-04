@@ -1,0 +1,68 @@
+#--- source.hlsl
+
+// Verify handling of unbounded multi-dimensional resource array.
+
+RWStructuredBuffer<int> Buf[][2] : register(u0);
+
+[numthreads(4,2,1)]
+void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
+  for (int i = 0; i < 4; i++) {
+    Buf[1][0][i] = Buf[0][0][i] + Buf[0][1][i];
+    Buf[1][1][i] = Buf[0][0][i] * Buf[0][1][i];
+    Buf[0][0][i] += Buf[0][1][i];
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Buf
+    Format: Int32
+    ArraySize: 4
+    Data:
+      - [ 0, 1, 2, 3 ]
+      - [ 1, 2, 3, 4 ]
+      - [ 2, 3, 4, 5 ]
+      - [ 3, 4, 5, 6 ]
+
+  - Name: ExpectedBuf
+    Format: Int32
+    ArraySize: 4
+    Data:
+     - [ 1, 3, 5, 7 ]
+     - [ 1, 2, 3, 4 ]
+     - [ 1, 3, 5, 7 ]
+     - [ 0, 2, 6, 12 ]
+
+Results:
+  - Result: Buf
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+
+DescriptorSets:
+  - Resources:
+    - Name: Buf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/159679
+# XFAIL: Clang
+
+# Resource arrays are not yet supported on Metal
+# UNSUPPORTED: Metal
+
+# Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
