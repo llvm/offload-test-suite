@@ -28,12 +28,14 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
+        CounterBinding: 1
 ...
 #--- end
 
-# Offload tests are missing support for counters on Vulcan
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/303
-# XFAIL: Vulkan
+# Unimplemented https://github.com/llvm/llvm-project/issues/137032
+# XFAIL: Clang && Vulkan
 
 # Offload tests are missing support for counters on Metal
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304
