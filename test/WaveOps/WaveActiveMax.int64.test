@@ -19,9 +19,9 @@ StructuredBuffer<MaskStruct> Masks  : register(t6);
 [numthreads(NUM_THREADS,1,1)]
 void main(uint3 tid : SV_GroupThreadID)
 {
-    for (int ValueSet = 0; ValueSet < VALUE_SETS; ValueSet++) {
+    for (uint ValueSet = 0; ValueSet < VALUE_SETS; ValueSet++) {
         const uint ValueSetOffset = ValueSet * NUM_MASKS * NUM_THREADS;
-        for (int MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
+        for (uint MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
             int64_t4 v = In[ValueSet * ValueSetOffset + MaskIdx * NUM_THREADS + tid.x];
             const uint OutIdx = ValueSetOffset + MaskIdx * NUM_THREADS + tid.x;
             if (Masks[MaskIdx].mask[tid.x]) {
@@ -48,7 +48,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int64
-    Stride: 32
+    Stride: 16
     # 2 value sets
     # For each value set, 
     # and for each specific one of the 4 thread masks in that value set,
@@ -111,8 +111,8 @@ Buffers:
     Stride: 32
     ZeroInitSize: 32
   - Name: Masks
-    Format: Int64
-    Stride: 8
+    Format: Int32
+    Stride: 16
     # 4 active mask sets for threads 0, 1, 2, 3:
     # 0 0 0 0
     # 1 1 1 1    

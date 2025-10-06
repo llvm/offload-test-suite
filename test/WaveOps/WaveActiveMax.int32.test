@@ -19,9 +19,9 @@ StructuredBuffer<MaskStruct> Masks  : register(t6);
 [numthreads(NUM_THREADS,1,1)]
 void main(uint3 tid : SV_GroupThreadID)
 {
-    for (int ValueSet = 0; ValueSet < VALUE_SETS; ValueSet++) {
+    for (uint ValueSet = 0; ValueSet < VALUE_SETS; ValueSet++) {
         const uint ValueSetOffset = ValueSet * NUM_MASKS * NUM_THREADS;
-        for (int MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
+        for (uint MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
             int4 v = In[ValueSet * ValueSetOffset + MaskIdx * NUM_THREADS + tid.x];
             const uint OutIdx = ValueSetOffset + MaskIdx * NUM_THREADS + tid.x;
             if (Masks[MaskIdx].mask[tid.x]) {

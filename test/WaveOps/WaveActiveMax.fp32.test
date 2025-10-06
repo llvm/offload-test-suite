@@ -4,7 +4,7 @@
 #define NUM_THREADS 4
 
 struct MaskStruct {
-    float mask[NUM_THREADS];
+    int mask[NUM_THREADS];
 };
 
 StructuredBuffer<float4> In  : register(t0);
@@ -21,7 +21,7 @@ void main(uint3 tid : SV_GroupThreadID)
 {
     for (uint ValueSet = 0; ValueSet < VALUE_SETS; ValueSet++) {
         const uint ValueSetOffset = ValueSet * NUM_MASKS * NUM_THREADS;
-        for (float MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
+        for (uint MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
             float4 v = In[ValueSet * ValueSetOffset + MaskIdx * NUM_THREADS + tid.x];
             const uint OutIdx = ValueSetOffset + MaskIdx * NUM_THREADS + tid.x;
             if (Masks[MaskIdx].mask[tid.x]) {
@@ -111,7 +111,7 @@ Buffers:
     Stride: 16
     ZeroInitSize: 16
   - Name: Masks
-    Format: Float32
+    Format: Int32
     Stride: 16
     # 4 active mask sets for threads 0, 1, 2, 3:
     # 0 0 0 0
