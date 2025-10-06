@@ -48,7 +48,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int64
-    Stride: 16
+    Stride: 32
     # 2 value sets
     # For each value set, 
     # and for each specific one of the 4 thread masks in that value set,
