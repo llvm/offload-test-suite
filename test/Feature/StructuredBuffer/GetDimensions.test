@@ -75,6 +75,16 @@ Buffers:
     Format: Int32
     ZeroInitSize: 32
 
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 16, 4, 8, 2, 16, 2, 8 ]
+
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+
 DescriptorSets:
   - Resources:
     - Name: A
@@ -114,8 +124,4 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK:      - Name: Out
-# CHECK-NEXT:   Format: Int32
-# CHECK-NEXT:   Data: [ 1, 16, 4, 8, 2, 16, 2, 8 ]
+# RUN: %offloader %t/pipeline.yaml %t.o
