@@ -4,9 +4,10 @@
 // `GetDimension`s on typed buffers RWBuffer and Buffer.
 
 Buffer<int4> A : register(t0);
-RWBuffer<float> B : register(u0);
+RWBuffer<float> B : register(u1);
 
-RWBuffer<uint> Out : register(u0, space1);
+[[vk::binding(10)]]
+RWBuffer<uint> Out : register(u10);
 
 [numthreads(4,1,1)]
 void main() {
@@ -57,23 +58,29 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
 
     - Name: B
       Kind: RWBuffer
       DirectXBinding:
-        Register: 0
+        Register: 1
         Space: 0
+      VulkanBinding:
+        Binding: 1
 
     - Name: Out
       Kind: RWBuffer
       DirectXBinding:
-        Register: 0
-        Space: 1
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+
 ...
 #--- end
 
 # UNSUPPORTED: Clang
-# UNSUPPORTED: Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
