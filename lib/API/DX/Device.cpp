@@ -958,7 +958,6 @@ public:
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     IS.CmdList->SetPipelineState(IS.PSO.Get());
-    IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -969,6 +968,8 @@ public:
       IS.CmdList->SetDescriptorHeaps(1, Heaps);
       Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
+
+    IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
 
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0u;
