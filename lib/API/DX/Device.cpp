@@ -957,19 +957,17 @@ public:
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdList->SetPipelineState(IS.PSO.Get());
-
-    const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
-
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
       IS.CmdList->SetDescriptorHeaps(1, Heaps);
       Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
-
     IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
+    IS.CmdList->SetPipelineState(IS.PSO.Get());
+
+    const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0u;
@@ -1316,6 +1314,13 @@ public:
         IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
     Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
 
+    if (IS.DescHeap) {
+      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
+      IS.CmdList->SetDescriptorHeaps(1, Heaps);
+      IS.CmdList->SetGraphicsRootDescriptorTable(
+          0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
+    }
+    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     IS.CmdList->SetPipelineState(IS.PSO.Get());
 
     IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
@@ -1333,15 +1338,6 @@ public:
     const D3D12_RECT Scissor = {0, 0, static_cast<LONG>(VP.Width),
                                 static_cast<LONG>(VP.Height)};
     IS.CmdList->RSSetScissorRects(1, &Scissor);
-
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CmdList->SetDescriptorHeaps(1, Heaps);
-      IS.CmdList->SetGraphicsRootDescriptorTable(
-          0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
-    }
-
-    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
 
     IS.CmdList->DrawInstanced(P.Bindings.getVertexCount(), 1, 0, 0);
 
