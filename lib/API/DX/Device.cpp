@@ -1317,7 +1317,6 @@ public:
     Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
 
     IS.CmdList->SetPipelineState(IS.PSO.Get());
-    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
 
     IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
 
@@ -1341,6 +1340,8 @@ public:
       IS.CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
+
+    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
 
     IS.CmdList->DrawInstanced(P.Bindings.getVertexCount(), 1, 0, 0);
 
