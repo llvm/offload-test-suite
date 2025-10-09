@@ -64,7 +64,7 @@ DescriptorSets:
     - Name: B
       Kind: RWByteAddressBuffer
       DirectXBinding:
-        Register: 0
+        Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
