@@ -1,6 +1,6 @@
 #--- source.hlsl
 // Regression test for https://github.com/llvm/llvm-project/issues/156084
-RWBuffer<uint> output : register(u1);
+RWStructuredBuffer<uint> output : register(u1);
 cbuffer Constants : register(b0) {
     uint4 s[3];
 };
@@ -19,17 +19,17 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Constants
-    Format: Int32
+    Format: UInt32
     Data: [
       1, 2, 3, 4,
       5, 6, 7, 8,
       9, 10, 11, 12,
     ]
   - Name: Out
-    Format: Int32
+    Format: UInt32
     ZeroInitSize: 8
   - Name: ExpectedOut
-    Format: Int32
+    Format: UInt32
     Data: [ 8, 11 ]
 Results:
   - Result: Test1
