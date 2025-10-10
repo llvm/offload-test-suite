@@ -4,12 +4,14 @@ cbuffer CBArrays : register(b0) {
   float c1[2];
   int4 c2[2][2];
   bool c3[2];
+  int3 c4[2][2];
 }
 
 struct Arrays {
   float c1[2];
   int4 c2[2][2];
   bool c3[2];
+  int3 c4[2][2];
 };
 
 RWStructuredBuffer<Arrays> Out : register(u1);
@@ -19,6 +21,7 @@ void main() {
   Out[0].c1 = c1;
   Out[0].c2 = c2;
   Out[0].c3 = c3;
+  Out[0].c4 = c4;
 }
 
 //--- pipeline.yaml
@@ -40,11 +43,37 @@ Buffers:
       0x0000000D, 0x0000000E, 0x0000000F, 0x00000010,
       0x00000000, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
       0x00000001, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x00000010, 0x00000011, 0x00000012, 0x5A5A5A5A,
+      0x00000013, 0x00000014, 0x00000015, 0x5A5A5A5A,
+      0x00000016, 0x00000017, 0x00000018, 0x5A5A5A5A,
+      0x00000019, 0x0000001A, 0x0000001B, 0x5A5A5A5A
     ]
   - Name: Out
     Format: Hex32
-    Stride: 80
-    ZeroInitSize: 80
+    Stride: 128
+    ZeroInitSize: 128
+  - Name: ExpectedOut
+    Format: Hex32
+    Stride: 128
+    Data: [
+      0x3f800000,
+      0x40800000,
+      0x00000001, 0x00000002, 0x00000003, 0x00000004,
+      0x00000005, 0x00000006, 0x00000007, 0x00000008,
+      0x00000009, 0x0000000A, 0x0000000B, 0x0000000C,
+      0x0000000D, 0x0000000E, 0x0000000F, 0x00000010,
+      0x00000000,
+      0x00000001,
+      0x00000010, 0x00000011, 0x00000012,
+      0x00000013, 0x00000014, 0x00000015,
+      0x00000016, 0x00000017, 0x00000018,
+      0x00000019, 0x0000001A, 0x0000001B,
+    ]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
 DescriptorSets:
   - Resources:
     - Name: CBArrays
@@ -68,40 +97,4 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK: - Name: CBArrays
-# CHECK:   Format: Hex32
-
-# CHECK: - Name: Out
-# CHECK:   Format: Hex32
-# CHECK:   Data: [
-
-# CHECK:     0x3F800000,
-# CHECK:     0x40800000,
-# CHECK-NOT: 0x5A5A5A5A,
-
-# CHECK:     0x1,
-# CHECK:     0x2,
-# CHECK:     0x3,
-# CHECK:     0x4,
-# CHECK:     0x5,
-# CHECK:     0x6,
-# CHECK:     0x7,
-# CHECK:     0x8,
-# CHECK:     0x9,
-# CHECK:     0xA,
-# CHECK:     0xB,
-# CHECK:     0xC,
-# CHECK:     0xD,
-# CHECK:     0xE,
-# CHECK:     0xF,
-# CHECK:     0x10,
-
-# CHECK:     0x0,
-# CHECK-NOT: 0x5A5A5A5A,
-
-# CHECK:     0x1
-# CHECK-NOT: 0x5A5A5A5A
-
-# CHECK:   ]
+# RUN: %offloader %t/pipeline.yaml %t.o
