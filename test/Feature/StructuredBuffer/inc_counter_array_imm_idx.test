@@ -7,10 +7,19 @@ RWStructuredBuffer<int> Out[4] : register(u0);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  for (int i = 0; i < GI; i++)
-    Out[GI].IncrementCounter();
-  
-  Out[GI][0] = Out[GI].IncrementCounter();
+  Out[0].IncrementCounter();
+
+  Out[1].IncrementCounter();
+  Out[1].IncrementCounter();
+
+  Out[2].IncrementCounter();
+  Out[2].IncrementCounter();
+  Out[2].IncrementCounter();
+
+  Out[3].IncrementCounter();
+  Out[3].IncrementCounter();
+  Out[3].IncrementCounter();
+  Out[3].IncrementCounter();
 }
 
 //--- pipeline.yaml
@@ -40,17 +49,10 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/162841
-# XFAIL: Clang && Vulkan
-
 # Offload tests are missing support for counters and resource arrays on Metal
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
-
-# Intel has an issue with counters in resource arrays
-# Bug https://github.com/llvm/offload-test-suite/issues/376
-# XFAIL: Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
@@ -60,9 +62,9 @@ DescriptorSets:
 # DX-CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
 
 # CHECK: Name: Out
-# CHECK: Counters: [ 1, 2, 3, 4 ]
+# CHECK: Counters: [ 4, 8, 12, 16 ]
 # CHECK: Data:
 # CHECK-NEXT: - [ 0x0 ]
-# CHECK-NEXT: - [ 0x1 ]
-# CHECK-NEXT: - [ 0x2 ]
-# CHECK-NEXT: - [ 0x3 ]
+# CHECK-NEXT: - [ 0x0 ]
+# CHECK-NEXT: - [ 0x0 ]
+# CHECK-NEXT: - [ 0x0 ]
