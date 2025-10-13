@@ -80,6 +80,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/469
+# XFAIL: DXC && Vulkan
+
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/126
 # XFAIL: Clang
 
