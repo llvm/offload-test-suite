@@ -71,21 +71,23 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
+      VulkanBinding:
+        Binding: 1
 ...
 #--- end
 
 # REQUIRES: Half, Int16
-# DXC's vulkan support does not layout cbuffers compatibly with DXIL
-# UNSUPPORTED: Vulkan
 
 # Bug https://github.com/llvm/llvm-project/issues/138996
 # XFAIL: Clang
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -fvk-use-dx-layout -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
