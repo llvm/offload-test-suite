@@ -9,7 +9,7 @@ RWByteAddressBuffer B : register(u1);
 [[vk::binding(10)]]
 RWBuffer<uint> Out : register(u10);
 
-[numthreads(4,1,1)]
+[numthreads(1,1,1)]
 void main() {
   uint dim;
   
