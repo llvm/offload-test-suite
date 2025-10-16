@@ -1,0 +1,84 @@
+#--- source.hlsl
+
+struct S{
+  int data[512];
+};
+
+StructuredBuffer<S> X : register(t0);
+StructuredBuffer<S> Y : register(t1);
+
+RWStructuredBuffer<int> Out : register(u2);
+
+
+[numthreads(1,1,1)]
+void main() {
+  // 256 elements in the Structured Buffer will span 2 tiles
+  Out[0] = X[0].data[0];
+  Out[1] = X[200].data[0];
+  Out[2] = Y[0].data[0];
+  Out[3] = Y[200].data[0];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Int32
+    Stride: 65536
+    FillSize: 131072
+    FillValue: 1
+  - Name: Y
+    Format: Int32
+    Stride: 65536
+    FillSize: 131072
+    FillValue: 2
+    TilesMapped: 1
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    ZeroInitSize: 64
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [1, 1, 2, 0]
+
+Results:
+  - Result: Test
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# REQUIRES: DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
