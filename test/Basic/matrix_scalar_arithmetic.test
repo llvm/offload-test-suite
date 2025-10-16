@@ -1,0 +1,104 @@
+#--- source.hlsl
+
+RWBuffer<int> In : register(u0);
+RWBuffer<int> DivOut : register(u1);
+RWBuffer<int> MulOut : register(u2);
+RWBuffer<int> AddOut : register(u3);
+RWBuffer<int> SubOut : register(u4);
+
+[numthreads(6,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  int2x3 A = int2x3(In[0], In[1], In[2], 
+                    In[3], In[4], In[5]); 
+  
+  int row = GI / 2;
+  int col = GI % 2;
+  DivOut[GI] = A[col][row] / 2;
+  MulOut[GI] = A[col][row] * 2;
+  AddOut[GI] = A[col][row] + 1;
+  SubOut[GI] = A[col][row] - 1;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 2, 4, 6, 8, 10, 12 ]
+  - Name: DivOut
+    Format: Int32
+    ZeroInitSize: 24
+  - Name: MulOut
+    Format: Int32
+    ZeroInitSize: 24
+  - Name: AddOut
+    Format: Int32
+    ZeroInitSize: 24
+  - Name: SubOut
+    Format: Int32
+    ZeroInitSize: 24
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: DivOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: MulOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: AddOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: SubOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: In
+# CHECK: Format: Int32
+# CHECK: Data: [ 2, 4, 6, 8, 10, 12 ]
+# CHECK: Name: DivOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 1, 4, 2, 5, 3, 6 ]
+# CHECK: Name: MulOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 4, 16, 8, 20, 12, 24 ]
+# CHECK: Name: AddOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 3, 9, 5, 11, 7, 13 ]
+# CHECK: Name: SubOut
+# CHECK: Format: Int32
+# CHECK: Data: [ 1, 7, 3, 9, 5, 11 ]
