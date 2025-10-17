@@ -12,11 +12,30 @@ RWStructuredBuffer<int> Out : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
-  // 256 elements in the Structured Buffer will span 2 tiles
-  Out[0] = X[0].data[0];
-  Out[1] = X[200].data[0];
-  Out[2] = Y[0].data[0];
-  Out[3] = Y[200].data[0];
+  // 32 S structs inside X or Y occupy 64KB of data. (32 * 512 ints * 4 bytes per int)
+  // So, any index into the buffer >= [32] will access a new "tile"
+
+  int idx = 0;
+
+  uint status;
+  S Out0 = X.Load(0, status);
+  Out[idx] = Out0.data[0];
+  Out[idx + 4] = status;
+  idx += 1;
+
+  S Out1 = X.Load(50, status);
+  Out[idx] = Out1.data[0];
+  Out[idx + 4] = status;
+  idx += 1;
+
+  S Out2 = Y.Load(0, status);
+  Out[idx] = Out2.data[0];
+  Out[idx + 4] = status;
+  idx += 1;
+
+  S Out3 = Y.Load(50, status);
+  Out[idx] = Out3.data[0];
+  Out[idx + 4] = status;  
 }
 //--- pipeline.yaml
 
@@ -28,28 +47,28 @@ Shaders:
 Buffers:
   - Name: X
     Format: Int32
-    Stride: 65536
+    Stride: 2048 # S is 512 ints, 512*4 = 2048.
     FillSize: 131072
     FillValue: 1
   - Name: Y
     Format: Int32
-    Stride: 65536
+    Stride: 2048
     FillSize: 131072
     FillValue: 2
-    TilesMapped: 1
   - Name: Out
     Format: Int32
     Stride: 4
-    ZeroInitSize: 64
+    FillSize: 32
   - Name: ExpectedOut
     Format: Int32
     Stride: 4
-    Data: [1, 1, 2, 0]
+    # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
+    # last 4 values are the status. 1 is expected for resident memory, 0 for non-resident
+    Data: [1, 1, 2, 0, 1, 1, 1, 0]
 
 Results:
   - Result: Test
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.0008
+    Rule: BufferExact    
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -68,6 +87,7 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
+      TilesMapped: 1
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
@@ -77,7 +97,8 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# REQUIRES: DirectX
+# XFAIL: Clang
+# XFAIL: Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
