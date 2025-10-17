@@ -540,7 +540,7 @@ public:
                    << ", Space = " << R.DXBinding.Space
                    << ", TilesMapped = " << R.TilesMapped << " }\n";
 
-      // --- Reserved SRV resource ---
+      // Reserved SRV resource
       ComPtr<ID3D12Resource> Buffer;
       if (auto Err =
               HR::toError(Device->CreateReservedResource(
@@ -549,7 +549,7 @@ public:
                           "Failed to create reserved resource (buffer)."))
         return Err;
 
-      // --- Committed Upload Buffer ---
+      // Committed Upload Buffer
       ComPtr<ID3D12Resource> UploadBuffer;
       const D3D12_HEAP_PROPERTIES UploadHeapProps =
           CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -563,7 +563,7 @@ public:
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // --- Tile mapping setup ---
+      // Tile mapping setup
       UINT numTiles = R.TilesMapped;
       std::vector<D3D12_TILED_RESOURCE_COORDINATE> startCoords(numTiles);
       std::vector<D3D12_TILE_REGION_SIZE> regionSizes(numTiles);
@@ -603,7 +603,7 @@ public:
           heap.Get(), numTiles, rangeFlags.data(), heapRangeStartOffsets.data(),
           rangeTileCounts.data(), D3D12_TILE_MAPPING_FLAG_NONE);
 
-      // --- Upload data initialization ---
+      // Upload data initialization
       void *ResDataPtr = nullptr;
       D3D12_RANGE range = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &range, &ResDataPtr))) {
@@ -733,7 +733,7 @@ public:
                    << ", HasCounter = " << R.HasCounter
                    << ", TilesMapped = " << R.TilesMapped << " }\n";
 
-      // --- Reserved destination buffer (UAV target) ---
+      // Reserved destination buffer (UAV target)
       ComPtr<ID3D12Resource> Buffer;
       if (auto Err =
               HR::toError(Device->CreateReservedResource(
@@ -742,7 +742,7 @@ public:
                           "Failed to create reserved resource (buffer)."))
         return Err;
 
-      // --- Committed upload buffer (CPU visible) ---
+      // Committed upload buffer (CPU visible)
       ComPtr<ID3D12Resource> UploadBuffer;
       const D3D12_HEAP_PROPERTIES UploadHeapProps =
           CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -755,7 +755,7 @@ public:
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // --- Readback buffer (committed) ---
+      // Readback buffer (committed)
       ComPtr<ID3D12Resource> ReadBackBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
@@ -765,7 +765,7 @@ public:
               "Failed to create committed resource (readback buffer)."))
         return Err;
 
-      // --- Tile mapping setup (map first R.TilesMapped tiles) ---
+      // Tile mapping setup (map first R.TilesMapped tiles)
       UINT numTiles = static_cast<UINT>(R.TilesMapped);
       ComPtr<ID3D12Heap> heap; // optional backing heap for mapped tiles
 
@@ -809,7 +809,7 @@ public:
             D3D12_TILE_MAPPING_FLAG_NONE);
       }
 
-      // --- Upload data initialization ---
+      // Upload data initialization
       void *ResDataPtr = nullptr;
       D3D12_RANGE mapRange = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &mapRange, &ResDataPtr))) {
@@ -873,7 +873,6 @@ public:
                    << ", HasCounter = " << R.HasCounter << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
                   &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
@@ -1003,7 +1002,7 @@ public:
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // --- Tile mapping setup (map first R.TilesMapped tiles) ---
+      // Tile mapping setup (map first R.TilesMapped tiles)
       UINT numTiles = static_cast<UINT>(R.TilesMapped);
       ComPtr<ID3D12Heap> heap; // keep alive in bundle if created
 
@@ -1040,8 +1039,7 @@ public:
         // Retrieve a command queue from InvocationState
         ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
 
-        // --- THIS LINE MAPS THE FIRST numTiles TILES (from tile 0 to
-        // R.TilesMapped - 1) ---
+        // Map the first numtiles Tiles
         CommandQueue->UpdateTileMappings(
             Buffer.Get(), numTiles, startCoords.data(), regionSizes.data(),
             heap.Get(), numTiles, rangeFlags.data(),

@@ -103,7 +103,6 @@ struct Buffer {
   DataFormat Format;
   int Channels;
   int Stride;
-
   uint32_t ArraySize;
   // Data can contain one block of data for a singular resource
   // or multiple blocks for a resource array.
