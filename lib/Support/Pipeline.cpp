@@ -163,7 +163,8 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
       memcpy(B.Data.back().get(), FillData.data(), B.Size);
     }
     return;
-  } else if (FillValue) {
+  }
+  if (FillValue) {
     I.setError("'FillValue' specified without 'FillSize'");
     return;
   }
