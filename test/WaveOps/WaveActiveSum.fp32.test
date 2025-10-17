@@ -62,23 +62,23 @@ Buffers:
   - Name: Out1
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64  
+    FillSize: 64  
   - Name: Out2
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: Out3
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: Out4
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: Out5
     Format: Float32
     Stride: 16
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOut1
     Format: Float32
     Stride: 16
@@ -173,4 +173,4 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o 
+# RUN: %offloader %t/pipeline.yaml %t.o

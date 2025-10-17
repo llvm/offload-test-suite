@@ -29,11 +29,11 @@ Buffers:
   - Name: Out1
     Format: Float32
     Channels: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: Out2
     Format: Float32
     Channels: 4
-    ZeroInitSize: 16
+    FillSize: 16
 DescriptorSets:
   - Resources:
     - Name: In

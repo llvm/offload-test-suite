@@ -28,7 +28,7 @@ Buffers:
   - Name: Out1
     Format: Float16
     Stride: 8
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut1 # The result we expect
     Format: Float16
     Stride: 8

@@ -31,7 +31,7 @@ Buffers:
   - Name: BufArray
     Format: Int32
     ArraySize: 2
-    ZeroInitSize: 16
+    FillSize: 16
 DescriptorSets:
   - Resources:
     - Name: BufArray

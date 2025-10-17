@@ -34,7 +34,7 @@ Buffers:
   - Name: Lows
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedLows
     Format: UInt32
     Stride: 16
@@ -42,7 +42,7 @@ Buffers:
   - Name: Highs
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedHighs
     Format: UInt32
     Stride: 16

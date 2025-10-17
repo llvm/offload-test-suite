@@ -44,7 +44,7 @@ Buffers:
   - Name: Output
     Format: Float32
     Channels: 4
-    ZeroInitSize: 1048576 # 256x256 @ 16 bytes per pixel
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
     OutputProps:
       Height: 256
       Width: 256
