@@ -8,6 +8,7 @@ StructuredBuffer<S> X : register(t0);
 StructuredBuffer<S> Y : register(t1);
 
 RWStructuredBuffer<int> Out : register(u2);
+RWStructuredBuffer<int> CAFM : register(u3);
 
 
 [numthreads(1,1,1)]
@@ -21,21 +22,25 @@ void main() {
   S Out0 = X.Load(0, status);
   Out[idx] = Out0.data[0];
   Out[idx + 4] = status;
+  CAFM[idx] = CheckAccessFullyMapped(status) ? 1 : 0;
   idx += 1;
 
   S Out1 = X.Load(50, status);
   Out[idx] = Out1.data[0];
   Out[idx + 4] = status;
+  CAFM[idx] = CheckAccessFullyMapped(status) ? 1 : 0;
   idx += 1;
 
   S Out2 = Y.Load(0, status);
   Out[idx] = Out2.data[0];
   Out[idx + 4] = status;
+  CAFM[idx] = CheckAccessFullyMapped(status) ? 1 : 0;
   idx += 1;
 
   S Out3 = Y.Load(50, status);
   Out[idx] = Out3.data[0];
-  Out[idx + 4] = status;  
+  Out[idx + 4] = status;
+  CAFM[idx] = CheckAccessFullyMapped(status) ? 1 : 0;
 }
 //--- pipeline.yaml
 
@@ -64,13 +69,27 @@ Buffers:
     Stride: 4
     # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
     # last 4 values are the status. 1 is expected for resident memory, 0 for non-resident
-    Data: [1, 1, 2, 0, 1, 1, 1, 0]
+    Data: [1, 0, 0, 0, 1, 0, 0, 0]
+  - Name: CAFM
+    Format: Int32
+    Stride: 4
+    FillSize: 16
+    FillValue: 0
+  - Name: ExpectedCAFM
+    Format: Int32
+    Stride: 4
+    # Only the first data access should be accessing fully mapped memory
+    Data: [1, 0, 0, 0]
 
 Results:
   - Result: Test
-    Rule: BufferExact    
+    Rule: BufferExact
     Actual: Out
     Expected: ExpectedOut
+  - Result: TestCAFM
+    Rule: BufferExact
+    Actual: CAFM
+    Expected: ExpectedCAFM
 DescriptorSets:
   - Resources:
     - Name: X
@@ -80,6 +99,7 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
+      TilesMapped: 1
     - Name: Y
       Kind: StructuredBuffer
       DirectXBinding:
@@ -87,7 +107,7 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
-      TilesMapped: 1
+      TilesMapped: 0
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
@@ -95,6 +115,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 2
+    - Name: CAFM
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 #--- end
 
 # XFAIL: Clang

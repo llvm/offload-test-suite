@@ -549,7 +549,7 @@ public:
                           "Failed to create reserved resource (buffer)."))
         return Err;
 
-      // Committed Upload Buffer
+      // Committed Upload Buffer (CPU visible)
       ComPtr<ID3D12Resource> UploadBuffer;
       const D3D12_HEAP_PROPERTIES UploadHeapProps =
           CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -557,65 +557,75 @@ public:
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
                   &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
-                  D3D12_RESOURCE_STATE_GENERIC_READ, // upload state for CPU
-                                                     // writes
-                  nullptr, IID_PPV_ARGS(&UploadBuffer)),
+                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                  IID_PPV_ARGS(&UploadBuffer)),
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // Tile mapping setup
-      UINT numTiles = R.TilesMapped;
-      std::vector<D3D12_TILED_RESOURCE_COORDINATE> startCoords(numTiles);
-      std::vector<D3D12_TILE_REGION_SIZE> regionSizes(numTiles);
-      std::vector<D3D12_TILE_RANGE_FLAGS> rangeFlags(
-          numTiles, D3D12_TILE_RANGE_FLAG_NONE);
-      std::vector<UINT> heapRangeStartOffsets(numTiles);
-      std::vector<UINT> rangeTileCounts(numTiles, 1);
+      // Tile mapping setup (optional if numTiles > 0)
+      UINT numTiles = static_cast<UINT>(R.TilesMapped);
+      ComPtr<ID3D12Heap> heap; // optional, only created if numTiles > 0
 
-      // Create a heap large enough for all mapped tiles
-      D3D12_HEAP_DESC heapDesc = {};
-      heapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-      heapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-      heapDesc.SizeInBytes =
-          numTiles * D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-      heapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+      if (numTiles > 0) {
+        std::vector<D3D12_TILED_RESOURCE_COORDINATE> startCoords(numTiles);
+        std::vector<D3D12_TILE_REGION_SIZE> regionSizes(numTiles);
+        std::vector<D3D12_TILE_RANGE_FLAGS> rangeFlags(
+            numTiles, D3D12_TILE_RANGE_FLAG_NONE);
+        std::vector<UINT> heapRangeStartOffsets(numTiles);
+        std::vector<UINT> rangeTileCounts(numTiles, 1);
 
-      ComPtr<ID3D12Heap> heap;
-      if (auto Err =
-              HR::toError(Device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)),
-                          "Failed to create heap for tiled SRV resource."))
-        return Err;
+        // Create a heap large enough for the mapped tiles
+        D3D12_HEAP_DESC heapDesc = {};
+        heapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        heapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        heapDesc.SizeInBytes = static_cast<UINT64>(numTiles) *
+                               D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        heapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
 
-      // Fill tile coordinates and region sizes
-      for (UINT i = 0; i < numTiles; ++i) {
-        startCoords[i] = {i, 0, 0, 0};
-        regionSizes[i].NumTiles = 1;
-        regionSizes[i].UseBox = FALSE;
-        heapRangeStartOffsets[i] = i;
+        if (auto Err =
+                HR::toError(Device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)),
+                            "Failed to create heap for tiled SRV resource."))
+          return Err;
+
+        // Fill tile coordinates and region sizes
+        for (UINT i = 0; i < numTiles; ++i) {
+          startCoords[i] = {i, 0, 0, 0};
+          regionSizes[i].NumTiles = 1;
+          regionSizes[i].UseBox = FALSE;
+          heapRangeStartOffsets[i] = i;
+        }
+
+        // Retrieve a command queue from InvocationState
+        ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
+
+        // Map the first numTiles tiles in the Buffer
+        CommandQueue->UpdateTileMappings(
+            Buffer.Get(), numTiles, startCoords.data(), regionSizes.data(),
+            heap.Get(), numTiles, rangeFlags.data(),
+            heapRangeStartOffsets.data(), rangeTileCounts.data(),
+            D3D12_TILE_MAPPING_FLAG_NONE);
       }
-
-      // Retrieve a command queue from InvocationState
-      ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
-
-      // Map the first numTiles tiles in the Buffer
-      CommandQueue->UpdateTileMappings(
-          Buffer.Get(), numTiles, startCoords.data(), regionSizes.data(),
-          heap.Get(), numTiles, rangeFlags.data(), heapRangeStartOffsets.data(),
-          rangeTileCounts.data(), D3D12_TILE_MAPPING_FLAG_NONE);
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
       D3D12_RANGE range = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
+        // Zero remaining bytes if the buffer is padded
+        if (R.size() < BufferSize) {
+          memset(static_cast<char *>(ResDataPtr) + R.size(), 0,
+                 BufferSize - R.size());
+        }
         UploadBuffer->Unmap(0, nullptr);
       } else {
         return llvm::createStringError(std::errc::io_error,
                                        "Failed to map SRV upload buffer.");
       }
 
+      // Add GPU upload commands
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
+      // Store resource bundle (heap optional)
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, heap);
       RegOffset++;
     }
