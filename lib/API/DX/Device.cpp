@@ -608,8 +608,8 @@ public:
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
-      D3D12_RANGE range = {0, 0}; // no reads expected
-      if (SUCCEEDED(UploadBuffer->Map(0, &range, &ResDataPtr))) {
+      D3D12_RANGE Range = {0, 0}; // no reads expected
+      if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
         // Zero remaining bytes if the buffer is padded
         if (R.size() < BufferSize) {
@@ -625,7 +625,7 @@ public:
       // Add GPU upload commands
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-      // Store resource bundle (heap optional)
+      // Store heap in Bundle so it lives until caller releases the Bundle
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, heap);
       RegOffset++;
     }
@@ -743,7 +743,7 @@ public:
                    << ", HasCounter = " << R.HasCounter
                    << ", TilesMapped = " << R.TilesMapped << " }\n";
 
-      // Reserved destination buffer (UAV target)
+      // Reserved UAV resource
       ComPtr<ID3D12Resource> Buffer;
       if (auto Err =
               HR::toError(Device->CreateReservedResource(
@@ -752,7 +752,7 @@ public:
                           "Failed to create reserved resource (buffer)."))
         return Err;
 
-      // Committed upload buffer (CPU visible)
+      // Committed Upload Buffer (CPU visible)
       ComPtr<ID3D12Resource> UploadBuffer;
       const D3D12_HEAP_PROPERTIES UploadHeapProps =
           CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -775,9 +775,9 @@ public:
               "Failed to create committed resource (readback buffer)."))
         return Err;
 
-      // Tile mapping setup (map first R.TilesMapped tiles)
+      // Tile mapping setup (optional if numTiles > 0)
       UINT numTiles = static_cast<UINT>(R.TilesMapped);
-      ComPtr<ID3D12Heap> heap; // optional backing heap for mapped tiles
+      ComPtr<ID3D12Heap> heap; // optional, only created if numTiles > 0
 
       if (numTiles > 0) {
         std::vector<D3D12_TILED_RESOURCE_COORDINATE> startCoords(numTiles);
@@ -787,7 +787,7 @@ public:
         std::vector<UINT> heapRangeStartOffsets(numTiles);
         std::vector<UINT> rangeTileCounts(numTiles, 1);
 
-        // Create a heap large enough for the requested mapped tiles
+        // Create a heap large enough for the mapped tiles
         D3D12_HEAP_DESC heapDesc = {};
         heapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
         heapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
@@ -797,10 +797,10 @@ public:
 
         if (auto Err =
                 HR::toError(Device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)),
-                            "Failed to create heap for tiled resource."))
+                            "Failed to create heap for tiled UAV resource."))
           return Err;
 
-        // Fill tile coordinates and region sizes (map tiles starting at tile 0)
+        // Fill tile coordinates and region sizes
         for (UINT i = 0; i < numTiles; ++i) {
           startCoords[i] = {i, 0, 0, 0};
           regionSizes[i].NumTiles = 1;
@@ -821,10 +821,10 @@ public:
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
-      D3D12_RANGE mapRange = {0, 0}; // no reads expected
-      if (SUCCEEDED(UploadBuffer->Map(0, &mapRange, &ResDataPtr))) {
+      D3D12_RANGE Range = {0, 0}; // no reads expected
+      if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
-        // Zero any remaining bytes if buffer element is larger than R.size()
+        // Zero remaining bytes if the buffer is padded
         if (R.size() < BufferSize) {
           memset(static_cast<char *>(ResDataPtr) + R.size(), 0,
                  BufferSize - R.size());
@@ -835,8 +835,7 @@ public:
                                        "Failed to map upload buffer.");
       }
 
-      // Issue copy/upload commands to transfer UploadBuffer -> Buffer (tile
-      // region)
+      // Add GPU upload commands
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
       // Store heap in Bundle so it lives until caller releases the Bundle
@@ -964,14 +963,11 @@ public:
                                                    InvocationState &IS) {
     ResourceBundle Bundle;
 
-    const size_t CBVSize = getCBVSize(R.size());
-
-    // Create a buffer description for a reserved buffer (no physical memory
-    // yet)
+    const size_t BufferSize = getCBVSize(R.size());
     const D3D12_RESOURCE_DESC ResDesc = {
         D3D12_RESOURCE_DIMENSION_BUFFER,
         0,
-        CBVSize,
+        BufferSize,
         1,
         1,
         1,
@@ -980,19 +976,17 @@ public:
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
 
-    const D3D12_HEAP_PROPERTIES UploadHeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(CBVSize);
+        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
 
     uint32_t RegOffset = 0;
     for (const auto &ResData : R.BufferPtr->Data) {
-      llvm::outs() << "Creating CBV: { Size = " << CBVSize << ", Register = b"
-                   << R.DXBinding.Register + RegOffset
+      llvm::outs() << "Creating CBV: { Size = " << BufferSize
+                   << ", Register = b" << R.DXBinding.Register + RegOffset
                    << ", Space = " << R.DXBinding.Space
                    << ", TilesMapped = " << R.TilesMapped << " }\n";
 
-      // Create the GPU-side reserved buffer (no physical memory yet)
+      // Reserved CBV resource
       ComPtr<ID3D12Resource> Buffer;
       if (auto Err =
               HR::toError(Device->CreateReservedResource(
@@ -1001,20 +995,21 @@ public:
                           "Failed to create reserved resource (buffer)."))
         return Err;
 
-      // Create an upload buffer (committed, CPU-visible) for copying the CBV
-      // contents
+      // Committed Upload Buffer (CPU visible)
       ComPtr<ID3D12Resource> UploadBuffer;
+      const D3D12_HEAP_PROPERTIES UploadHeapProps =
+          CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
-                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                   IID_PPV_ARGS(&UploadBuffer)),
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // Tile mapping setup (map first R.TilesMapped tiles)
+      // Tile mapping setup (optional if numTiles > 0)
       UINT numTiles = static_cast<UINT>(R.TilesMapped);
-      ComPtr<ID3D12Heap> heap; // keep alive in bundle if created
+      ComPtr<ID3D12Heap> heap; // optional, only created if numTiles > 0
 
       if (numTiles > 0) {
         std::vector<D3D12_TILED_RESOURCE_COORDINATE> startCoords(numTiles);
@@ -1024,7 +1019,7 @@ public:
         std::vector<UINT> heapRangeStartOffsets(numTiles);
         std::vector<UINT> rangeTileCounts(numTiles, 1);
 
-        // Create a heap large enough for all mapped tiles
+        // Create a heap large enough for the mapped tiles
         D3D12_HEAP_DESC heapDesc = {};
         heapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
         heapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
@@ -1034,11 +1029,10 @@ public:
 
         if (auto Err =
                 HR::toError(Device->CreateHeap(&heapDesc, IID_PPV_ARGS(&heap)),
-                            "Failed to create heap for tiled resource."))
+                            "Failed to create heap for tiled CBV resource."))
           return Err;
 
-        // Fill tile coordinates and region sizes (map tiles starting from tile
-        // 0)
+        // Fill tile coordinates and region sizes
         for (UINT i = 0; i < numTiles; ++i) {
           startCoords[i] = {i, 0, 0, 0};
           regionSizes[i].NumTiles = 1;
@@ -1049,38 +1043,34 @@ public:
         // Retrieve a command queue from InvocationState
         ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
 
-        // Map the first numtiles Tiles
+        // Map the first numTiles tiles in the Buffer
         CommandQueue->UpdateTileMappings(
             Buffer.Get(), numTiles, startCoords.data(), regionSizes.data(),
             heap.Get(), numTiles, rangeFlags.data(),
             heapRangeStartOffsets.data(), rangeTileCounts.data(),
             D3D12_TILE_MAPPING_FLAG_NONE);
-      } // end if numTiles > 0
-
-      // Initialize the CBV data into the upload buffer
-      void *ResDataPtr = nullptr;
-      D3D12_RANGE mapRange = {
-          0, 0}; // We don't intend to read from the upload buffer on CPU
-      if (FAILED(UploadBuffer->Map(0, &mapRange, &ResDataPtr)))
-        return llvm::createStringError(std::errc::io_error,
-                                       "Failed to map upload buffer.");
-
-      // Copy CBV payload
-      memcpy(ResDataPtr, ResData.get(), R.size());
-
-      // Zero any remaining bytes (correct length CBVSize - R.size())
-      if (R.size() < CBVSize) {
-        void *ExtraData = static_cast<char *>(ResDataPtr) + R.size();
-        memset(ExtraData, 0, CBVSize - R.size());
       }
 
-      UploadBuffer->Unmap(0, nullptr);
+      // Upload data initialization
+      void *ResDataPtr = nullptr;
+      D3D12_RANGE range = {0, 0}; // no reads expected
+      if (SUCCEEDED(UploadBuffer->Map(0, &range, &ResDataPtr))) {
+        memcpy(ResDataPtr, ResData.get(), R.size());
+        // Zero remaining bytes if the buffer is padded
+        if (R.size() < BufferSize) {
+          memset(static_cast<char *>(ResDataPtr) + R.size(), 0,
+                 BufferSize - R.size());
+        }
+        UploadBuffer->Unmap(0, nullptr);
+      } else {
+        return llvm::createStringError(std::errc::io_error,
+                                       "Failed to map CBV upload buffer.");
+      }
 
-      // Issue GPU-side copy/upload commands to transfer UploadBuffer -> Buffer
+      // Add GPU upload commands
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-      // Save bundle (store heap so backing memory stays alive while GPU uses
-      // it)
+      // Store resource bundle (heap optional)
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, heap);
       RegOffset++;
     }
