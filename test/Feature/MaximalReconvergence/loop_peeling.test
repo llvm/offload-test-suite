@@ -1,0 +1,44 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> Out : register(u0);
+
+[numthreads(8,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+    for (uint i = 0; i < 8; i++) {
+        if (i == TID.x) {
+            Out[TID.x] = WaveActiveMax(TID.x);
+            break;
+        }
+    }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0 ]
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: Out
+# CHECK: Format: UInt32
+# CHECK: Data: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
