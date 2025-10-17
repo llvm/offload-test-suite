@@ -77,7 +77,7 @@ Buffers:
   - Name: Result2D
     Format: Float16
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult2D
     Format: Float16
     Stride: 4
@@ -86,7 +86,7 @@ Buffers:
   - Name: Result3D
     Format: Float16
     Stride: 8
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult3D
     Format: Float16
     Stride: 8
@@ -95,7 +95,7 @@ Buffers:
   - Name: Result4D
     Format: Float16
     Stride: 8
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult4D
     Format: Float16
     Stride: 8

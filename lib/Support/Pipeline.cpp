@@ -138,15 +138,34 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
     return;
   }
 
-  // zero-initialized buffer(s)
-  int64_t ZeroInitSize;
-  I.mapOptional("ZeroInitSize", ZeroInitSize, 0);
-  if (ZeroInitSize > 0) {
-    B.Size = ZeroInitSize;
+  // Buffers can be initialized to be filled with a fixed value.
+  int64_t FillSize;
+
+  // Explicitly reject ZeroInitSize to avoid a confusing error while
+  // transitioning to FillSize. We can remove this once in flight PRs have had
+  // time to go in.
+  I.mapOptional("ZeroInitSize", FillSize, 0);
+  if (FillSize > 0) {
+    I.setError("invalid key 'ZeroInitSize' - did you mean 'FillSize'?");
+    return;
+  }
+
+  T FillValue;
+  I.mapOptional("FillSize", FillSize, 0);
+  I.mapOptional("FillValue", FillValue, T{});
+  if (FillSize > 0) {
+    B.Size = FillSize;
+    llvm::SmallVector<T> FillData(FillSize);
+    std::fill(FillData.begin(), FillData.end(), FillValue);
+
     for (uint32_t I = 0; I < B.ArraySize; I++) {
       B.Data.push_back(std::make_unique<char[]>(B.Size));
-      memset(B.Data.back().get(), 0, B.Size);
+      memcpy(B.Data.back().get(), FillData.data(), B.Size);
     }
+    return;
+  }
+  if (FillValue) {
+    I.setError("'FillValue' specified without 'FillSize'");
     return;
   }
 

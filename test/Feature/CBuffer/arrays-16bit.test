@@ -45,7 +45,7 @@ Buffers:
     # Warp doesn't seem to like buffers with non-multiple of 4 strides, so we
     # add a small amount of buffer at the end here.
     Stride: 28
-    ZeroInitSize: 28
+    FillSize: 28
   - Name: ExpectedOut
     Format: Hex16
     Stride: 26

@@ -36,7 +36,7 @@ Buffers:
     Format: Hex16
     # Warp doesn't seem to be able to handle a stride of 6 so we use 8 here...
     Stride: 8
-    ZeroInitSize: 8
+    FillSize: 8
 DescriptorSets:
   - Resources:
     - Name: CBScalars

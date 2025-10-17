@@ -48,7 +48,7 @@ Buffers:
   - Name: OutBroadcast
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOutBroadcast # The result we expect
     Format: Int32
     Stride: 4
@@ -56,7 +56,7 @@ Buffers:
   - Name: OutShift
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOutShift # The result we expect
     Format: Int32
     Stride: 4
@@ -64,7 +64,7 @@ Buffers:
   - Name: OutMix
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOutMix # The result we expect
     Format: Int32
     Stride: 4

@@ -31,7 +31,7 @@ Buffers:
   - Name: BufC
     Format: Int32
     Stride: 4
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: CB
     Format: Int32
     Data: [ 100 ]

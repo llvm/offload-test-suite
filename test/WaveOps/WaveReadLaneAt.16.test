@@ -47,7 +47,7 @@ Buffers:
   - Name: OutInt
     Format: Int16
     Stride: 8
-    ZeroInitSize: 72
+    FillSize: 72
   - Name: ExpectedOutInt # The result we expect
     Format: Int16
     Stride: 8
@@ -59,7 +59,7 @@ Buffers:
   - Name: OutUInt
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 72
+    FillSize: 72
   - Name: ExpectedOutUInt # The result we expect
     Format: UInt16
     Stride: 8
@@ -71,7 +71,7 @@ Buffers:
   - Name: OutFloat
     Format: Float16
     Stride: 8
-    ZeroInitSize: 72
+    FillSize: 72
   - Name: ExpectedOutFloat # The result we expect
     Format: Float16
     Stride: 8
