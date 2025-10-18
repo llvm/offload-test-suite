@@ -143,6 +143,7 @@ struct Resource {
   std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
   bool HasCounter;
+  int TilesMapped = -1;
 
   bool isRaw() const {
     switch (Kind) {
