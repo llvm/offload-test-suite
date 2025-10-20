@@ -93,23 +93,23 @@ Buffers:
     Format: Float16
     Stride: 2
     # 1 half is 2 bytes, * 4 halves for 4 threads, * 4 thread masks, * 2 value sets
-    ZeroInitSize: 64  
+    FillSize: 64  
   - Name: Out2
     Format: Float16
     Stride: 4
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: Out3
     Format: Float16
     Stride: 8
-    ZeroInitSize: 256
+    FillSize: 256
   - Name: Out4
     Format: Float16
     Stride: 8
-    ZeroInitSize: 256
+    FillSize: 256
   - Name: Out5
     Format: Float16
     Stride: 8
-    ZeroInitSize: 8
+    FillSize: 8
   - Name: Masks
     Format: Int32
     Stride: 16

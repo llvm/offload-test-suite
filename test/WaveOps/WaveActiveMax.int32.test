@@ -93,23 +93,23 @@ Buffers:
     Format: Int32
     Stride: 4
     # 1 int is 4 bytes, * 4 halves for 4 threads, * 4 thread masks, * 2 value sets
-    ZeroInitSize: 128  
+    FillSize: 128  
   - Name: Out2
     Format: Int32
     Stride: 8
-    ZeroInitSize: 256
+    FillSize: 256
   - Name: Out3
     Format: Int32
     Stride: 16
-    ZeroInitSize: 512
+    FillSize: 512
   - Name: Out4
     Format: Int32
     Stride: 16
-    ZeroInitSize: 512
+    FillSize: 512
   - Name: Out5
     Format: Int32
     Stride: 16
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: Masks
     Format: Int32
     Stride: 16
