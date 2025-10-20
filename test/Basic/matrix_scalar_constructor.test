@@ -5,9 +5,9 @@ RWBuffer<int> Out : register(u1);
 
 [numthreads(6,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  int2x3 A = int2x3(In[0], In[1], In[2], 
-                    In[3], In[4], In[5]); 
-  
+  int2x3 A = int2x3(In[0], In[1], In[2],
+                    In[3], In[4], In[5]);
+
   int row = GI / 2;
   int col = GI % 2;
   Out[GI] = A[col][row];
@@ -26,7 +26,7 @@ Buffers:
     Data: [ 1, 2, 3, 4, 5, 6]
   - Name: Out
     Format: Int32
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut
     Format: Int32
     Data: [ 1, 4, 2, 5, 3, 6 ]

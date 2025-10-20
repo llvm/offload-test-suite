@@ -220,7 +220,7 @@ Buffers:
   - Name: NewParticles
     Format: Float32
     Stride: 20
-    ZeroInitSize: 640
+    FillSize: 640
   - Name: ExpectedParticles
     Format: Float32
     Stride: 20
@@ -261,7 +261,7 @@ Buffers:
   - Name: Vertices
     Format: Float32
     Stride: 12
-    ZeroInitSize: 384
+    FillSize: 384
   - Name: ExpectedVertices
     Format: Float32
     Stride: 20

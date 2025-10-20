@@ -19,7 +19,7 @@ Buffers:
   - Name: Out
     Format: Hex32
     Stride: 4
-    ZeroInitSize: 4
+    FillSize: 4
 DescriptorSets:
   - Resources:
     - Name: Out
@@ -33,9 +33,6 @@ DescriptorSets:
         CounterBinding: 1
 ...
 #--- end
-
-# Unimplemented https://github.com/llvm/llvm-project/issues/137032
-# XFAIL: Clang && Vulkan
 
 # Offload tests are missing support for counters on Metal
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304

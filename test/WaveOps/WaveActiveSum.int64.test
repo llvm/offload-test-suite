@@ -108,23 +108,23 @@ Buffers:
   - Name: Out1
     Format: Int64
     Stride: 32
-    ZeroInitSize: 128  
+    FillSize: 128  
   - Name: Out2
     Format: Int64
     Stride: 32
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: Out3
     Format: Int64
     Stride: 32
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: Out4
     Format: Int64
     Stride: 32
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: Out5
     Format: Int64
     Stride: 32
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut1
     Format: Int64
     Stride: 32
@@ -152,23 +152,23 @@ Buffers:
   - Name: UOut1
     Format: UInt64
     Stride: 32
-    ZeroInitSize: 128  
+    FillSize: 128  
   - Name: UOut2
     Format: UInt64
     Stride: 32
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: UOut3
     Format: UInt64
     Stride: 32
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: UOut4
     Format: UInt64
     Stride: 32
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: UOut5
     Format: UInt64
     Stride: 32
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: UExpectedOut1
     Format: UInt64
     Stride: 32

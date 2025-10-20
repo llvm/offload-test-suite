@@ -43,7 +43,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 4
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut
     Format: Float32
     Stride: 4

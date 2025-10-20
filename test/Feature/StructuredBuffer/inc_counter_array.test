@@ -24,7 +24,7 @@ Buffers:
     Format: Hex32
     Stride: 4
     ArraySize: 4
-    ZeroInitSize: 4
+    FillSize: 4
 
 DescriptorSets:
   - Resources:
@@ -40,7 +40,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/137032
+# Bug https://github.com/llvm/llvm-project/issues/162841
 # XFAIL: Clang && Vulkan
 
 # Offload tests are missing support for counters and resource arrays on Metal
@@ -62,7 +62,7 @@ DescriptorSets:
 # CHECK: Name: Out
 # CHECK: Counters: [ 1, 2, 3, 4 ]
 # CHECK: Data:
-      - [ 0x0 ]
-      - [ 0x1 ]
-      - [ 0x2 ]
-      - [ 0x3 ]
+# CHECK-NEXT: - [ 0x0 ]
+# CHECK-NEXT: - [ 0x1 ]
+# CHECK-NEXT: - [ 0x2 ]
+# CHECK-NEXT: - [ 0x3 ]

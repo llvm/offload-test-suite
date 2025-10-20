@@ -32,16 +32,16 @@ Buffers:
     Data: [ 2, 4, 6, 8, 10, 12 ]
   - Name: DivOut
     Format: Int32
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: MulOut
     Format: Int32
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: AddOut
     Format: Int32
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: SubOut
     Format: Int32
-    ZeroInitSize: 24
+    FillSize: 24
 DescriptorSets:
   - Resources:
     - Name: In

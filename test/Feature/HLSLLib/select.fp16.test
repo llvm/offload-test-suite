@@ -63,7 +63,7 @@ Buffers:
   - Name: Out
     Format: Float16
     Stride: 8
-    ZeroInitSize: 80
+    FillSize: 80
   - Name: ExpectedOut
     Format: Float16
     Stride: 8

@@ -20,7 +20,7 @@ Buffers:
   - Name: OutArray
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
     ArraySize: 2
   - Name: ExpectedOutArray
     Format: Int32
