@@ -42,6 +42,7 @@ DescriptorSets:
 ...
 
 #--- end
+# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
