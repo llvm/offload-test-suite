@@ -564,7 +564,7 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
+      const UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -609,7 +609,7 @@ public:
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
-      D3D12_RANGE Range = {0, 0}; // no reads expected
+      const D3D12_RANGE Range = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
         // Zero remaining bytes if the buffer is padded
@@ -779,7 +779,7 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
+      const UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -824,7 +824,7 @@ public:
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
-      D3D12_RANGE Range = {0, 0}; // no reads expected
+      const D3D12_RANGE Range = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
         // Zero remaining bytes if the buffer is padded
@@ -1016,7 +1016,7 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
+      const UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -1061,7 +1061,7 @@ public:
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
-      D3D12_RANGE Range = {0, 0}; // no reads expected
+      const D3D12_RANGE Range = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
         // Zero remaining bytes if the buffer is padded
