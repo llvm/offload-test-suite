@@ -38,7 +38,7 @@ Buffers:
   - Name: Result
     Format: Hex32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult
     Format: Hex32
     Stride: 4

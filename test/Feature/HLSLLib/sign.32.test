@@ -66,7 +66,7 @@ Buffers:
   - Name: Out1
     Format: Int32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut1 # The result we expect
     Format: Int32
     Stride: 16
@@ -74,7 +74,7 @@ Buffers:
   - Name: Out2
     Format: Int32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut2 # The result we expect
     Format: Int32
     Stride: 16
@@ -82,7 +82,7 @@ Buffers:
   - Name: Out3
     Format: Int32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut3 # The result we expect
     Format: Int32
     Stride: 16
@@ -90,7 +90,7 @@ Buffers:
   - Name: Out4
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOut4
     Format: UInt32
     Stride: 4

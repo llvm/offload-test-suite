@@ -30,7 +30,7 @@ Buffers:
   - Name: Output
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
 DescriptorSets:
   - Resources:
     - Name: Output

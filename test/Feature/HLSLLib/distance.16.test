@@ -80,7 +80,7 @@ Buffers:
   - Name: Result
     Format: Float16
     Stride: 2
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedResult
     Format: Float16
     Stride: 2

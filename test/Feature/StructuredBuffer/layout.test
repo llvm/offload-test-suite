@@ -45,15 +45,15 @@ Buffers:
   - Name: BufA
     Format: Float32
     Stride: 12
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: BufB
     Format: Float32
     Stride: 12
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: BufC
     Format: Float32
     Stride: 12
-    ZeroInitSize: 48
+    FillSize: 48
 DescriptorSets:
   - Resources:
     - Name: In

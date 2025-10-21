@@ -36,7 +36,7 @@ Buffers:
   - Name: Out
     Format: Hex32
     Stride: 12
-    ZeroInitSize: 12
+    FillSize: 12
 DescriptorSets:
   - Resources:
     - Name: CBScalars

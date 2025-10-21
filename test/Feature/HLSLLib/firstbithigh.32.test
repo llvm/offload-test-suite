@@ -43,12 +43,12 @@ Buffers:
   - Name: Out
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut # The result we expect
     Format: UInt32
     Stride: 16
     # All bits set (4294967295) is returned when no bit is set on the input
-    Data: [4294967295, 3, 0, 31, 4294967295, 3, 0, 31, 4294967295, 2, 3, 4294967295] 
+    Data: [4294967295, 3, 0, 31, 4294967295, 3, 0, 31, 4294967295, 2, 3, 4294967295]
 Results:
   - Result: Test1
     Rule: BufferExact

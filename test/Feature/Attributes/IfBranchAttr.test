@@ -24,7 +24,7 @@ Buffers:
     Data: [ 1, 4, 9, 16, 25, 36, 49, 64]
   - Name: Out
     Format: Int32
-    ZeroInitSize: 32
+    FillSize: 32
 DescriptorSets:
   - Resources:
     - Name: In

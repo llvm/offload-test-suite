@@ -108,23 +108,23 @@ Buffers:
   - Name: Out1
     Format: Int16
     Stride: 8
-    ZeroInitSize: 32  
+    FillSize: 32  
   - Name: Out2
     Format: Int16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: Out3
     Format: Int16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: Out4
     Format: Int16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: Out5
     Format: Int16
     Stride: 8
-    ZeroInitSize: 8
+    FillSize: 8
   - Name: ExpectedOut1
     Format: Int16
     Stride: 8
@@ -152,23 +152,23 @@ Buffers:
   - Name: UOut1
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 32  
+    FillSize: 32  
   - Name: UOut2
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: UOut3
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: UOut4
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: UOut5
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 8
+    FillSize: 8
   - Name: UExpectedOut1
     Format: UInt16
     Stride: 8
