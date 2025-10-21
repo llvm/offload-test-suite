@@ -10,10 +10,10 @@ StructuredBuffer<S> Y : register(t1);
 RWStructuredBuffer<int> Out : register(u2);
 RWStructuredBuffer<int> CAFM : register(u3);
 
-
 [numthreads(1,1,1)]
 void main() {
-  // 32 S structs inside X or Y occupy 64KB of data. (32 * 512 ints * 4 bytes per int)
+  // 32 S structs inside X or Y occupy 64KB of data. 
+  // (32 * 512 ints * 4 bytes per int)
   // So, any index into the buffer >= [32] will access a new "tile"
 
   int idx = 0;
@@ -54,12 +54,12 @@ Buffers:
     Format: Int32
     Stride: 2048 # S is 512 ints, 512*4 = 2048.
     FillSize: 131072
-    FillValue: 1
+    FillValue: 9001
   - Name: Y
     Format: Int32
     Stride: 2048
     FillSize: 131072
-    FillValue: 2
+    FillValue: 9002
   - Name: Out
     Format: Int32
     Stride: 4
@@ -69,7 +69,7 @@ Buffers:
     Stride: 4
     # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
     # last 4 values are the status. 1 is expected for resident memory, 0 for non-resident
-    Data: [1, 0, 0, 0, 1, 0, 0, 0]
+    Data: [9001, 0, 0, 0, 1, 0, 0, 0]
   - Name: CAFM
     Format: Int32
     Stride: 4
@@ -124,7 +124,12 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/138910 
+# AND https://github.com/llvm/llvm-project/issues/99204
+# XFAIL: Clang 
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/138910
+# AND https://github.com/llvm/llvm-project/issues/99204
 # XFAIL: Vulkan
 
 # RUN: split-file %s %t

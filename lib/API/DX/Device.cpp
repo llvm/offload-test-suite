@@ -244,7 +244,6 @@ private:
     ComPtr<ID3D12Resource> Upload;
     ComPtr<ID3D12Resource> Buffer;
     ComPtr<ID3D12Resource> Readback;
-    // In unmapped cases, the Heap lifetime needs to be preserved
     ComPtr<ID3D12Heap> Heap;
     ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
                 ComPtr<ID3D12Resource> Readback,
@@ -524,7 +523,7 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-  llvm::Expected<ResourceBundle> createUnmappedSRV(Resource &R,
+  llvm::Expected<ResourceBundle> createReservedSRV(Resource &R,
                                                    InvocationState &IS) {
     ResourceBundle Bundle;
     const uint32_t BufferSize = R.size();
@@ -537,8 +536,10 @@ public:
     for (const auto &ResData : R.BufferPtr->Data) {
       llvm::outs() << "Creating SRV: { Size = " << BufferSize
                    << ", Register = t" << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space
-                   << ", TilesMapped = " << R.TilesMapped << " }\n";
+                   << ", Space = " << R.DXBinding.Space;
+      if (R.TilesMapped)
+        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
+      llvm::outs() << " }\n";
 
       // Reserved SRV resource
       ComPtr<ID3D12Resource> Buffer;
@@ -563,7 +564,7 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      UINT NumTiles = static_cast<UINT>(R.TilesMapped);
+      UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -633,8 +634,8 @@ public:
     return Bundle;
   }
 
-  llvm::Expected<ResourceBundle> createMappedSRV(Resource &R,
-                                                 InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createCommittedSRV(Resource &R,
+                                                    InvocationState &IS) {
     ResourceBundle Bundle;
 
     const D3D12_HEAP_PROPERTIES HeapProp =
@@ -685,9 +686,9 @@ public:
   }
 
   llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
-    if (R.TilesMapped != -1)
-      return createUnmappedSRV(R, IS);
-    return createMappedSRV(R, IS);
+    if (R.TilesMapped)
+      return createReservedSRV(R, IS);
+    return createCommittedSRV(R, IS);
   }
 
   // returns the next available HeapIdx
@@ -712,7 +713,7 @@ public:
     return HeapIdx;
   }
 
-  llvm::Expected<ResourceBundle> createUnmappedUAV(Resource &R,
+  llvm::Expected<ResourceBundle> createReservedUAV(Resource &R,
                                                    InvocationState &IS) {
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
@@ -740,8 +741,10 @@ public:
       llvm::outs() << "Creating UAV: { Size = " << BufferSize
                    << ", Register = u" << R.DXBinding.Register + RegOffset
                    << ", Space = " << R.DXBinding.Space
-                   << ", HasCounter = " << R.HasCounter
-                   << ", TilesMapped = " << R.TilesMapped << " }\n";
+                   << ", HasCounter = " << R.HasCounter;
+      if (R.TilesMapped)
+        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
+      llvm::outs() << " }\n";
 
       // Reserved UAV resource
       ComPtr<ID3D12Resource> Buffer;
@@ -776,7 +779,7 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      UINT NumTiles = static_cast<UINT>(R.TilesMapped);
+      UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -846,8 +849,8 @@ public:
     return Bundle;
   }
 
-  llvm::Expected<ResourceBundle> createFullyMappedUAV(Resource &R,
-                                                      InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createCommittedUAV(Resource &R,
+                                                    InvocationState &IS) {
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
 
@@ -924,9 +927,9 @@ public:
   }
 
   llvm::Expected<ResourceBundle> createUAV(Resource &R, InvocationState &IS) {
-    if (R.TilesMapped != -1)
-      return createUnmappedUAV(R, IS);
-    return createFullyMappedUAV(R, IS);
+    if (R.TilesMapped)
+      return createReservedUAV(R, IS);
+    return createCommittedUAV(R, IS);
   }
 
   // returns the next available HeapIdx
@@ -943,8 +946,11 @@ public:
     for (const ResourceSet &RS : ResBundle) {
       llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
                    << " NumElts = " << NumElts
-                   << " HasCounter = " << R.HasCounter
-                   << " TilesMapped = " << R.TilesMapped << "\n";
+                   << " HasCounter = " << R.HasCounter;
+      if (R.TilesMapped)
+        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
+      llvm::outs() << " }\n";
+
       D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle = UAVHandleHeapStart;
       UAVHandle.ptr += HeapIdx * DescHandleIncSize;
       ID3D12Resource *CounterBuffer = R.HasCounter ? RS.Buffer.Get() : nullptr;
@@ -959,7 +965,7 @@ public:
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  llvm::Expected<ResourceBundle> createUnmappedCBV(Resource &R,
+  llvm::Expected<ResourceBundle> createReservedCBV(Resource &R,
                                                    InvocationState &IS) {
     ResourceBundle Bundle;
 
@@ -983,8 +989,10 @@ public:
     for (const auto &ResData : R.BufferPtr->Data) {
       llvm::outs() << "Creating CBV: { Size = " << BufferSize
                    << ", Register = b" << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space
-                   << ", TilesMapped = " << R.TilesMapped << " }\n";
+                   << ", Space = " << R.DXBinding.Space;
+      if (R.TilesMapped)
+        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
+      llvm::outs() << " }\n";
 
       // Reserved CBV resource
       ComPtr<ID3D12Resource> Buffer;
@@ -1008,7 +1016,7 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      UINT NumTiles = static_cast<UINT>(R.TilesMapped);
+      UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -1078,8 +1086,8 @@ public:
     return Bundle;
   }
 
-  llvm::Expected<ResourceBundle> createFullyMappedCBV(Resource &R,
-                                                      InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createCommittedCBV(Resource &R,
+                                                    InvocationState &IS) {
     ResourceBundle Bundle;
 
     const size_t CBVSize = getCBVSize(R.size());
@@ -1147,9 +1155,9 @@ public:
   }
 
   llvm::Expected<ResourceBundle> createCBV(Resource &R, InvocationState &IS) {
-    if (R.TilesMapped != -1)
-      return createUnmappedCBV(R, IS);
-    return createFullyMappedCBV(R, IS);
+    if (R.TilesMapped)
+      return createReservedCBV(R, IS);
+    return createCommittedCBV(R, IS);
   }
 
   // returns the next available HeapIdx
