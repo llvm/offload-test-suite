@@ -8,9 +8,9 @@ RWStructuredBuffer<int> Out[4] : register(u0);
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
   for (int i = 0; i < GI; i++)
-    Out[GI].IncrementCounter();
-  
-  Out[GI][0] = Out[GI].IncrementCounter();
+    Out[NonUniformResourceIndex(GI)].IncrementCounter();
+
+  Out[NonUniformResourceIndex(GI)][0] = Out[NonUniformResourceIndex(GI)].IncrementCounter();
 }
 
 //--- pipeline.yaml
@@ -47,10 +47,6 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
-
-# Intel has an issue with counters in resource arrays
-# Bug https://github.com/llvm/offload-test-suite/issues/376
-# XFAIL: Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
