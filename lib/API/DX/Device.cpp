@@ -149,9 +149,12 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
   const uint32_t Width =
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
-  const D3D12_TEXTURE_LAYOUT Layout = R.isTexture()
-                                          ? D3D12_TEXTURE_LAYOUT_UNKNOWN
-                                          : D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  D3D12_TEXTURE_LAYOUT Layout;
+  if (R.isTexture() && getDXKind(R.Kind) == SRV)
+    Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
+  else
+    Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
   const D3D12_RESOURCE_FLAGS Flags =
       R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                       : D3D12_RESOURCE_FLAG_NONE;
@@ -523,25 +526,25 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-  llvm::Expected<ResourceBundle> createReservedSRV(Resource &R,
-                                                   InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
     ResourceBundle Bundle;
-    const uint32_t BufferSize = R.size();
     const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
-
     const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+        CD3DX12_RESOURCE_DESC::Buffer(R.size());
+    const D3D12_HEAP_PROPERTIES UploadHeapProps =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 
     uint32_t RegOffset = 0;
+
     for (const auto &ResData : R.BufferPtr->Data) {
-      llvm::outs() << "Creating SRV: { Size = " << BufferSize
-                   << ", Register = t" << R.DXBinding.Register + RegOffset
+      llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
+                   << R.DXBinding.Register + RegOffset
                    << ", Space = " << R.DXBinding.Space;
+
       if (R.TilesMapped)
         llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
       llvm::outs() << " }\n";
 
-      // Reserved SRV resource
       ComPtr<ID3D12Resource> Buffer;
       if (auto Err =
               HR::toError(Device->CreateReservedResource(
@@ -550,11 +553,8 @@ public:
                           "Failed to create reserved resource (buffer)."))
         return Err;
 
-      // Committed Upload Buffer (CPU visible)
+      // Committed upload buffer
       ComPtr<ID3D12Resource> UploadBuffer;
-      const D3D12_HEAP_PROPERTIES UploadHeapProps =
-          CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
                   &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
@@ -564,7 +564,15 @@ public:
         return Err;
 
       // Tile mapping setup (optional if NumTiles > 0)
-      const UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
+      UINT NumTiles = 0;
+      if (R.TilesMapped.has_value()) {
+        NumTiles = static_cast<UINT>(*R.TilesMapped);
+      } else {
+        // Map the entire buffer by computing how many 64KB tiles cover it
+        NumTiles = static_cast<UINT>(
+            (ResDesc.Width + D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT - 1) /
+            D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+      }
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
@@ -612,11 +620,6 @@ public:
       const D3D12_RANGE Range = {0, 0}; // no reads expected
       if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
-        // Zero remaining bytes if the buffer is padded
-        if (R.size() < BufferSize) {
-          memset(static_cast<char *>(ResDataPtr) + R.size(), 0,
-                 BufferSize - R.size());
-        }
         UploadBuffer->Unmap(0, nullptr);
       } else {
         return llvm::createStringError(std::errc::io_error,
@@ -630,65 +633,7 @@ public:
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, Heap);
       RegOffset++;
     }
-
     return Bundle;
-  }
-
-  llvm::Expected<ResourceBundle> createCommittedSRV(Resource &R,
-                                                    InvocationState &IS) {
-    ResourceBundle Bundle;
-
-    const D3D12_HEAP_PROPERTIES HeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
-    const D3D12_HEAP_PROPERTIES UploadHeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(R.size());
-
-    uint32_t RegOffset = 0;
-    for (const auto &ResData : R.BufferPtr->Data) {
-      llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space << " }\n";
-
-      ComPtr<ID3D12Resource> Buffer;
-      if (auto Err = HR::toError(
-              Device->CreateCommittedResource(
-                  &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&Buffer)),
-              "Failed to create committed resource (buffer)."))
-        return Err;
-
-      ComPtr<ID3D12Resource> UploadBuffer;
-      if (auto Err = HR::toError(
-              Device->CreateCommittedResource(
-                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
-                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                  IID_PPV_ARGS(&UploadBuffer)),
-              "Failed to create committed resource (upload buffer)."))
-        return Err;
-
-      // Initialize the SRV data
-      void *ResDataPtr = nullptr;
-      if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
-                                 "Failed to acquire UAV data pointer."))
-        return Err;
-      memcpy(ResDataPtr, ResData.get(), R.size());
-      UploadBuffer->Unmap(0, nullptr);
-
-      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
-
-      Bundle.emplace_back(UploadBuffer, Buffer, nullptr);
-      RegOffset++;
-    }
-    return Bundle;
-  }
-
-  llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
-    if (R.TilesMapped)
-      return createReservedSRV(R, IS);
-    return createCommittedSRV(R, IS);
   }
 
   // returns the next available HeapIdx
