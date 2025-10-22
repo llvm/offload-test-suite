@@ -150,8 +150,10 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
   D3D12_TEXTURE_LAYOUT Layout;
-  if (R.isTexture() && getDXKind(R.Kind) == SRV)
-    Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
+  if (R.isTexture())
+    Layout = getDXKind(R.Kind) == SRV
+                 ? D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE
+                 : D3D12_TEXTURE_LAYOUT_UNKNOWN;
   else
     Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
@@ -589,7 +591,7 @@ public:
         HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
         HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
                                D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-        HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
+        HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
 
         if (auto Err =
                 HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
