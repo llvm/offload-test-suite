@@ -26,17 +26,17 @@ Buffers:
     Data:
       - [ 0, 1, 2, 3 ]
       - [ 1, 2, 3, 4 ]
-      - [ 2, 3, 4, 5 ]
-      - [ 3, 4, 5, 6 ]
+      - [ 0, 0, 0, 0 ]
+      - [ 0, 0, 0, 0 ]
 
   - Name: ExpectedBuf
     Format: Int32
     ArraySize: 4
     Data:
-     - [ 1, 3, 5, 7 ]
-     - [ 1, 2, 3, 4 ]
-     - [ 1, 3, 5, 7 ]
-     - [ 0, 2, 6, 12 ]
+       - [ 1, 3, 5, 7 ]
+       - [ 1, 2, 3, 4 ]
+       - [ 1, 3, 5, 7 ]
+       - [ 0, 2, 6, 12 ]
 
 Results:
   - Result: Buf
@@ -53,6 +53,9 @@ DescriptorSets:
         Space: 0
 ...
 #--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/481
+# XFAIL: WARP
 
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal

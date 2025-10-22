@@ -39,7 +39,7 @@ Buffers:
 
   - Name: BufOut
     Format: Float32
-    ZeroInitSize: 16
+    FillSize: 16
 
   - Name: ExpectedOut
     Format: Float32
