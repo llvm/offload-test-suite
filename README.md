@@ -88,7 +88,8 @@ Buffers:
   - Name: Out1 # Buffer where our output will go
     Format: Float32
     Stride: 4
-    ZeroInitSize: 8
+    FillSize: 8
+    FillValue: 0.0 # The FillValue is optional and defaults to zero
   - Name: Expected1 # Buffer which stores the expected result of our test
     Format: Float32
     Stride: 4
@@ -96,7 +97,7 @@ Buffers:
   - Name: Out2 # Buffer where our output will go
     Format: Float16
     Stride: 2
-    ZeroInitSize: 4 # ZeroInitSize needs to be 4 bytes minimum
+    FillSize: 4 # FillSize needs to be 4 bytes minimum
   - Name: Expected2 # Buffer which stores the expected result of our test
     Format: Float16
     Stride: 2

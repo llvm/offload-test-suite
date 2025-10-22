@@ -15,7 +15,7 @@ void main() {
   Out0[1] = int16_t4(clamp(In0[1].xyz, In1[1].xyz, In2[1].xyz), clamp(In0[1].w, In1[1].w, In2[1].w));
   Out0[2] = int16_t4(clamp(In0[2].xy, In1[2].xy, In2[2].xy), clamp(In0[2].zw, In1[2].zw, In2[2].zw));
   Out0[3] = clamp(int16_t4(100, 90, 0, 8), int16_t4(-32768, 100, -10, 5), int16_t4(32767, 100, 10, 6));
-  
+
   Out1[0] = clamp(In3[0], In4[0], In5[0]);
   Out1[1] = uint16_t4(clamp(In3[1].xyz, In4[1].xyz, In5[1].xyz), clamp(In3[1].w, In4[1].w, In5[1].w));
   Out1[2] = uint16_t4(clamp(In3[2].xy, In4[2].xy, In5[2].xy), clamp(In3[2].zw, In4[2].zw, In5[2].zw));
@@ -56,7 +56,7 @@ Buffers:
   - Name: Out0
     Format: Int16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut0
     Format: Int16
     Stride: 8
@@ -64,7 +64,7 @@ Buffers:
   - Name: Out1
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut1
     Format: UInt16
     Stride: 8

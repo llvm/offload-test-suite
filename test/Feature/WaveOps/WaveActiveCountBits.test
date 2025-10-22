@@ -35,7 +35,7 @@ Buffers:
   - Name: Out
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 28
+    FillSize: 28
   - Name: ExpectedOut
     Format: UInt32
     Stride: 4

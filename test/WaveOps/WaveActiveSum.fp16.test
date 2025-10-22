@@ -62,23 +62,23 @@ Buffers:
   - Name: Out1
     Format: Float16
     Stride: 8
-    ZeroInitSize: 32  
+    FillSize: 32  
   - Name: Out2
     Format: Float16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: Out3
     Format: Float16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: Out4
     Format: Float16
     Stride: 8
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: Out5
     Format: Float16
     Stride: 8
-    ZeroInitSize: 8
+    FillSize: 8
   - Name: ExpectedOut1
     Format: Float16
     Stride: 8

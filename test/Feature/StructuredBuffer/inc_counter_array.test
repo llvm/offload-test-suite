@@ -24,7 +24,7 @@ Buffers:
     Format: Hex32
     Stride: 4
     ArraySize: 4
-    ZeroInitSize: 4
+    FillSize: 4
 
 DescriptorSets:
   - Resources:

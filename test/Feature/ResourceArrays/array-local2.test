@@ -30,11 +30,11 @@ Shaders:
 Buffers:
   - Name: BufX
     Format: Int32
-    ZeroInitSize: 16
+    FillSize: 16
 
   - Name: BufY
     Format: Int32
-    ZeroInitSize: 16
+    FillSize: 16
 
   - Name: ExpectedX
     Format: Int32

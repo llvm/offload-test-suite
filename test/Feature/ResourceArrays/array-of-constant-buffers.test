@@ -35,7 +35,7 @@ Buffers:
   - Name: BufOut
     Format: Int32
     Stride: 16
-    ZeroInitSize: 16
+    FillSize: 16
 
   - Name: ExpectedBufOut
     Format: Int32

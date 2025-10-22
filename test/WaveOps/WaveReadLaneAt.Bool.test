@@ -30,7 +30,7 @@ Buffers:
   - Name: OutBool
     Format: Bool
     Stride: 16
-    ZeroInitSize: 144
+    FillSize: 144
   - Name: ExpectedOutBool # The result we expect
     Format: Bool
     Stride: 16
