@@ -4,7 +4,7 @@
 
 RWStructuredBuffer<int> Buf[][2] : register(u0);
 
-[numthreads(4,2,1)]
+[numthreads(1,1,1)]
 void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
   for (int i = 0; i < 4; i++) {
     Buf[1][0][i] = Buf[0][0][i] + Buf[0][1][i];
@@ -53,9 +53,6 @@ DescriptorSets:
         Space: 0
 ...
 #--- end
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/481
-# XFAIL: WARP
 
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
