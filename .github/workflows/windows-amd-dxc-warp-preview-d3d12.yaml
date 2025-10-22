@@ -1,0 +1,19 @@
+name: Windows D3D12 Warp Preview DXC
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  workflow_dispatch:
+
+jobs:
+  Windows-D3D12-Warp-DXC:
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-amd
+      BuildType: Debug
+      TestTarget: check-hlsl-warp-d3d12
+      OffloadTest-branch: ${{ github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWARP_VERSION=1.0.15-preview

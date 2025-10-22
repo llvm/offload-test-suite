@@ -1,14 +1,14 @@
 #--- source.hlsl
 
-// This test verified handling of unbounded resource array.
+// Verify handling of unbounded multi-dimensional resource array
+// with NonUniformResourceIndex.
 
-[[vk::binding(0)]]
-RWBuffer<int> Buf[] : register(u0);
+RWStructuredBuffer<int> Buf[][2] : register(u0);
 
 [numthreads(4,2,1)]
-void main(uint GI : SV_GroupIndex) {
+void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
   for (int i = 0; i < 4; i++) {
-    Buf[GI][i] = GI * 100 + Buf[GI][i];
+    Buf[NonUniformResourceIndex(GTI.x)][NonUniformResourceIndex(GTI.y)][i] = Buf[NonUniformResourceIndex(GTI.x)][NonUniformResourceIndex(GTI.y)][i] + 100 * GI;
   }
 }
 
@@ -37,12 +37,12 @@ Buffers:
     ArraySize: 8
     Data:
       - [ 0, 1, 2, 3 ]
-      - [ 101, 102, 103, 104 ]
-      - [ 202, 203, 204, 205 ]
-      - [ 303, 304, 305, 306 ]
-      - [ 404, 405, 406, 407 ]
-      - [ 505, 506, 507, 508 ]
-      - [ 606, 607, 608, 609 ]
+      - [ 401, 402, 403, 404 ]
+      - [ 102, 103, 104, 105 ]
+      - [ 503, 504, 505, 506 ]
+      - [ 204, 205, 206, 207 ]
+      - [ 605, 606, 607, 608 ]
+      - [ 306, 307, 308, 309 ]
       - [ 707, 708, 709, 710 ]
 
 Results:
@@ -54,21 +54,19 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: Buf
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
-      VulkanBinding:
-        Binding: 0
 ...
 #--- end
-
-# UNSUPPORTED: Clang
 
 # Resource arrays are not yet supported on Metal
 # UNSUPPORTED: Metal
 
+# Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: Vulkan
+
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

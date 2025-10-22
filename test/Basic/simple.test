@@ -21,7 +21,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    ZeroInitSize: 16
+    FillSize: 16
 DescriptorSets:
   - Resources:
     - Name: In
@@ -42,7 +42,7 @@ DescriptorSets:
 #--- end
 
 # https://github.com/llvm/llvm-project/issues/140739
-# UNSUPPORTED: Clang-Vulkan
+# UNSUPPORTED: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/simple.hlsl

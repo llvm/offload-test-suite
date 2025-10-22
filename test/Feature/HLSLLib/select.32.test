@@ -1,0 +1,306 @@
+#--- source.hlsl
+
+// This test tests all the following scenarios for select:
+//   - Scalar condition, scalar true/false values
+//   - Vector condition, vector true/false values
+//   - Vector condition, scalar true value, vector false value
+//   - Vector condition, vector true value, scalar false value
+//   - Vector condition, scalar true/false values
+// For each vector condition scenario, there are tests for vec4, vec3, and vec2.
+// For the scalar condition scenario, there are four tests. One uses the buffers 
+// for inputs and the other three use constants.
+
+StructuredBuffer<bool> Cond : register(t0);
+StructuredBuffer<float4> TrueVal0 : register(t1);
+StructuredBuffer<float4> FalseVal0 : register(t2);
+StructuredBuffer<int4> TrueVal1 : register(t3);
+StructuredBuffer<int4> FalseVal1 : register(t4);
+StructuredBuffer<uint4> TrueVal2 : register(t5);
+StructuredBuffer<uint4> FalseVal2 : register(t6);
+StructuredBuffer<bool> TrueVal3 : register(t7);
+StructuredBuffer<bool> FalseVal3 : register(t8);
+
+RWStructuredBuffer<float4> Out0 : register(u9);
+RWStructuredBuffer<int4> Out1 : register(u10);
+RWStructuredBuffer<uint4> Out2 : register(u11);
+RWStructuredBuffer<bool4> Out3 : register(u12);
+
+
+[numthreads(1,1,1)]
+void main() {
+  bool4 Cond0 = bool4(Cond[0], Cond[1], Cond[2], Cond[3]);
+  bool3 Cond1 = bool3(Cond[4], Cond[5], Cond[6]);
+  bool2 Cond2 = bool2(Cond[8], Cond[9]);
+  bool2 Cond3 = bool2(Cond[10], Cond[11]);
+
+  // float
+  // vec4
+  Out0[0] = select(Cond0, TrueVal0[0], FalseVal0[0]);
+  Out0[1] = select(Cond0, TrueVal0[0].x, FalseVal0[0]);
+  Out0[2] = select(Cond0, TrueVal0[0], FalseVal0[0].x);
+  Out0[3] = select(Cond0, TrueVal0[0].x, FalseVal0[0].x);
+  // vec3 + scalar
+  Out0[4] = float4(select(Cond1, TrueVal0[1].xyz, FalseVal0[1].xyz), select(Cond[7], TrueVal0[1].w, FalseVal0[1].w));
+  Out0[5] = float4(select(Cond1, TrueVal0[1].x, FalseVal0[1].xyz), select(bool(1), float(1), float(-1)));
+  Out0[6] = float4(select(Cond1, TrueVal0[1].xyz, FalseVal0[1].x), select(bool(0), float(2), float(-2)));
+  Out0[7] = float4(select(Cond1, TrueVal0[1].x, FalseVal0[1].x), select(bool(1), float(3), float(-3)));
+  // vec2
+  Out0[8] = float4(select(Cond2, TrueVal0[2].xy, FalseVal0[2].xy), select(Cond3, TrueVal0[2].z, FalseVal0[2].zw));
+  Out0[9] = float4(select(Cond2, TrueVal0[2].xy, FalseVal0[2].x), select(Cond3, TrueVal0[2].z, FalseVal0[2].z));
+
+  // int
+  // vec4
+  Out1[0] = select(Cond0, TrueVal1[0], FalseVal1[0]);
+  Out1[1] = select(Cond0, TrueVal1[0].x, FalseVal1[0]);
+  Out1[2] = select(Cond0, TrueVal1[0], FalseVal1[0].x);
+  Out1[3] = select(Cond0, TrueVal1[0].x, FalseVal1[0].x);
+  // vec3 + scalar
+  Out1[4] = int4(select(Cond1, TrueVal1[1].xyz, FalseVal1[1].xyz), select(Cond[7], TrueVal1[1].w, FalseVal1[1].w));
+  Out1[5] = int4(select(Cond1, TrueVal1[1].x, FalseVal1[1].xyz), select(bool(1), int(1), int(-1)));
+  Out1[6] = int4(select(Cond1, TrueVal1[1].xyz, FalseVal1[1].x), select(bool(0), int(2), int(-2)));
+  Out1[7] = int4(select(Cond1, TrueVal1[1].x, FalseVal1[1].x), select(bool(1), int(3), int(-3)));
+  // vec2
+  Out1[8] = int4(select(Cond2, TrueVal1[2].xy, FalseVal1[2].xy), select(Cond3, TrueVal1[2].z, FalseVal1[2].zw));
+  Out1[9] = int4(select(Cond2, TrueVal1[2].xy, FalseVal1[2].x), select(Cond3, TrueVal1[2].z, FalseVal1[2].z));
+
+  // uint
+  // vec4
+  Out2[0] = select(Cond0, TrueVal2[0], FalseVal2[0]);
+  Out2[1] = select(Cond0, TrueVal2[0].x, FalseVal2[0]);
+  Out2[2] = select(Cond0, TrueVal2[0], FalseVal2[0].x);
+  Out2[3] = select(Cond0, TrueVal2[0].x, FalseVal2[0].x);
+  // vec3 + scalar
+  Out2[4] = uint4(select(Cond1, TrueVal2[1].xyz, FalseVal2[1].xyz), select(Cond[7], TrueVal2[1].w, FalseVal2[1].w));
+  Out2[5] = uint4(select(Cond1, TrueVal2[1].x, FalseVal2[1].xyz), select(bool(1), uint(1), uint(10)));
+  Out2[6] = uint4(select(Cond1, TrueVal2[1].xyz, FalseVal2[1].x), select(bool(0), uint(2), uint(20)));
+  Out2[7] = uint4(select(Cond1, TrueVal2[1].x, FalseVal2[1].x), select(bool(1), uint(3), uint(30)));
+  // vec2
+  Out2[8] = uint4(select(Cond2, TrueVal2[2].xy, FalseVal2[2].xy), select(Cond3, TrueVal2[2].z, FalseVal2[2].zw));
+  Out2[9] = uint4(select(Cond2, TrueVal2[2].xy, FalseVal2[2].x), select(Cond3, TrueVal2[2].z, FalseVal2[2].z));
+
+  // bool
+  // vec4
+  bool4 TrueVal3Tmp0 = bool4(TrueVal3[0], TrueVal3[1], TrueVal3[2], TrueVal3[3]);
+  bool4 FalseVal3Tmp0 = bool4(FalseVal3[0], FalseVal3[1], FalseVal3[2], FalseVal3[3]);
+  Out3[0] = select(Cond0, TrueVal3Tmp0, FalseVal3Tmp0);
+  Out3[1] = select(Cond0, TrueVal3[0], FalseVal3Tmp0);
+  Out3[2] = select(Cond0, TrueVal3Tmp0, FalseVal3[0]);
+  Out3[3] = select(Cond0, TrueVal3[0], FalseVal3[0]);
+  // vec3 + scalar
+  bool3 TrueVal3Tmp1 = bool3(TrueVal3[4], TrueVal3[5], TrueVal3[6]);
+  bool3 FalseVal3Tmp1 = bool3(FalseVal3[4], FalseVal3[5], FalseVal3[6]);
+  Out3[4] = bool4(select(Cond1, TrueVal3Tmp1, FalseVal3Tmp1), select(Cond[7], TrueVal3[7], FalseVal3[7]));
+  Out3[5] = bool4(select(Cond1, TrueVal3[4], FalseVal3Tmp1), select(bool(1), bool(1), bool(0)));
+  Out3[6] = bool4(select(Cond1, TrueVal3Tmp1, FalseVal3[4]), select(bool(0), bool(1), bool(0)));
+  Out3[7] = bool4(select(Cond1, TrueVal3[4], FalseVal3[4]), select(bool(1), bool(1), bool(0)));
+  // vec2
+  Out3[8] = bool4(select(Cond2, bool2(TrueVal3[8], TrueVal3[9]), bool2(FalseVal3[8], FalseVal3[9])), select(Cond3, TrueVal3[10], bool2(FalseVal3[10], FalseVal3[11])));
+  Out3[9] = bool4(select(Cond2, bool2(TrueVal3[8], TrueVal3[9]), FalseVal3[8]), select(Cond3, TrueVal3[10], FalseVal3[10]));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Cond
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1 ]
+  - Name: TrueVal0
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 2, 3, 4, 4.4, -5.5, 6.6, 3.1415, -10, -20, 15, -25 ]
+  - Name: FalseVal0
+    Format: Float32
+    Stride: 16
+    Data: [ -1, -2, -3, -4, 7.7, 8.8, -9.9, 0.01, 100, 200, -15, 25 ]
+  - Name: TrueVal1
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 2, 3, 4, 4, -5, 6, 9, -10, -20, 15, -25 ]
+  - Name: FalseVal1
+    Format: Int32
+    Stride: 16
+    Data: [ -1, -2, -3, -4, 7, 8, -9, 1, 100, 200, -15, 25 ]
+  - Name: TrueVal2
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 2, 3, 4, 4, 5, 6, 9, 10, 20, 15, 250 ]
+  - Name: FalseVal2
+    Format: UInt32
+    Stride: 16
+    Data: [ 10, 20, 30, 40, 7, 8, 9, 1, 100, 200, 150, 25 ]
+  - Name: TrueVal3
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0 ]
+  - Name: FalseVal3
+    Format: Bool
+    Stride: 4
+    Data: [ 0, 0, 0, 0, 0, 1, 0, 1, 1, 0, 1, 1 ]
+  - Name: Out0
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut0
+    Format: Float32
+    Stride: 16
+    Data: [ 
+      1, -2, 3, -4, 1, -2, 1, -4, 1, -1, 3, -1, 1, -1, 1, -1,
+      4.4, -5.5, -9.9, 0.01, 4.4, 4.4, -9.9, 1, 4.4, -5.5, 7.7, -2, 4.4, 4.4, 7.7, 3,
+      -10, 200, -15, 15, -10, 100, -15, 15
+    ]
+  - Name: Out1
+    Format: Int32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 16
+    Data: [
+      1, -2, 3, -4, 1, -2, 1, -4, 1, -1, 3, -1, 1, -1, 1, -1,
+      4, -5, -9, 1, 4, 4, -9, 1, 4, -5, 7, -2, 4, 4, 7, 3,
+      -10, 200, -15, 15, -10, 100, -15, 15
+    ]
+  - Name: Out2
+    Format: UInt32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut2
+    Format: UInt32
+    Stride: 16
+    Data: [
+      1, 20, 3, 40, 1, 20, 1, 40, 1, 10, 3, 10, 1, 10, 1, 10,
+      4, 5, 9, 1, 4, 4, 9, 1, 4, 5, 7, 20, 4, 4, 7, 3,
+      10, 200, 150, 15, 10, 100, 150, 15
+    ]
+  - Name: Out3
+    Format: Bool
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut3
+    Format: Bool
+    Stride: 16
+    Data: [
+      1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0,
+      1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 0, 0, 1, 1, 0, 1,
+      0, 0, 1, 1, 0, 1, 1, 1
+    ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: Test3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+DescriptorSets:
+  - Resources:
+    - Name: Cond
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TrueVal0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: FalseVal0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: TrueVal1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: FalseVal1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: TrueVal2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: FalseVal2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: TrueVal3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: FalseVal3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 11
+        Space: 0
+      VulkanBinding:
+        Binding: 11
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 12
+        Space: 0
+      VulkanBinding:
+        Binding: 12
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

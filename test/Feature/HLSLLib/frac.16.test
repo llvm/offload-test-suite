@@ -30,7 +30,7 @@ Buffers:
   - Name: Out
     Format: Float16
     Stride: 8
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut # The result we expect
     Format: Float16
     Stride: 8
@@ -60,6 +60,9 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+
+# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
+# XFAIL: Vulkan && Darwin
 
 # REQUIRES: Half
 # RUN: split-file %s %t

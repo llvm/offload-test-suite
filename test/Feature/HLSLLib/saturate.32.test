@@ -26,7 +26,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
 DescriptorSets:
   - Resources:
     - Name: In

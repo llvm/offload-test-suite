@@ -1,0 +1,94 @@
+#--- source.hlsl
+StructuredBuffer<uint4> Low : register(t0);
+StructuredBuffer<uint4> High : register(t1);
+
+RWStructuredBuffer<double4> Out : register(u2);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = asdouble(Low[0], High[0]);
+  Out[1] = double4(asdouble(Low[1].xyz, High[1].xyz), asdouble(Low[1].w, High[1].w));
+  Out[2] = double4(asdouble(Low[2].xy, High[2].xy), asdouble(Low[2].zw, High[2].zw));
+  Out[3] = asdouble(uint4(0, 0, 0, 3149642683), uint4(0, 1072693248, 3220176896, 2863311530));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Low
+    Format: UInt32
+    Stride: 16
+    Data: [ 
+      0X00000000, 0x00000000, 0x00000000, 0xBBBBBBBB, 
+      0xDDDDDDDD, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 
+      0xAAAAAAAA, 0x00000000, 0xCDCDCDCD, 0x55555555
+    ]
+    # 0, 0, 0, 3149642683, 3722304989, 4294967295, 4294967295, 4294967295, 2863311530, 0, 3452816845, 1431655765
+  - Name: High
+    Format: UInt32
+    Stride: 16
+    Data: [ 
+      0X00000000, 0x3FF00000, 0xBFF00000, 0xAAAAAAAA,
+      0xCCCCCCCC, 0xEEEEEEEE, 0x7FEFFFFF, 0xFFEFFFFF, 
+      0x00000000, 0x40900000, 0xABABABAB, 0x3FD55555
+    ]
+    # 0, 1072693248, 3220176896, 2863311530, 3435973836, 4008636142, 2146435071, 4293918719, 0, 1083179008, 2880154539, 1070945621
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: ExpectedOut
+    Format: Hex64
+    Stride: 32
+    Data: [ 
+      0X0000000000000000, 0x3FF0000000000000, 0xBFF0000000000000, 0xAAAAAAAABBBBBBBB, 
+      0xCCCCCCCCDDDDDDDD, 0xEEEEEEEEFFFFFFFF, 0x7FEFFFFFFFFFFFFF, 0xFFEFFFFFFFFFFFFF, 
+      0x00000000AAAAAAAA, 0x4090000000000000, 0xABABABABCDCDCDCD, 0x3FD5555555555555, 
+      0X0000000000000000, 0x3FF0000000000000, 0xBFF0000000000000, 0xAAAAAAAABBBBBBBB
+    ]
+    # 0, 1.0, -1.0, -3.72066e-103, -9.25596e61, -2.28999e226, 1.79769e+308, -1.79769e+308, denorm, 1024.0, -2.53017e-98, 0.33333, 0, 1.0, -1.0, -3.72066e-103
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Low
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: High
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/153513
+# XFAIL: Clang && Vulkan
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7699
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -29,6 +29,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapRequired("Buffers", P.Buffers);
   I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
+  I.mapOptional("Bindings", P.Bindings);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
@@ -38,6 +39,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
       }
     }
+
     // Initialize result Buffers
     for (auto &R : P.Results) {
       R.ActualPtr = P.getBuffer(R.Actual);
@@ -85,6 +87,20 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       I.setError(Twine("Expected ") + std::to_string(P.Sets.size()) +
                  " DescriptorTable root parameters, found " +
                  std::to_string(DescriptorTableCount));
+
+    if (!P.Bindings.VertexBuffer.empty()) {
+      P.Bindings.VertexBufferPtr = P.getBuffer(P.Bindings.VertexBuffer);
+      if (!P.Bindings.VertexBufferPtr)
+        I.setError(Twine("Referenced vertex buffer ") +
+                   P.Bindings.VertexBuffer + " not found!");
+    }
+
+    if (!P.Bindings.RenderTarget.empty()) {
+      P.Bindings.RTargetBufferPtr = P.getBuffer(P.Bindings.RenderTarget);
+      if (!P.Bindings.RTargetBufferPtr)
+        I.setError(Twine("Referenced render target buffer ") +
+                   P.Bindings.RenderTarget + " not found!");
+    }
   }
 }
 
@@ -122,15 +138,34 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
     return;
   }
 
-  // zero-initialized buffer(s)
-  int64_t ZeroInitSize;
-  I.mapOptional("ZeroInitSize", ZeroInitSize, 0);
-  if (ZeroInitSize > 0) {
-    B.Size = ZeroInitSize;
+  // Buffers can be initialized to be filled with a fixed value.
+  int64_t FillSize;
+
+  // Explicitly reject ZeroInitSize to avoid a confusing error while
+  // transitioning to FillSize. We can remove this once in flight PRs have had
+  // time to go in.
+  I.mapOptional("ZeroInitSize", FillSize, 0);
+  if (FillSize > 0) {
+    I.setError("invalid key 'ZeroInitSize' - did you mean 'FillSize'?");
+    return;
+  }
+
+  T FillValue;
+  I.mapOptional("FillSize", FillSize, 0);
+  I.mapOptional("FillValue", FillValue, T{});
+  if (FillSize > 0) {
+    B.Size = FillSize;
+    llvm::SmallVector<T> FillData(FillSize);
+    std::fill(FillData.begin(), FillData.end(), FillValue);
+
     for (uint32_t I = 0; I < B.ArraySize; I++) {
       B.Data.push_back(std::make_unique<char[]>(B.Size));
-      memset(B.Data.back().get(), 0, B.Size);
+      memcpy(B.Data.back().get(), FillData.data(), B.Size);
     }
+    return;
+  }
+  if (FillValue) {
+    I.setError("'FillValue' specified without 'FillSize'");
     return;
   }
 
@@ -269,6 +304,22 @@ void MappingTraits<offloadtest::DirectXBinding>::mapping(
 void MappingTraits<offloadtest::VulkanBinding>::mapping(
     IO &I, offloadtest::VulkanBinding &B) {
   I.mapRequired("Binding", B.Binding);
+  I.mapOptional("CounterBinding", B.CounterBinding);
+}
+
+void MappingTraits<offloadtest::VertexAttribute>::mapping(
+    IO &I, offloadtest::VertexAttribute &A) {
+  I.mapRequired("Format", A.Format);
+  I.mapRequired("Channels", A.Channels);
+  I.mapRequired("Offset", A.Offset);
+  I.mapRequired("Name", A.Name);
+}
+
+void MappingTraits<offloadtest::IOBindings>::mapping(
+    IO &I, offloadtest::IOBindings &B) {
+  I.mapOptional("VertexBuffer", B.VertexBuffer);
+  I.mapOptional("VertexAttributes", B.VertexAttributes);
+  I.mapOptional("RenderTarget", B.RenderTarget);
 }
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(

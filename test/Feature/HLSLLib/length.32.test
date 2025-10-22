@@ -1,16 +1,18 @@
 #--- source.hlsl
-
 StructuredBuffer<float4> In : register(t0);
+
 RWStructuredBuffer<float> Out : register(u1);
+
 
 [numthreads(1,1,1)]
 void main() {
   Out[0] = length(In[0]);
   Out[1] = length(In[1].x);
   Out[2] = length(In[1].yzw);
-  Out[3] = length(In[1].yz);
+  Out[3] = length(In[2].xy);
+  Out[4] = length(In[2].zw);
+  Out[5] = length(float4(4, 4, 4, 4));
 }
-
 //--- pipeline.yaml
 
 ---
@@ -22,11 +24,21 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ 4, 4, 4, 4, 3.14159, 0, 5, 12 ]
+    Data: [ 4, 4, 4, 4, 3.14159, 0, 5, 12, 0, 5, 2, 3 ]
   - Name: Out
     Format: Float32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 24
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [ 8, 3.14159, 13, 5, 3.60555, 8 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatULP
+    ULPT: 5
+    Actual: Out
+    Expected: ExpectedOut
 DescriptorSets:
   - Resources:
     - Name: In
@@ -47,12 +59,5 @@ DescriptorSets:
 #--- end
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK: - Name: In
-# CHECK:   Format: Float32
-
-# CHECK: - Name: Out
-# CHECK:   Format: Float32
-# CHECK:   Data: [ 8, 3.14159, 13, 5 ]
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

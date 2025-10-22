@@ -31,7 +31,7 @@ Buffers:
   - Name: Out
     Format: Hex32
     Stride: 32
-    ZeroInitSize: 32
+    FillSize: 32
 DescriptorSets:
   - Resources:
     - Name: In
@@ -50,8 +50,6 @@ DescriptorSets:
         Binding: 0
 ...
 #--- end
-
-# UNSUPPORTED: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

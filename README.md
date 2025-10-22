@@ -5,15 +5,22 @@ Experimental Runtime test suite for HLSL
 
 | Testing Machine | DXC | Clang |
 |-----------------|-----|-------|
-| Windows DirectX12 AMD GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 NVIDIA GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-d3d12.yaml/badge.svg) |
-| Windows DirectX12 Warp | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-warp-d3d12.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-warp-d3d12.yaml/badge.svg) |
-| Windows Vulkan AMD GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-vk.yaml/badge.svg) |
-| Windows Vulkan Intel GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-vk.yaml/badge.svg) |
-| Windows Vulkan NVIDIA GPU | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-vk.yaml/badge.svg) | ![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-vk.yaml/badge.svg) |
-| macOS Apple M1 | ![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml/badge.svg) | ![Clang & DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml/badge.svg) |
+| **Tier 1 Targets** |
+| Windows DirectX12 Intel GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-d3d12.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-d3d12.yaml) |
+| Windows DirectX12 Warp (x64 LKG) | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-warp-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-warp-d3d12.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-warp-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-warp-d3d12.yaml) |
+| Windows DirectX12 Warp (arm64 LKG) | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-warp-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-warp-d3d12.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-warp-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-warp-d3d12.yaml) |
+| Windows Vulkan Intel GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-dxc-vk.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-intel-clang-vk.yaml) |
+| **Tier 2 Targets** |
+| macOS Apple M1 | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/macos-dxc-mtl.yaml) | [![Clang & DXC](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/macos-clang-mtl.yaml) |
+| **Experimental Targets** |
+| Windows DirectX12 AMD GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-d3d12.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-d3d12.yaml) |
+| Windows DirectX12 NVIDIA GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-d3d12.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-d3d12.yaml) |
+| Windows DirectX12 Qualcomm GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-d3d12.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-d3d12.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-d3d12.yaml) |
+| Windows Vulkan AMD GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-dxc-vk.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-amd-clang-vk.yaml) |
+| Windows Vulkan NVIDIA GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-dxc-vk.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-nvidia-clang-vk.yaml) |
+| Windows Vulkan Qualcomm GPU | [![DXC](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-dxc-vk.yaml) | [![Clang](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-vk.yaml/badge.svg)](https://github.com/llvm/offload-test-suite/actions/workflows/windows-qc-clang-vk.yaml) |
 
+See the [Continuous Integration](docs/CI.md) documentation for the description of support tiers and builder hardware.
 
 # Prerequisites
 
@@ -48,6 +55,16 @@ The offload test suite's code is clang-tidy clean for a limited ruleset.
 If you have clang-tidy installed locally you can enable clang-tidy by adding `-DOFFLOADTEST_USE_CLANG_TIDY=On` to your CMake invocation.
 You can also add `-DOFFLOADTEST_CLANG_TIDY_APPLY_FIX=On` to enable automatically applying the clang-tidy fix-its for any warnings that have automated fixes.
 
+# Failing tests
+
+Tests which are failing can be prevented from running using `XFAIL` and `UNSUPPORTED`. When `XFAIL`ing a test make sure to add a comment above
+linking the appropriate issue and whether the failure is due to a bug or an unimplemented feature.
+
+```
+# Bug/Unimplemented <link to issue>
+# XFAIL: Clang && Vulkan
+```
+
 # YAML Pipeline Format
 
 This framework provides a YAML representation for describing GPU pipelines and buffers. The format is implemented by the `API/Pipeline.{h|cpp}` sources. The following is an example pipeline YAML description:
@@ -71,7 +88,8 @@ Buffers:
   - Name: Out1 # Buffer where our output will go
     Format: Float32
     Stride: 4
-    ZeroInitSize: 8
+    FillSize: 8
+    FillValue: 0.0 # The FillValue is optional and defaults to zero
   - Name: Expected1 # Buffer which stores the expected result of our test
     Format: Float32
     Stride: 4
@@ -79,7 +97,7 @@ Buffers:
   - Name: Out2 # Buffer where our output will go
     Format: Float16
     Stride: 2
-    ZeroInitSize: 4 # ZeroInitSize needs to be 4 bytes minimum
+    FillSize: 4 # FillSize needs to be 4 bytes minimum
   - Name: Expected2 # Buffer which stores the expected result of our test
     Format: Float16
     Stride: 2

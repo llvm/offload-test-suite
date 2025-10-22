@@ -2,7 +2,7 @@
 
 StructuredBuffer<bool4> In1 : register(t0);
 StructuredBuffer<bool4> In2 : register(t1);
-RWStructuredBuffer<bool4> Out : register(u1);
+RWStructuredBuffer<bool4> Out : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
@@ -31,7 +31,7 @@ Buffers:
   - Name: Out
     Format: Bool
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut # The result we expect
     Format: Bool
     Stride: 16
@@ -60,17 +60,16 @@ DescriptorSets:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 1
+        Register: 2
         Space: 0
       VulkanBinding:
-        Binding: 1
+        Binding: 2
 ...
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/140824
+# Bug https://github.com/llvm/llvm-project/issues/140824
 # XFAIL: Clang
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7475
-# XFAIL: DXC-Vulkan
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

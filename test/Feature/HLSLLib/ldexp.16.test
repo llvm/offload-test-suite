@@ -41,7 +41,7 @@ Buffers:
   - Name: Out
     Format: Float16
     Stride: 8
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut # The result we expect
     Format: Float16
     Stride: 8
@@ -73,7 +73,7 @@ DescriptorSets:
 
 # REQUIRES: Half
 
-# UNSUPPORTED: Clang-Vulkan
+# UNSUPPORTED: Clang && Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

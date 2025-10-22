@@ -1,0 +1,103 @@
+#--- source.hlsl
+StructuredBuffer<int16_t4> In0 : register(t0);
+StructuredBuffer<uint16_t4> In1 : register(t1);
+
+RWStructuredBuffer<bool> Out0 : register(u2);
+RWStructuredBuffer<bool> Out1 : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  // int16_t
+  Out0[0] = any(In0[0]);
+  Out0[1] = any(In0[1].xyz);
+  Out0[2] = any(In0[1].w);
+  Out0[3] = any(In0[2].xy);
+  Out0[4] = any(In0[2].zw);
+  Out0[5] = any(int16_t4(0, 0, 0, 4));
+
+  // uint16_t
+  Out1[0] = any(In1[0]);
+  Out1[1] = any(In1[1].xyz);
+  Out1[2] = any(In1[1].w);
+  Out1[3] = any(In1[2].xy);
+  Out1[4] = any(In1[2].zw);
+  Out1[5] = any(uint16_t4(0, 0, 0, 4));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Int16
+    Stride: 8
+    Data: [ 0, 0, 0, 4, 0, 0, 0, -5, 0, 2, -1, 1 ]
+  - Name: In1
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 0, 0, 4, 0, 0, 0, 5, 0, 2, 100, 1 ]
+  - Name: Out0
+    Format: Bool
+    Stride: 4
+    FillSize: 24
+  - Name: ExpectedOut0
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0, 1, 1, 1, 1 ]
+  - Name: Out1
+    Format: Bool
+    Stride: 4
+    FillSize: 24
+  - Name: ExpectedOut1
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0, 1, 1, 1, 1 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

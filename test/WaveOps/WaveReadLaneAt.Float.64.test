@@ -1,0 +1,66 @@
+#--- source.hlsl
+
+StructuredBuffer<float64_t4> InFloat : register(t4);
+RWStructuredBuffer<float64_t4> OutFloat : register(u5);
+
+
+[numthreads(4,1,1)]
+void main(uint32_t3 TID : SV_GroupThreadID) {
+  uint OutIdx = TID.x * 3;
+
+  // Float
+  OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
+  float64_t4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: InFloat
+    Format: Float64
+    Stride: 16
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
+  - Name: OutFloat
+    Format: Float64
+    Stride: 16
+    FillSize: 288
+  - Name: ExpectedOutFloat # The result we expect
+    Format: Float64
+    Stride: 16
+    Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
+Results:
+  - Result: TestFloat
+    Rule: BufferExact
+    Actual: OutFloat
+    Expected: ExpectedOutFloat
+DescriptorSets:
+  - Resources:
+    - Name: InFloat
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

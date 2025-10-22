@@ -27,7 +27,7 @@ Buffers:
   - Name: Result
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult
     Format: Int32
     Stride: 4
@@ -60,9 +60,11 @@ DescriptorSets:
 # UHD drivers. This issue does not reproduce when compiled with Clang because
 # LLVM's load-store optimization performs correct optimizations that hide the
 # problem.
-# Tracking issue: https://github.com/llvm/offload-test-suite/issues/226
+# This test fails randomly but inconsistently without validation enabled. With
+# validation enabled it fails consistently every time.
+# Bug https://github.com/llvm/offload-test-suite/issues/226
 # XFAIL: Intel-Memory-Coherence-Issue-226 && !Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %offloader -validation-layer %t/pipeline.yaml %t.o

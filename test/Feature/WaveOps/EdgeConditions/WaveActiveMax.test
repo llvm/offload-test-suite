@@ -83,7 +83,6 @@ DescriptorSets:
 
 # Metal also is consistent except that it preserves NaN.
 
-
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32
 # NAN-NEXT: Data: [ nan, nan, nan, nan ]

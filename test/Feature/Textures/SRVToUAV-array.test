@@ -40,7 +40,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    ZeroInitSize: 64
+    FillSize: 64
     ArraySize: 2
     OutputProps:
       Height: 2
@@ -88,11 +88,11 @@ DescriptorSets:
 #--- end
 
 # Resource arrays are not yet implemented in Clang:
-# https://github.com/llvm/llvm-project/issues/133835
+# Unimplemented https://github.com/llvm/llvm-project/issues/133835
 # XFAIL: Clang
 
 # Offload tests are missing support for resource arrays on Metal
-# https://github.com/llvm/offload-test-suite/issues/305
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
 # RUN: split-file %s %t

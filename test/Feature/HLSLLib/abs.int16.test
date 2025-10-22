@@ -39,7 +39,7 @@ Buffers:
   - Name: Out1
     Format: Int16
     Stride: 8
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut1 # The result we expect
     Format: Int16
     Stride: 8
@@ -47,7 +47,7 @@ Buffers:
   - Name: Out2
     Format: UInt16
     Stride: 8
-    ZeroInitSize: 24 
+    FillSize: 24
   - Name: ExpectedOut2 # The result we expect
     Format: UInt16
     Stride: 8
@@ -93,9 +93,6 @@ DescriptorSets:
         Binding: 3
 ...
 #--- end
-
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7512
-# XFAIL: DXC-Vulkan
 
 # REQUIRES: Int16
 # RUN: split-file %s %t

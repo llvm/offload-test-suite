@@ -28,7 +28,7 @@ Buffers:
   - Name: Out
     Format: UInt64
     Stride: 32
-    ZeroInitSize: 96
+    FillSize: 96
   - Name: ExpectedOut # The result we expect
     Format: UInt64
     Stride: 32
@@ -57,11 +57,8 @@ DescriptorSets:
 ...
 #--- end
 
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7680
-# XFAIL: DXC-Vulkan
-
-# https://github.com/llvm/llvm-project/issues/152049
-# XFAIL: Clang-Vulkan
+# Bug https://github.com/llvm/llvm-project/issues/152049
+# XFAIL: Clang && Vulkan
 
 # REQUIRES: Int64
 # RUN: split-file %s %t

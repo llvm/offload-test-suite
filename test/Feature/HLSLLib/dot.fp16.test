@@ -15,7 +15,7 @@ void main() {
 
   Out[4] = dot(X[0].xyz, Y[0].xyz);
   Out[5] = dot(half3(1.125, -2.5, -4.75), half3(7.29, 3.14, -1.1));
-  
+
   Out[6] = dot(X[0], Y[0]);
   Out[7] = dot(half4(1.125, -2.5, -4.75, 6.625), half4(7.29, 3.14, -1.1, -3.5));
 }
@@ -40,7 +40,7 @@ Buffers:
   - Name: Out
     Format: Float16
     Stride: 2
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOut
     Format: Float16
     Stride: 2
@@ -48,8 +48,8 @@ Buffers:
     # [ 8.20125, 8.20125, 0.35125, 0.35125, 5.57625, 5.57625, -17.61125, -17.61125 ]
 Results:
   - Result: Test1
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.008
+    Rule: BufferFloatULP
+    ULPT: 30
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -77,10 +77,11 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan
+# DXC is producing a compile-time value at a significantly higher precision than
+# runtime computed values for case 3 (clang will likely do the same once it
+# learns to constant evaluate `dot`).
 
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -enable-16bit-types -HV 202x -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

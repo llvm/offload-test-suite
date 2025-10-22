@@ -37,7 +37,7 @@ Buffers:
   - Name: Out
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut # The result we expect
     Format: UInt32
     Stride: 16
@@ -81,7 +81,7 @@ DescriptorSets:
 
 # 16/64 bit firstbitlow doesn't have a DXC-Vulkan lowering
 # https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5
-# UNSUPPORTED: DXC-Vulkan
+# UNSUPPORTED: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl

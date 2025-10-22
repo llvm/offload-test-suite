@@ -1,0 +1,66 @@
+#--- source.hlsl
+
+StructuredBuffer<bool4> InBool : register(t0);
+RWStructuredBuffer<bool4> OutBool : register(u1);
+
+
+[numthreads(4,1,1)]
+void main(uint32_t3 TID : SV_GroupThreadID) {
+  uint OutIdx = TID.x * 3;
+
+  // Bool
+  OutBool[OutIdx] = WaveReadLaneAt(InBool[TID.x], TID.x);
+  bool4 ThreadInBool = {InBool[TID.x].xyz, InBool[TID.x].w};
+  OutBool[OutIdx + 1] =  WaveReadLaneAt(ThreadInBool, TID.x);
+  OutBool[OutIdx + 2].xy = WaveReadLaneAt(InBool[TID.x].xy, TID.x);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: InBool
+    Format: Bool
+    Stride: 16
+    Data: [ 1, 0, 1, 0, 1, 1, 0, 0, 0, 0, 0, 1 ]
+  - Name: OutBool
+    Format: Bool
+    Stride: 16
+    FillSize: 144
+  - Name: ExpectedOutBool # The result we expect
+    Format: Bool
+    Stride: 16
+    Data: [ 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0 ]
+Results:
+  - Result: TestBool
+    Rule: BufferExact
+    Actual: OutBool
+    Expected: ExpectedOutBool
+DescriptorSets:
+  - Resources:
+    - Name: InBool
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutBool
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+# Bug https://github.com/llvm/llvm-project/issues/140824
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

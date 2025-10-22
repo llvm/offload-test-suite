@@ -24,7 +24,7 @@ Buffers:
     Format: Hex32
     Stride: 4
     ArraySize: 4
-    ZeroInitSize: 4
+    FillSize: 4
 
 DescriptorSets:
   - Resources:
@@ -34,40 +34,35 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
+      VulkanBinding:
+        Binding: 0
+        CounterBinding: 1
 ...
 #--- end
 
-# Offload tests are missing support for counters on Vulkan
-# https://github.com/llvm/offload-test-suite/issues/303
-# XFAIL: Vulkan
+# Bug https://github.com/llvm/llvm-project/issues/162841
+# XFAIL: Clang && Vulkan
 
 # Offload tests are missing support for counters and resource arrays on Metal
-# https://github.com/llvm/offload-test-suite/issues/304
-# https://github.com/llvm/offload-test-suite/issues/305
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/304
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
 
-# Resource arrays are not yet implemented in Clang:
-# https://github.com/llvm/llvm-project/issues/133835
-# XFAIL: Clang
-
-# WARP has an issue counters in resource arrays
-# Internal issue #58567630
-# XFAIL: DXC && DirectX-WARP
-
 # Intel has an issue with counters in resource arrays
-# XFAIL: DXC && DirectX-Intel
+# Bug https://github.com/llvm/offload-test-suite/issues/376
+# XFAIL: Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s %if DirectX %{ --check-prefixes=CHECK,DX-CHECK %}
 
-# CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
-# CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
+# DX-CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
+# DX-CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
 
 # CHECK: Name: Out
 # CHECK: Counters: [ 1, 2, 3, 4 ]
 # CHECK: Data:
-      - [ 0x0 ]
-      - [ 0x1 ]
-      - [ 0x2 ]
-      - [ 0x3 ]
+# CHECK-NEXT: - [ 0x0 ]
+# CHECK-NEXT: - [ 0x1 ]
+# CHECK-NEXT: - [ 0x2 ]
+# CHECK-NEXT: - [ 0x3 ]

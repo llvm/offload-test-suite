@@ -30,7 +30,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
@@ -38,8 +38,8 @@ Buffers:
     #  NaN, Inf, 1.0, 1.0, 1.0, 1.0, Inf, 1.543081, 1.543081,
 Results:
   - Result: Test1
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.0008
+    Rule: BufferFloatULP
+    ULPT: 4
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:

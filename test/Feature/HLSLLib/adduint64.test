@@ -1,0 +1,76 @@
+#--- source.hlsl
+
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<uint4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  // vec4
+  Out[0] = AddUint64(In[0], In[0]);
+
+  // vec2
+  uint4 Tmp = {AddUint64(In[1].xy, In[1].xy), AddUint64(In[1].zw, In[1].zw)};
+  Out[1] = Tmp;
+  uint4 Tmp2 = {AddUint64(In[2].xy, In[2].xy), AddUint64(In[2].zw, In[2].zw)};
+  Out[2] = Tmp2;
+  uint4 Tmp3 = {AddUint64(uint2(0xffffffff, 0xffffffff), uint2(1, 0)), AddUint64(uint2(1, 256), uint2(1, 256))};
+  Out[3] = Tmp3;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 0, 1, 256, 10000, 10001, 0x80000000, 1, 0x7fffffff, 0x7fffffff, 0xffffffff, 0x7fffffff ]
+    # 1, 0, 1, 256, 10000, 10001, 2147483648, 1, 2147483647, 2147483647, 4294967295, 2147483647
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 64
+  - Name: ExpectedOut # The result we expect
+    Format: UInt32
+    Stride: 16
+    Data: [ 2, 0, 2, 512, 20000, 20002, 0, 3, 0xfffffffe, 0xfffffffe, 0xfffffffe, 0xffffffff, 0, 0, 2, 512 ]
+    # 2, 0, 2, 512, 20000, 20002, 0, 3, 4294967294, 4294967294, 4294967294, 4294967295, 0, 0, 2, 512
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/292
+# XFAIL: DXC && Metal
+
+# Bug https://github.com/llvm/offload-test-suite/issues/344
+# XFAIL: Clang && Metal
+
+# UNSUPPORTED: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,151 @@
+#--- source.hlsl
+StructuredBuffer<int16_t4> M0 : register(t0);
+StructuredBuffer<int16_t4> A0 : register(t1);
+StructuredBuffer<int16_t4> B0 : register(t2);
+StructuredBuffer<uint16_t4> M1 : register(t3);
+StructuredBuffer<uint16_t4> A1 : register(t4);
+StructuredBuffer<uint16_t4> B1 : register(t5);
+
+RWStructuredBuffer<int16_t4> Out0 : register(u6);
+RWStructuredBuffer<uint16_t4> Out1 : register(u7);
+
+
+[numthreads(1,1,1)]
+void main() {
+  // int16_t
+  Out0[0] = mad(M0[0], A0[0], B0[0]);
+  Out0[1] = int16_t4(mad(M0[1].xyz, A0[1].xyz, B0[1].xyz), mad(M0[1].w, A0[1].w, B0[1].w));
+  Out0[2] = int16_t4(mad(M0[2].xy, A0[2].xy, B0[2].xy), mad(M0[2].zw, A0[2].zw, B0[2].zw));
+  Out0[3] = mad(int16_t4(-32768, -256, 32767, -32768), int16_t4(1, 8, 1, 1), int16_t4(0, 0, 1, -1));
+
+  // uint16_t
+  Out1[0] = mad(M1[0], A1[0], B1[0]);
+  Out1[1] = uint16_t4(mad(M1[1].xyz, A1[1].xyz, B1[1].xyz), mad(M1[1].w, A1[1].w, B1[1].w));
+  Out1[2] = uint16_t4(mad(M1[2].xy, A1[2].xy, B1[2].xy), mad(M1[2].zw, A1[2].zw, B1[2].zw));
+  Out1[3] = mad(uint16_t4(2, 16, 256, 65535), uint16_t4(2, 16, 256, 1), uint16_t4(1, 15, 1, 1));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: M0
+    Format: Int16
+    Stride: 8
+    Data: [ -32768, -256, -1, 0, 1, 2, 16, 32767, 257, -1, 32767, -32768 ]
+  - Name: A0
+    Format: Int16
+    Stride: 8
+    Data: [ 1, 8, -1, 0, 1, 3, 16, 1, 12, -1, 1, 1 ]
+  - Name: B0
+    Format: Int16
+    Stride: 8
+    Data: [ 0, 0, 1, 3, 250, -30, -32768, -50, 10, 0, 1, -1 ]
+  - Name: M1
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 1, 2, 16, 32767, 0, 10, 0, 100, 1000, 256, 65535 ]
+  - Name: A1
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 1, 2, 16, 1, 0, 10, 1, 2, 5, 256, 1 ]
+  - Name: B1
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 0, 1, 15, 0, 10, 10, 1, 50, 100, 1, 1 ]
+  - Name: Out0
+    Format: Int16
+    Stride: 8
+    FillSize: 32
+  - Name: ExpectedOut0
+    Format: Int16
+    Stride: 8
+    Data: [ -32768, -2048, 2, 3, 251, -24, -32512, 32717, 3094, 1, -32768, 32767, -32768, -2048, -32768, 32767 ]
+  - Name: Out1
+    Format: UInt16
+    Stride: 8
+    FillSize: 32
+  - Name: ExpectedOut1
+    Format: UInt16
+    Stride: 8
+    Data: [ 0, 1, 5, 271, 32767, 10, 110, 1, 250, 5100, 1, 0, 5, 271, 1, 0 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+DescriptorSets:
+  - Resources:
+    - Name: M0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: A0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: B0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: M1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: A1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: B1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+#--- end
+
+# https://github.com/llvm/llvm-project/issues/140095
+# UNSUPPORTED: Clang && Vulkan
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+
+# RUN: %offloader %t/pipeline.yaml %t.o

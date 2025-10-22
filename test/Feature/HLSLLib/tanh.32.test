@@ -29,15 +29,15 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
     Data: [ -0.0, 0.0, 0.761594, -0.761594, -0.0, 0.0, 0.761594, -0.761594, -0.0, 0.0, 0.761594, -0.761594]
 Results:
   - Result: Test1
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.0008
+    Rule: BufferFloatULP
+    ULPT: 120  # Metal has an ULP range of 5, CUDA has 2, but NV drivers seem to have wider drift
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -61,5 +61,5 @@ DescriptorSets:
 
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

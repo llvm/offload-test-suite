@@ -22,7 +22,7 @@ void main() {
 
   Out0[4] = dot(X0[0].xyz, Y0[0].xyz);
   Out0[5] = dot(float3(1.125, -2.5, -4.75), float3(7.29, 3.14, -1.1));
-  
+
   Out0[6] = dot(X0[0], Y0[0]);
   Out0[7] = dot(float4(1.125, -2.5, -4.75, 6.625), float4(7.29, 3.14, -1.1, -3.5));
 
@@ -87,7 +87,7 @@ Buffers:
   - Name: Out0
     Format: Float32
     Stride: 4
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut0
     Format: Float32
     Stride: 4
@@ -95,7 +95,7 @@ Buffers:
   - Name: Out1
     Format: Int32
     Stride: 4
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut1
     Format: Int32
     Stride: 4
@@ -103,7 +103,7 @@ Buffers:
   - Name: Out2
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 4
@@ -188,9 +188,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 8
 #--- end
-
-# https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl

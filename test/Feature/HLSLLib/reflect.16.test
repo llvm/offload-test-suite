@@ -76,7 +76,7 @@ Buffers:
   - Name: Result2D
     Format: Float16
     Stride: 4
-    ZeroInitSize: 8
+    FillSize: 8
   - Name: ExpectedResult2D
     Format: Float16
     Stride: 4
@@ -85,7 +85,7 @@ Buffers:
   - Name: Result3D
     Format: Float16
     Stride: 8
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult3D
     Format: Float16
     Stride: 8
@@ -94,7 +94,7 @@ Buffers:
   - Name: Result4D
     Format: Float16
     Stride: 8
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult4D
     Format: Float16
     Stride: 8
@@ -185,6 +185,9 @@ DescriptorSets:
 ...
 #--- end
 # REQUIRES: Half
+
+# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2524
+# XFAIL: Vulkan && Darwin
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl

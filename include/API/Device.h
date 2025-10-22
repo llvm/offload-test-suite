@@ -30,6 +30,11 @@ namespace offloadtest {
 
 struct Pipeline;
 
+struct DeviceConfig {
+  bool EnableDebugLayer = false;
+  bool EnableValidationLayer = false;
+};
+
 class Device {
 protected:
   std::string Description;
@@ -46,7 +51,7 @@ public:
   llvm::StringRef getDescription() const { return Description; }
 
   static void registerDevice(std::shared_ptr<Device> D);
-  static llvm::Error initialize();
+  static llvm::Error initialize(const DeviceConfig Config);
   static void uninitialize();
 
   using DeviceArray = llvm::SmallVector<std::shared_ptr<Device>>;
@@ -58,16 +63,16 @@ public:
   static inline DeviceRange devices() { return DeviceRange(begin(), end()); }
 
 #ifdef OFFLOADTEST_ENABLE_D3D12
-  static llvm::Error initializeDXDevices();
+  static llvm::Error initializeDXDevices(const DeviceConfig Config);
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  static llvm::Error initializeVKDevices();
+  static llvm::Error initializeVKDevices(const DeviceConfig Config);
   static void cleanupVKDevices();
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_METAL
-  static llvm::Error initializeMtlDevices();
+  static llvm::Error initializeMtlDevices(const DeviceConfig Config);
 #endif
 };
 

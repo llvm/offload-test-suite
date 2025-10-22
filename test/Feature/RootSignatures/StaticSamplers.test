@@ -1,0 +1,214 @@
+#--- source.hlsl
+
+Texture2D<float4> In : register(t0);
+
+SamplerState DefaultSampler: register(s0);
+SamplerState SpecifiedSampler: register(s1);
+
+RWTexture2D<float4> DefaultOut : register(u1);
+RWTexture2D<float4> SpecifiedOut : register(u2);
+
+#define RootSig                                                                \
+  "DescriptorTable( "                                                          \
+  "  SRV(t0), "                                                                \
+  "  UAV(u1, numDescriptors = 2) "                                             \
+  "), "                                                                        \
+  "StaticSampler(s0), "                                                        \
+  "StaticSampler(s1, "                                                         \
+  "  mipLODBias = -15.99, "                                                    \
+  "  minLOD = 32.0, "                                                          \
+  "  maxLOD = 32.0, "                                                          \
+  "  addressV = TEXTURE_ADDRESS_MIRROR, "                                      \
+  "  filter = FILTER_MAXIMUM_MIN_MAG_MIP_POINT "                               \
+  ")"
+
+[RootSignature(RootSig)]
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  uint Width, Height;
+  uint2 GID = {GI / 2, GI % 2};
+  float2 UV = GID;
+  float4 DefaultColor = In.Sample(DefaultSampler, UV);
+  DefaultOut[GID.xy] = DefaultColor.bgra;
+
+  float4 SpecifiedColor = In.Sample(SpecifiedSampler, UV);
+  SpecifiedOut[GID.xy] = SpecifiedColor.bgra;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Channels: 4
+    Data: [1.0, 0.0, 0.0, 1.0,
+           0.0, 1.0, 0.0, 1.0,
+           0.0, 0.0, 1.0, 1.0,
+           1.0, 1.0, 0.0, 1.0]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: DefaultOut
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: SpecifiedOut
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: ExpectedDefaultOut
+    Format: Float32
+    Channels: 4
+    Data: [0.25, 0.5, 0.5, 1,
+	        0.25, 0.5, 0.5, 1,
+			0.25, 0.5, 0.5,
+			1, 0.25, 0.5, 0.5, 1]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  ## Modifying the LOD parameters does not affect the output. However,
+  ## the applied filter will output [0, 0, 1, 1, ... 0, 0, 1, 1] and then
+  ## setting addressV to mirror outputs [0, 0, 1, 1, ..., 1, 0, 0, 1] as shown
+  ## below
+  - Name: ExpectedSpecifiedOut
+    Format: Float32
+    Channels: 4
+    Data: [0, 0, 1, 1,
+		   0, 0, 1, 1,
+	       1, 0, 0, 1,
+	       1, 0, 0, 1 ]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+Results:
+  - Result: DefaultTest
+    Rule: BufferExact
+    Actual: DefaultOut
+    Expected: ExpectedDefaultOut
+  - Result: SpecifiedTest
+    Rule: BufferExact
+    Actual: SpecifiedOut
+    Expected: ExpectedSpecifiedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: Texture2D
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: DefaultOut
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: SpecifiedOut
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unsupported: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: Clang
+
+# REQUIRES: DerivativesInCompute
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: obj2yaml %t.o | FileCheck %s --check-prefix=OBJ
+
+## Root Signature Header
+# OBJ:      - Name:            RTS0
+# OBJ-NEXT:   Size:            196
+# OBJ-NEXT:   RootSignature:
+# OBJ-NEXT:     Version:         2
+# OBJ-NEXT:     NumRootParameters: 1
+# OBJ-NEXT:     RootParametersOffset: 24
+# OBJ-NEXT:     NumStaticSamplers: 2
+# OBJ-NEXT:     StaticSamplersOffset: 92
+# OBJ-NEXT:     Parameters:
+
+## Descriptor Table
+# OBJ:          - ParameterType:   DescriptorTable
+# OBJ-NEXT:       ShaderVisibility: All
+# OBJ-NEXT:       Table:
+# OBJ-NEXT:       NumRanges:       2
+# OBJ-NEXT:       RangesOffset:    44
+# OBJ-NEXT:       Ranges:
+
+## SRV(t0)
+# OBJ:            - RangeType:       SRV
+# OBJ-NEXT:         NumDescriptors:  1
+# OBJ-NEXT:         BaseShaderRegister: 0
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
+
+## UAV(u1, numDescriptors = 2)
+# OBJ-NEXT:       - RangeType:       UAV
+# OBJ-NEXT:         NumDescriptors:  2
+# OBJ-NEXT:         BaseShaderRegister: 1
+# OBJ-NEXT:         RegisterSpace:   0
+# OBJ-NEXT:         OffsetInDescriptorsFromTableStart: 4294967295
+
+# OBJ:          Samplers:
+
+## StaticSampler(s0)
+## Ensures the defaults are set as expected
+# OBJ-NEXT:     - Filter:          Anisotropic
+# OBJ-NEXT:       AddressU:        Wrap
+# OBJ-NEXT:       AddressV:        Wrap
+# OBJ-NEXT:       AddressW:        Wrap
+# OBJ-NEXT:       MipLODBias:      0
+# OBJ-NEXT:       MaxAnisotropy:   16
+# OBJ-NEXT:       ComparisonFunc:  LessEqual
+# OBJ-NEXT:       BorderColor:     OpaqueWhite
+# OBJ-NEXT:       MinLOD:          0
+# OBJ-NEXT:       MaxLOD:          3.40282e+38
+# OBJ-NEXT:       ShaderRegister:  0
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       ShaderVisibility: All
+
+## StaticSampler(s1,
+##   mipLODBias = -15.99,
+##   minLOD = 32.0,
+##   maxLOD = 32.0,
+##   addressV = TEXTURE_ADDRESS_MIRROR,
+##   filter = FILTER_MAXIMUM_MIN_MAG_MIP_POINT
+## )
+## Ensures the specified values are set as expected
+# OBJ:          - Filter:          MaximumMinMagMipPoint
+# OBJ-NEXT:       AddressU:        Wrap
+# OBJ-NEXT:       AddressV:        Mirror
+# OBJ-NEXT:       AddressW:        Wrap
+# OBJ-NEXT:       MipLODBias:      -15.99
+# OBJ-NEXT:       MaxAnisotropy:   16
+# OBJ-NEXT:       ComparisonFunc:  LessEqual
+# OBJ-NEXT:       BorderColor:     OpaqueWhite
+# OBJ-NEXT:       MinLOD:          32
+# OBJ-NEXT:       MaxLOD:          32
+# OBJ-NEXT:       ShaderRegister:  1
+# OBJ-NEXT:       RegisterSpace:   0
+# OBJ-NEXT:       ShaderVisibility: All

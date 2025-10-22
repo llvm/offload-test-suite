@@ -19,7 +19,7 @@ RWStructuredBuffer<A> BufA : register(u1);
 RWStructuredBuffer<B> BufB : register(u2);
 RWStructuredBuffer<C> BufC : register(u3);
 
-[numthreads(1,1,4)]
+[numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
   BufA[GI].a = In[GI].x;
   BufA[GI].b = In[GI].y;
@@ -40,20 +40,20 @@ Shaders:
 Buffers:
   - Name: In
     Format: Float32
-    Stride: 32
+    Stride: 16
     Data: [ 1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 0, 10, 11, 12, 0 ]
   - Name: BufA
     Format: Float32
     Stride: 12
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: BufB
     Format: Float32
     Stride: 12
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: BufC
     Format: Float32
     Stride: 12
-    ZeroInitSize: 48
+    FillSize: 48
 DescriptorSets:
   - Resources:
     - Name: In
@@ -87,12 +87,8 @@ DescriptorSets:
 ...
 #--- end
 
-# clang-dxc doesn't support the -fvk-use-scalar-layout flag yet
-# UNSUPPORTED: Clang-Vulkan
-
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/source.hlsl %}
+# RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: In

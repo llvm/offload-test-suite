@@ -48,13 +48,24 @@ tools = [
 ]
 
 
+def getHighestShaderModel(features):
+    if features == None:
+        return 6, 0
+    sm = features.get("HighestShaderModel", 6.0)
+    major, minor = str(sm).split(".")
+    return int(major), int(minor)
+
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
+    config.available_features.add(compiler)
+    config.available_features.add(config.offloadtest_os)
     if "Microsoft Basic Render Driver" in device["Description"]:
-        config.available_features.add("%s-WARP" % API)
+        config.available_features.add("WARP")
+        config.available_features.add(config.warp_arch)
     if "Intel" in device["Description"]:
-        config.available_features.add("%s-Intel" % API)
+        config.available_features.add("Intel")
         if "UHD Graphics" in device["Description"] and API == "DirectX":
             # When Intel resolves the driver issue and tests XFAILing on the
             # feature below are resolved we can resolve
@@ -62,11 +73,20 @@ def setDeviceFeatures(config, device, compiler):
             # this check to only XFAIL on old driver versions.
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
-        config.available_features.add("%s-NV" % API)
+        config.available_features.add("NV")
+        NV50SeriesRegex = re.compile("NVIDIA GeForce [A-Z]+ 50[0-9]+")
+        NV50SeriesMatch = NV50SeriesRegex.match(device["Description"])
+        if NV50SeriesMatch and API == "DirectX":
+            config.available_features.add("NV-Reconvergence-Issue-320")
     if "AMD" in device["Description"]:
-        config.available_features.add("%s-AMD" % API)
+        config.available_features.add("AMD")
+    if "Qualcomm" in device["Description"]:
+        config.available_features.add("QC")
 
-    config.available_features.add("%s-%s" % (compiler, API))
+    HighestShaderModel = getHighestShaderModel(device["Features"])
+    if (6, 6) <= HighestShaderModel:
+        # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
+        config.available_features.add("DerivativesInCompute")
 
     if device["API"] == "DirectX":
         if device["Features"].get("Native16BitShaderOpsSupported", False):
@@ -81,7 +101,6 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
-        config.available_features.add("Int64")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
@@ -93,17 +112,28 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
 
+        # Add supported extensions.
+        for Extension in device["Extensions"]:
+            config.available_features.add(Extension["ExtensionName"])
 
+
+offloader_args = []
 if config.offloadtest_test_warp:
-    tools.append(
-        ToolSubst("%offloader", command=FindTool("offloader"), extra_args=["-warp"])
-    )
-else:
-    tools.append(ToolSubst("%offloader", FindTool("offloader")))
+    offloader_args.append("-warp")
+if config.offloadtest_enable_debug:
+    offloader_args.append("-debug-layer")
+if config.offloadtest_enable_validation:
+    offloader_args.append("-validation-layer")
+
+tools.append(
+    ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
+)
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
     ExtraCompilerArgs = ["-spirv", "-fspv-target-env=vulkan1.3"]
+    if config.offloadtest_test_clang:
+        ExtraCompilerArgs.append("-fspv-extension=DXC")
 if config.offloadtest_enable_metal:
     ExtraCompilerArgs = ["-metal"]
     # metal-irconverter version: 3.0.0
@@ -145,6 +175,8 @@ else:
 
 config.available_features.add(HLSLCompiler)
 
+tools.append(ToolSubst("obj2yaml", FindTool("obj2yaml")))
+
 llvm_config.add_tool_substitutions(tools, config.llvm_tools_dir)
 
 api_query = os.path.join(config.llvm_tools_dir, "api-query")
@@ -164,7 +196,7 @@ for device in devices["Devices"]:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
         target_device = device
-    # Bail from th eloop if we found a device that matches what we're looking for.
+    # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
         break
 

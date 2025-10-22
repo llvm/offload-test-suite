@@ -220,7 +220,7 @@ Buffers:
   - Name: NewParticles
     Format: Float32
     Stride: 20
-    ZeroInitSize: 640
+    FillSize: 640
   - Name: ExpectedParticles
     Format: Float32
     Stride: 20
@@ -261,7 +261,7 @@ Buffers:
   - Name: Vertices
     Format: Float32
     Stride: 12
-    ZeroInitSize: 384
+    FillSize: 384
   - Name: ExpectedVertices
     Format: Float32
     Stride: 20
@@ -350,15 +350,18 @@ DescriptorSets:
 ...
 #--- end
 
-# clang-dxc doesn't support the -fvk-use-scalar-layout flag yet
-# UNSUPPORTED: Clang-Vulkan
+# Unimplemented: CBuffer not implemented in Clang's Vulkan implementation.
+# https://github.com/llvm/llvm-project/issues/124597
+# XFAIL: Clang && Vulkan
 
 # CBuffer bindings seem to be broken under metal
-# https://github.com/llvm/offload-test-suite/issues/55
-# UNSUPPORTED: Metal
+# Bug https://github.com/llvm/offload-test-suite/issues/55
+# XFAIL: Metal
+
+# No idea what is going on here, but the results are _way_ off.
+# XFAIL: Vulkan && Darwin
 
 # RUN: split-file %s %t
-# RUN: %if !Vulkan %{ %dxc_target -T cs_6_0 -Fo %t.o %t/particle-life.hlsl %}
-# RUN: %if Vulkan %{ %dxc_target -T cs_6_0 -fspv-target-env=vulkan1.3 -fvk-use-scalar-layout -Fo %t.o %t/particle-life.hlsl %}
+# RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/particle-life.hlsl
 # TODO: Specify -rootsig-define ROOT_SIGNATURE
 # RUN: %offloader %t/particle-life.yaml %t.o

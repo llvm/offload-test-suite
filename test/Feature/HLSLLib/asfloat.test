@@ -1,0 +1,136 @@
+#--- source.hlsl
+StructuredBuffer<float4> In0 : register(t0);
+StructuredBuffer<uint4> In1 : register(t1);
+StructuredBuffer<int4> In2 : register(t2);
+
+RWStructuredBuffer<float4> Out0 : register(u3);
+RWStructuredBuffer<float4> Out1 : register(u4);
+RWStructuredBuffer<float4> Out2 : register(u5);
+
+[numthreads(1,1,1)]
+void main() {
+
+  Out0[0] = asfloat(In0[0]);
+  Out0[1] = float4(asfloat(In0[1].xyz), asfloat(In0[1].w));
+  Out0[2] = float4(asfloat(In0[2].xy), asfloat(In0[2].zw));
+  Out0[3] = asfloat(float4(0, 1, -50.555, 99.999));
+
+  Out1[0] = asfloat(In1[0]);
+  Out1[1] = float4(asfloat(In1[1].xyz), asfloat(In1[1].w));
+  Out1[2] = float4(asfloat(In1[2].xy), asfloat(In1[2].zw));
+  Out1[3] = asfloat(uint4(0, 50, 10000, 4294967295));
+
+  Out2[0] = asfloat(In2[0]);
+  Out2[1] = float4(asfloat(In2[1].xyz), asfloat(In2[1].w));
+  Out2[2] = float4(asfloat(In2[2].xy), asfloat(In2[2].zw));
+  Out2[3] = asfloat(int4(-1, 0, 50, 2147483647));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Float32
+    Stride: 16
+    Data: [0, 1, -50.555, 99.999, -0.00001, 0.00001, 10.1, 20.2, 30.3, 40.4, 11111.111, 22.0002]
+  - Name: In1
+    Format: UInt32
+    Stride: 16
+    Data: [0, 50, 10000, 4294967295, 1, 10, 100, 1000, 202, 303, 404, 505]
+  - Name: In2
+    Format: Int32
+    Stride: 16
+    Data: [-1, 0, 50, 2147483647, 1, 10, 100, 1000, -202, -303, -404, -505]
+  - Name: Out0
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: ExpectedOut0
+    Format: Float32
+    Stride: 16
+    Data: [0, 1, -50.555, 99.999, -0.00001, 0.00001, 10.1, 20.2, 30.3, 40.4, 11111.111, 22.0002, 0, 1, -50.555, 99.999]
+  - Name: Out1
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: ExpectedOut1
+    Format: Float32
+    Stride: 16
+    Data: [ 0, 7.00649e-44, 1.4013e-41, -nan, 1.4013e-45, 1.4013e-44, 1.4013e-43, 1.4013e-42, 2.83062e-43, 4.24593e-43, 5.66125e-43, 7.07656e-43, 0, 7.00649e-44, 1.4013e-41, -nan ]
+  - Name: Out2
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: ExpectedOut2
+    Format: Float32
+    Stride: 16
+    Data: [ -nan, 0, 7.00649e-44, nan, 1.4013e-45, 1.4013e-44, 1.4013e-43, 1.4013e-42, -nan, -nan, -nan, -nan, -nan, 0, 7.00649e-44, nan ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
