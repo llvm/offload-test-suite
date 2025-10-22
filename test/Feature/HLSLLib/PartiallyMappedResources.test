@@ -132,6 +132,10 @@ DescriptorSets:
 # AND https://github.com/llvm/llvm-project/issues/99204
 # XFAIL: Vulkan
 
+# Bug https://github.com/llvm/offload-test-suite/issues/182
+# Metal API seems to have problems with reserved resources
+# XFAIL: Metal
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
