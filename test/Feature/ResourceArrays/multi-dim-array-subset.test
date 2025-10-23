@@ -3,15 +3,15 @@
 // Verify handling of subsets of multi-dimensional resource arrays
 // used in a function argument.
 
-RWStructuredBuffer<float> In[4][2] : register(u0);
-RWStructuredBuffer<float> Out : register(u0, space1);
+RWStructuredBuffer<int> In[4][2] : register(u0);
+RWStructuredBuffer<int> Out : register(u0, space1);
 
-float foo(RWStructuredBuffer<float> A[2], uint Index) {
+int foo(RWStructuredBuffer<int> A[2], uint Index) {
   return A[0][Index] + A[1][Index];
 }
 
 [numthreads(4,1,1)]
-void main(uint GI : SV_GroupIndex) {
+void main() {
   for (int i = 0; i < 4; i++) {
     Out[i] = foo(In[i], i);
   }
@@ -25,30 +25,29 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufIn
-    Format: Float32
+    Format: Int32
     ArraySize: 8
     Data:
-      - [ 1.0, 2.0, 3.0, 4.0 ]
-      - [ 0.1, 0.2, 0.3, 0.4 ]
-      - [ 5.0, 6.0, 7.0, 8.0 ]
-      - [ 0.5, 0.6, 0.7, 0.8 ]
-      - [ 10.0, 11.0, 12.0, 13.0 ]
-      - [ 0.10, 0.11, 0.12, 0.13 ]
-      - [ 14.0, 15.0, 16.0, 17.0 ]
-      - [ 0.14, 0.15, 0.16, 0.17 ]
+      - [ 10, 20, 30, 40 ]
+      - [  1,  2,  3,  4 ]
+      - [ 50, 60, 70, 80 ]
+      - [  5,  6,  7,  8 ]
+      - [ 100, 110, 120, 130 ]
+      - [  10,  11,  12,  13 ]
+      - [ 140, 150, 160, 170 ]
+      - [  14,  15,  16,  17 ]
 
   - Name: BufOut
-    Format: Float32
+    Format: Int32
     FillSize: 16
 
   - Name: ExpectedOut
-    Format: Float32
-    Data: [ 1.1, 6.6, 12.12, 17.17 ]
+    Format: Int32
+    Data: [ 11, 66, 132, 187 ]
 
 Results:
   - Result: BufOut
-    Rule: BufferFloatULP
-    ULPT: 1     # Float addition should be within 1 ULP on all hardware.
+    Rule: BufferExact
     Actual: BufOut
     Expected: ExpectedOut
 
@@ -67,11 +66,14 @@ DescriptorSets:
 ...
 #--- end
 
-# Vulkan does not support multi-dimensional resource arrays
-# UNSUPPORTED: Vulkan
+# DXC + Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: DXC && Vulkan
 
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
+# Unimplemented https://github.com/llvm/llvm-project/issues/164908
+# XFAIL: Clang && Vulkan
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
