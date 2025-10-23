@@ -6,15 +6,17 @@
 //   - Vector condition, scalar true value, vector false value
 //   - Vector condition, vector true value, scalar false value
 //   - Vector condition, scalar true/false values
+//   - Non-boolean vector condition, vector true/false values
 // For each vector condition scenario, there are tests for vec4, vec3, and vec2.
 // For the scalar condition scenario, there are four tests. One uses the buffers 
 // for inputs and the other three use constants.
 
 StructuredBuffer<bool> Cond : register(t0);
-StructuredBuffer<half4> TrueVal : register(t1);
-StructuredBuffer<half4> FalseVal : register(t2);
+StructuredBuffer<half4> HalfCond : register(t1);
+StructuredBuffer<half4> TrueVal : register(t2);
+StructuredBuffer<half4> FalseVal : register(t3);
 
-RWStructuredBuffer<half4> Out : register(u3);
+RWStructuredBuffer<half4> Out : register(u4);
 
 
 [numthreads(1,1,1)]
@@ -37,6 +39,9 @@ void main() {
   // vec2
   Out[8] = half4(select(Cond2, TrueVal[2].xy, FalseVal[2].xy), select(Cond3, TrueVal[2].z, FalseVal[2].zw));
   Out[9] = half4(select(Cond2, TrueVal[2].xy, FalseVal[2].x), select(Cond3, TrueVal[2].z, FalseVal[2].z));
+  // non-bool vector condition
+  Out[10] = select(HalfCond[0], TrueVal[0], FalseVal[0]);
+  Out[11] = select(HalfCond[0] == HalfCond[1], TrueVal[0], FalseVal[0]);
 }
 //--- pipeline.yaml
 
@@ -50,6 +55,11 @@ Buffers:
     Format: Bool
     Stride: 4
     Data: [ 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1 ]
+  - Name: HalfCond
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4900, 0x0000, 0x4d00, 0x0000, 0x3c00, 0xc900, 0x4d00, 0x0000 ]
+    # 10, 0, 20, 0, 1, -10, 20, 0
   - Name: TrueVal
     Format: Float16
     Stride: 8
@@ -63,18 +73,20 @@ Buffers:
   - Name: Out
     Format: Float16
     Stride: 8
-    FillSize: 80
+    FillSize: 96
   - Name: ExpectedOut
     Format: Float16
     Stride: 8
     Data: [ 
       0x3c00, 0xc000, 0x4200, 0xc400, 0x3c00, 0xc000, 0x3c00, 0xc400, 0x3c00, 0xbc00, 0x4200, 0xbc00, 0x3c00, 0xbc00, 0x3c00, 0xbc00,
       0x4466, 0xc580, 0xc8f3, 0x211f, 0x4466, 0x4466, 0xc8f3, 0x3c00, 0x4466, 0xc580, 0x47b3, 0xc000, 0x4466, 0x4466, 0x47b3, 0x4200,
-      0xc900, 0x5a40, 0xcb80, 0x4b80, 0xc900, 0x5640, 0xcb80, 0x4b80
+      0xc900, 0x5a40, 0xcb80, 0x4b80, 0xc900, 0x5640, 0xcb80, 0x4b80,
+      0x3c00, 0xc000, 0x4200, 0xc400, 0xbc00, 0xc000, 0x4200, 0x4400
     ]
     # 1, -2, 3, -4, 1, -2, 1, -4, 1, -1, 3, -1, 1, -1, 1, -1,
     # 4.4, -5.5, -9.9, 0.01, 4.4, 4.4, -9.9, 1, 4.4, -5.5, 7.7, -2, 4.4, 4.4, 7.7, 3,
     # -10, 200, -15, 15, -10, 100, -15, 15
+    # 1, -2, 3, -4, -1, -2, 3, 4
 Results:
   - Result: Test0
     Rule: BufferExact
@@ -89,28 +101,38 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: TrueVal
+    - Name: HalfCond
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: FalseVal
+    - Name: TrueVal
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
-    - Name: Out
-      Kind: RWStructuredBuffer
+    - Name: FalseVal
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
       VulkanBinding:
         Binding: 3
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
 #--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/164018
+# XFAIL: Clang
 
 # REQUIRES: Half
 # RUN: split-file %s %t

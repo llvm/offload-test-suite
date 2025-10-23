@@ -6,19 +6,21 @@
 //   - Vector condition, scalar true value, vector false value
 //   - Vector condition, vector true value, scalar false value
 //   - Vector condition, scalar true/false values
+//   - Non-boolean vector condition, vector true/false values
 // For each vector condition scenario, there are tests for vec4, vec3, and vec2.
 // For the scalar condition scenario, there are four tests. One uses the buffers 
 // for inputs and the other three use constants.
 
 StructuredBuffer<bool> Cond : register(t0);
-StructuredBuffer<int64_t4> TrueVal0 : register(t1);
-StructuredBuffer<int64_t4> FalseVal0 : register(t2);
-StructuredBuffer<uint64_t4> TrueVal1 : register(t3);
-StructuredBuffer<uint64_t4> FalseVal1 : register(t4);
+StructuredBuffer<int64_t4> IntCond : register(t1);
+StructuredBuffer<int64_t4> TrueVal0 : register(t2);
+StructuredBuffer<int64_t4> FalseVal0 : register(t3);
+StructuredBuffer<uint64_t4> UIntCond : register(t4);
+StructuredBuffer<uint64_t4> TrueVal1 : register(t5);
+StructuredBuffer<uint64_t4> FalseVal1 : register(t6);
 
-RWStructuredBuffer<int64_t4> Out0 : register(u5);
-RWStructuredBuffer<uint64_t4> Out1 : register(u6);
-
+RWStructuredBuffer<int64_t4> Out0 : register(u7);
+RWStructuredBuffer<uint64_t4> Out1 : register(u8);
 
 [numthreads(1,1,1)]
 void main() {
@@ -41,6 +43,9 @@ void main() {
   // vec2
   Out0[8] = int64_t4(select(Cond2, TrueVal0[2].xy, FalseVal0[2].xy), select(Cond3, TrueVal0[2].z, FalseVal0[2].zw));
   Out0[9] = int64_t4(select(Cond2, TrueVal0[2].xy, FalseVal0[2].x), select(Cond3, TrueVal0[2].z, FalseVal0[2].z));
+  // non-bool vector condition
+  Out0[10] = select(IntCond[0], TrueVal0[0], FalseVal0[0]);
+  Out0[11] = select(IntCond[0] == IntCond[1], TrueVal0[0], FalseVal0[0]);
 
   // uint64_t
   // vec4
@@ -56,6 +61,9 @@ void main() {
   // vec2
   Out1[8] = uint64_t4(select(Cond2, TrueVal1[2].xy, FalseVal1[2].xy), select(Cond3, TrueVal1[2].z, FalseVal1[2].zw));
   Out1[9] = uint64_t4(select(Cond2, TrueVal1[2].xy, FalseVal1[2].x), select(Cond3, TrueVal1[2].z, FalseVal1[2].z));
+  // non-bool vector condition
+  Out1[10] = select(UIntCond[0], TrueVal1[0], FalseVal1[0]);
+  Out1[11] = select(UIntCond[0] == UIntCond[1], TrueVal1[0], FalseVal1[0]);
 }
 //--- pipeline.yaml
 
@@ -69,6 +77,10 @@ Buffers:
     Format: Bool
     Stride: 4
     Data: [ 1, 0, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1 ]
+  - Name: IntCond
+    Format: Int64
+    Stride: 32
+    Data: [ 10, 0, 20, 0, 1, -10, 20, 0 ]
   - Name: TrueVal0
     Format: Int64
     Stride: 32
@@ -77,6 +89,10 @@ Buffers:
     Format: Int64
     Stride: 32
     Data: [ -1, -2, -3, -4, 7, 8, -9, 1, 100, 200, -15, 25 ]
+  - Name: UIntCond
+    Format: UInt64
+    Stride: 32
+    Data: [ 10, 0, 20, 0, 1, 10, 20, 0 ]
   - Name: TrueVal1
     Format: UInt64
     Stride: 32
@@ -88,26 +104,28 @@ Buffers:
   - Name: Out0
     Format: Int64
     Stride: 32
-    FillSize: 320
+    FillSize: 384
   - Name: ExpectedOut0
     Format: Int64
     Stride: 32
     Data: [
       1, -2, 3, -4, 1, -2, 1, -4, 1, -1, 3, -1, 1, -1, 1, -1,
       4, -5, -9, 1, 4, 4, -9, 1, 4, -5, 7, -2, 4, 4, 7, 3,
-      -10, 200, -15, 15, -10, 100, -15, 15
+      -10, 200, -15, 15, -10, 100, -15, 15,
+      1, -2, 3, -4, -1, -2, 3, 4
     ]
   - Name: Out1
     Format: UInt64
     Stride: 32
-    FillSize: 320
+    FillSize: 384
   - Name: ExpectedOut1
     Format: UInt64
     Stride: 32
     Data: [
       1, 20, 3, 40, 1, 20, 1, 40, 1, 10, 3, 10, 1, 10, 1, 10,
       4, 5, 9, 1, 4, 4, 9, 1, 4, 5, 7, 20, 4, 4, 7, 3,
-      10, 200, 150, 15, 10, 100, 150, 15
+      10, 200, 150, 15, 10, 100, 150, 15,
+      1, 20, 3, 40, 10, 20, 3, 4
     ]
 Results:
   - Result: Test0
@@ -127,49 +145,66 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: TrueVal0
+    - Name: IntCond
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: FalseVal0
+    - Name: TrueVal0
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
-    - Name: TrueVal1
+    - Name: FalseVal0
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
       VulkanBinding:
         Binding: 3
-    - Name: FalseVal1
+    - Name: UIntCond
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 4
         Space: 0
       VulkanBinding:
         Binding: 4
-    - Name: Out0
-      Kind: RWStructuredBuffer
+    - Name: TrueVal1
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 5
         Space: 0
       VulkanBinding:
         Binding: 5
-    - Name: Out1
-      Kind: RWStructuredBuffer
+    - Name: FalseVal1
+      Kind: StructuredBuffer
       DirectXBinding:
         Register: 6
         Space: 0
       VulkanBinding:
         Binding: 6
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
 #--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/164018
+# XFAIL: Clang
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
