@@ -34,7 +34,7 @@ DescriptorSets:
 ...
 
 #--- end
-# UNSUPPORTED: !VK_KHR_shader_maximal_reconvergence
+# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
 # BUG: https://github.com/llvm/llvm-project/issues/164496
 # XFAIL: Clang && Vulkan
