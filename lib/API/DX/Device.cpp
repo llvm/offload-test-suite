@@ -582,13 +582,6 @@ public:
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
       if (NumTiles > 0) {
-        std::vector<D3D12_TILED_RESOURCE_COORDINATE> StartCoords(NumTiles);
-        std::vector<D3D12_TILE_REGION_SIZE> RegionSizes(NumTiles);
-        std::vector<D3D12_TILE_RANGE_FLAGS> RangeFlags(
-            NumTiles, D3D12_TILE_RANGE_FLAG_NONE);
-        std::vector<UINT> HeapRangeStartOffsets(NumTiles);
-        std::vector<UINT> RangeTileCounts(NumTiles, 1);
-
         // Create a Heap large enough for the mapped tiles
         D3D12_HEAP_DESC HeapDesc = {};
         HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
@@ -602,29 +595,26 @@ public:
                             "Failed to create heap for tiled SRV resource."))
           return Err;
 
-        // Fill tile coordinates and region sizes
-        for (UINT I = 0; I < NumTiles; ++I) {
-          StartCoords[I] = {I, 0, 0, 0};
-          RegionSizes[I].NumTiles = 1;
-          RegionSizes[I].UseBox = FALSE;
-          HeapRangeStartOffsets[I] = I;
-        }
+        // Define one contiguous mapping region
+        D3D12_TILED_RESOURCE_COORDINATE startCoord = {0, 0, 0, 0};
+        D3D12_TILE_REGION_SIZE regionSize = {};
+        regionSize.NumTiles = NumTiles;
+        regionSize.UseBox = FALSE;
 
-        // Retrieve a command queue from InvocationState
+        D3D12_TILE_RANGE_FLAGS rangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+        UINT heapRangeStartOffset = 0;
+        UINT rangeTileCount = NumTiles;
+
         ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
-
-        // Map the first NumTiles tiles in the Buffer
         CommandQueue->UpdateTileMappings(
-            Buffer.Get(), NumTiles, StartCoords.data(), RegionSizes.data(),
-            Heap.Get(), NumTiles, RangeFlags.data(),
-            HeapRangeStartOffsets.data(), RangeTileCounts.data(),
+            Buffer.Get(), 1, &startCoord, &regionSize, // One region
+            Heap.Get(), 1, &rangeFlag, &heapRangeStartOffset, &rangeTileCount,
             D3D12_TILE_MAPPING_FLAG_NONE);
       }
 
       // Upload data initialization
       void *ResDataPtr = nullptr;
-      const D3D12_RANGE Range = {0, 0}; // no reads expected
-      if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
+      if (SUCCEEDED(UploadBuffer->Map(0, NULL, &ResDataPtr))) {
         memcpy(ResDataPtr, ResData.get(), R.size());
         UploadBuffer->Unmap(0, nullptr);
       } else {
@@ -632,10 +622,8 @@ public:
                                        "Failed to map SRV upload buffer.");
       }
 
-      // Add GPU upload commands
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-      // Store heap in Bundle so it lives until caller releases the Bundle
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, Heap);
       RegOffset++;
     }
@@ -1563,18 +1551,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error waitThenReturnErr(llvm::Error Err, InvocationState &IS) {
-    // Wait on the GPU before returning the error
-    llvm::Error WaitErr = waitForSignal(IS);
-    if (WaitErr)
-      // joinErrors returns an Error by value (move-only). Just return it
-      // directly.
-      return llvm::joinErrors(std::move(WaitErr), std::move(Err));
-
-    // No waiting error, just return the moved original.
-    return Err;
-  }
-
   llvm::Error executeProgram(Pipeline &P) override {
     llvm::sys::AddSignalHandler(
         [](void *Cookie) {
@@ -1618,7 +1594,7 @@ public:
       return Err;
     llvm::outs() << "Buffers created.\n";
     if (auto Err = createEvent(State))
-      return waitThenReturnErr(std::move(Err), State);
+      return Err;
 
     llvm::outs() << "Event prepared.\n";
 
@@ -1629,33 +1605,33 @@ public:
             std::errc::invalid_argument,
             "Compute pipeline must have exactly one compute shader.");
       if (auto Err = createComputePSO(P.Shaders[0].Shader->getBuffer(), State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "PSO created.\n";
       if (auto Err = createComputeCommands(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Compute command list created.\n";
 
     } else {
       // Create render target, readback and vertex buffer and PSO.
       if (auto Err = createRenderTarget(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Render target created.\n";
       if (auto Err = createVertexBuffer(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Vertex buffer created.\n";
       if (auto Err = createGraphicsPSO(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Graphics PSO created.\n";
       if (auto Err = createGraphicsCommands(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Graphics command list created complete.\n";
     }
 
     if (auto Err = executeCommandList(State))
-      return waitThenReturnErr(std::move(Err), State);
+      return Err;
     llvm::outs() << "Compute commands executed.\n";
     if (auto Err = readBack(P, State))
-      return waitThenReturnErr(std::move(Err), State);
+      return Err;
     llvm::outs() << "Read data back.\n";
 
     return llvm::Error::success();
