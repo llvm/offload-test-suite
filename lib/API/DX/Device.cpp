@@ -596,19 +596,19 @@ public:
           return Err;
 
         // Define one contiguous mapping region
-        D3D12_TILED_RESOURCE_COORDINATE startCoord = {0, 0, 0, 0};
-        D3D12_TILE_REGION_SIZE regionSize = {};
+        D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
+        D3D12_TILE_REGION_SIZE RegionSize = {};
         regionSize.NumTiles = NumTiles;
         regionSize.UseBox = FALSE;
 
-        D3D12_TILE_RANGE_FLAGS rangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
-        UINT heapRangeStartOffset = 0;
-        UINT rangeTileCount = NumTiles;
+        D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+        UINT HeapRangeStartOffset = 0;
+        UINT RangeTileCount = NumTiles;
 
         ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
         CommandQueue->UpdateTileMappings(
-            Buffer.Get(), 1, &startCoord, &regionSize, // One region
-            Heap.Get(), 1, &rangeFlag, &heapRangeStartOffset, &rangeTileCount,
+            Buffer.Get(), 1, &StartCoord, &RegionSize, // One region
+            Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
             D3D12_TILE_MAPPING_FLAG_NONE);
       }
 
@@ -760,129 +760,7 @@ public:
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  llvm::Expected<ResourceBundle> createReservedCBV(Resource &R,
-                                                   InvocationState &IS) {
-    ResourceBundle Bundle;
-
-    const size_t BufferSize = getCBVSize(R.size());
-    const D3D12_RESOURCE_DESC ResDesc = {
-        D3D12_RESOURCE_DIMENSION_BUFFER,
-        0,
-        BufferSize,
-        1,
-        1,
-        1,
-        DXGI_FORMAT_UNKNOWN,
-        {1, 0},
-        D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS};
-
-    const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
-
-    uint32_t RegOffset = 0;
-    for (const auto &ResData : R.BufferPtr->Data) {
-      llvm::outs() << "Creating CBV: { Size = " << BufferSize
-                   << ", Register = b" << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space;
-      if (R.TilesMapped)
-        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
-      llvm::outs() << " }\n";
-
-      // Reserved CBV resource
-      ComPtr<ID3D12Resource> Buffer;
-      if (auto Err =
-              HR::toError(Device->CreateReservedResource(
-                              &ResDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-                              IID_PPV_ARGS(&Buffer)),
-                          "Failed to create reserved resource (buffer)."))
-        return Err;
-
-      // Committed Upload Buffer (CPU visible)
-      ComPtr<ID3D12Resource> UploadBuffer;
-      const D3D12_HEAP_PROPERTIES UploadHeapProps =
-          CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-      if (auto Err = HR::toError(
-              Device->CreateCommittedResource(
-                  &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
-                  D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                  IID_PPV_ARGS(&UploadBuffer)),
-              "Failed to create committed resource (upload buffer)."))
-        return Err;
-
-      // Tile mapping setup (optional if NumTiles > 0)
-      const UINT NumTiles = static_cast<UINT>(*R.TilesMapped);
-      ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
-
-      if (NumTiles > 0) {
-        std::vector<D3D12_TILED_RESOURCE_COORDINATE> StartCoords(NumTiles);
-        std::vector<D3D12_TILE_REGION_SIZE> RegionSizes(NumTiles);
-        std::vector<D3D12_TILE_RANGE_FLAGS> RangeFlags(
-            NumTiles, D3D12_TILE_RANGE_FLAG_NONE);
-        std::vector<UINT> HeapRangeStartOffsets(NumTiles);
-        std::vector<UINT> RangeTileCounts(NumTiles, 1);
-
-        // Create a heap large enough for the mapped tiles
-        D3D12_HEAP_DESC HeapDesc = {};
-        HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-        HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
-                               D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-        HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ONLY_BUFFERS;
-
-        if (auto Err =
-                HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
-                            "Failed to create heap for tiled CBV resource."))
-          return Err;
-
-        // Fill tile coordinates and region sizes
-        for (UINT I = 0; I < NumTiles; ++I) {
-          StartCoords[I] = {I, 0, 0, 0};
-          RegionSizes[I].NumTiles = 1;
-          RegionSizes[I].UseBox = FALSE;
-          HeapRangeStartOffsets[I] = I;
-        }
-
-        // Retrieve a command queue from InvocationState
-        ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
-
-        // Map the first NumTiles tiles in the Buffer
-        CommandQueue->UpdateTileMappings(
-            Buffer.Get(), NumTiles, StartCoords.data(), RegionSizes.data(),
-            Heap.Get(), NumTiles, RangeFlags.data(),
-            HeapRangeStartOffsets.data(), RangeTileCounts.data(),
-            D3D12_TILE_MAPPING_FLAG_NONE);
-      }
-
-      // Upload data initialization
-      void *ResDataPtr = nullptr;
-      const D3D12_RANGE Range = {0, 0}; // no reads expected
-      if (SUCCEEDED(UploadBuffer->Map(0, &Range, &ResDataPtr))) {
-        memcpy(ResDataPtr, ResData.get(), R.size());
-        // Zero remaining bytes if the buffer is padded
-        if (R.size() < BufferSize) {
-          memset(static_cast<char *>(ResDataPtr) + R.size(), 0,
-                 BufferSize - R.size());
-        }
-        UploadBuffer->Unmap(0, nullptr);
-      } else {
-        return llvm::createStringError(std::errc::io_error,
-                                       "Failed to map CBV upload buffer.");
-      }
-
-      // Add GPU upload commands
-      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
-
-      // Store resource bundle (heap optional)
-      Bundle.emplace_back(UploadBuffer, Buffer, nullptr, Heap);
-      RegOffset++;
-    }
-
-    return Bundle;
-  }
-
-  llvm::Expected<ResourceBundle> createCommittedCBV(Resource &R,
-                                                    InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createCBV(Resource &R, InvocationState &IS) {
     ResourceBundle Bundle;
 
     const size_t CBVSize = getCBVSize(R.size());
@@ -947,12 +825,6 @@ public:
       RegOffset++;
     }
     return Bundle;
-  }
-
-  llvm::Expected<ResourceBundle> createCBV(Resource &R, InvocationState &IS) {
-    if (R.TilesMapped)
-      return createReservedCBV(R, IS);
-    return createCommittedCBV(R, IS);
   }
 
   // returns the next available HeapIdx
