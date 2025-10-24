@@ -596,14 +596,14 @@ public:
           return Err;
 
         // Define one contiguous mapping region
-        D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
+        const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
         D3D12_TILE_REGION_SIZE RegionSize = {};
-        regionSize.NumTiles = NumTiles;
-        regionSize.UseBox = FALSE;
+        RegionSize.NumTiles = NumTiles;
+        RegionSize.UseBox = FALSE;
 
-        D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
-        UINT HeapRangeStartOffset = 0;
-        UINT RangeTileCount = NumTiles;
+        const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+        const UINT HeapRangeStartOffset = 0;
+        const UINT RangeTileCount = NumTiles;
 
         ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
         CommandQueue->UpdateTileMappings(
