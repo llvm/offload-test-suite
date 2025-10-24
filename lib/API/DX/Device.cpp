@@ -577,7 +577,7 @@ public:
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // Tile mapping setup (optional if NumTiles > 0)
+      // Tile mapping setup (only skipped when TilesMapped is set to 0)
       const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
 
