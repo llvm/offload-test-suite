@@ -25,16 +25,16 @@ void main(uint3 tid : SV_GroupThreadID)
             int64_t4 v = In[ValueSet * ValueSetOffset + MaskIdx * NUM_THREADS + tid.x];
             const uint OutIdx = ValueSetOffset + MaskIdx * NUM_THREADS + tid.x;
             if (Masks[MaskIdx].mask[tid.x]) {
-                Out1[OutIdx] = WaveActiveMax( v.x );
-                Out2[OutIdx].xy = WaveActiveMax( v.xy );
-                Out3[OutIdx].xyz = WaveActiveMax( v.xyz );
-                Out4[OutIdx] = WaveActiveMax( v );
+                Out1[OutIdx] = WaveActiveMin( v.x );
+                Out2[OutIdx].xy = WaveActiveMin( v.xy );
+                Out3[OutIdx].xyz = WaveActiveMin( v.xyz );
+                Out4[OutIdx] = WaveActiveMin( v );
             }
         }
     }
 
     // constant folding case
-    Out5[0] = WaveActiveMax(int64_t4(1,2,3,4));
+    Out5[0] = WaveActiveMin(int64_t4(1,2,3,4));
 }
 
 

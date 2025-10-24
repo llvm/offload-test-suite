@@ -71,7 +71,7 @@ DescriptorSets:
 
 # The behavior of this operation is consistent on Metal, so the test verifies that behavior.
 
-# The SPIR-V Spec for OpGroupNonUniformFMax says:
+# The SPIR-V Spec for OpGroupNonUniformFMin says:
 # > From the set of Value(s) provided by active invocations within a subgroup,
 # > if for any two Values one of them is a NaN, the other is chosen. If all
 # > Value(s) that are used by the current invocation are NaN, then the result is
