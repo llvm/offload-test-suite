@@ -528,7 +528,7 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-   UINT getNumTiles(std::optional<int> NumTiles, UINT64 Width) {
+  UINT getNumTiles(std::optional<int> NumTiles, UINT64 Width) {
     UINT Ret;
     if (NumTiles.has_value())
       Ret = static_cast<UINT>(*NumTiles);
@@ -1619,7 +1619,7 @@ public:
     llvm::outs() << "Buffers created.\n";
     if (auto Err = createEvent(State))
       return waitThenReturnErr(std::move(Err), State);
-    
+
     llvm::outs() << "Event prepared.\n";
 
     if (P.isCompute()) {
@@ -1632,13 +1632,13 @@ public:
         return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "PSO created.\n";
       if (auto Err = createComputeCommands(P, State))
-        return  waitThenReturnErr(std::move(Err), State);
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Compute command list created.\n";
 
     } else {
       // Create render target, readback and vertex buffer and PSO.
       if (auto Err = createRenderTarget(P, State))
-        return  waitThenReturnErr(std::move(Err), State);
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Render target created.\n";
       if (auto Err = createVertexBuffer(P, State))
         return waitThenReturnErr(std::move(Err), State);
