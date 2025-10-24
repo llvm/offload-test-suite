@@ -151,7 +151,7 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
   D3D12_TEXTURE_LAYOUT Layout;
   if (R.isTexture())
-    Layout = getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV
+    Layout = getDXKind(R.Kind) == SRV
                  ? D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE
                  : D3D12_TEXTURE_LAYOUT_UNKNOWN;
   else
@@ -739,7 +739,6 @@ public:
     }
     return Bundle;
   }
-  
   // returns the next available HeapIdx
   uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
                    ResourceBundle ResBundle) {
@@ -1082,9 +1081,6 @@ public:
   }
 
   void addReadbackBeginBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
-    const D3D12_RESOURCE_BARRIER b = CD3DX12_RESOURCE_BARRIER::UAV(R.Get());
-    IS.CmdList->ResourceBarrier(1, &b);
-
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         R.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
