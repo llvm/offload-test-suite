@@ -727,6 +727,7 @@ public:
     }
     return Bundle;
   }
+
   // returns the next available HeapIdx
   uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
                    ResourceBundle ResBundle) {
@@ -741,10 +742,7 @@ public:
     for (const ResourceSet &RS : ResBundle) {
       llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
                    << " NumElts = " << NumElts
-                   << " HasCounter = " << R.HasCounter;
-      if (R.TilesMapped)
-        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
-      llvm::outs() << " }\n";
+                   << " HasCounter = " << R.HasCounter << "\n";
 
       D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle = UAVHandleHeapStart;
       UAVHandle.ptr += HeapIdx * DescHandleIncSize;
@@ -1467,7 +1465,6 @@ public:
     llvm::outs() << "Buffers created.\n";
     if (auto Err = createEvent(State))
       return Err;
-
     llvm::outs() << "Event prepared.\n";
 
     if (P.isCompute()) {
