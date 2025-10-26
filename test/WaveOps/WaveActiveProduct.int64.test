@@ -8,12 +8,12 @@ RWStructuredBuffer<int64_t4> Out4 : register(u4);
 RWStructuredBuffer<int64_t4> Out5 : register(u5);
 
 // uints
-StructuredBuffer<int64_t4> UIn  : register(t6);
-RWStructuredBuffer<int64_t4> UOut1 : register(u7);
-RWStructuredBuffer<int64_t4> UOut2 : register(u8);
-RWStructuredBuffer<int64_t4> UOut3 : register(u9);
-RWStructuredBuffer<int64_t4> UOut4 : register(u10);
-RWStructuredBuffer<int64_t4> UOut5 : register(u11);
+StructuredBuffer<uint64_t4> UIn  : register(t6);
+RWStructuredBuffer<uint64_t4> UOut1 : register(u7);
+RWStructuredBuffer<uint64_t4> UOut2 : register(u8);
+RWStructuredBuffer<uint64_t4> UOut3 : register(u9);
+RWStructuredBuffer<uint64_t4> UOut4 : register(u10);
+RWStructuredBuffer<uint64_t4> UOut5 : register(u11);
 
 [numthreads(4,1,1)]
 void main(uint3 tid : SV_GroupThreadID)
