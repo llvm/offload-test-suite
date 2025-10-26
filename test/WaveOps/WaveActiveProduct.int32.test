@@ -52,7 +52,7 @@ void main(uint3 tid : SV_GroupThreadID)
     Out4[tid.x]     = vec4s[tid.x];
 
     // constant folding case
-    Out5[0] = WaveActiveProduct(int16_t4(1,2,3,4));
+    Out5[0] = WaveActiveProduct(int4(1,2,3,4));
 
     // UINT case
 
