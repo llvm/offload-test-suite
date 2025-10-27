@@ -1,0 +1,81 @@
+#--- vertex.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+};
+
+PSInput main(float4 position : POSITION)
+{
+    PSInput result;
+
+    result.position = position;
+
+    return result;
+}
+
+
+#--- pixel.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    float x = input.position.x;
+    float y = input.position.y;
+    x = smoothstep(0.0, 256.0, x);
+    y = smoothstep(0.0, 256.0, y);
+    float4 res = float4(x, y, 0.0, 1.0);
+    return res;
+}
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12 # 16 bytes per vertex
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0, 1.0, 0.0,
+            1.0, 1.0, 0.0,
+            1.0, 1.0, 0.0,
+            1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 16
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+# UNSUPPORTED: Clang
+# REQUIRES: goldenimage
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/ScreenSpaceUV.png -rules %t/rules.yaml
