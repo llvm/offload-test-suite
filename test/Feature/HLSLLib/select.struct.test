@@ -1,0 +1,92 @@
+#--- source.hlsl
+struct S {
+  float a;
+  float b;
+};
+
+StructuredBuffer<bool> Cond : register(t0);
+StructuredBuffer<S> TrueVal : register(t1);
+StructuredBuffer<S> FalseVal : register(t2);
+
+RWStructuredBuffer<S> Out : register(u3);
+
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = select(Cond[0], TrueVal[0], FalseVal[0]);
+  Out[1] = select(Cond[1], TrueVal[1], FalseVal[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Cond
+    Format: Bool
+    Stride: 4
+    Data: [ 1, 0 ]
+  - Name: TrueVal
+    Format: Float32
+    Stride: 8
+    Data: [ 1.1, 2.2, 3.3, 4.4 ]
+  - Name: FalseVal
+    Format: Float32
+    Stride: 8
+    Data: [ -1.1, -2.2, -3.3, -4.4 ]
+  - Name: Out
+    Format: Float32
+    Stride: 8
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 8
+    Data: [ 1.1, 2.2, -3.3, -4.4 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Cond
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TrueVal
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: FalseVal
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Select is meant to replace the pre-HLSL-2021 ternary operators. In DXC, these operators
+# didn't support struct types, so select doesn't either.
+# For more context see here:
+# https://github.com/microsoft/hlsl-specs/blob/main/proposals/0040-select-type-support.md
+# UNSUPPORTED: DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -38,7 +38,7 @@ Buffers:
   - Name: Result
     Format: Hex32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedResult
     Format: Hex32
     Stride: 4
@@ -75,7 +75,7 @@ DescriptorSets:
 #--- end
 
 # We don't yet support PackedVectorFormat4x8Bit
-# UNSUPPORTED: Clang-Vulkan
+# UNSUPPORTED: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

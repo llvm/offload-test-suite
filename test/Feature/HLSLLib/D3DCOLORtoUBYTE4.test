@@ -22,7 +22,7 @@ Buffers:
   - Name: Out0
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedOut0
     Format: UInt32
     Stride: 16
@@ -49,10 +49,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 #--- end
-
-
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang-Vulkan && !VK_KHR_shader_float_controls2
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

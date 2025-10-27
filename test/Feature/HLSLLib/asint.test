@@ -55,7 +55,7 @@ Buffers:
   - Name: Out1
     Format: Int32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut1 # The result we expect
     Format: Int32
     Stride: 16
@@ -63,7 +63,7 @@ Buffers:
   - Name: Out2
     Format: Int32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut2 # The result we expect
     Format: Int32
     Stride: 16
@@ -71,7 +71,7 @@ Buffers:
   - Name: Out3
     Format: Int32
     Stride: 16
-    ZeroInitSize: 64 
+    FillSize: 64
   - Name: ExpectedOut3 # The result we expect
     Format: Int32
     Stride: 16
@@ -137,7 +137,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/154214
-# XFAIL: Clang-Vulkan
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

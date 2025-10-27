@@ -80,7 +80,7 @@ Buffers:
   - Name: Result
     Format: Float16
     Stride: 2
-    ZeroInitSize: 32
+    FillSize: 32
   - Name: ExpectedResult
     Format: Float16
     Stride: 2
@@ -118,7 +118,7 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang-Vulkan
+# UNSUPPORTED: Clang && Vulkan
 # Clang-Vulkan is unsupported because of two validation errors
 # This issue tracks its resolution: https://github.com/llvm/offload-test-suite/issues/285
 # REQUIRES: Half

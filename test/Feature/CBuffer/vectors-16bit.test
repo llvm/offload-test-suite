@@ -37,7 +37,7 @@ Buffers:
     Format: Hex16
     # Warp doesn't seem to be able to handle a stride of 10 so we use 12 here
     Stride: 12
-    ZeroInitSize: 12
+    FillSize: 12
 DescriptorSets:
   - Resources:
     - Name: CBVectors
@@ -60,7 +60,7 @@ DescriptorSets:
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -fvk-use-dx-layout -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: - Name: CBVectors

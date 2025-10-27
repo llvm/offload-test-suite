@@ -30,11 +30,11 @@ Buffers:
   - Name: OutInt
     Format: Int32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: OutFloat
     Format: Float32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOutInt # The result we expect
     Format: Int32
     Stride: 4

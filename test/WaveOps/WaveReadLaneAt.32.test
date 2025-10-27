@@ -54,7 +54,7 @@ Buffers:
   - Name: OutInt
     Format: Int32
     Stride: 16
-    ZeroInitSize: 144
+    FillSize: 144
   - Name: ExpectedOutInt # The result we expect
     Format: Int32
     Stride: 16
@@ -66,7 +66,7 @@ Buffers:
   - Name: OutUInt
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 144
+    FillSize: 144
   - Name: ExpectedOutUInt # The result we expect
     Format: UInt32
     Stride: 16
@@ -78,7 +78,7 @@ Buffers:
   - Name: OutFloat
     Format: Float32
     Stride: 16
-    ZeroInitSize: 144
+    FillSize: 144
   - Name: ExpectedOutFloat # The result we expect
     Format: Float32
     Stride: 16
@@ -90,7 +90,7 @@ Buffers:
   - Name: OutEdgeFloat
     Format: Float32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOutEdgeFloat # The result we expect
     Format: Float32
     Stride: 4

@@ -38,15 +38,15 @@ Buffers:
   - Name: In2 # special values where the result might differ based on platform or compiler
     Format: Float16
     Stride: 2
-    Data: [0x7e00, 0xfe00, 0x0001, 0x8001] # nan, -nan, denorm, -denorm 
+    Data: [0x7e00, 0xfe00, 0x0001, 0x8001] # nan, -nan, denorm, -denorm
   - Name: Out1
     Format: Int32
     Stride: 16
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: Out2
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedOut1 # The result we expect
     Format: Int32
     Stride: 16

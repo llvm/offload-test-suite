@@ -33,7 +33,7 @@ Buffers:
   - Name: Out
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut # The result we expect
     Format: UInt32
     Stride: 16
@@ -64,12 +64,12 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/292
-# XFAIL: DXC-Metal
+# XFAIL: DXC && Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/344
-# XFAIL: Clang-Metal
+# XFAIL: Clang && Metal
 
-# UNSUPPORTED: DXC-Vulkan
+# UNSUPPORTED: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

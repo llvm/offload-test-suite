@@ -1,0 +1,74 @@
+#--- source.hlsl
+
+// This test is added to continue having a test to track the Intel && DXC bug
+// below. This bug only appears when using GroupMemoryBarrierWithGroupSync
+// while concurrently writing to uint4 components.
+
+RWStructuredBuffer<uint4> Out : register(u0);
+
+groupshared uint4 SharedData;
+
+[numthreads(128, 4, 1)]
+void main(uint3 ThreadID : SV_GroupThreadID) {
+  if (ThreadID.x == 0 && ThreadID.y == 0) {
+    SharedData = 0;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  for (uint I = 0; I < 128; I++) {
+    if (ThreadID.x == I) {
+      SharedData[ThreadID.y] = SharedData[ThreadID.y] + 1;
+    }
+    GroupMemoryBarrierWithGroupSync();
+  }
+
+  if (ThreadID.x == 0) {
+    Out[0][ThreadID.y] = SharedData[ThreadID.y];
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Channels: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: UInt32
+    Channels: 4
+    Data: [ 128, 128, 128, 128 ]
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Clang introduces a data-race (but it is not observable on WARP)
+# Bug https://github.com/llvm/llvm-project/issues/160208
+# XFAIL: Clang && !WARP
+
+# Bug https://github.com/llvm/offload-test-suite/issues/445
+# XFAIL: DirectX && Intel
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/452
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

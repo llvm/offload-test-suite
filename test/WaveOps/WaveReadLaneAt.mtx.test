@@ -29,7 +29,7 @@ Buffers:
   - Name: OutMatrix
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOutMatrix # The result we expect
     Format: Float32
     Stride: 16

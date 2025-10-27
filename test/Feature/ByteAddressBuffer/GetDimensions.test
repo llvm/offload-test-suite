@@ -1,0 +1,87 @@
+#--- source.hlsl
+
+// This test checks that we will get the expected values from invoking
+// `GetDimension`s on typed buffers RWBuffer and Buffer.
+
+ByteAddressBuffer A : register(t0);
+RWByteAddressBuffer B : register(u1);
+
+[[vk::binding(10)]]
+RWBuffer<uint> Out : register(u10);
+
+[numthreads(1,1,1)]
+void main() {
+  uint dim;
+  
+  A.GetDimensions(dim);
+  Out[0] = dim;
+  
+  B.GetDimensions(dim);
+  Out[1] = dim;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+
+Buffers:
+  - Name: A
+    Format: Int32
+    Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 ]
+
+  - Name: B
+    Format: Hex32
+    Data: [ 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700 ]
+
+  - Name: Out
+    Format: Int32
+    FillSize: 8
+
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 56, 28 ]
+
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: A
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+
+    - Name: B
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/164008
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

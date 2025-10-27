@@ -1,0 +1,81 @@
+#--- source.hlsl
+
+// Note: Placing GroupMemoryBarrierWithGroupSync in divergent control branches
+// is undefined, and hence, untested
+
+RWStructuredBuffer<uint> Out : register(u0);
+
+groupshared uint Counter;
+
+[numthreads(512,1,1)]
+void main(uint3 ThreadID : SV_GroupThreadID) {
+
+  // Basic Broadcast
+  if (ThreadID.x == 511) {
+    Counter = 1;
+  }
+
+  // Prevents Counter being read below before being initialized
+  GroupMemoryBarrierWithGroupSync();
+
+  if (ThreadID.x == 0) {
+    Out[0] = Counter;
+  }
+
+  // Prevents Counter being updated below before written to Out[0]
+  GroupMemoryBarrierWithGroupSync();
+
+  // Interlocked Accumulation
+  for (uint I = 0; I < 512; I++) {
+    if (ThreadID.x == I) {
+      Counter = Counter + 1;
+    }
+
+    // Prevents Counter datarace across ThreadID.x, and,
+    // Counter being written before fully accumulated
+    GroupMemoryBarrierWithGroupSync();
+  }
+
+  if (ThreadID.x == 256) {
+    Out[1] = Counter;
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Channels: 1
+    FillSize: 8
+  - Name: ExpectedOut
+    Format: UInt32
+    Channels: 1
+    Data: [
+      1,   # Broadcast
+      513, # Accumulation
+    ]
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -58,11 +58,11 @@ Buffers:
 
   - Name: OutBuf
     Format: Hex32
-    ZeroInitSize: 64
+    FillSize: 64
 
   - Name: MappedBuf
     Format: Int32
-    ZeroInitSize: 16
+    FillSize: 16
 
 DescriptorSets:
   - Resources:

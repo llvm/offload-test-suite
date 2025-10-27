@@ -27,7 +27,7 @@ Buffers:
   - Name: Out1
     Format: Float64
     Stride: 32
-    ZeroInitSize: 96
+    FillSize: 96
   - Name: ExpectedOut1 # The result we expect
     Format: Float64
     Stride: 32

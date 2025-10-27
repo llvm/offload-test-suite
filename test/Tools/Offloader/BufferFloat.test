@@ -24,7 +24,7 @@ Buffers:
   - Name: Out1
     Format: Float32
     Stride: 4
-    ZeroInitSize: 4
+    FillSize: 4
   - Name: Expected1
     Format: Float32
     Stride: 4
@@ -32,7 +32,7 @@ Buffers:
   - Name: Out2
     Format: Float32
     Stride: 4
-    ZeroInitSize: 4
+    FillSize: 4
   - Name: Expected2
     Format: Float32
     Stride: 4
@@ -40,7 +40,7 @@ Buffers:
   - Name: Out3
     Format: Float32
     Stride: 4
-    ZeroInitSize: 4
+    FillSize: 4
   - Name: Expected3
     Format: Float32
     Stride: 4
@@ -48,7 +48,7 @@ Buffers:
   - Name: Out4
     Format: Float32
     Stride: 4
-    ZeroInitSize: 4
+    FillSize: 4
   - Name: Expected4
     Format: Float32
     Stride: 4

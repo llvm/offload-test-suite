@@ -38,7 +38,7 @@ Buffers:
   - Name: OutInt
     Format: Int64
     Stride: 16
-    ZeroInitSize: 288
+    FillSize: 288
   - Name: ExpectedOutInt # The result we expect
     Format: Int64
     Stride: 16
@@ -50,7 +50,7 @@ Buffers:
   - Name: OutUInt
     Format: UInt64
     Stride: 16
-    ZeroInitSize: 288
+    FillSize: 288
   - Name: ExpectedOutUInt # The result we expect
     Format: UInt64
     Stride: 16

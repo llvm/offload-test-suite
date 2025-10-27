@@ -18,14 +18,14 @@ void main() {
   Out0[1] = float4(min(X0[1].xyz, Y0[1].xyz), min(X0[1].w, Y0[1].w));
   Out0[2] = float4(min(X0[2].xy, Y0[2].xy), min(X0[2].zw, Y0[2].zw));
   Out0[3] = min(half4(1.0, -1.0, 31408, -415), half4(-1.0, 1.0, 1.5, 129.5));
-  
+
   // int
   Out1[0] = min(X1[0], Y1[0]);
   Out1[1] = int4(min(X1[1].xyz, Y1[1].xyz), min(X1[1].w, Y1[1].w));
   Out1[2] = int4(min(X1[2].xy, Y1[2].xy), min(X1[2].zw, Y1[2].zw));
   Out1[3] = min(X1[3], Y1[3]);
   Out1[3] = min(int4(-2147483648, -10, 10, 2147483647), int4(0, 10, 10, 0));
-  
+
   // uint
   Out2[0] = min(X2[0], Y2[0]);
   Out2[1] = uint4(min(X2[1].xyz, Y2[1].xyz), min(X2[1].w, Y2[1].w));
@@ -68,7 +68,7 @@ Buffers:
   - Name: Out0
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
@@ -76,7 +76,7 @@ Buffers:
   - Name: Out1
     Format: Int32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut1
     Format: Int32
     Stride: 16
@@ -84,7 +84,7 @@ Buffers:
   - Name: Out2
     Format: UInt32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 16

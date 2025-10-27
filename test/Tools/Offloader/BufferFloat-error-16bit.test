@@ -21,7 +21,7 @@ Buffers:
   - Name: Out1
     Format: Float16
     Stride: 2
-    ZeroInitSize: 4
+    FillSize: 4
   - Name: Expected1
     Format: Float16
     Stride: 2
@@ -29,7 +29,7 @@ Buffers:
   - Name: Out2
     Format: Float16
     Stride: 2
-    ZeroInitSize: 4
+    FillSize: 4
   - Name: Expected2
     Format: Float16
     Stride: 2
@@ -77,7 +77,6 @@ DescriptorSets:
 
 # REQUIRES: Half
 
-# UNSUPPORTED: Clang-Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s

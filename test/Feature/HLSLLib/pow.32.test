@@ -31,7 +31,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 16
-    ZeroInitSize: 64
+    FillSize: 64
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
@@ -66,9 +66,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 2
 #--- end
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7702
-# XFAIL: DXC-Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

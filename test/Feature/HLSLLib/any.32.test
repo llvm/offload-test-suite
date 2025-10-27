@@ -57,7 +57,7 @@ Buffers:
   - Name: Out0
     Format: Bool
     Stride: 4
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut0
     Format: Bool
     Stride: 4
@@ -65,7 +65,7 @@ Buffers:
   - Name: Out1
     Format: Bool
     Stride: 4
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut1
     Format: Bool
     Stride: 4
@@ -73,7 +73,7 @@ Buffers:
   - Name: Out2
     Format: Bool
     Stride: 4
-    ZeroInitSize: 24
+    FillSize: 24
   - Name: ExpectedOut2
     Format: Bool
     Stride: 4

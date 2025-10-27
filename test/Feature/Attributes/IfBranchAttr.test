@@ -24,7 +24,7 @@ Buffers:
     Data: [ 1, 4, 9, 16, 25, 36, 49, 64]
   - Name: Out
     Format: Int32
-    ZeroInitSize: 32
+    FillSize: 32
 DescriptorSets:
   - Resources:
     - Name: In
@@ -48,7 +48,6 @@ DescriptorSets:
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
-# UNSUPPORTED: Clang-Vulkan
 # CHECK: Name: In
 # CHECK: Format: Int32
 # CHECK: Data: [ 1, 4, 9, 16, 25, 36, 49, 64 ]

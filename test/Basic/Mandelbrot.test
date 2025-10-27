@@ -62,7 +62,7 @@ Buffers:
   - Name: Tex
     Format: Float32
     Channels: 4
-    ZeroInitSize: 268435456 # 1024 * 1024 * 4 channels / pixel * 4 bytes / channel
+    FillSize: 268435456 # 1024 * 1024 * 4 channels / pixel * 4 bytes / channel
     OutputProps:
       Height: 4096
       Width: 4096
