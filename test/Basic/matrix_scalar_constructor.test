@@ -8,9 +8,11 @@ void main(uint GI : SV_GroupIndex) {
   int2x3 A = int2x3(In[0], In[1], In[2],
                     In[3], In[4], In[5]);
 
-  int row = GI / 2;
-  int col = GI % 2;
-  Out[GI] = A[col][row];
+  const uint COLS = 3;          // int2x3 => 2 rows, 3 columns
+  uint row = GI / COLS;         // 0..1
+  uint col = GI % COLS;         // 0..2
+
+  Out[GI] = A[row][col];
 }
 
 //--- pipeline.yaml
@@ -29,7 +31,7 @@ Buffers:
     FillSize: 24
   - Name: ExpectedOut
     Format: Int32
-    Data: [ 1, 4, 2, 5, 3, 6 ]
+    Data: [ 1, 2, 3, 4, 5, 6 ]
 Results:
   - Result: Out
     Rule: BufferExact
