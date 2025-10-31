@@ -1,0 +1,80 @@
+#--- source.hlsl
+
+// Verify handling of subsets of multi-dimensional resource arrays
+// used in a function argument.
+
+RWStructuredBuffer<int> In[4][2] : register(u0);
+RWStructuredBuffer<int> Out : register(u0, space1);
+
+int foo(RWStructuredBuffer<int> A[2], uint Index) {
+  return A[0][Index] + A[1][Index];
+}
+
+[numthreads(4,1,1)]
+void main() {
+  for (int i = 0; i < 4; i++) {
+    Out[i] = foo(In[i], i);
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufIn
+    Format: Int32
+    ArraySize: 8
+    Data:
+      - [ 10, 20, 30, 40 ]
+      - [  1,  2,  3,  4 ]
+      - [ 50, 60, 70, 80 ]
+      - [  5,  6,  7,  8 ]
+      - [ 100, 110, 120, 130 ]
+      - [  10,  11,  12,  13 ]
+      - [ 140, 150, 160, 170 ]
+      - [  14,  15,  16,  17 ]
+
+  - Name: BufOut
+    Format: Int32
+    FillSize: 16
+
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 11, 66, 132, 187 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: BufIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 1
+...
+#--- end
+
+# DXC + Vulkan does not support multi-dimensional resource arrays
+# UNSUPPORTED: DXC && Vulkan
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/164908
+# XFAIL: Clang && Vulkan
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
