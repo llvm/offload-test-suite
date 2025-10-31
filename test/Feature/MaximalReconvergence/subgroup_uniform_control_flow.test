@@ -1,0 +1,59 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> Out : register(u0);
+
+[numthreads(8,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+    // First non-uniform branch
+    if (TID.x < 4) {
+        // Second non-uniform branch
+        if (TID.x % 2 == 0) {
+            Out[TID.x] = WaveActiveSum(TID.x);
+        } else {
+            Out[TID.x] = WaveActiveMax(TID.x);
+        }
+        // Must reconverge here with maximal reconvergence
+        Out[TID.x] += WaveActiveMax(TID.x);
+    } else {
+        Out[4] = WaveActiveMax(TID.x);
+    }
+    Out[TID.x] += WaveActiveMax(TID.x);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0 ]
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+
+#--- end
+# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
+
+# BUG: https://github.com/llvm/offload-test-suite/issues/490
+# XFAIL: WARP && DirectX
+
+# BUG: https://github.com/llvm/llvm-project/issues/165288
+# XFAIL: !WARP && Clang && (DirectX || Metal)
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: Out
+# CHECK: Format: UInt32
+# CHECK: Data: [ 12, 13, 12, 13, 14, 7, 7, 7 ]
