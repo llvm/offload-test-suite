@@ -528,7 +528,7 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-  UINT getNumTiles(std::optional<int> NumTiles, UINT64 Width) {
+  UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
     UINT Ret;
     if (NumTiles.has_value())
       Ret = static_cast<UINT>(*NumTiles);
@@ -813,7 +813,7 @@ public:
       // Zero any remaining bytes
       if (R.size() < CBVSize) {
         void *ExtraData = static_cast<char *>(ResDataPtr) + R.size();
-        memset(ExtraData, 0, CBVSize - R.size());
+        memset(ExtraData, 0, CBVSize - R.size() - 1);
       }
       UploadBuffer->Unmap(0, nullptr);
 
