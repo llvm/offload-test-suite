@@ -1,7 +1,7 @@
 #--- source.hlsl
 RWStructuredBuffer<uint> Out : register(u0);
 
-[WaveSize(8)]
+[WaveSize(8,128)]
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
     for (uint i = 0; i < 8; i++) {
@@ -38,7 +38,7 @@ DescriptorSets:
 # UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_6 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_8 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: Out
