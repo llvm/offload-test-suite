@@ -1,6 +1,7 @@
 #--- source.hlsl
 RWStructuredBuffer<uint> Out : register(u0);
 
+[WaveSize(8,128)]
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
     // First non-uniform branch
@@ -44,14 +45,8 @@ DescriptorSets:
 #--- end
 # UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
-# BUG: https://github.com/llvm/offload-test-suite/issues/490
-# XFAIL: WARP && DirectX
-
-# BUG: https://github.com/llvm/llvm-project/issues/165288
-# XFAIL: !WARP && Clang && (DirectX || Metal)
-
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_6 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: Out
