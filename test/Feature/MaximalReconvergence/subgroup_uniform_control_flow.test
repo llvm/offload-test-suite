@@ -1,7 +1,7 @@
 #--- source.hlsl
 RWStructuredBuffer<uint> Out : register(u0);
 
-[WaveSize(8,128)]
+[WaveSize(8)]
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
     // First non-uniform branch
