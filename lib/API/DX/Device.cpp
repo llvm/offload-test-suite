@@ -532,11 +532,14 @@ public:
     UINT Ret;
     if (NumTiles.has_value())
       Ret = static_cast<UINT>(*NumTiles);
-    else
+    else {
       // Map the entire buffer by computing how many 64KB tiles cover it
       Ret = static_cast<UINT>(
           (Width + D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1) /
           D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
+      // check for overflow
+      assert(Ret < Width || Ret < D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
+    }
     return Ret;
   }
 
