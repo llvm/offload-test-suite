@@ -538,7 +538,8 @@ public:
           (Width + D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1) /
           D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
       // check for overflow
-      assert(Ret < Width || Ret < D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
+      assert(Width < std::numeric_limits<UINT>::max() -
+                         D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1);
     }
     return Ret;
   }
