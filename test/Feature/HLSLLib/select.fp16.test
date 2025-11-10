@@ -131,8 +131,8 @@ DescriptorSets:
         Binding: 4
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/164018
-# XFAIL: Clang
+# Bug https://github.com/llvm/llvm-project/issues/166642
+# XFAIL: Clang && Vulkan
 
 # REQUIRES: Half
 # RUN: split-file %s %t
