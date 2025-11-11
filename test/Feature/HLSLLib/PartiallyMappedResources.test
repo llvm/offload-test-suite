@@ -135,6 +135,7 @@ DescriptorSets:
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/138910 
 # AND https://github.com/llvm/llvm-project/issues/99204
+# XFAIL: Clang
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/138910
 # AND https://github.com/llvm/llvm-project/issues/99204
