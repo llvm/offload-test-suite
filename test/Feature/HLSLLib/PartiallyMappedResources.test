@@ -96,7 +96,7 @@ Buffers:
     Format: Bool
     Stride: 4
     # Only the first data access should be accessing fully mapped memory
-    Data: [1, 0, 0, 0]
+    Data: [true, false, false, false]
 
 Results:
   - Result: Test
