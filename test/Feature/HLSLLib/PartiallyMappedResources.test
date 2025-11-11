@@ -20,10 +20,9 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else {
-    if (all(Result == int4(0,0,0,0)))
-      Out[idx] = 9003;
-  }
+  else 
+    Out[idx] = 9003;
+    
   idx += 1;
 
   Result = X.Load(4100, status);
@@ -31,10 +30,9 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else {
-    if (all(Result == int4(0,0,0,0)))
-      Out[idx] = 9003;
-  }
+  else 
+    Out[idx] = 9003;
+  
   idx += 1;
 
   Result = Y.Load(0, status);
@@ -42,10 +40,9 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else {
-    if (all(Result == int4(0,0,0,0)))
-      Out[idx] = 9003;
-  }
+  else 
+    Out[idx] = 9003;
+
   idx += 1;
 
   Result = Y.Load(4100, status);
@@ -53,10 +50,9 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else {
-    if (all(Result == int4(0,0,0,0)))
-      Out[idx] = 9003;
-  }
+  else 
+    Out[idx] = 9003;
+
   idx += 1;
 }
 
