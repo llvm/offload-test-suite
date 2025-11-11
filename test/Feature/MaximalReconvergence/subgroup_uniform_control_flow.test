@@ -1,16 +1,15 @@
 #--- source.hlsl
 RWStructuredBuffer<float> Out : register(u0);
 
-// https://www.khronos.org/blog/khronos-releases-maximal-reconvergence-and-quad-control-extensions-for-vulkan-and-spir-v
-// This tests that waves are correctly reconverging
-// after nested non-uniform branches.
+// This test checks that compilers do not perform optimizations, such as code hoisting,
+// that may change the expected behavior when `-fspv-enable-maximal-reconvergence` flag
+// is set.
+// Here, all the blocks inside the branches are the same but they should not be taken out
+// of the branch because it will change the result.
 
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
     float maxActiveLaneCount = min(WaveActiveSum(1), 8);
-    float div1 = 1.0/maxActiveLaneCount;
-    float div2 = 2.0/maxActiveLaneCount;
-    float div4 = 4.0/maxActiveLaneCount;
     float div8 = 8.0/maxActiveLaneCount;
 
     float result = 0;
@@ -19,16 +18,19 @@ void main(uint3 TID : SV_GroupThreadID) {
     if (TID.x % 2 == 0) {
         // Second non-uniform branch
         if (TID.x % 4 == 0) {
-            result += WaveActiveSum(div4);
+            result += WaveActiveSum(div8);
         } else {
             result += WaveActiveSum(div8);
         }
         // Must reconverge here with maximal reconvergence
-        result += WaveActiveSum(div2);
+        result += WaveActiveSum(div8); 
+    } else {
+        result += WaveActiveSum(div8);
+        result += WaveActiveSum(div8);
     }
 
     // Must reconverge here with maximal reconvergence
-    result += WaveActiveSum(div1);
+    result += WaveActiveSum(div8);
     Out[TID.x] = result;
 }
 
@@ -60,13 +62,10 @@ DescriptorSets:
 # BUG: https://github.com/llvm/llvm-project/issues/165288
 # XFAIL: !WARP && Clang && (DirectX || Metal)
 
-# BUG: https://github.com/llvm/llvm-project/issues/99159
-# XFAIL: Clang
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: Out
 # CHECK: Format: Float32
-# CHECK: Data: [ 3, 1, 4, 1, 3, 1, 4, 1 ]
+# CHECK: Data: [ 14, 16, 14, 16, 14, 16, 14, 16 ]
