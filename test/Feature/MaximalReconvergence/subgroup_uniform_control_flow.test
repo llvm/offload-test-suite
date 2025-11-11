@@ -1,9 +1,13 @@
 #--- source.hlsl
 RWStructuredBuffer<float> Out : register(u0);
 
+// https://www.khronos.org/blog/khronos-releases-maximal-reconvergence-and-quad-control-extensions-for-vulkan-and-spir-v
+// This tests that waves are correctly reconverging
+// after nested non-uniform branches.
+
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
-    float maxActiveLaneCount = min(WaveGetLaneCount(), 8);
+    float maxActiveLaneCount = min(WaveActiveSum(1), 8);
     float div1 = 1.0/maxActiveLaneCount;
     float div2 = 2.0/maxActiveLaneCount;
     float div4 = 4.0/maxActiveLaneCount;
