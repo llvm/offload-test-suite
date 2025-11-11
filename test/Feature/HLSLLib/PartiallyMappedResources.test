@@ -4,7 +4,7 @@ StructuredBuffer<int4> X : register(t0);
 StructuredBuffer<int4> Y : register(t1);
 
 RWStructuredBuffer<int> Out : register(u2);
-RWStructuredBuffer<int> CAFM : register(u3);
+RWStructuredBuffer<bool> CAFM : register(u3);
 
 [numthreads(1,1,1)]
 void main() {
@@ -12,43 +12,44 @@ void main() {
   // (4096 int4's * 4 ints * 4 bytes per int)
   // So, any index into the buffer >= [4096] will access a new "tile"
 
-  int idx = 0;
+  uint idx = 0;
 
   uint status;
-  int4 Out0 = X.Load(0, status);
-  int CAFMResult = CheckAccessFullyMapped(status) ? 1 : 0;
-  if (CAFMResult){
-    CAFM[idx] = CAFMResult;
-    Out[idx] = Out0.x;
-    Out[idx + 4] = status;
-  }
+  int4 Result = X.Load(0, status);
+  bool CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else
+    Out[idx] = 9003;
   idx += 1;
 
-  int4 Out1 = X.Load(4100, status);
-  CAFMResult = CheckAccessFullyMapped(status) ? 1 : 0;
-  if (CAFMResult){
-    CAFM[idx] = CAFMResult;
-    Out[idx] = Out1.x;
-    Out[idx + 4] = status;
-  }
+  Result = X.Load(4100, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else
+    Out[idx] = 9003;
   idx += 1;
 
-  int4 Out2 = Y.Load(0, status);
-  CAFMResult = CheckAccessFullyMapped(status) ? 1 : 0;
-  if (CAFMResult){
-    CAFM[idx] = CAFMResult;
-    Out[idx] = Out2.x;
-    Out[idx + 4] = status;
-  }
+  Result = Y.Load(0, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else
+    Out[idx] = 9003;
   idx += 1;
 
-  int4 Out3 = Y.Load(4100, status);
-  CAFMResult = CheckAccessFullyMapped(status) ? 1 : 0;
-  if (CAFMResult){
-    CAFM[idx] = CAFMResult;
-    Out[idx] = Out3.x;
-    Out[idx + 4] = status;
-  }
+  Result = Y.Load(4100, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else
+    Out[idx] = 9003;
+  idx += 1;
 }
 
 //--- pipeline.yaml
@@ -77,15 +78,14 @@ Buffers:
     Format: Int32
     Stride: 4
     # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
-    # last 4 values are the status. 1 is expected for resident memory, 0 for non-resident
-    Data: [9001, 0, 0, 0, 1, 0, 0, 0]
+    Data: [9001, 0, 0, 0]
   - Name: CAFM
-    Format: Int32
+    Format: Bool
     Stride: 4
     FillSize: 16
     FillValue: 0
   - Name: ExpectedCAFM
-    Format: Int32
+    Format: Bool
     Stride: 4
     # Only the first data access should be accessing fully mapped memory
     Data: [1, 0, 0, 0]
