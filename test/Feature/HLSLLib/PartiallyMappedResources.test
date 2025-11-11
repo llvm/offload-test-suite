@@ -20,8 +20,10 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else
-    Out[idx] = 9003;
+  else {
+    if (all(Result == int4(0,0,0,0)))
+      Out[idx] = 9003;
+  }
   idx += 1;
 
   Result = X.Load(4100, status);
@@ -29,8 +31,10 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else
-    Out[idx] = 9003;
+  else {
+    if (all(Result == int4(0,0,0,0)))
+      Out[idx] = 9003;
+  }
   idx += 1;
 
   Result = Y.Load(0, status);
@@ -38,8 +42,10 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else
-    Out[idx] = 9003;
+  else {
+    if (all(Result == int4(0,0,0,0)))
+      Out[idx] = 9003;
+  }
   idx += 1;
 
   Result = Y.Load(4100, status);
@@ -47,8 +53,10 @@ void main() {
   CAFM[idx] = CAFMResult;
   if (CAFMResult)
     Out[idx] = Result.x;
-  else
-    Out[idx] = 9003;
+  else {
+    if (all(Result == int4(0,0,0,0)))
+      Out[idx] = 9003;
+  }
   idx += 1;
 }
 
@@ -73,12 +81,12 @@ Buffers:
   - Name: Out
     Format: Int32
     Stride: 4
-    FillSize: 32
+    FillSize: 16
   - Name: ExpectedOut
     Format: Int32
     Stride: 4
     # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
-    Data: [9001, 0, 0, 0]
+    Data: [9001, 9003, 9003, 9003]
   - Name: CAFM
     Format: Bool
     Stride: 4
