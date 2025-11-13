@@ -78,10 +78,18 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
     return DXGI_FORMAT_UNKNOWN;
 
   switch (R.BufferPtr->Format) {
+  case DataFormat::Hex16:
+  case DataFormat::UInt16:
+  case DataFormat::Int16:
+  case DataFormat::Float16:
   case DataFormat::Hex32:
   case DataFormat::UInt32:
   case DataFormat::Int32:
   case DataFormat::Float32:
+  case DataFormat::Hex64:
+  case DataFormat::UInt64:
+  case DataFormat::Int64:
+  case DataFormat::Float64:
     return DXGI_FORMAT_R32_TYPELESS;
   default:
     llvm_unreachable("Unsupported Resource format specified");
@@ -161,7 +169,7 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
 }
 
 static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
-  const uint32_t EltSize = R.getElementSize();
+  const uint32_t EltSize = R.isByteAddressBuffer() ? 4 : R.getElementSize();
   const uint32_t NumElts = R.size() / EltSize;
 
   llvm::outs() << "    EltSize = " << EltSize << " NumElts = " << NumElts
@@ -197,7 +205,7 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
 }
 
 static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
-  const uint32_t EltSize = R.getElementSize();
+  const uint32_t EltSize = R.isByteAddressBuffer() ? 4 : R.getElementSize();
   const uint32_t NumElts = R.size() / EltSize;
   const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
 
