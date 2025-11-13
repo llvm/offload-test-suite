@@ -1285,7 +1285,7 @@ public:
     return llvm::Error::success();
   }
 
-  static void
+  static llvm::Error
   parseSpecializationConstant(const SpecializationConstant &SpecConst,
                               VkSpecializationMapEntry &Entry,
                               llvm::SmallVector<char> &SpecData) {
@@ -1295,7 +1295,11 @@ public:
     case DataFormat::Float32: {
       float Value = 0.0f;
       double Tmp = 0.0;
-      llvm::StringRef(SpecConst.Value).getAsDouble(Tmp);
+      if (llvm::StringRef(SpecConst.Value).getAsDouble(Tmp))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid float value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Value = static_cast<float>(Tmp);
       Entry.size = sizeof(float);
       SpecData.resize(SpecData.size() + sizeof(float));
@@ -1304,7 +1308,11 @@ public:
     }
     case DataFormat::Float64: {
       double Value = 0.0;
-      llvm::StringRef(SpecConst.Value).getAsDouble(Value);
+      if (llvm::StringRef(SpecConst.Value).getAsDouble(Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid double value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Entry.size = sizeof(double);
       SpecData.resize(SpecData.size() + sizeof(double));
       memcpy(SpecData.data() + Entry.offset, &Value, sizeof(double));
@@ -1312,7 +1320,11 @@ public:
     }
     case DataFormat::Int16: {
       int16_t Value = 0;
-      llvm::StringRef(SpecConst.Value).getAsInteger(0, Value);
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid int16 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Entry.size = sizeof(int16_t);
       SpecData.resize(SpecData.size() + sizeof(int16_t));
       memcpy(SpecData.data() + Entry.offset, &Value, sizeof(int16_t));
@@ -1320,7 +1332,11 @@ public:
     }
     case DataFormat::UInt16: {
       uint16_t Value = 0;
-      llvm::StringRef(SpecConst.Value).getAsInteger(0, Value);
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid uint16 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Entry.size = sizeof(uint16_t);
       SpecData.resize(SpecData.size() + sizeof(uint16_t));
       memcpy(SpecData.data() + Entry.offset, &Value, sizeof(uint16_t));
@@ -1328,7 +1344,11 @@ public:
     }
     case DataFormat::Int32: {
       int32_t Value = 0;
-      llvm::StringRef(SpecConst.Value).getAsInteger(0, Value);
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid int32 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Entry.size = sizeof(int32_t);
       SpecData.resize(SpecData.size() + sizeof(int32_t));
       memcpy(SpecData.data() + Entry.offset, &Value, sizeof(int32_t));
@@ -1336,7 +1356,11 @@ public:
     }
     case DataFormat::UInt32: {
       uint32_t Value = 0;
-      llvm::StringRef(SpecConst.Value).getAsInteger(0, Value);
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid uint32 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Entry.size = sizeof(uint32_t);
       SpecData.resize(SpecData.size() + sizeof(uint32_t));
       memcpy(SpecData.data() + Entry.offset, &Value, sizeof(uint32_t));
@@ -1344,7 +1368,11 @@ public:
     }
     case DataFormat::Bool: {
       bool Value = false;
-      llvm::StringRef(SpecConst.Value).getAsInteger(0, Value);
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid bool value for specialization constant '%s'",
+            SpecConst.Value.c_str());
       Entry.size = sizeof(bool);
       SpecData.resize(SpecData.size() + sizeof(bool));
       memcpy(SpecData.data() + Entry.offset, &Value, sizeof(bool));
@@ -1353,6 +1381,7 @@ public:
     default:
       llvm_unreachable("Unsupported specialization constant type");
     }
+    return llvm::Error::success();
   }
 
   llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
@@ -1380,7 +1409,9 @@ public:
       if (!Shader.SpecializationConstants.empty()) {
         for (const auto &SpecConst : Shader.SpecializationConstants) {
           VkSpecializationMapEntry Entry;
-          parseSpecializationConstant(SpecConst, Entry, SpecData);
+          if (auto Err =
+                  parseSpecializationConstant(SpecConst, Entry, SpecData))
+            return Err;
           SpecEntries.push_back(Entry);
         }
 

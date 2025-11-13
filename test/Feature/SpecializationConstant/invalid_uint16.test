@@ -1,0 +1,35 @@
+#--- invalid_uint16.hlsl
+[[vk::constant_id(0)]]
+const uint16_t spec_ushort = 0;
+RWStructuredBuffer<uint16_t> OutUShort : register(u0, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  OutUShort[GI] = spec_ushort;
+}
+#--- invalid_uint16.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: "not a number", Type: UInt16 }
+Buffers:
+  - { Name: OutUShort, Format: UInt16, Stride: 2, FillSize: 2 }
+DescriptorSets:
+  - Resources:
+    - Name: OutUShort
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_2 -enable-16bit-types -Fo %t.o %t/invalid_uint16.hlsl
+# RUN: not %offloader %t/invalid_uint16.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Invalid uint16 value for specialization constant 'not a number'
