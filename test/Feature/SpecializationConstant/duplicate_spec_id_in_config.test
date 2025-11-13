@@ -1,0 +1,37 @@
+#--- duplicate_spec_id_in_config.hlsl
+[[vk::constant_id(0)]]
+const int spec_int = 0;
+
+RWStructuredBuffer<int> Out : register(u0, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI] = spec_int;
+}
+#--- duplicate_spec_id_in_config.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: 123, Type: Int32 }
+      - { ConstantID: 0, Value: 456, Type: Int32 }
+Buffers:
+  - { Name: Out, Format: Int32, Stride: 4, FillSize: 4 }
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_2 -Fo %t.o %t/duplicate_spec_id_in_config.hlsl
+# RUN: not %offloader %t/duplicate_spec_id_in_config.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: gpu-exec: error: Specialization constant ID 0 is already defined

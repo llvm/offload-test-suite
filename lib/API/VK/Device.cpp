@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Error.h"
 
 #include <memory>
@@ -1407,7 +1408,14 @@ public:
       llvm::SmallVector<char> SpecData;
       VkSpecializationInfo SpecInfo = {};
       if (!Shader.SpecializationConstants.empty()) {
+        llvm::DenseSet<uint32_t> SeenConstantIDs;
         for (const auto &SpecConst : Shader.SpecializationConstants) {
+          if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "Specialization constant ID %u is already defined",
+                SpecConst.ConstantID);
+
           VkSpecializationMapEntry Entry;
           if (auto Err =
                   parseSpecializationConstant(SpecConst, Entry, SpecData))
