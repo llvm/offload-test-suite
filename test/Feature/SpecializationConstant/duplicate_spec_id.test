@@ -1,0 +1,39 @@
+#--- duplicate_spec_id.hlsl
+[[vk::constant_id(0)]]
+const int spec_int_A = 0;
+[[vk::constant_id(0)]]
+const int spec_int_B = 0;
+
+RWStructuredBuffer<int> Out : register(u0, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[0] = spec_int_A;
+  Out[1] = spec_int_B;
+}
+#--- duplicate_spec_id.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: 123, Type: Int32 }
+Buffers:
+  - { Name: Out, Format: Int32, Stride: 4, FillSize: 8 }
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_2 -Fo %t.o %t/duplicate_spec_id.hlsl
+# RUN: %offloader %t/duplicate_spec_id.yaml %t.o | FileCheck %s
+
+# CHECK: Data: [ 123, 123 ]
