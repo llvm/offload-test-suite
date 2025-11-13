@@ -372,6 +372,7 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
                                                  offloadtest::Shader &S) {
   I.mapRequired("Stage", S.Stage);
   I.mapRequired("Entry", S.Entry);
+  I.mapOptional("SpecializationConstants", S.SpecializationConstants);
 
   if (S.Stage == Stages::Compute) {
     // Stage-specific data, not sure if this should be optional
@@ -380,6 +381,7 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
     I.mapRequired("DispatchSize", MutableDispatchSize);
   }
 }
+
 void MappingTraits<offloadtest::Result>::mapping(IO &I,
                                                  offloadtest::Result &R) {
   I.mapRequired("Result", R.Name);
@@ -402,5 +404,13 @@ void MappingTraits<offloadtest::Result>::mapping(IO &I,
     break;
   }
 }
+
+void MappingTraits<offloadtest::SpecializationConstant>::mapping(
+    IO &I, offloadtest::SpecializationConstant &C) {
+  I.mapRequired("ConstantID", C.ConstantID);
+  I.mapRequired("Type", C.Type);
+  I.mapRequired("Value", C.Value);
+}
+
 } // namespace yaml
 } // namespace llvm

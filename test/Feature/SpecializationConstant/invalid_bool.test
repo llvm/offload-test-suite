@@ -1,0 +1,35 @@
+#--- invalid_bool.hlsl
+[[vk::constant_id(0)]]
+const bool spec_bool = false;
+RWStructuredBuffer<uint> OutBool : register(u0, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  OutBool[GI] = (uint)spec_bool;
+}
+#--- invalid_bool.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: "not a number", Type: Bool }
+Buffers:
+  - { Name: OutBool, Format: Int32, Stride: 4, FillSize: 4 }
+DescriptorSets:
+  - Resources:
+    - Name: OutBool
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_2 -Fo %t.o %t/invalid_bool.hlsl
+# RUN: not %offloader %t/invalid_bool.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Invalid bool value for specialization constant 'not a number'

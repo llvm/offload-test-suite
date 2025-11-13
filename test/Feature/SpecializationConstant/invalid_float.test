@@ -1,0 +1,35 @@
+#--- invalid_float.hlsl
+[[vk::constant_id(0)]]
+const float spec_float = 0.0;
+RWStructuredBuffer<float> OutFloat : register(u0, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  OutFloat[GI] = spec_float;
+}
+#--- invalid_float.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: "not a number", Type: Float32 }
+Buffers:
+  - { Name: OutFloat, Format: Float32, Stride: 4, FillSize: 4 }
+DescriptorSets:
+  - Resources:
+    - Name: OutFloat
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_2 -Fo %t.o %t/invalid_float.hlsl
+# RUN: not %offloader %t/invalid_float.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Invalid float value for specialization constant 'not a number'

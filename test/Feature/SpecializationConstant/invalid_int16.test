@@ -1,0 +1,38 @@
+#--- invalid_int16.hlsl
+[[vk::constant_id(0)]]
+const int16_t spec_short = 0;
+RWStructuredBuffer<int16_t> OutShort : register(u0, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  OutShort[GI] = spec_short;
+}
+#--- invalid_int16.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: "not a number", Type: Int16 }
+Buffers:
+  - { Name: OutShort, Format: Int16, Stride: 2, FillSize: 2 }
+DescriptorSets:
+  - Resources:
+    - Name: OutShort
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7886
+# XFAIL: DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_2 -enable-16bit-types -Fo %t.o %t/invalid_int16.hlsl
+# RUN: not %offloader %t/invalid_int16.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Invalid int16 value for specialization constant 'not a number'

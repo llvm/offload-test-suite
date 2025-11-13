@@ -1,0 +1,87 @@
+#--- simple.hlsl
+// bool
+[[vk::constant_id(0)]]
+const bool spec_bool = false;
+RWBuffer<uint> OutBool : register(u0, space0);
+
+// int
+[[vk::constant_id(1)]]
+const int spec_int = 0;
+RWBuffer<int> OutInt : register(u1, space0);
+
+// unsigned int
+[[vk::constant_id(2)]]
+const uint spec_uint = 0;
+RWBuffer<uint> OutUInt : register(u2, space0);
+
+// float
+[[vk::constant_id(3)]]
+const float spec_float = 0.0;
+RWBuffer<float> OutFloat : register(u3, space0);
+
+// int with default value
+[[vk::constant_id(4)]]
+const int spec_int_default = 1234;
+RWBuffer<int> OutIntDefault : register(u4, space0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  OutBool[GI] = (uint)spec_bool;
+  OutInt[GI] = spec_int;
+  OutUInt[GI] = spec_uint;
+  OutFloat[GI] = spec_float;
+  OutIntDefault[GI] = spec_int_default;
+}
+#--- simple.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+    SpecializationConstants:
+      - { ConstantID: 0, Value: 1, Type: Bool }
+      - { ConstantID: 1, Value: 42, Type: Int32 }
+      - { ConstantID: 2, Value: 0xDEADBEEF, Type: UInt32 }
+      - { ConstantID: 3, Value: 3.14, Type: Float32 }
+Buffers:
+  - { Name: OutBool, Format: Int32, FillSize: 4 }
+  - { Name: OutInt,  Format: Int32, FillSize: 4 }
+  - { Name: OutUInt, Format: UInt32, FillSize: 4 }
+  - { Name: OutFloat, Format: Float32, FillSize: 4 }
+  - { Name: OutIntDefault, Format: Int32, FillSize: 4 }
+DescriptorSets:
+  - Resources:
+    - Name: OutBool
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: OutInt
+      Kind: RWBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: OutUInt
+      Kind: RWBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutFloat
+      Kind: RWBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: OutIntDefault
+      Kind: RWBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/simple.hlsl
+# RUN: %offloader %t/simple.yaml %t.o | FileCheck %s
+
+# CHECK: Data: [ 1 ]
+# CHECK: Data: [ 42 ]
+# CHECK: Data: [ 3735928559 ]
+# CHECK: Data: [ {{3.14.*}} ]
+# CHECK: Data: [ 1234 ]

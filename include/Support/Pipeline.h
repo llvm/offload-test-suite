@@ -282,11 +282,18 @@ struct IOBindings {
   }
 };
 
+struct SpecializationConstant {
+  uint32_t ConstantID;
+  DataFormat Type;
+  std::string Value;
+};
+
 struct Shader {
   Stages Stage;
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
   int DispatchSize[3];
+  llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
 
 struct Pipeline {
@@ -335,6 +342,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
 
 namespace llvm {
 namespace yaml {
@@ -397,6 +405,10 @@ template <> struct MappingTraits<offloadtest::dx::Settings> {
 
 template <> struct MappingTraits<offloadtest::RuntimeSettings> {
   static void mapping(IO &I, offloadtest::RuntimeSettings &S);
+};
+
+template <> struct MappingTraits<offloadtest::SpecializationConstant> {
+  static void mapping(IO &I, offloadtest::SpecializationConstant &C);
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
