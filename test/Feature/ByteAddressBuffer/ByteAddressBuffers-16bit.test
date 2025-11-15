@@ -1,0 +1,97 @@
+#--- source.hlsl
+
+// This test checks that we will get the expected values from invoking
+// various `Load` and `Store` methods on `[RW]ByteAddressBuffer`.
+
+// The expected behaviour is to load the values in `In0` and `In1` at the given
+// byte-offset, add them, and store the result at the respective offset in
+// `Out`.
+
+ByteAddressBuffer In0 : register(t0);
+ByteAddressBuffer In1 : register(t1);
+RWByteAddressBuffer Out : register(u2);
+
+[numthreads(4,1,1)]
+void main() {
+  int16_t U0 = In0.Load<int16_t>(0);
+  int16_t V0 = In1.Load<int16_t>(0);
+  Out.Store<int16_t>(0, U0 + V0);
+
+  int16_t2 U1 = In0.Load<int16_t2>(8);
+  int16_t2 V1 = In1.Load<int16_t2>(8);
+  Out.Store<int16_t2>(8, U1 + V1);
+
+  int16_t3 U2 = In0.Load<int16_t3>(16);
+  int16_t3 V2 = In1.Load<int16_t3>(16);
+  Out.Store<int16_t3>(16, U2 + V2);
+
+  int16_t4 U3 = In0.Load<int16_t4>(24);
+  int16_t4 V3 = In1.Load<int16_t4>(24);
+  Out.Store<int16_t4>(24, U3 + V3);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Int16
+    Stride: 2
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 
+            9, 10, 11, 12, 13, 14, 15, 16 ]
+  - Name: In1
+    Format: Hex16
+    Stride: 2
+    Data: [ 0x100, 0x200, 0x300, 0x400, 0x500, 0x600, 0x700, 0x800, 
+            0x900, 0xA00, 0xB00, 0xC00, 0xD00, 0xE00, 0xF00, 0x1000 ]
+  - Name: Out
+    Format: Hex16
+    Stride: 2
+    FillSize: 32
+  - Name: ExpectedOut
+    Format: Hex16
+    Stride: 2
+    Data: [ 0x101, 0x000, 0x000, 0x000, 0x505, 0x606, 0x000, 0x000,
+            0x909, 0xA0A, 0xB0B, 0x000, 0xD0D, 0xE0E, 0xF0F, 0x1010 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/108058
+# XFAIL: Clang
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
