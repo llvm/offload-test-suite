@@ -34,4 +34,4 @@ DescriptorSets:
 # RUN: %dxc_target -T cs_6_2 -Fo %t.o %t/duplicate_spec_id_in_config.hlsl
 # RUN: not %offloader %t/duplicate_spec_id_in_config.yaml %t.o 2>&1 | FileCheck %s
 
-# CHECK: gpu-exec: error: Specialization constant ID 0 is already defined
+# CHECK: gpu-exec: error: Test configuration contains multiple entries for specialization constant ID 0.

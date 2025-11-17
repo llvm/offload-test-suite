@@ -1413,7 +1413,8 @@ public:
           if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
             return llvm::createStringError(
                 std::errc::invalid_argument,
-                "Specialization constant ID %u is already defined",
+                "Test configuration contains multiple entries for "
+                "specialization constant ID %u.",
                 SpecConst.ConstantID);
 
           VkSpecializationMapEntry Entry;
