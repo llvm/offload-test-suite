@@ -2,7 +2,7 @@
 RWStructuredBuffer<uint> Out : register(u1);
 
 struct S {
-  float x[2];
+  uint x[2];
   uint q;
 };
 
@@ -17,6 +17,8 @@ void main(uint GI : SV_GroupIndex) {
   Out[1] = w[2].z;
   Out[2] = v[1].q;
   Out[3] = v[2].q;
+  Out[4] = v[0].x[0];
+  Out[5] = v[2].x[1];
 }
 
 //--- pipeline.yaml
@@ -32,22 +34,22 @@ Buffers:
       0x1, 0x2, 0x3, 0x5A5A5A5A,
       0x4, 0x5, 0x6, 0x5A5A5A5A,
       0x7, 0x8, 0x9, 0x5A5A5A5A,
-      0x3f800000, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
-      0x7f7fffff, 0x20, 0x5A5A5A5A, 0x5A5A5A5A,
-      0x3eaaaaab, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
-      0x40490fdb, 0x21, 0x5A5A5A5A, 0x5A5A5A5A,
-      0x3f800001, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
-      0xc0000000, 0x22, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xA, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xB, 0x20, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xC, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xD, 0x21, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xE, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xF, 0x22, 0x5A5A5A5A, 0x5A5A5A5A,
     ]
   - Name: VOut
     Format: UInt32
     FillSize: 4
   - Name: Out
     Format: UInt32
-    FillSize: 16
+    FillSize: 24
   - Name: ExpectedOut
     Format: UInt32
-    Data: [ 5, 9, 33, 34 ]
+    Data: [ 5, 9, 33, 34, 10, 15 ]
 Results:
   - Result: Check
     Rule: BufferExact
