@@ -113,6 +113,9 @@ DescriptorSets:
 #--- end
 # UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
+# Bug: Some wave operations are not yet implemented.
+# XFAIL: Clang
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
