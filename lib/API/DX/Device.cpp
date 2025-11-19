@@ -169,7 +169,7 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
 }
 
 static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
-  const uint32_t EltSize = R.isByteAddressBuffer() ? 4 : R.getElementSize();
+  const uint32_t EltSize = R.getElementSize();
   const uint32_t NumElts = R.size() / EltSize;
 
   llvm::outs() << "    EltSize = " << EltSize << " NumElts = " << NumElts
@@ -205,7 +205,7 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
 }
 
 static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
-  const uint32_t EltSize = R.isByteAddressBuffer() ? 4 : R.getElementSize();
+  const uint32_t EltSize = R.getElementSize();
   const uint32_t NumElts = R.size() / EltSize;
   const uint32_t CounterOffset = getUAVBufferCounterOffset(R);
 

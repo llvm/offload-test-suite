@@ -7,12 +7,16 @@
 // byte-offset, add them, and store the result at the respective offset in
 // `Out`.
 
-struct S0 {
+struct ArrayStruct {
+  int arr[4];
+};
+
+struct SmallStruct {
   int a;
   uint b;
 };
 
-struct S1 {
+struct LargeStruct {
   int4 a;
   int4 b;
   uint4 c;
@@ -59,25 +63,24 @@ void main() {
   bool4 V7 = In1.Load<bool4>(64);
   Out.Store<bool4>(112, U7 + V7);
 
-  // array
-  int U8[4] = In0.Load<int[4]>(0);
-  int V8[4] = In1.Load<int[4]>(0);
-  int TempArray[4];
-  for(int I = 0; I < 4; I++) {
-    TempArray[I] = U8[I] + V8[I];
-  }
-  Out.Store<int[4]>(128, TempArray);
-
   // structs
-  S0 U9 = In0.Load<S0>(0);
-  S0 V9 = In1.Load<S0>(0);
-  S0 TempStruct0 = {U9.a + V9.a, U9.b + V9.b};
-  Out.Store<S0>(144, TempStruct0);
+  ArrayStruct U8 = In0.Load<ArrayStruct>(0);
+  ArrayStruct V8 = In1.Load<ArrayStruct>(0);
+  ArrayStruct TempStruct0;
+  for(int I = 0; I < 4; I++) {
+    TempStruct0.arr[I] = U8.arr[I] + V8.arr[I];
+  }
+  Out.Store<ArrayStruct>(128, TempStruct0);
 
-  S1 U10 = In0.Load<S1>(0);
-  S1 V10 = In1.Load<S1>(0);
-  S1 TempStruct1 = {U10.a + V10.a, U10.b + V10.b, U10.c + V10.c, U10.d + V10.d};
-  Out.Store<S1>(160, TempStruct1);
+  SmallStruct U9 = In0.Load<SmallStruct>(0);
+  SmallStruct V9 = In1.Load<SmallStruct>(0);
+  SmallStruct TempStruct1 = {U9.a + V9.a, U9.b + V9.b};
+  Out.Store<SmallStruct>(144, TempStruct1);
+
+  LargeStruct U10 = In0.Load<LargeStruct>(0);
+  LargeStruct V10 = In1.Load<LargeStruct>(0);
+  LargeStruct TempStruct2 = {U10.a + V10.a, U10.b + V10.b, U10.c + V10.c, U10.d + V10.d};
+  Out.Store<LargeStruct>(160, TempStruct2);
 }
 
 //--- pipeline.yaml
