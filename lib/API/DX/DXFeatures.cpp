@@ -35,7 +35,8 @@ static ArrayRef<EnumEntry<RootSignature>> getRootSignatures() {
 }
 
 template <typename T>
-static std::string enumEntryToString(ArrayRef<EnumEntry<T>> EnumValues, T Value) {
+static std::string enumEntryToString(ArrayRef<EnumEntry<T>> EnumValues,
+                                     T Value) {
   for (const EnumEntry<T> &I : EnumValues)
     if (I.Value == Value)
       return I.Name.str();
