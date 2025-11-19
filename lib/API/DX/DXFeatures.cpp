@@ -34,15 +34,13 @@ static ArrayRef<EnumEntry<RootSignature>> getRootSignatures() {
   return ArrayRef(RootSignatureNames);
 }
 
-namespace {
 template <typename T>
-std::string enumEntryToString(ArrayRef<EnumEntry<T>> EnumValues, T Value) {
+static std::string enumEntryToString(ArrayRef<EnumEntry<T>> EnumValues, T Value) {
   for (const EnumEntry<T> &I : EnumValues)
     if (I.Value == Value)
       return I.Name.str();
   llvm_unreachable("All cases must be covered");
 }
-} // namespace
 
 std::string CapabilityPrinter<directx::ShaderModel>::toString(
     const directx::ShaderModel &V) {
