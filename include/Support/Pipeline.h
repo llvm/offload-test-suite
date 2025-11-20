@@ -199,7 +199,8 @@ struct Resource {
   }
 
   uint32_t getElementSize() const {
-    // ByteAddressBuffer uses DXGI_FORMAT_R32_TYPELESS which has 4-byte elements
+    // ByteAddressBuffers are treated as 4-byte elements to match their memory
+    // format.
     return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
   }
 
