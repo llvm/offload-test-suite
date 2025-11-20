@@ -78,10 +78,18 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
     return DXGI_FORMAT_UNKNOWN;
 
   switch (R.BufferPtr->Format) {
+  case DataFormat::Hex16:
+  case DataFormat::UInt16:
+  case DataFormat::Int16:
+  case DataFormat::Float16:
   case DataFormat::Hex32:
   case DataFormat::UInt32:
   case DataFormat::Int32:
   case DataFormat::Float32:
+  case DataFormat::Hex64:
+  case DataFormat::UInt64:
+  case DataFormat::Int64:
+  case DataFormat::Float64:
     return DXGI_FORMAT_R32_TYPELESS;
   default:
     llvm_unreachable("Unsupported Resource format specified");

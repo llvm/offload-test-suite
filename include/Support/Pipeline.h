@@ -199,7 +199,11 @@ struct Resource {
     }
   }
 
-  uint32_t getElementSize() const { return BufferPtr->getElementSize(); }
+  uint32_t getElementSize() const {
+    // ByteAddressBuffers are treated as 4-byte elements to match their memory
+    // format.
+    return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
+  }
 
   uint32_t size() const { return BufferPtr->size(); }
 
