@@ -174,7 +174,7 @@ DescriptorSets:
 # REQUIRES: Half
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: !(Clang && DirectX && Intel)
+# XFAIL: !(Intel || QC)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
