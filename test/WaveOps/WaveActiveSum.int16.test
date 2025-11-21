@@ -323,7 +323,7 @@ DescriptorSets:
 # REQUIRES: Int16
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang && DirectX && Intel
+# XFAIL: !(Clang && DirectX && Intel)
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
