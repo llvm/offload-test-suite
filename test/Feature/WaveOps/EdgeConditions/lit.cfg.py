@@ -1,0 +1,2 @@
+if "EdgeConditions" in config.available_features:
+    config.unsupported = True
