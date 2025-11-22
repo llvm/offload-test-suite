@@ -1,0 +1,82 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> Out : register(u1);
+
+struct S {
+  uint x[2];
+  uint q;
+};
+
+cbuffer cb0 : register(b0) {
+  uint32_t3 w[3];
+  S v[3];
+}
+
+[numthreads(4, 1, 1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[0] = w[1].y;
+  Out[1] = w[2].z;
+  Out[2] = v[1].q;
+  Out[3] = v[2].q;
+  Out[4] = v[0].x[0];
+  Out[5] = v[2].x[1];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [
+      0x1, 0x2, 0x3, 0x5A5A5A5A,
+      0x4, 0x5, 0x6, 0x5A5A5A5A,
+      0x7, 0x8, 0x9, 0x5A5A5A5A,
+      0xA, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xB, 0x20, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xC, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xD, 0x21, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xE, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xF, 0x22, 0x5A5A5A5A, 0x5A5A5A5A,
+    ]
+  - Name: VOut
+    Format: UInt32
+    FillSize: 4
+  - Name: Out
+    Format: UInt32
+    FillSize: 24
+  - Name: ExpectedOut
+    Format: UInt32
+    Data: [ 5, 9, 33, 34, 10, 15 ]
+Results:
+  - Result: Check
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/159602
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

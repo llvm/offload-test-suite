@@ -1,20 +1,29 @@
 #--- source.hlsl
-
 RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 
-[numthreads(6,1,1)]
-void main(uint GI : SV_GroupIndex) {
-  int2x3 A = int2x3(In[0], In[1], In[2],
-                    In[3], In[4], In[5]);
+[numthreads(1,1,1)]
+void main() {
+    int4 vec = int4(In[0], In[1], In[2], In[3]);
 
-  const uint COLS = 3;          // int2x3 => 2 rows, 3 columns
-  uint row = GI / COLS;         // 0..1
-  uint col = GI % COLS;         // 0..2
-
-  Out[GI] = A[row][col];
+    int4x4 A;
+    for(int i = 0; i < 4; i++) {
+        if(i % 2 == 0)
+            A[i].rbag = vec;
+        // A[3] is exactly In Buffer
+        else if(i % 3 == 0)
+            A[i] = vec;
+        // A[1] is reverse In Buffer
+        else
+            A[i] = vec.bagr;
+    }
+    const uint COLS = 4;
+    for(int i = 0; i < 16; i++) {
+        uint row = i / COLS;
+        uint col = i % COLS;
+        Out[i] = A[row][col];
+    }
 }
-
 //--- pipeline.yaml
 
 ---
@@ -25,13 +34,13 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6]
+    Data: [1, 2, 3, 4]
   - Name: Out
     Format: Int32
-    FillSize: 24
+    FillSize: 64
   - Name: ExpectedOut
     Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6 ]
+    Data: [ 1, 4, 2, 3, 3, 4, 2, 1, 1, 4, 2, 3, 1, 2, 3, 4 ]
 Results:
   - Result: Out
     Rule: BufferExact
@@ -56,6 +65,7 @@ DescriptorSets:
 ...
 #--- end
 
+# XFAIL: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

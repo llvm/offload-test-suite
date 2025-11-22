@@ -57,6 +57,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Unimplemented https://github.com/llvm/llvm-project/issues/159602
+# XFAIL: Clang && Vulkan
+
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t

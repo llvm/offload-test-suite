@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Error.h"
 
 #include <memory>
@@ -20,22 +21,34 @@
 
 using namespace offloadtest;
 
-#define VKFormats(FMT)                                                         \
+#define VKFormats(FMT, BITS)                                                   \
   if (Channels == 1)                                                           \
-    return VK_FORMAT_R32_##FMT;                                                \
+    return VK_FORMAT_R##BITS##_##FMT;                                          \
   if (Channels == 2)                                                           \
-    return VK_FORMAT_R32G32_##FMT;                                             \
+    return VK_FORMAT_R##BITS##G##BITS##_##FMT;                                 \
   if (Channels == 3)                                                           \
-    return VK_FORMAT_R32G32B32_##FMT;                                          \
+    return VK_FORMAT_R##BITS##G##BITS##B##BITS##_##FMT;                        \
   if (Channels == 4)                                                           \
-    return VK_FORMAT_R32G32B32A32_##FMT;
+    return VK_FORMAT_R##BITS##G##BITS##B##BITS##A##BITS##_##FMT;
 
 static VkFormat getVKFormat(DataFormat Format, int Channels) {
   switch (Format) {
+  case DataFormat::Int16:
+    VKFormats(SINT, 16) break;
+  case DataFormat::UInt16:
+    VKFormats(UINT, 16) break;
   case DataFormat::Int32:
-    VKFormats(SINT) break;
+    VKFormats(SINT, 32) break;
+  case DataFormat::UInt32:
+    VKFormats(UINT, 32) break;
   case DataFormat::Float32:
-    VKFormats(SFLOAT) break;
+    VKFormats(SFLOAT, 32) break;
+  case DataFormat::Int64:
+    VKFormats(SINT, 64) break;
+  case DataFormat::UInt64:
+    VKFormats(UINT, 64) break;
+  case DataFormat::Float64:
+    VKFormats(SFLOAT, 64) break;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -776,8 +789,8 @@ public:
             std::errc::invalid_argument,
             "No RenderTarget buffer specified for graphics pipeline.");
       Resource FrameBuffer = {
-          ResourceKind::Texture2D,     "RenderTarget", {}, {},
-          P.Bindings.RTargetBufferPtr, false};
+          ResourceKind::Texture2D,     "RenderTarget", {},          {},
+          P.Bindings.RTargetBufferPtr, false,          std::nullopt};
       IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
       IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
       IS.FrameBufferResource.ImageLayout =
@@ -804,8 +817,8 @@ public:
             std::errc::invalid_argument,
             "No Vertex buffer specified for graphics pipeline.");
       const Resource VertexBuffer = {
-          ResourceKind::StructuredBuffer, "VertexBuffer", {}, {},
-          P.Bindings.VertexBufferPtr,     false};
+          ResourceKind::StructuredBuffer, "VertexBuffer", {},          {},
+          P.Bindings.VertexBufferPtr,     false,          std::nullopt};
       auto ExVHostBuf =
           createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),
@@ -1273,6 +1286,105 @@ public:
     return llvm::Error::success();
   }
 
+  static llvm::Error
+  parseSpecializationConstant(const SpecializationConstant &SpecConst,
+                              VkSpecializationMapEntry &Entry,
+                              llvm::SmallVector<char> &SpecData) {
+    Entry.constantID = SpecConst.ConstantID;
+    Entry.offset = SpecData.size();
+    switch (SpecConst.Type) {
+    case DataFormat::Float32: {
+      float Value = 0.0f;
+      double Tmp = 0.0;
+      if (llvm::StringRef(SpecConst.Value).getAsDouble(Tmp))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid float value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Value = static_cast<float>(Tmp);
+      Entry.size = sizeof(float);
+      SpecData.resize(SpecData.size() + sizeof(float));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(float));
+      break;
+    }
+    case DataFormat::Float64: {
+      double Value = 0.0;
+      if (llvm::StringRef(SpecConst.Value).getAsDouble(Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid double value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Entry.size = sizeof(double);
+      SpecData.resize(SpecData.size() + sizeof(double));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(double));
+      break;
+    }
+    case DataFormat::Int16: {
+      int16_t Value = 0;
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid int16 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Entry.size = sizeof(int16_t);
+      SpecData.resize(SpecData.size() + sizeof(int16_t));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(int16_t));
+      break;
+    }
+    case DataFormat::UInt16: {
+      uint16_t Value = 0;
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid uint16 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Entry.size = sizeof(uint16_t);
+      SpecData.resize(SpecData.size() + sizeof(uint16_t));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(uint16_t));
+      break;
+    }
+    case DataFormat::Int32: {
+      int32_t Value = 0;
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid int32 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Entry.size = sizeof(int32_t);
+      SpecData.resize(SpecData.size() + sizeof(int32_t));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(int32_t));
+      break;
+    }
+    case DataFormat::UInt32: {
+      uint32_t Value = 0;
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid uint32 value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Entry.size = sizeof(uint32_t);
+      SpecData.resize(SpecData.size() + sizeof(uint32_t));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(uint32_t));
+      break;
+    }
+    case DataFormat::Bool: {
+      bool Value = false;
+      if (llvm::StringRef(SpecConst.Value).getAsInteger(0, Value))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Invalid bool value for specialization constant '%s'",
+            SpecConst.Value.c_str());
+      Entry.size = sizeof(bool);
+      SpecData.resize(SpecData.size() + sizeof(bool));
+      memcpy(SpecData.data() + Entry.offset, &Value, sizeof(bool));
+      break;
+    }
+    default:
+      llvm_unreachable("Unsupported specialization constant type");
+    }
+    return llvm::Error::success();
+  }
+
   llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
     VkPipelineCacheCreateInfo CacheCreateInfo = {};
     CacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
@@ -1282,14 +1394,42 @@ public:
                                      "Failed to create pipeline cache.");
 
     if (P.isCompute()) {
-      const CompiledShader &S = IS.Shaders[0];
+      const offloadtest::Shader &Shader = P.Shaders[0];
       assert(IS.Shaders.size() == 1 &&
              "Currently only support one compute shader");
+      const CompiledShader &S = IS.Shaders[0];
       VkPipelineShaderStageCreateInfo StageInfo = {};
       StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
       StageInfo.module = S.Shader;
       StageInfo.pName = S.Entry.c_str();
+
+      llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
+      llvm::SmallVector<char> SpecData;
+      VkSpecializationInfo SpecInfo = {};
+      if (!Shader.SpecializationConstants.empty()) {
+        llvm::DenseSet<uint32_t> SeenConstantIDs;
+        for (const auto &SpecConst : Shader.SpecializationConstants) {
+          if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "Test configuration contains multiple entries for "
+                "specialization constant ID %u.",
+                SpecConst.ConstantID);
+
+          VkSpecializationMapEntry Entry;
+          if (auto Err =
+                  parseSpecializationConstant(SpecConst, Entry, SpecData))
+            return Err;
+          SpecEntries.push_back(Entry);
+        }
+
+        SpecInfo.mapEntryCount = SpecEntries.size();
+        SpecInfo.pMapEntries = SpecEntries.data();
+        SpecInfo.dataSize = SpecData.size();
+        SpecInfo.pData = SpecData.data();
+        StageInfo.pSpecializationInfo = &SpecInfo;
+      }
 
       VkComputePipelineCreateInfo PipelineCreateInfo = {};
       PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
