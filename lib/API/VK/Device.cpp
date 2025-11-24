@@ -789,8 +789,8 @@ public:
             std::errc::invalid_argument,
             "No RenderTarget buffer specified for graphics pipeline.");
       Resource FrameBuffer = {
-          ResourceKind::Texture2D,     "RenderTarget", {}, {},
-          P.Bindings.RTargetBufferPtr, false};
+          ResourceKind::Texture2D,     "RenderTarget", {},          {},
+          P.Bindings.RTargetBufferPtr, false,          std::nullopt};
       IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
       IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
       IS.FrameBufferResource.ImageLayout =
@@ -817,8 +817,8 @@ public:
             std::errc::invalid_argument,
             "No Vertex buffer specified for graphics pipeline.");
       const Resource VertexBuffer = {
-          ResourceKind::StructuredBuffer, "VertexBuffer", {}, {},
-          P.Bindings.VertexBufferPtr,     false};
+          ResourceKind::StructuredBuffer, "VertexBuffer", {},          {},
+          P.Bindings.VertexBufferPtr,     false,          std::nullopt};
       auto ExVHostBuf =
           createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),

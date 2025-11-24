@@ -143,6 +143,7 @@ struct Resource {
   std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
   bool HasCounter;
+  std::optional<uint32_t> TilesMapped;
 
   bool isRaw() const {
     switch (Kind) {
@@ -198,7 +199,11 @@ struct Resource {
     }
   }
 
-  uint32_t getElementSize() const { return BufferPtr->getElementSize(); }
+  uint32_t getElementSize() const {
+    // ByteAddressBuffers are treated as 4-byte elements to match their memory
+    // format.
+    return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
+  }
 
   uint32_t size() const { return BufferPtr->size(); }
 
