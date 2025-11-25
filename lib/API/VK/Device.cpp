@@ -1818,7 +1818,7 @@ public:
         auto *DataIt = DataSet.begin();
         for (; ResRefIt != ResourceRef.end() && DataIt != DataSet.end();
              ++ResRefIt, ++DataIt) {
-          void *Mapped = nullptr;
+          void *Mapped = nullptr; // NOLINT(misc-const-correctness)
           vkMapMemory(IS.Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
                       &Mapped);
           Range.memory = ResRefIt->Host.Memory;
@@ -1829,7 +1829,7 @@ public:
         if (R.HasCounter) {
           R.BufferPtr->Counters.clear();
           for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
-            uint32_t *Mapped = nullptr;
+            uint32_t *Mapped = nullptr; // NOLINT(misc-const-correctness)
             auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
             vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
                         (void **)&Mapped);
@@ -1850,7 +1850,7 @@ public:
       Range.size = VK_WHOLE_SIZE;
       const ResourceRef &ResRef = IS.FrameBufferResource.ResourceRefs[0];
 
-      void *Mapped = nullptr;
+      void *Mapped = nullptr; // NOLINT(misc-const-correctness)
       vkMapMemory(IS.Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
 
       Range.memory = ResRef.Host.Memory;
