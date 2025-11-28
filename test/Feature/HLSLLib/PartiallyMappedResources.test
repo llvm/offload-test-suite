@@ -137,16 +137,12 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/138910 
-# AND https://github.com/llvm/llvm-project/issues/99204
-# XFAIL: Clang
-
-# Unimplemented https://github.com/llvm/llvm-project/issues/138910
-# AND https://github.com/llvm/llvm-project/issues/99204
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/514
 # XFAIL: Vulkan
+# Unimplemented https://github.com/llvm/llvm-project/issues/166954
+# XFAIL: Clang-Vulkan
 
-# Bug https://github.com/llvm/offload-test-suite/issues/182
-# Metal API seems to have problems with reserved resources
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/515
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/485
