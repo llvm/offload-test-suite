@@ -177,7 +177,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/525
 # XFAIL: NV && Clang
 
-# Bug
+# Bug https://github.com/llvm/offload-test-suite/issues/528
 # XFAIL: QC && Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
