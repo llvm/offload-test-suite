@@ -330,7 +330,7 @@ DescriptorSets:
 # XFAIL: WARP && Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/525
-# XFAIL: NV && Clang
+# XFAIL: NV && Clang && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

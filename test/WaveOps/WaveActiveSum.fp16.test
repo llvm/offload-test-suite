@@ -175,10 +175,10 @@ DescriptorSets:
 # XFAIL: WARP && Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/525
-# XFAIL: NV && Clang
+# XFAIL: NV && Clang && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/528
-# XFAIL: QC && Clang
+# XFAIL: QC && Clang && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
