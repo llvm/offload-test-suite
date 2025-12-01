@@ -67,7 +67,7 @@ DescriptorSets:
 
 # NURI not correctly propagated by DXC.
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7756
-# XFAIL: DirectX && AMD && DXC
+
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan

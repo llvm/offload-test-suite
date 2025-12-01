@@ -173,7 +173,7 @@ DescriptorSets:
 ...
 #--- end
 # Bug https://github.com/llvm/offload-test-suite/issues/351
-# XFAIL: Metal
+
 
 
 # RUN: split-file %s %t

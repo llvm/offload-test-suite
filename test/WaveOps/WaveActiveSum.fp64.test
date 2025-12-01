@@ -169,13 +169,13 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Vulkan && Clang
+
 
 # Bug https://github.com/llvm/offload-test-suite/issues/524
-# XFAIL: WARP && Clang
+
 
 # Bug https://github.com/llvm/offload-test-suite/issues/525
-# XFAIL: NV && Clang & DirectX
+
 
 # REQUIRES: Double
 

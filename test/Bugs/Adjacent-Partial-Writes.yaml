@@ -63,7 +63,7 @@ DescriptorSets:
 # LLVM's load-store optimization performs correct optimizations that hide the
 # problem.
 # Bug https://github.com/llvm/offload-test-suite/issues/226
-# XFAIL: Intel-Memory-Coherence-Issue-226 && !Clang
+
 
 # https://github.com/microsoft/DirectXShaderCompiler/issues/7494
 # https://github.com/llvm/llvm-project/issues/142677

@@ -64,10 +64,10 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/292
-# XFAIL: DXC && Metal
+
 
 # Bug https://github.com/llvm/offload-test-suite/issues/344
-# XFAIL: Clang && Metal
+
 
 # UNSUPPORTED: DXC && Vulkan
 
