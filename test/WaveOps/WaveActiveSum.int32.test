@@ -324,7 +324,13 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
+# XFAIL: Vulkan && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/524
+# XFAIL: WARP && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/525
+# XFAIL: NV && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
