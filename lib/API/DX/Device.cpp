@@ -1022,7 +1022,8 @@ public:
             HR::toError(IS.CmdList->Close(), "Failed to close command list."))
       return Err;
 
-    ID3D12CommandList *CmdLists[] = {IS.CmdList.Get()};
+    ID3D12CommandList *CmdLists[] = {
+        IS.CmdList.Get()}; // NOLINT(misc-const-correctness)
     IS.Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
@@ -1213,13 +1214,13 @@ public:
         static_cast<uint32_t>(B.getElementSize() * B.OutputProps.Width);
     const uint32_t Height = static_cast<uint32_t>(B.OutputProps.Height);
 
-    uint8_t *SrcBase = reinterpret_cast<uint8_t *>(Mapped);
+    const uint8_t *SrcBase = reinterpret_cast<uint8_t *>(Mapped);
     uint8_t *DstBase =
         reinterpret_cast<uint8_t *>(P.Bindings.RTargetBufferPtr->Data[0].get());
 
     // Copy rows in reverse order.
     for (uint32_t Y = 0; Y < Height; ++Y) {
-      uint8_t *SrcRow = SrcBase + static_cast<size_t>(Y) * RowPitch;
+      const uint8_t *SrcRow = SrcBase + static_cast<size_t>(Y) * RowPitch;
       uint8_t *DstRow =
           DstBase + static_cast<size_t>(Height - 1 - Y) * RowBytes;
       memcpy(DstRow, SrcRow, RowBytes);
