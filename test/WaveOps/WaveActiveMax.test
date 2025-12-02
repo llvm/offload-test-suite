@@ -89,9 +89,6 @@ DescriptorSets:
 
 # XFAIL: DirectX && WARP
 
-# Bug https://github.com/llvm/offload-test-suite/issues/543
-# XFAIL: Vulkan && NV
-
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32
 # METAL-NEXT: Data: [ 0, 0, 0, 0 ]
