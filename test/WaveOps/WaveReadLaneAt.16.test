@@ -145,6 +145,9 @@ DescriptorSets:
 # Bug tracked by https://github.com/llvm/offload-test-suite/issues/396
 # XFAIL: DirectX && WARP
 
+# Bug https://github.com/llvm/offload-test-suite/issues/532
+# XFAIL: DirectX && QC
+
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t
