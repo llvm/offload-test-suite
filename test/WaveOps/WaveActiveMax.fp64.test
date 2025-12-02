@@ -314,7 +314,7 @@ DescriptorSets:
 # XFAIL: DirectX && AMD
 
 # Bug https://github.com/llvm/offload-test-suite/issues/542
-# XFAIL: DirectX && QC
+# XFAIL: QC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
