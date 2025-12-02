@@ -62,6 +62,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/533
 # XFAIL: DirectX && AMD
 
+# Bug https://github.com/llvm/llvm-project/issues/170241
+# XFAIL: Clang && Vulkan
+
 # REQUIRES: Double
 
 # RUN: split-file %s %t
