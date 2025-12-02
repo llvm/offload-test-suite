@@ -175,6 +175,8 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
 
+# Bug https://github.com/llvm/offload-test-suite/issues/531
+# XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
