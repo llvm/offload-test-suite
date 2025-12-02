@@ -144,9 +144,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/532
 # XFAIL: DirectX && QC
 
-# Bug https://github.com/llvm/offload-test-suite/issues/531
-# XFAIL: Vulkan && Clang
-
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t
