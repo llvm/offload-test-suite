@@ -94,6 +94,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/llvm-project/issues/170241
+# XFAIL: Clang && Vulkan
+
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7755
 # XFAIL: DXC && Vulkan
 

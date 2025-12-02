@@ -59,6 +59,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/llvm-project/issues/170241
+# XFAIL: Clang && Vulkan
+
 # REQUIRES: Double
 
 # RUN: split-file %s %t
