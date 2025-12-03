@@ -52,7 +52,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/376
 # XFAIL: Intel
 
-# Bug https://github.com/llvm/offload-test-suite/issues/552
+# Bug https://github.com/llvm/offload-test-suite/issues/337
 # XFAIL: AMD
 
 # RUN: split-file %s %t
