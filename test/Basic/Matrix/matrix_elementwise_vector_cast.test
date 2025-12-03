@@ -10,7 +10,7 @@ void main(uint GI : SV_GroupIndex) {
   int2x2  M2 = (int2x2)V;
   const uint COLS = 2;          // float2x2 => 2 rows, 2 columns
   uint row = GI / COLS;         // 0..1
-  uint col = GI % COLS;         // 0..2
+  uint col = GI % COLS;         // 0..1
 
   FloatMatOut[GI]    = M[row][col];
   IntMatOut[GI]      = M2[row][col];
