@@ -52,6 +52,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/376
 # XFAIL: Intel
 
+# Bug https://github.com/llvm/offload-test-suite/issues/552
+# XFAIL: AMD
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s %if DirectX %{ --check-prefixes=CHECK,DX-CHECK %}
