@@ -59,6 +59,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/533
+# XFAIL: DirectX && AMD
+
 # REQUIRES: Double
 
 # RUN: split-file %s %t
