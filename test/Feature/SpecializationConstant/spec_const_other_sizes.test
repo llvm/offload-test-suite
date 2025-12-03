@@ -56,6 +56,9 @@ DescriptorSets:
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7886
 # XFAIL: DXC
 
+# Bug https://github.com/llvm/offload-test-suite/issues/554
+# XFAIL: QC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_2 -enable-16bit-types -Fo %t.o %t/simple_64bit.hlsl
 # RUN: %offloader %t/simple_64bit.yaml %t.o | FileCheck %s
