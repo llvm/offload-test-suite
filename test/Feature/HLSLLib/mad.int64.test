@@ -144,6 +144,9 @@ DescriptorSets:
 # https://github.com/llvm/llvm-project/issues/140095
 # UNSUPPORTED: Clang && Vulkan
 
+# Bug https://github.com/llvm/offload-test-suite/issues/412
+# XFAIL: AMD && DirectX
+
 # REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
