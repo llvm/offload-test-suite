@@ -58,7 +58,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/518
-# XFAIL: Clang && Vulkan && QC
+
 
 # REQUIRES: Int16
 # RUN: split-file %s %t

@@ -66,11 +66,11 @@ DescriptorSets:
 # REQUIRES: Double, Int64
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/471
-# XFAIL: Vulkan && Intel
+
 
 # Clang trips on 3-element vectors in structs:
 # Bug https://github.com/llvm/llvm-project/issues/123968
-# XFAIL: Clang
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl

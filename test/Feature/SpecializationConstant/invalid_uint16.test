@@ -29,7 +29,7 @@ DescriptorSets:
 # REQUIRES: Vulkan
 
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7886
-# XFAIL: DXC
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_2 -enable-16bit-types -Fo %t.o %t/invalid_uint16.hlsl

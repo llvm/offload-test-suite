@@ -37,16 +37,16 @@ DescriptorSets:
 # UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
 # BUG: https://github.com/llvm/offload-test-suite/issues/490
-# XFAIL: WARP && DirectX && Clang
+
 
 # BUG: https://github.com/llvm/llvm-project/issues/165288
-# XFAIL: !WARP && Clang && (DirectX || Metal)
+
 
 # BUG: https://github.com/llvm/offload-test-suite/issues/520
-# XFAIL: QC
+
 
 # BUG: https://github.com/llvm/offload-test-suite/issues/521
-# XFAIL: NV && DirectX
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
