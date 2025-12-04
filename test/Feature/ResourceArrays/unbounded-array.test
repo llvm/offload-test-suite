@@ -58,7 +58,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/556
-# XFAIL: Vulkan && QC
+# XFAIL: Vulkan && QC && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
