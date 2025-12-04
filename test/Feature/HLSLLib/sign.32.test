@@ -174,12 +174,12 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/170241
-# XFAIL: Clang && Vulkan
+
 
 # We're generating invalid SPIRV for this. I have _no_ idea why this isn't
 # failing on all Clang Vulkan tests.
 # Bug https://github.com/llvm/llvm-project/issues/149722
-# XFAIL: Clang && Vulkan && Darwin
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

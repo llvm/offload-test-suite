@@ -131,7 +131,7 @@ DescriptorSets:
 #--- end
 
 # Unsupported: https://github.com/llvm/llvm-project/issues/101558
-# XFAIL: Clang
+
 
 # REQUIRES: DerivativesInCompute
 

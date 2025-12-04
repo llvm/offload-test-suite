@@ -77,7 +77,7 @@ DescriptorSets:
 # REQUIRES: Int16
 
 # Fails with 'gpu-exec: error: Failed to materializeAll.:'
-# XFAIL: Metal
+
 
 # 16/64 bit firstbitlow doesn't have a DXC-Vulkan lowering
 # https://github.com/microsoft/DirectXShaderCompiler/blob/48d6e3c635f0ab3ae79580c37003e6faeca6c671/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl#L5

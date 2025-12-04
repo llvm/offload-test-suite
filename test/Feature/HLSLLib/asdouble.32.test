@@ -83,10 +83,10 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/153513
-# XFAIL: Clang && Vulkan
+
 
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7699
-# XFAIL: DXC && Vulkan
+
 
 # REQUIRES: Double
 # RUN: split-file %s %t

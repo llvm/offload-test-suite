@@ -36,7 +36,7 @@ DescriptorSets:
 
 # Offload tests are missing support for counters on Metal
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304
-# XFAIL: Metal
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

@@ -307,10 +307,10 @@ DescriptorSets:
 # REQUIRES: Int64
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
+
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

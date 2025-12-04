@@ -84,7 +84,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/563
-# XFAIL: NV && Vulkan
+
 
 # REQUIRES: Half
 # RUN: split-file %s %t

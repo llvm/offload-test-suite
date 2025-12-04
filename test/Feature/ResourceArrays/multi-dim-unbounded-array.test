@@ -55,7 +55,7 @@ DescriptorSets:
 #--- end
 
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
-# XFAIL: Metal
+
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
