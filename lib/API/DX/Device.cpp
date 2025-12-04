@@ -668,8 +668,6 @@ public:
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
 
-    const D3D12_HEAP_PROPERTIES HeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
 
     const D3D12_HEAP_PROPERTIES ReadBackHeapProp =
@@ -686,35 +684,42 @@ public:
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_NONE};
 
-    const D3D12_HEAP_PROPERTIES UploadHeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
         CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+    const D3D12_HEAP_PROPERTIES UploadHeapProps =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 
     uint32_t RegOffset = 0;
+
     for (const auto &ResData : R.BufferPtr->Data) {
       llvm::outs() << "Creating UAV: { Size = " << BufferSize
                    << ", Register = u" << R.DXBinding.Register + RegOffset
                    << ", Space = " << R.DXBinding.Space
-                   << ", HasCounter = " << R.HasCounter << " }\n";
+                   << ", HasCounter = " << R.HasCounter;
+
+      if (R.TilesMapped)
+        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
+      llvm::outs() << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-      if (auto Err = HR::toError(
-              Device->CreateCommittedResource(
-                  &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&Buffer)),
-              "Failed to create committed resource (buffer)."))
+      if (auto Err =
+              HR::toError(Device->CreateReservedResource(
+                              &ResDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                              IID_PPV_ARGS(&Buffer)),
+                          "Failed to create reserved resource (buffer)."))
         return Err;
 
+      // Committed upload buffer
       ComPtr<ID3D12Resource> UploadBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
-                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                   IID_PPV_ARGS(&UploadBuffer)),
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
+      // Committed readback buffer
       ComPtr<ID3D12Resource> ReadBackBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
@@ -724,17 +729,54 @@ public:
               "Failed to create committed resource (readback buffer)."))
         return Err;
 
-      // Initialize the UAV data
+      // Tile mapping setup (only skipped when TilesMapped is set to 0)
+      const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
+      ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
+
+      if (NumTiles > 0) {
+        // Create a Heap large enough for the mapped tiles
+        D3D12_HEAP_DESC HeapDesc = {};
+        HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
+                               D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+
+        if (auto Err =
+                HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
+                            "Failed to create heap for tiled SRV resource."))
+          return Err;
+
+        // Define one contiguous mapping region
+        const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
+        D3D12_TILE_REGION_SIZE RegionSize = {};
+        RegionSize.NumTiles = NumTiles;
+        RegionSize.UseBox = FALSE;
+
+        const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+        const UINT HeapRangeStartOffset = 0;
+        const UINT RangeTileCount = NumTiles;
+
+        ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
+        CommandQueue->UpdateTileMappings(
+            Buffer.Get(), 1, &StartCoord, &RegionSize, // One region
+            Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
+            D3D12_TILE_MAPPING_FLAG_NONE);
+      }
+
+      // Upload data initialization
       void *ResDataPtr = nullptr;
-      if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
-                                 "Failed to acquire UAV data pointer."))
-        return Err;
-      memcpy(ResDataPtr, ResData.get(), R.size());
-      UploadBuffer->Unmap(0, nullptr);
+      if (SUCCEEDED(UploadBuffer->Map(0, NULL, &ResDataPtr))) {
+        memcpy(ResDataPtr, ResData.get(), R.size());
+        UploadBuffer->Unmap(0, nullptr);
+      } else {
+        return llvm::createStringError(std::errc::io_error,
+                                       "Failed to map SRV upload buffer.");
+      }
 
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-      Bundle.emplace_back(UploadBuffer, Buffer, ReadBackBuffer);
+      Bundle.emplace_back(UploadBuffer, Buffer, ReadBackBuffer, Heap);
       RegOffset++;
     }
     return Bundle;
