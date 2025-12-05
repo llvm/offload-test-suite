@@ -70,6 +70,9 @@ DescriptorSets:
         Binding: 2
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/561
+# XFAIL: QC
+
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

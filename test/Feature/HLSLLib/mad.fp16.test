@@ -83,6 +83,9 @@ DescriptorSets:
         Binding: 3
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/562
+# XFAIL: QC && Vulkan
+
 # Bug https://github.com/llvm/offload-test-suite/issues/563
 # XFAIL: NV && Vulkan
 
