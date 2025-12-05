@@ -159,7 +159,7 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
   D3D12_TEXTURE_LAYOUT Layout;
   if (R.isTexture())
-    Layout = getDXKind(R.Kind) == SRV
+    Layout = getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV
                  ? D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE
                  : D3D12_TEXTURE_LAYOUT_UNKNOWN;
   else
@@ -1043,14 +1043,28 @@ public:
                           "Failed to register end event."))
         return Err;
 
+      // Choose a timeout (ms)
+      static constexpr int TimeoutMS = 5000;
+
 #ifdef _WIN32
-      WaitForSingleObject(IS.Event, INFINITE);
-#else // WSL
+      DWORD WaitRes = WaitForSingleObject(IS.Event, TimeoutMS);
+      if (WaitRes == WAIT_TIMEOUT)
+        return llvm::createStringError(std::errc::timed_out,
+                                       "Fence wait timed out");
+      if (WaitRes != WAIT_OBJECT_0)
+        return llvm::createStringError(std::errc::io_error,
+                                       "Unexpected WaitForSingleObject result");
+#else
       pollfd PollEvent;
       PollEvent.fd = IS.Event;
       PollEvent.events = POLLIN;
       PollEvent.revents = 0;
-      if (poll(&PollEvent, 1, -1) == -1)
+
+      int Ret = poll(&PollEvent, 1, TimeoutMS);
+      if (Ret == 0)
+        return llvm::createStringError(std::errc::timed_out,
+                                       "Fence wait timed out");
+      if (Ret < 0)
         return llvm::createStringError(
             std::error_code(errno, std::system_category()), strerror(errno));
 #endif
@@ -1475,6 +1489,13 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error waitThenReturnErr(llvm::Error Err, InvocationState &IS) {
+    llvm::Error WaitErr = waitForSignal(IS);
+    if (WaitErr)
+      return llvm::joinErrors(std::move(WaitErr), std::move(Err));
+    return Err;
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     llvm::sys::AddSignalHandler(
         [](void *Cookie) {
@@ -1518,7 +1539,7 @@ public:
       return Err;
     llvm::outs() << "Buffers created.\n";
     if (auto Err = createEvent(State))
-      return Err;
+      return waitThenReturnErr(std::move(Err), State);
     llvm::outs() << "Event prepared.\n";
 
     if (P.isCompute()) {
@@ -1528,33 +1549,33 @@ public:
             std::errc::invalid_argument,
             "Compute pipeline must have exactly one compute shader.");
       if (auto Err = createComputePSO(P.Shaders[0].Shader->getBuffer(), State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "PSO created.\n";
       if (auto Err = createComputeCommands(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Compute command list created.\n";
 
     } else {
       // Create render target, readback and vertex buffer and PSO.
       if (auto Err = createRenderTarget(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Render target created.\n";
       if (auto Err = createVertexBuffer(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Vertex buffer created.\n";
       if (auto Err = createGraphicsPSO(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Graphics PSO created.\n";
       if (auto Err = createGraphicsCommands(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Graphics command list created complete.\n";
     }
 
     if (auto Err = executeCommandList(State))
-      return Err;
+      return waitThenReturnErr(std::move(Err), State);
     llvm::outs() << "Compute commands executed.\n";
     if (auto Err = readBack(P, State))
-      return Err;
+      return waitThenReturnErr(std::move(Err), State);
     llvm::outs() << "Read data back.\n";
 
     return llvm::Error::success();
