@@ -61,7 +61,7 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/575
-# XFAIL: QC
+# XFAIL: QC && Vulkan
 
 # REQUIRES: Half, Int16
 
