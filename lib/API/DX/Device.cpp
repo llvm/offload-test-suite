@@ -1047,7 +1047,7 @@ public:
       static constexpr int TimeoutMS = 5000;
 
 #ifdef _WIN32
-      DWORD WaitRes = WaitForSingleObject(IS.Event, TimeoutMS);
+      const DWORD WaitRes = WaitForSingleObject(IS.Event, TimeoutMS);
       if (WaitRes == WAIT_TIMEOUT)
         return llvm::createStringError(std::errc::timed_out,
                                        "Fence wait timed out");
