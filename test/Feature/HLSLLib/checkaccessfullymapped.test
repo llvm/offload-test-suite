@@ -1,0 +1,173 @@
+#--- source.hlsl
+
+StructuredBuffer<int4> X : register(t0); // partially mapped
+StructuredBuffer<int4> Y : register(t1); // unmapped
+
+RWStructuredBuffer<int> Out : register(u2);
+RWStructuredBuffer<bool> CAFM : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  // 4096 int4's inside X or Y occupy 64KB of data. 
+  // (4096 int4's * 4 ints * 4 bytes per int)
+  // So, any index into the buffer >= [4096] will access a new "tile"
+
+  uint idx = 0;
+
+  uint status;
+  int4 Result = X.Load(0, status);
+  bool CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+
+  idx += 1;
+
+  Result = X.Load(4100, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+  
+  idx += 1;
+
+  Result = Y.Load(0, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+
+  idx += 1;
+
+  Result = Y.Load(4100, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+
+  idx += 1;
+
+  // Test that if CheckAccessFullyMapped is called on 
+  // something other than an operation status,
+  // the LSB will be cast to a bool
+
+  unsigned int Nums[4] = {1, 2, 2147483647, 0};
+  for (unsigned int I = 0; I < 4; I++){
+    unsigned int Num_I = Nums[I];
+    CAFM[idx] = CheckAccessFullyMapped(Num_I);
+    idx++;
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Int32
+    Stride: 16
+    FillSize: 131072
+    FillValue: 9001
+  - Name: Y
+    Format: Int32
+    Stride: 16
+    FillSize: 131072
+    FillValue: 9002
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
+    Data: [9001, 9003, 9003, 9003]
+  - Name: CAFM
+    Format: Bool
+    Stride: 4
+    FillSize: 32
+    FillValue: 0
+  - Name: ExpectedCAFM
+    Format: Bool
+    Stride: 4
+    # There are 2 tests being run, each with 4 values
+    # The first test results in the first 4 values
+    # The first data access in this test is the only 
+    # data access to a mapped tile, so we expect 1.
+    # The second test tests bool casting, and only
+    # the 2nd and 4th input has an LSB of 0, so we
+    # expect only the 2nd and 4th results to be 0.
+    Data: [1, 0, 0, 0, 1, 0, 1, 0]
+
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: TestCAFM
+    Rule: BufferExact
+    Actual: CAFM
+    Expected: ExpectedCAFM
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      TilesMapped: 1
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+      TilesMapped: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: CAFM
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/514
+# XFAIL: Vulkan
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/166954
+# XFAIL: Clang-Vulkan
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/515
+# XFAIL: Metal
+
+# Bug https://github.com/llvm/offload-test-suite/issues/485
+# XFAIL: Intel
+
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
