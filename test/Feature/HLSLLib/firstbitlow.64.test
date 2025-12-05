@@ -76,7 +76,7 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# Fails with 'gpu-exec: error: Failed to materializeAll.:'
+# Bug https://github.com/llvm/offload-test-suite/issues/605
 # XFAIL: Metal
 
 # 16/64 bit firstbitlow doesn't have a DXC-Vulkan lowering
