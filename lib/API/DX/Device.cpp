@@ -159,7 +159,7 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
   D3D12_TEXTURE_LAYOUT Layout;
   if (R.isTexture())
-    Layout = getDXKind(R.Kind) == SRV
+    Layout = getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV
                  ? D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE
                  : D3D12_TEXTURE_LAYOUT_UNKNOWN;
   else
@@ -668,8 +668,6 @@ public:
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
 
-    const D3D12_HEAP_PROPERTIES HeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
 
     const D3D12_HEAP_PROPERTIES ReadBackHeapProp =
@@ -686,35 +684,42 @@ public:
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_NONE};
 
-    const D3D12_HEAP_PROPERTIES UploadHeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
         CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+    const D3D12_HEAP_PROPERTIES UploadHeapProps =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 
     uint32_t RegOffset = 0;
+
     for (const auto &ResData : R.BufferPtr->Data) {
       llvm::outs() << "Creating UAV: { Size = " << BufferSize
                    << ", Register = u" << R.DXBinding.Register + RegOffset
                    << ", Space = " << R.DXBinding.Space
-                   << ", HasCounter = " << R.HasCounter << " }\n";
+                   << ", HasCounter = " << R.HasCounter;
+
+      if (R.TilesMapped)
+        llvm::outs() << ", TilesMapped = " << *R.TilesMapped;
+      llvm::outs() << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-      if (auto Err = HR::toError(
-              Device->CreateCommittedResource(
-                  &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                  D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&Buffer)),
-              "Failed to create committed resource (buffer)."))
+      if (auto Err =
+              HR::toError(Device->CreateReservedResource(
+                              &ResDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
+                              IID_PPV_ARGS(&Buffer)),
+                          "Failed to create reserved resource (buffer)."))
         return Err;
 
+      // Committed upload buffer
       ComPtr<ID3D12Resource> UploadBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
-                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                   IID_PPV_ARGS(&UploadBuffer)),
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
+      // Committed readback buffer
       ComPtr<ID3D12Resource> ReadBackBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
@@ -724,17 +729,54 @@ public:
               "Failed to create committed resource (readback buffer)."))
         return Err;
 
-      // Initialize the UAV data
+      // Tile mapping setup (only skipped when TilesMapped is set to 0)
+      const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
+      ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
+
+      if (NumTiles > 0) {
+        // Create a Heap large enough for the mapped tiles
+        D3D12_HEAP_DESC HeapDesc = {};
+        HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+        HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
+                               D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+        HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+
+        if (auto Err =
+                HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
+                            "Failed to create heap for tiled SRV resource."))
+          return Err;
+
+        // Define one contiguous mapping region
+        const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
+        D3D12_TILE_REGION_SIZE RegionSize = {};
+        RegionSize.NumTiles = NumTiles;
+        RegionSize.UseBox = FALSE;
+
+        const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+        const UINT HeapRangeStartOffset = 0;
+        const UINT RangeTileCount = NumTiles;
+
+        ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
+        CommandQueue->UpdateTileMappings(
+            Buffer.Get(), 1, &StartCoord, &RegionSize, // One region
+            Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
+            D3D12_TILE_MAPPING_FLAG_NONE);
+      }
+
+      // Upload data initialization
       void *ResDataPtr = nullptr;
-      if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
-                                 "Failed to acquire UAV data pointer."))
-        return Err;
-      memcpy(ResDataPtr, ResData.get(), R.size());
-      UploadBuffer->Unmap(0, nullptr);
+      if (SUCCEEDED(UploadBuffer->Map(0, NULL, &ResDataPtr))) {
+        memcpy(ResDataPtr, ResData.get(), R.size());
+        UploadBuffer->Unmap(0, nullptr);
+      } else {
+        return llvm::createStringError(std::errc::io_error,
+                                       "Failed to map SRV upload buffer.");
+      }
 
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-      Bundle.emplace_back(UploadBuffer, Buffer, ReadBackBuffer);
+      Bundle.emplace_back(UploadBuffer, Buffer, ReadBackBuffer, Heap);
       RegOffset++;
     }
     return Bundle;
@@ -1001,14 +1043,28 @@ public:
                           "Failed to register end event."))
         return Err;
 
+      // Choose a timeout (ms)
+      static constexpr int TimeoutMS = 5000;
+
 #ifdef _WIN32
-      WaitForSingleObject(IS.Event, INFINITE);
-#else // WSL
+      const DWORD WaitRes = WaitForSingleObject(IS.Event, TimeoutMS);
+      if (WaitRes == WAIT_TIMEOUT)
+        return llvm::createStringError(std::errc::timed_out,
+                                       "Fence wait timed out");
+      if (WaitRes != WAIT_OBJECT_0)
+        return llvm::createStringError(std::errc::io_error,
+                                       "Unexpected WaitForSingleObject result");
+#else
       pollfd PollEvent;
       PollEvent.fd = IS.Event;
       PollEvent.events = POLLIN;
       PollEvent.revents = 0;
-      if (poll(&PollEvent, 1, -1) == -1)
+
+      int Ret = poll(&PollEvent, 1, TimeoutMS);
+      if (Ret == 0)
+        return llvm::createStringError(std::errc::timed_out,
+                                       "Fence wait timed out");
+      if (Ret < 0)
         return llvm::createStringError(
             std::error_code(errno, std::system_category()), strerror(errno));
 #endif
@@ -1433,6 +1489,13 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error waitThenReturnErr(llvm::Error Err, InvocationState &IS) {
+    llvm::Error WaitErr = waitForSignal(IS);
+    if (WaitErr)
+      return llvm::joinErrors(std::move(WaitErr), std::move(Err));
+    return Err;
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     llvm::sys::AddSignalHandler(
         [](void *Cookie) {
@@ -1476,7 +1539,7 @@ public:
       return Err;
     llvm::outs() << "Buffers created.\n";
     if (auto Err = createEvent(State))
-      return Err;
+      return waitThenReturnErr(std::move(Err), State);
     llvm::outs() << "Event prepared.\n";
 
     if (P.isCompute()) {
@@ -1486,33 +1549,33 @@ public:
             std::errc::invalid_argument,
             "Compute pipeline must have exactly one compute shader.");
       if (auto Err = createComputePSO(P.Shaders[0].Shader->getBuffer(), State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "PSO created.\n";
       if (auto Err = createComputeCommands(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Compute command list created.\n";
 
     } else {
       // Create render target, readback and vertex buffer and PSO.
       if (auto Err = createRenderTarget(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Render target created.\n";
       if (auto Err = createVertexBuffer(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Vertex buffer created.\n";
       if (auto Err = createGraphicsPSO(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Graphics PSO created.\n";
       if (auto Err = createGraphicsCommands(P, State))
-        return Err;
+        return waitThenReturnErr(std::move(Err), State);
       llvm::outs() << "Graphics command list created complete.\n";
     }
 
     if (auto Err = executeCommandList(State))
-      return Err;
+      return waitThenReturnErr(std::move(Err), State);
     llvm::outs() << "Compute commands executed.\n";
     if (auto Err = readBack(P, State))
-      return Err;
+      return waitThenReturnErr(std::move(Err), State);
     llvm::outs() << "Read data back.\n";
 
     return llvm::Error::success();
