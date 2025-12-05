@@ -310,6 +310,11 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
+# Bug https://github.com/llvm/offload-test-suite/issues/541
+# XFAIL: DirectX && AMD
+
+# REQUIRES: Double
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o 

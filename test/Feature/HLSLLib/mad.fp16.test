@@ -83,6 +83,9 @@ DescriptorSets:
         Binding: 3
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/563
+# XFAIL: NV && Vulkan
+
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

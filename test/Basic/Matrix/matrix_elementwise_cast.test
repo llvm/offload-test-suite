@@ -1,0 +1,107 @@
+#--- source.hlsl
+RWBuffer<float> In : register(u0);
+RWBuffer<int> MatOut : register(u1);
+RWBuffer<int> ArrOut : register(u2);
+RWBuffer<int> StructOut : register(u3);
+
+struct S {
+  int   A,B,C;
+  float X,Y,Z;
+};
+
+[numthreads(6,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  float2x3 A = float2x3(In[0], In[1], In[2],
+                        In[3], In[4], In[5]);
+  float Arr[2][3] = {In[0], In[1], In[2],
+                     In[3], In[4], In[5]};
+  
+  S s = {(int)In[0], (int)In[1], (int)In[2],
+              In[3],      In[4],      In[5]};
+
+  const uint COLS = 3;          // float2x3 => 2 rows, 3 columns
+  uint row = GI / COLS;         // 0..1
+  uint col = GI % COLS;         // 0..2
+
+  int2x3 B = (int2x3)A;
+  int2x3 C = (int2x3)Arr;
+  int2x3 D = (int2x3)s;
+
+  MatOut[GI]    = B[row][col];
+  ArrOut[GI]    = C[row][col];
+  StructOut[GI] = D[row][col];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6]
+  - Name: MatOut
+    Format: Int32
+    FillSize: 24
+  - Name: ArrOut
+    Format: Int32
+    FillSize: 24
+  - Name: StructOut
+    Format: Int32
+    FillSize: 24
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6 ]
+Results:
+  - Result: MatOut
+    Rule: BufferExact
+    Actual: MatOut
+    Expected: ExpectedOut
+  - Result: ArrOut
+    Rule: BufferExact
+    Actual: ArrOut
+    Expected: ExpectedOut
+  - Result: StructOut
+    Rule: BufferExact
+    Actual: StructOut
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: MatOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: ArrOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: StructOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+# Unimplemented: https://github.com/llvm/llvm-project/issues/170534
+# XFAIL: Vulkan && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
