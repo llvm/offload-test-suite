@@ -107,7 +107,7 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/610
-# XFAIL: Clang && WARP && DirectX
+# XFAIL: WARP && DirectX
 
 # REQUIRES: Int64
 
