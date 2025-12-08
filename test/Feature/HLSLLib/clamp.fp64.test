@@ -79,6 +79,10 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Double
+
+# Bug https://github.com/llvm/offload-test-suite/issues/610
+# XFAIL: WARP
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
