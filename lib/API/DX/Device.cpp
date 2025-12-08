@@ -1022,7 +1022,7 @@ public:
             HR::toError(IS.CmdList->Close(), "Failed to close command list."))
       return Err;
 
-    ID3D12CommandList * const CmdLists[] = {IS.CmdList.Get()};
+    ID3D12CommandList *const CmdLists[] = {IS.CmdList.Get()};
     IS.Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
