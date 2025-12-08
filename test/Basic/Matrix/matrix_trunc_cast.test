@@ -1,20 +1,20 @@
 #--- source.hlsl
-
 RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 
-[numthreads(6,1,1)]
+[numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  int2x3 A = int2x3(In[0], In[1], In[2],
-                    In[3], In[4], In[5]);
-
-  const uint COLS = 3;          // int2x3 => 2 rows, 3 columns
-  uint row = GI / COLS;         // 0..1
-  uint col = GI % COLS;         // 0..2
-
-  Out[GI] = A[row][col];
+    int4x4 A = int4x4(In[0],  In[1],  In[2],  In[3],
+                      In[4],  In[5],  In[6],  In[7],
+                      In[8],  In[9],  In[10], In[11],
+                      In[12], In[13], In[14], In[15]);
+    
+    int2x2 B = (int2x2)A;
+    const uint COLS = 2;          // int2x3 => 2 rows, 2 columns
+    uint row = GI / COLS;         // 0..1
+    uint col = GI % COLS;         // 0..1
+    Out[GI] = B[row][col];    
 }
-
 //--- pipeline.yaml
 
 ---
@@ -25,13 +25,13 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6]
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
   - Name: Out
     Format: Int32
-    FillSize: 24
+    FillSize: 16
   - Name: ExpectedOut
     Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6 ]
+    Data: [1, 2, 5, 6]
 Results:
   - Result: Out
     Rule: BufferExact
@@ -55,6 +55,9 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/599
+# XFAIL: Intel && Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

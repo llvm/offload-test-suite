@@ -135,11 +135,18 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/170241
+# XFAIL: Clang && Vulkan
+
 # Bug https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
 
 # Bug tracked by https://github.com/llvm/offload-test-suite/issues/396
 # XFAIL: DirectX && WARP
+
+# Bug https://github.com/llvm/offload-test-suite/issues/532
+# XFAIL: DirectX && QC
 
 # REQUIRES: Half, Int16
 

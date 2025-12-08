@@ -1,0 +1,64 @@
+#--- source.hlsl
+
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Out : register(u1);
+
+[numthreads(6,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  int2x3 A = int2x3(In[0], In[1], In[2],
+                    In[3], In[4], In[5]);
+
+  const uint COLS = 3;          // int2x3 => 2 rows, 3 columns
+  uint row = GI / COLS;         // 0..1
+  uint col = GI % COLS;         // 0..2
+
+  Out[GI] = A[row][col];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6]
+  - Name: Out
+    Format: Int32
+    FillSize: 24
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/538
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
