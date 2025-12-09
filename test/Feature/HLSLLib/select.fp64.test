@@ -124,6 +124,9 @@ DescriptorSets:
         Binding: 4
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/615
+# XFAIL: Clang && Vulkan && Intel
+
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
