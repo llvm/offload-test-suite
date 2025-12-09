@@ -261,6 +261,8 @@ DescriptorSets:
 ...
 #--- end
 
+# REQUIRES: WaveSize_32
+
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
