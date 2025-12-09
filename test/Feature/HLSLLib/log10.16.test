@@ -64,6 +64,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/145073
 # XFAIL: Clang && Vulkan
 
+# Bug https://github.com/llvm/offload-test-suite/issues/565
+# XFAIL: QC
+
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
