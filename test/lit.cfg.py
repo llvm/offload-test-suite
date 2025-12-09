@@ -67,9 +67,10 @@ def setWaveSizeFeaturesDirectX(config, device):
 
     Wave_Prefix = "WaveSize_"
 
-    while (MinSizeInt <= MaxSizeInt):
+    while MinSizeInt <= MaxSizeInt:
         config.available_features.add(Wave_Prefix + str(MinSizeInt))
         MinSizeInt *= 2
+
 
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
@@ -111,7 +112,7 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("DoublePrecisionFloatShaderOps", False):
             config.available_features.add("Double")
         if device["Features"].get("Int64ShaderOps", False):
-            config.available_features.add("Int64")        
+            config.available_features.add("Int64")
         setWaveSizeFeaturesDirectX(config, device)
 
     if device["API"] == "Metal":
