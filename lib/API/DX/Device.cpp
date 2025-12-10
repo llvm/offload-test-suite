@@ -1043,8 +1043,8 @@ public:
                           "Failed to register end event."))
         return Err;
 
-      // Choose a timeout (ms)
-      static constexpr int TimeoutMS = 5000;
+      // 60000 ms timeout (1 minute)
+      static constexpr int TimeoutMS = 60000;
 
 #ifdef _WIN32
       const DWORD WaitRes = WaitForSingleObject(IS.Event, TimeoutMS);
