@@ -82,7 +82,7 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# Bug: Fails with 'gpu-exec: error: Failed to materializeAll.:'
+# Bug https://github.com/llvm/offload-test-suite/issues/605
 # XFAIL: Metal
 
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
@@ -91,6 +91,9 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/llvm-project/issues/143171
 # XFAIL: Clang && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/324
+# XFAIL: NV && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

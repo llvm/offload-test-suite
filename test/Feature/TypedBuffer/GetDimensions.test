@@ -81,7 +81,9 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/469
-# XFAIL: DXC && Vulkan
+# GetDimensions on Vulkan (DXC) returns [ 16, 16 ] instead of [ 8, 5 ]
+# except on AMD https://github.com/llvm/offload-test-suite/issues/523
+# XFAIL: DXC && Vulkan && !AMD
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/164008
 # XFAIL: Clang && Vulkan

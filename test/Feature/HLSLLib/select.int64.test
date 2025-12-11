@@ -203,8 +203,8 @@ DescriptorSets:
         Binding: 8
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/166642
-# XFAIL: Clang && Vulkan
+# Bug https://github.com/llvm/offload-test-suite/issues/615
+# XFAIL: Clang && Vulkan && Intel
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
