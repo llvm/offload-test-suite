@@ -16,12 +16,10 @@ StructuredBuffer<MaskStruct> Masks  : register(t6);
 void main(uint3 tid : SV_GroupThreadID)
 {
     
-    for (uint MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
-        int4 v = In[MaskIdx * NUM_THREADS + tid.x];
-        const uint OutIdx = MaskIdx * NUM_THREADS + tid.x;
-        if (Masks[MaskIdx].mask[tid.x]) {            
-            Out4[OutIdx] = WaveReadLaneFirst( v );
-        }
+    int4 v = In[tid.x];
+    const uint OutIdx = tid.x;
+    if (Masks[0].mask[tid.x]) {            
+        Out4[OutIdx] = WaveReadLaneFirst( v );
     }
 
     // constant folding case
@@ -268,9 +266,6 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
-
-# Bug https://github.com/llvm/offload-test-suite/issues/611
-# UNSUPPORTED: Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
