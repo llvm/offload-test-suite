@@ -1,0 +1,71 @@
+#--- source.hlsl
+
+// This test verifies handling of a simple resource in a struct.
+
+struct A {
+  RWBuffer<int> Buf;
+};
+
+[[vk::binding(5)]]
+A a1 : register(u5);
+
+A a2;
+  
+[numthreads(8, 1, 1)]
+void main(uint3 ID : SV_GroupThreadID) {
+  a2.Buf[ID.x] += a1.Buf[ID.x];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufA1
+    Format: Int32
+    Data:
+      [ 1, 2, 3, 4, 5, 6, 7, 8 ]
+
+  - Name: BufA2
+    Format: Int32
+    Data:
+      [ 10, 20, 30, 40, 50, 60, 70, 80 ]
+
+  - Name: ExpectedBufA2
+    Format: Int32
+    Data:
+      [ 11, 22, 33, 44, 55, 66, 77, 88 ]
+
+Results:
+  - Result: ExpectedResult
+    Rule: BufferExact
+    Actual: BufA2
+    Expected: ExpectedBufA2
+
+DescriptorSets:
+  - Resources:
+    - Name: BufA1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: BufA2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
