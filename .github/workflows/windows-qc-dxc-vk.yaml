@@ -8,6 +8,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '0 */2 * * *' # run every 2 hours
+  pull_request:
+    paths:
+     - .github/workflows/windows-qc-dxc-vk.yaml
 
 jobs:
   Windows-VK-QC-DXC:
