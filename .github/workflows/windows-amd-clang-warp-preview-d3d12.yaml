@@ -6,6 +6,9 @@ permissions:
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+     - .github/workflows/windows-amd-clang-warp-preview-d3d12.yaml
 
 jobs:
   Windows-D3D12-Warp-Clang:
