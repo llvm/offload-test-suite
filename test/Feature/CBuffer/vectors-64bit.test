@@ -72,6 +72,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/123968
 # XFAIL: Clang
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/610
+# XFAIL: WARP
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
