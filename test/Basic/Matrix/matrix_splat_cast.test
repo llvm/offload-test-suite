@@ -7,7 +7,6 @@ RWBuffer<float> OutFloat : register(u2);
 void main(uint GI : SV_GroupIndex) {
     float2x3 A = In[0];
     int2x3 B = (int)In[0];
-\
     const uint COLS = 3;          // float2x3 => 2 rows, 3 columns
     uint row = GI / COLS;         // 0..1
     uint col = GI % COLS;         // 0..2
