@@ -312,7 +312,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# XFAIL: WARP
+# XFAIL: WARP && arm64
 # Bug https://github.com/llvm/offload-test-suite/issues/433
 
 # RUN: split-file %s %t
