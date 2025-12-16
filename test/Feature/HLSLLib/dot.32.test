@@ -189,6 +189,9 @@ DescriptorSets:
         Binding: 8
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/571
+# XFAIL: QC && Vulkan && Clang
+
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
