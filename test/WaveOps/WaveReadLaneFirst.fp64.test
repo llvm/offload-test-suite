@@ -313,8 +313,8 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/625
 # XFAIL: AMD && DirectX
 
-# XFAIL: WARP && arm64
 # Bug https://github.com/llvm/offload-test-suite/issues/433
+# XFAIL: WARP && arm64
 
 REQUIRES: Double
 
