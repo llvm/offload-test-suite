@@ -124,7 +124,7 @@ Buffers:
   - Name: OutputB
     Format: UInt32
     Stride: 16
-    FillSize: 45500
+    FillSize: 182000
   - Name: ExpectedOutputB
     Format: UInt32
     Stride: 16
