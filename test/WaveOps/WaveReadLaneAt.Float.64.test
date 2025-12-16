@@ -62,9 +62,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/533
 # XFAIL: DirectX && AMD
 
-# Bug https://github.com/llvm/offload-test-suite/issues/610
-# XFAIL: WARP && DirectX
-
 # REQUIRES: Double
 
 # RUN: split-file %s %t

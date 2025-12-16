@@ -82,9 +82,6 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/610
-# XFAIL: WARP
-
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
