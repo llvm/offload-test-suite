@@ -399,24 +399,5 @@ llvm::Error verifyResult(offloadtest::Result R) {
   }
   }
 
-  OS << "Expected:\n";
-  llvm::yaml::Output YAMLOS(OS);
-  YAMLOS << *R.ExpectedPtr;
-  OS << "Got:\n";
-  YAMLOS << *R.ActualPtr;
-
-  // Now print exact hex64 representations of each element of the
-  // actual and expected buffers.
-
-  const std::string ExpectedBufferStr =
-      getBufferStr(R.ExpectedPtr, R.ComparisonRule);
-  const std::string ActualBufferStr =
-      getBufferStr(R.ActualPtr, R.ComparisonRule);
-
-  OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
-     << ExpectedBufferStr << "\n";
-  OS << "Full Hex 64bit representation of Actual Buffer Values:\n"
-     << ActualBufferStr << "\n";
-
   return llvm::createStringError(Str.c_str());
 }
