@@ -310,8 +310,11 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# XFAIL: WARP
+# Bug https://github.com/llvm/offload-test-suite/issues/627
+# XFAIL: QC && DirectX
+
 # Bug https://github.com/llvm/offload-test-suite/issues/433
+# XFAIL: WARP
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
