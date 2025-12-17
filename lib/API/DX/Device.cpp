@@ -158,7 +158,7 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
   D3D12_TEXTURE_LAYOUT Layout;
-  bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
+  const bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
   if (R.isTexture())
     Layout =
         IsReserved && (getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV)
@@ -554,7 +554,7 @@ public:
     return Ret;
   }
 
-  llvm::Error SetupTiledResource(Resource &R, InvocationState &IS,
+  llvm::Error setupTiledResource(Resource &R, InvocationState &IS,
                                  const D3D12_RESOURCE_DESC ResDesc,
                                  ComPtr<ID3D12Heap> &Heap,
                                  ComPtr<ID3D12Resource> &Buffer) {
@@ -619,7 +619,7 @@ public:
       llvm::outs() << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-      bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
+      const bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
       if (IsReserved) {
         if (auto Err =
                 HR::toError(Device->CreateReservedResource(
@@ -649,7 +649,7 @@ public:
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (IsReserved)
-        if (auto Err = SetupTiledResource(R, IS, ResDesc, Heap, Buffer))
+        if (auto Err = setupTiledResource(R, IS, ResDesc, Heap, Buffer))
           return Err;
 
       // Upload data initialization
@@ -734,7 +734,7 @@ public:
       llvm::outs() << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-      bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
+      const bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
       if (IsReserved) {
         if (auto Err =
                 HR::toError(Device->CreateReservedResource(
@@ -774,7 +774,7 @@ public:
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (IsReserved)
-        if (auto Err = SetupTiledResource(R, IS, ResDesc, Heap, Buffer))
+        if (auto Err = setupTiledResource(R, IS, ResDesc, Heap, Buffer))
           return Err;
 
       // Upload data initialization
