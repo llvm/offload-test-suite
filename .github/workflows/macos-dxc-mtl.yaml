@@ -8,6 +8,9 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '*/30 * * * *' # run every 30 minutes
+  pull_request:
+    paths:
+     - .github/workflows/macos-dxc-mtl.yaml
 
 jobs:
   macOS-Metal-DXC:
