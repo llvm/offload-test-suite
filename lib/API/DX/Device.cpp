@@ -158,10 +158,10 @@ static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
   D3D12_TEXTURE_LAYOUT Layout;
-  const bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
+
   if (R.isTexture())
     Layout =
-        IsReserved && (getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV)
+        R.IsReserved && (getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV)
             ? D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE
             : D3D12_TEXTURE_LAYOUT_UNKNOWN;
   else
@@ -593,7 +593,7 @@ public:
         Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
         D3D12_TILE_MAPPING_FLAG_NONE);
 
-    return llvm::Error::success();
+    return waitForSignal(IS);
   }
 
   llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
@@ -617,8 +617,7 @@ public:
       llvm::outs() << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-      const bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
-      if (IsReserved) {
+      if (R.IsReserved) {
         if (auto Err =
                 HR::toError(Device->CreateReservedResource(
                                 &ResDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
@@ -650,7 +649,7 @@ public:
         return Err;
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
-      if (IsReserved)
+      if (R.IsReserved)
         if (auto Err = setupReservedResource(R, IS, ResDesc, Heap, Buffer))
           return Err;
 
@@ -732,8 +731,7 @@ public:
       llvm::outs() << " }\n";
 
       ComPtr<ID3D12Resource> Buffer;
-      const bool IsReserved = R.IsReserved.has_value() && *R.IsReserved;
-      if (IsReserved) {
+      if (R.IsReserved) {
         if (auto Err =
                 HR::toError(Device->CreateReservedResource(
                                 &ResDesc, D3D12_RESOURCE_STATE_COMMON, nullptr,
@@ -775,7 +773,7 @@ public:
         return Err;
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
-      if (IsReserved)
+      if (R.IsReserved)
         if (auto Err = setupReservedResource(R, IS, ResDesc, Heap, Buffer))
           return Err;
 
@@ -1064,28 +1062,14 @@ public:
                           "Failed to register end event."))
         return Err;
 
-      // 60000 ms timeout (1 minute)
-      static constexpr int TimeoutMS = 60000;
-
 #ifdef _WIN32
-      const DWORD WaitRes = WaitForSingleObject(IS.Event, TimeoutMS);
-      if (WaitRes == WAIT_TIMEOUT)
-        return llvm::createStringError(std::errc::timed_out,
-                                       "Fence wait timed out");
-      if (WaitRes != WAIT_OBJECT_0)
-        return llvm::createStringError(std::errc::io_error,
-                                       "Unexpected WaitForSingleObject result");
-#else
+      WaitForSingleObject(IS.Event, INFINITE);
+#else // WSL
       pollfd PollEvent;
       PollEvent.fd = IS.Event;
       PollEvent.events = POLLIN;
       PollEvent.revents = 0;
-
-      int Ret = poll(&PollEvent, 1, TimeoutMS);
-      if (Ret == 0)
-        return llvm::createStringError(std::errc::timed_out,
-                                       "Fence wait timed out");
-      if (Ret < 0)
+      if (poll(&PollEvent, 1, -1) == -1)
         return llvm::createStringError(
             std::error_code(errno, std::system_category()), strerror(errno));
 #endif
@@ -1510,13 +1494,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error waitThenReturnErr(llvm::Error Err, InvocationState &IS) {
-    llvm::Error WaitErr = waitForSignal(IS);
-    if (WaitErr)
-      return llvm::joinErrors(std::move(WaitErr), std::move(Err));
-    return Err;
-  }
-
   llvm::Error executeProgram(Pipeline &P) override {
     llvm::sys::AddSignalHandler(
         [](void *Cookie) {
@@ -1556,12 +1533,14 @@ public:
     if (auto Err = createCommandStructures(State))
       return Err;
     llvm::outs() << "Command structures created.\n";
+
+    if (auto Err = createEvent(State))
+      return Err;
+    llvm::outs() << "Event prepared.\n";
+
     if (auto Err = createBuffers(P, State))
       return Err;
     llvm::outs() << "Buffers created.\n";
-    if (auto Err = createEvent(State))
-      return waitThenReturnErr(std::move(Err), State);
-    llvm::outs() << "Event prepared.\n";
 
     if (P.isCompute()) {
       // This is an arbitrary distinction that we could alter in the future.
@@ -1570,33 +1549,33 @@ public:
             std::errc::invalid_argument,
             "Compute pipeline must have exactly one compute shader.");
       if (auto Err = createComputePSO(P.Shaders[0].Shader->getBuffer(), State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "PSO created.\n";
       if (auto Err = createComputeCommands(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Compute command list created.\n";
 
     } else {
       // Create render target, readback and vertex buffer and PSO.
       if (auto Err = createRenderTarget(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Render target created.\n";
       if (auto Err = createVertexBuffer(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Vertex buffer created.\n";
       if (auto Err = createGraphicsPSO(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Graphics PSO created.\n";
       if (auto Err = createGraphicsCommands(P, State))
-        return waitThenReturnErr(std::move(Err), State);
+        return Err;
       llvm::outs() << "Graphics command list created complete.\n";
     }
 
     if (auto Err = executeCommandList(State))
-      return waitThenReturnErr(std::move(Err), State);
+      return Err;
     llvm::outs() << "Compute commands executed.\n";
     if (auto Err = readBack(P, State))
-      return waitThenReturnErr(std::move(Err), State);
+      return Err;
     llvm::outs() << "Read data back.\n";
 
     return llvm::Error::success();
