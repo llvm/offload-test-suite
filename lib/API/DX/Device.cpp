@@ -589,9 +589,8 @@ public:
 
     ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
     CommandQueue->UpdateTileMappings(
-        Buffer.Get(), 1, &StartCoord, &RegionSize, // One region
-        Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
-        D3D12_TILE_MAPPING_FLAG_NONE);
+        Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
+        &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
 
     return waitForSignal(IS);
   }
@@ -638,7 +637,6 @@ public:
           return Err;
       }
 
-      // Committed upload buffer
       ComPtr<ID3D12Resource> UploadBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
@@ -752,7 +750,6 @@ public:
           return Err;
       }
 
-      // Committed upload buffer
       ComPtr<ID3D12Resource> UploadBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
