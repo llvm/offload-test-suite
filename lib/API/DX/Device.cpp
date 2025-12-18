@@ -538,7 +538,7 @@ public:
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
-  UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
+  static UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
     UINT Ret;
     if (NumTiles.has_value())
       Ret = static_cast<UINT>(*NumTiles);
@@ -554,58 +554,56 @@ public:
     return Ret;
   }
 
-  llvm::Error setupTiledResource(Resource &R, InvocationState &IS,
-                                 const D3D12_RESOURCE_DESC ResDesc,
-                                 ComPtr<ID3D12Heap> &Heap,
-                                 ComPtr<ID3D12Resource> &Buffer) {
+  llvm::Error setupReservedResource(Resource &R, InvocationState &IS,
+                                    const D3D12_RESOURCE_DESC ResDesc,
+                                    ComPtr<ID3D12Heap> &Heap,
+                                    ComPtr<ID3D12Resource> &Buffer) {
     // Tile mapping setup (only skipped when TilesMapped is set to 0)
     const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
 
-    if (NumTiles > 0) {
-      // Create a Heap large enough for the mapped tiles
-      D3D12_HEAP_DESC HeapDesc = {};
-      HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-      HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-      HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
-                             D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-      HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+    if (NumTiles == 0)
+      return llvm::Error::success();
 
-      if (auto Err =
-              HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
-                          "Failed to create heap for tiled SRV resource."))
-        return Err;
+    // Create a Heap large enough for the mapped tiles
+    D3D12_HEAP_DESC HeapDesc = {};
+    HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
+                           D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
 
-      // Define one contiguous mapping region
-      const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
-      D3D12_TILE_REGION_SIZE RegionSize = {};
-      RegionSize.NumTiles = NumTiles;
-      RegionSize.UseBox = FALSE;
+    if (auto Err =
+            HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
+                        "Failed to create heap for tiled SRV resource."))
+      return Err;
 
-      const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
-      const UINT HeapRangeStartOffset = 0;
-      const UINT RangeTileCount = NumTiles;
+    // Define one contiguous mapping region
+    const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
+    D3D12_TILE_REGION_SIZE RegionSize = {};
+    RegionSize.NumTiles = NumTiles;
+    RegionSize.UseBox = FALSE;
 
-      ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
-      CommandQueue->UpdateTileMappings(
-          Buffer.Get(), 1, &StartCoord, &RegionSize, // One region
-          Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
-          D3D12_TILE_MAPPING_FLAG_NONE);
-    }
+    const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+    const UINT HeapRangeStartOffset = 0;
+    const UINT RangeTileCount = NumTiles;
+
+    ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
+    CommandQueue->UpdateTileMappings(
+        Buffer.Get(), 1, &StartCoord, &RegionSize, // One region
+        Heap.Get(), 1, &RangeFlag, &HeapRangeStartOffset, &RangeTileCount,
+        D3D12_TILE_MAPPING_FLAG_NONE);
+
     return llvm::Error::success();
   }
 
   llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
     ResourceBundle Bundle;
 
-    // for committed resources
-    const D3D12_HEAP_PROPERTIES HeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
     const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
+    const D3D12_HEAP_PROPERTIES UploadHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
         CD3DX12_RESOURCE_DESC::Buffer(R.size());
-    const D3D12_HEAP_PROPERTIES UploadHeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 
     uint32_t RegOffset = 0;
 
@@ -628,12 +626,16 @@ public:
                             "Failed to create reserved resource (buffer)."))
           return Err;
       } else {
-        if (auto Err =
-                HR::toError(Device->CreateCommittedResource(
-                                &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                                D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                IID_PPV_ARGS(&Buffer)),
-                            "Failed to create committed resource (buffer)."))
+        // for committed resources
+        const D3D12_HEAP_PROPERTIES CommittedResourceHeapProp =
+            CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+        if (auto Err = HR::toError(
+                Device->CreateCommittedResource(&CommittedResourceHeapProp,
+                                                D3D12_HEAP_FLAG_NONE, &ResDesc,
+                                                D3D12_RESOURCE_STATE_COMMON,
+                                                nullptr, IID_PPV_ARGS(&Buffer)),
+                "Failed to create committed resource (buffer)."))
           return Err;
       }
 
@@ -641,7 +643,7 @@ public:
       ComPtr<ID3D12Resource> UploadBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
-                  &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                   IID_PPV_ARGS(&UploadBuffer)),
               "Failed to create committed resource (upload buffer)."))
@@ -649,7 +651,7 @@ public:
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (IsReserved)
-        if (auto Err = setupTiledResource(R, IS, ResDesc, Heap, Buffer))
+        if (auto Err = setupReservedResource(R, IS, ResDesc, Heap, Buffer))
           return Err;
 
       // Upload data initialization
@@ -696,10 +698,6 @@ public:
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
 
-    // for committed resources
-    const D3D12_HEAP_PROPERTIES HeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-
     const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
 
     const D3D12_HEAP_PROPERTIES ReadBackHeapProp =
@@ -716,10 +714,10 @@ public:
         D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
         D3D12_RESOURCE_FLAG_NONE};
 
+    const D3D12_HEAP_PROPERTIES UploadHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
         CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
-    const D3D12_HEAP_PROPERTIES UploadHeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 
     uint32_t RegOffset = 0;
 
@@ -743,12 +741,16 @@ public:
                             "Failed to create reserved resource (buffer)."))
           return Err;
       } else {
-        if (auto Err =
-                HR::toError(Device->CreateCommittedResource(
-                                &HeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
-                                D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                IID_PPV_ARGS(&Buffer)),
-                            "Failed to create committed resource (buffer)."))
+        // for committed resources
+        const D3D12_HEAP_PROPERTIES CommittedResourceHeapProp =
+            CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+
+        if (auto Err = HR::toError(
+                Device->CreateCommittedResource(&CommittedResourceHeapProp,
+                                                D3D12_HEAP_FLAG_NONE, &ResDesc,
+                                                D3D12_RESOURCE_STATE_COMMON,
+                                                nullptr, IID_PPV_ARGS(&Buffer)),
+                "Failed to create committed resource (buffer)."))
           return Err;
       }
 
@@ -756,7 +758,7 @@ public:
       ComPtr<ID3D12Resource> UploadBuffer;
       if (auto Err = HR::toError(
               Device->CreateCommittedResource(
-                  &UploadHeapProps, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
+                  &UploadHeapProp, D3D12_HEAP_FLAG_NONE, &UploadResDesc,
                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
                   IID_PPV_ARGS(&UploadBuffer)),
               "Failed to create committed resource (upload buffer)."))
@@ -774,7 +776,7 @@ public:
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (IsReserved)
-        if (auto Err = setupTiledResource(R, IS, ResDesc, Heap, Buffer))
+        if (auto Err = setupReservedResource(R, IS, ResDesc, Heap, Buffer))
           return Err;
 
       // Upload data initialization
