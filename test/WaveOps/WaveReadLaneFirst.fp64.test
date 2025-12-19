@@ -310,8 +310,13 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# XFAIL: WARP
+# Bug https://github.com/llvm/offload-test-suite/issues/625
+# XFAIL: AMD && DirectX
+
 # Bug https://github.com/llvm/offload-test-suite/issues/433
+# XFAIL: WARP && arm64
+
+REQUIRES: Double
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
