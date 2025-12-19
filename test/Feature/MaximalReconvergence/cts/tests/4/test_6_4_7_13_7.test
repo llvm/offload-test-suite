@@ -7,12 +7,14 @@ StructuredBuffer<uint> InputA : register(t0);
 RWStructuredBuffer<uint4> OutputB : register(u1);
 
 bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> (bit % 32)) & 1) != 0; }
+static int outLoc = 0;
+static int invocationStride = 91;
 
-                    void func0() {
+                    void func0(uint gIndex) {
                         OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                         return;
                     }
-                    void func1() {
+                    void func1(uint gIndex) {
                         OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                         return;
                     }
@@ -20,8 +22,6 @@ bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> (bit % 32)) & 1)
 [numthreads(THREADS_X, THREADS_Y, 1)]
 void main(uint gIndex : SV_GroupIndex)
 {
-    int outLoc = 0;
-    int invocationStride = 91;
     if (InputA[1] == 1) {
         switch (WaveGetLaneIndex() & 3) {
             case 0:
@@ -55,7 +55,7 @@ void main(uint gIndex : SV_GroupIndex)
                         OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                     }
                 } else {
-                    func0();
+                    func0(gIndex);
                     OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                     if (InputA[0] == 0) {
                         for (int loopIdx0 = 0;
@@ -315,7 +315,7 @@ void main(uint gIndex : SV_GroupIndex)
                         OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                     }
                 } else {
-                    func1();
+                    func1(gIndex);
                     OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                     if (InputA[2] == 2) {
                         for (int loopIdx0 = 0;

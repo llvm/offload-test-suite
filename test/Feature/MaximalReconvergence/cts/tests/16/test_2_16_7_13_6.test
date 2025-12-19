@@ -7,13 +7,13 @@ StructuredBuffer<uint> InputA : register(t0);
 RWStructuredBuffer<uint4> OutputB : register(u1);
 
 bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> (bit % 32)) & 1) != 0; }
+static int outLoc = 0;
+static int invocationStride = 91;
 
 
 [numthreads(THREADS_X, THREADS_Y, 1)]
 void main(uint gIndex : SV_GroupIndex)
 {
-    int outLoc = 0;
-    int invocationStride = 91;
     OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
     if (WaveIsFirstLane()) {
         OutputB[(outLoc++)*invocationStride + gIndex].x = 0x10002;

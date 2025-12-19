@@ -7,8 +7,10 @@ StructuredBuffer<uint> InputA : register(t0);
 RWStructuredBuffer<uint4> OutputB : register(u1);
 
 bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> (bit % 32)) & 1) != 0; }
+static int outLoc = 0;
+static int invocationStride = 91;
 
-            void func0(int loopIdx0) {
+            void func0(uint gIndex, int loopIdx0) {
                 if (WaveIsFirstLane()) {
                     OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
                     OutputB[(outLoc++)*invocationStride + gIndex].x = 0x1012e;
@@ -18,8 +20,6 @@ bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> (bit % 32)) & 1)
 [numthreads(THREADS_X, THREADS_Y, 1)]
 void main(uint gIndex : SV_GroupIndex)
 {
-    int outLoc = 0;
-    int invocationStride = 91;
     for (int loopIdx0 = 0;
              loopIdx0 < InputA[5];
              loopIdx0++) {
@@ -405,7 +405,7 @@ void main(uint gIndex : SV_GroupIndex)
             }
         }
         if (WaveIsFirstLane()) {
-            func0(loopIdx0);
+            func0(gIndex, loopIdx0);
             OutputB[(outLoc++)*invocationStride + gIndex] = WaveActiveBallot(true);
             OutputB[(outLoc++)*invocationStride + gIndex].x = 0x10132;
             if (gIndex >= InputA[0x57]) {
