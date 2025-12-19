@@ -113,6 +113,7 @@ DescriptorSets:
       VulkanBinding:
         Binding: 0
       TilesMapped: 1
+      IsReserved: True
     - Name: Y
       Kind: StructuredBuffer
       DirectXBinding:
@@ -121,6 +122,7 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
       TilesMapped: 0
+      IsReserved: True
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
