@@ -100,6 +100,8 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
         config.available_features.add("QC")
+    if "llvmpipe" in device["Description"]:
+        config.available_features.add("lavapipe")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
@@ -130,6 +132,11 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
+
+        # Add all boolean features from api-query
+        for FeatureName, FeatureValue in device["Features"].items():
+            if isinstance(FeatureValue, bool) and FeatureValue:
+                config.available_features.add(FeatureName)
 
         # Add supported extensions.
         for Extension in device["Extensions"]:
