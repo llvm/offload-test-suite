@@ -165,6 +165,11 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
 
+        # Add all boolean features from api-query
+        for FeatureName, FeatureValue in device["Features"].items():
+            if isinstance(FeatureValue, bool) and FeatureValue:
+                config.available_features.add(FeatureName)
+
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])

@@ -17,12 +17,35 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <system_error>
 #include <vulkan/vulkan.h>
 
 using namespace offloadtest;
+
+// We use 64KB tile size because DX has a fixed tile size, and the offload test
+// suite must work for all APIs.
+constexpr uint32_t SparseBufferTileSize = 65536;
+
+static constexpr uint32_t InvalidQueueIndex =
+    std::numeric_limits<uint32_t>::max();
+
+static uint32_t findQueue(const VkQueueFamilyProperties *Props, uint32_t Count,
+                          VkQueueFlags Flags) {
+  for (uint32_t I = 0; I < Count; ++I) {
+    if ((Props[I].queueFlags & Flags) == Flags)
+      return I;
+  }
+  return InvalidQueueIndex;
+}
+
+static uint32_t getNumTiles(std::optional<uint32_t> NumTiles, size_t Size) {
+  if (NumTiles)
+    return *NumTiles;
+  return (Size + SparseBufferTileSize - 1) / SparseBufferTileSize;
+}
 
 #define VKFormats(FMT, BITS)                                                   \
   if (Channels == 1)                                                           \
@@ -65,6 +88,7 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
 static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
+    return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
   case ResourceKind::Texture2D:
@@ -409,6 +433,7 @@ private:
   VkPhysicalDeviceDriverProperties DriverProps;
   VkDevice Device = VK_NULL_HANDLE;
   VulkanQueue GraphicsQueue;
+  VulkanQueue SparseQueue;
   Capabilities Caps;
   using LayerVector = llvm::SmallVector<VkLayerProperties, 0>;
   LayerVector InstanceLayers;
@@ -534,33 +559,52 @@ public:
     vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &QueueCount,
                                              QueueFamilyProps.get());
 
-    std::optional<uint32_t> SelectedIdx;
-    for (uint32_t I = 0; I < QueueCount; ++I) {
-      const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
-      // Prefer family supporting both GRAPHICS and COMPUTE
-      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
-        SelectedIdx = static_cast<int>(I);
-        break;
-      }
+    uint32_t MainQueueIdx =
+        findQueue(QueueFamilyProps.get(), QueueCount,
+                  VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT |
+                      VK_QUEUE_SPARSE_BINDING_BIT);
+    uint32_t SparseQueueIdx = MainQueueIdx;
+
+    // If not found, find separate queues
+    if (MainQueueIdx == InvalidQueueIndex) {
+      MainQueueIdx = findQueue(QueueFamilyProps.get(), QueueCount,
+                               VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT);
+      SparseQueueIdx = findQueue(QueueFamilyProps.get(), QueueCount,
+                                 VK_QUEUE_SPARSE_BINDING_BIT);
     }
 
-    if (!SelectedIdx)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "No suitable queue family found.");
+    if (MainQueueIdx == InvalidQueueIndex)
+      return llvm::createStringError(
+          std::errc::no_such_device,
+          "No suitable queue family found for graphics and compute.");
 
-    const uint32_t QueueFamilyIdx = *SelectedIdx;
+    if (SparseQueueIdx == InvalidQueueIndex)
+      return llvm::createStringError(
+          std::errc::no_such_device,
+          "No suitable queue family found for sparse "
+          "binding.");
 
-    VkDeviceQueueCreateInfo QueueInfo = {};
     const float QueuePriority = 1.0f;
-    QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    QueueInfo.queueFamilyIndex = QueueFamilyIdx;
-    QueueInfo.queueCount = 1;
-    QueueInfo.pQueuePriorities = &QueuePriority;
+    std::vector<VkDeviceQueueCreateInfo> QueueCreateInfos;
+
+    auto AddQueueCreateInfo = [&](uint32_t QFamilyIndex) {
+      VkDeviceQueueCreateInfo QueueCreateInfo = {};
+      QueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      QueueCreateInfo.queueFamilyIndex = QFamilyIndex;
+      QueueCreateInfo.queueCount = 1;
+      QueueCreateInfo.pQueuePriorities = &QueuePriority;
+      QueueCreateInfos.push_back(QueueCreateInfo);
+    };
+
+    AddQueueCreateInfo(MainQueueIdx);
+    if (MainQueueIdx != SparseQueueIdx)
+      AddQueueCreateInfo(SparseQueueIdx);
 
     VkDeviceCreateInfo DeviceInfo = {};
     DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    DeviceInfo.queueCreateInfoCount = 1;
-    DeviceInfo.pQueueCreateInfos = &QueueInfo;
+    DeviceInfo.queueCreateInfoCount =
+        static_cast<uint32_t>(QueueCreateInfos.size());
+    DeviceInfo.pQueueCreateInfos = QueueCreateInfos.data();
 
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -593,21 +637,27 @@ public:
     if (vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Could not create Vulkan logical device.");
-    VkQueue DeviceQueue = VK_NULL_HANDLE;
-    vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
+    VkQueue MainQueue = VK_NULL_HANDLE;
+    vkGetDeviceQueue(Device, MainQueueIdx, 0, &MainQueue);
+    VkQueue SparseQueue = VK_NULL_HANDLE;
+    if (SparseQueueIdx != InvalidQueueIndex)
+      vkGetDeviceQueue(Device, SparseQueueIdx, 0, &SparseQueue);
 
-    const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
+    VulkanQueue GraphicsQueue = VulkanQueue(MainQueue, MainQueueIdx);
+    VulkanQueue VulkanSparseQueue = VulkanQueue(SparseQueue, SparseQueueIdx);
 
-    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
-                                          Device, std::move(GraphicsQueue),
-                                          std::move(InstanceLayers));
+    return std::make_unique<VulkanDevice>(
+        Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
+        std::move(VulkanSparseQueue), std::move(InstanceLayers));
   }
 
   VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
                VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
+               VulkanQueue SQ,
                llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
       : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
-        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
+        GraphicsQueue(std::move(Q)), SparseQueue(SQ),
+        InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -770,6 +820,11 @@ private:
 #define VULKAN_FLOAT_CONTROLS_FEATURE_BOOL(Name)                               \
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, FloatControlProp.Name)));
+
+#define VULKAN_SPARSE_PROPERTY_BOOL(Name)                                      \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, Props.sparseProperties.Name)));
+
 #define VULKAN_FEATURE_BOOL(Name)                                              \
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, Features.features.Name)));
@@ -822,65 +877,79 @@ public:
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
                                          VkMemoryPropertyFlags MemoryFlags,
-                                         size_t Size, void *Data = nullptr) {
-    VkBuffer Buffer;
-    VkDeviceMemory Memory;
-    VkBufferCreateInfo BufferInfo = {};
-    BufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    BufferInfo.size = Size;
-    BufferInfo.usage = Usage;
-    BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    if (vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Could not create buffer.");
-
+                                         size_t Size, void *Data = nullptr,
+                                         VkBufferCreateFlags Flags = 0) {
+    auto ExBuffer = createVkBuffer(Device, Size, Usage, Flags);
+    if (!ExBuffer)
+      return ExBuffer.takeError();
+    VkBuffer Buffer = *ExBuffer;
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
-    VkMemoryAllocateInfo AllocInfo = {};
-    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    AllocInfo.allocationSize = MemReqs.size;
-
     llvm::Expected<uint32_t> MemIdx =
         getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemoryFlags);
     if (!MemIdx)
       return MemIdx.takeError();
-
-    AllocInfo.memoryTypeIndex = *MemIdx;
-
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Memory allocation failed.");
+    auto ExMemory = allocateMemory(Device, MemReqs.size, *MemIdx);
+    if (!ExMemory)
+      return ExMemory.takeError();
+    VkDeviceMemory Memory = *ExMemory;
     if (Data) {
       void *Dst = nullptr;
       if (vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
         return llvm::createStringError(std::errc::not_enough_memory,
                                        "Failed to map memory.");
       memcpy(Dst, Data, Size);
-
       VkMappedMemoryRange Range = {};
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
       Range.memory = Memory;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
       vkFlushMappedMemoryRanges(Device, 1, &Range);
-
       vkUnmapMemory(Device, Memory);
     }
-
     if (vkBindBufferMemory(Device, Buffer, Memory, 0))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to bind buffer to memory.");
-
     return BufferRef{Buffer, Memory};
+  }
+
+  llvm::Expected<VkBuffer> createVkBuffer(VkDevice Device, size_t Size,
+                                          VkBufferUsageFlags Usage,
+                                          VkBufferCreateFlags Flags = 0) {
+    VkBuffer Buffer;
+    VkBufferCreateInfo BufferInfo = {};
+    BufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufferInfo.size = Size;
+    BufferInfo.usage = Usage;
+    BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferInfo.flags = Flags;
+
+    if (vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Could not create buffer.");
+    return Buffer;
+  }
+
+  llvm::Expected<VkDeviceMemory>
+  allocateMemory(VkDevice Device, VkDeviceSize Size, uint32_t MemoryTypeIndex) {
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = Size;
+    AllocInfo.memoryTypeIndex = MemoryTypeIndex;
+    VkDeviceMemory Memory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Memory allocation failed.");
+    return Memory;
   }
 
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
     if (B.Format == DataFormat::Depth32 && R.isReadWrite())
-      return llvm::createStringError(std::errc::invalid_argument,
-                                     "Image memory allocation failed.");
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth32 format is not supported for read-write resources.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
@@ -957,6 +1026,18 @@ public:
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
 
+  VkDeviceSize getCopySize(InvocationState &IS, Resource &R, VkBuffer Buffer) {
+    VkDeviceSize CopySize = R.size();
+    if (R.IsReserved) {
+      VkDeviceSize MappedSize =
+          static_cast<VkDeviceSize>(getNumTiles(R.TilesMapped, R.size())) *
+          SparseBufferTileSize;
+      if (CopySize > MappedSize)
+        CopySize = MappedSize;
+    }
+    return CopySize;
+  }
+
   llvm::Error createResource(Resource &R, InvocationState &IS) {
     // Samplers don't have backing data buffers, so handle them separately
     if (R.isSampler()) {
@@ -969,6 +1050,11 @@ public:
       IS.Resources.push_back(Bundle);
       return llvm::Error::success();
     }
+
+    if (!R.BufferPtr)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Resource '%s' has no backing buffer.",
+                                     R.Name.c_str());
 
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
@@ -995,14 +1081,23 @@ public:
 
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
-        auto ExDeviceBuf = createBuffer(
-            getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+        llvm::Expected<BufferRef> ExDeviceBuf =
+            R.IsReserved
+                ? createSparseBuffer(
+                      IS,
+                      getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size(),
+                      getNumTiles(R.TilesMapped, R.size()))
+                : createBuffer(getFlagBits(R.Kind) |
+                                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                   VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
         if (!ExDeviceBuf)
           return ExDeviceBuf.takeError();
+
         VkBufferCopy Copy = {};
-        Copy.size = R.size();
+        Copy.size = getCopySize(IS, R, ExDeviceBuf->Buffer);
         vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
                         &Copy);
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
@@ -1033,6 +1128,98 @@ public:
     }
     IS.Resources.push_back(Bundle);
     return llvm::Error::success();
+  }
+
+  llvm::Expected<BufferRef>
+  createSparseBuffer(InvocationState &IS, VkBufferUsageFlags Usage,
+                     VkMemoryPropertyFlags MemoryFlags, size_t Size,
+                     uint32_t TilesMapped) {
+    if (SparseQueue.Queue == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Sparse binding is not supported by the Vulkan device.");
+
+    auto ExBuffer = createVkBuffer(Device, Size, Usage,
+                                   VK_BUFFER_CREATE_SPARSE_BINDING_BIT |
+                                       VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT);
+    if (!ExBuffer)
+      return ExBuffer.takeError();
+    VkBuffer Buffer = *ExBuffer;
+
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
+
+    if (SparseBufferTileSize % MemReqs.alignment != 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Sparse buffer alignment must be a factor of 64KB.");
+
+    if (TilesMapped == 0)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "TilesMapped must be at least 1.");
+
+    // Calculate size for the mapped region (TilesMapped * SparseBufferTileSize)
+    VkDeviceSize MappedSize = TilesMapped * SparseBufferTileSize;
+
+    if (MappedSize > MemReqs.size)
+      MappedSize = MemReqs.size;
+
+    llvm::Expected<uint32_t> MemIdx =
+        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemoryFlags);
+    if (!MemIdx)
+      return MemIdx.takeError();
+
+    auto ExMemory = allocateMemory(Device, MappedSize, *MemIdx);
+    if (!ExMemory)
+      return ExMemory.takeError();
+    VkDeviceMemory Memory = *ExMemory;
+
+    // Bind the allocated memory to the start of the buffer
+    VkSparseMemoryBind Bind = {};
+    Bind.resourceOffset = 0;
+    Bind.size = MappedSize;
+    Bind.memory = Memory;
+    Bind.memoryOffset = 0;
+    Bind.flags = 0;
+
+    VkSparseBufferMemoryBindInfo BufferBindInfo = {};
+    BufferBindInfo.buffer = Buffer;
+    BufferBindInfo.bindCount = 1;
+    BufferBindInfo.pBinds = &Bind;
+
+    VkBindSparseInfo BindInfo = {};
+    BindInfo.sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO;
+    BindInfo.bufferBindCount = 1;
+    BindInfo.pBufferBinds = &BufferBindInfo;
+
+    // Use a fence to ensure binding is complete before use, though for simple
+    // cases strict ordering might suffice if on same queue. Ideally we should
+    // wait, but here we just submit. IS.Queue is used for commands. Note:
+    // vkQueueBindSparse requires the queue to support SPARSI_BINDING. We assume
+    // the main queue supports it.
+    VkFence Fence;
+    VkFenceCreateInfo FenceInfo = {};
+    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(Device, &FenceInfo, nullptr, &Fence))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create fence for sparse bind");
+
+    if (vkQueueBindSparse(SparseQueue.Queue, 1, &BindInfo, Fence) !=
+        VK_SUCCESS) {
+      vkDestroyFence(Device, Fence, nullptr);
+      return llvm::createStringError(std::errc::io_error,
+                                     "vkQueueBindSparse failed");
+    }
+
+    if (vkWaitForFences(Device, 1, &Fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+      vkDestroyFence(Device, Fence, nullptr);
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to wait for sparse bind fence");
+    }
+
+    vkDestroyFence(Device, Fence, nullptr);
+
+    return BufferRef{Buffer, Memory};
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
