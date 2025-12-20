@@ -14,8 +14,8 @@ void main() {
     Mat[0] = B.zyx;
 
     int2x3 Mat2;
-    Mat2[Index[1]] = Mat[1].yzx;
-    Mat2[1].zxy = Mat[Index[1]];
+    Mat2[Index[0]] = Mat[1].yzx;
+    Mat2[0].zxy = Mat[Index[1]];
 
     const uint COLS = 3;
     for(uint i = 0; i < 6; i++) {
@@ -50,7 +50,7 @@ Buffers:
     FillSize: 24
   - Name: ExpectedOut2
     Format: Int32
-    Data: [ 3, 2, 1, 5, 4, 6 ]
+    Data: [ 5, 4, 6, 3, 2, 1 ]
 Results:
   - Result: Out
     Rule: BufferExact
