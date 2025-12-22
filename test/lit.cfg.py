@@ -56,6 +56,22 @@ def getHighestShaderModel(features):
     return int(major), int(minor)
 
 
+def setWaveSizeFeaturesDirectX(config, device):
+    MinSize = device["Features"]["WaveLaneCountMin"]
+    MaxSize = device["Features"]["WaveLaneCountMax"]
+    if not MinSize or not MaxSize:
+        return
+
+    MinSizeInt = int(MinSize)
+    MaxSizeInt = int(MaxSize)
+
+    Wave_Prefix = "WaveSize_"
+
+    while MinSizeInt <= MaxSizeInt:
+        config.available_features.add(Wave_Prefix + str(MinSizeInt))
+        MinSizeInt *= 2
+
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
@@ -64,6 +80,7 @@ def setDeviceFeatures(config, device, compiler):
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
         config.available_features.add(config.warp_arch)
+
     if "Intel" in device["Description"]:
         config.available_features.add("Intel")
         if "UHD Graphics" in device["Description"] and API == "DirectX":
@@ -74,10 +91,6 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("NV")
-        NV50SeriesRegex = re.compile("NVIDIA GeForce [A-Z]+ 50[0-9]+")
-        NV50SeriesMatch = NV50SeriesRegex.match(device["Description"])
-        if NV50SeriesMatch and API == "DirectX":
-            config.available_features.add("NV-Reconvergence-Issue-320")
     if "AMD" in device["Description"]:
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
@@ -96,6 +109,7 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("Int64ShaderOps", False):
             config.available_features.add("Int64")
+        setWaveSizeFeaturesDirectX(config, device)
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")

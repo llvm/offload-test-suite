@@ -1,0 +1,71 @@
+#--- source.hlsl
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    int4x4 A = int4x4(In[0],  In[1],  In[2],  In[3],
+                      In[4],  In[5],  In[6],  In[7],
+                      In[8],  In[9],  In[10], In[11],
+                      In[12], In[13], In[14], In[15]);
+    
+    for (int i = 0; i < 4; i++) {
+        int4 B;
+        if (i % 2 == 0)
+            B = A[i];
+        else if (i % 3 == 0)
+            B = A[i].bagr;
+        else // i == 1
+            B.agrb = A[i]; // equivalent: B = A[1].bgar
+
+        for (int j = 0; j < 4; j++) {
+            Out[i*4 + j] = B[j];
+        }
+    }
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+  - Name: Out
+    Format: Int32
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 7, 6, 8, 5, 9, 10, 11, 12, 15, 16, 14, 13 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/170777
+# XFAIL: Clang
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

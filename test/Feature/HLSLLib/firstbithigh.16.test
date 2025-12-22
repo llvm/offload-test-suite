@@ -82,13 +82,8 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
-# Bug: No bit set terminal is returned as 4294901776 instead of 4294967295
-# XFAIL: DXC && Metal
-# Bug: Fails with 'gpu-exec: error: Failed to materializeAll.:'
-# XFAIL: Clang && Metal
-
-# Bug https://github.com/llvm/llvm-project/issues/145752
-# XFAIL: Clang && DirectX
+# Bug https://github.com/llvm/offload-test-suite/issues/602
+# XFAIL: Metal
 
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
 # Unsupported https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl

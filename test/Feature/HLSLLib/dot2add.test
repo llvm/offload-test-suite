@@ -89,11 +89,8 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/341
 # XFAIL: Metal
 
-# Bug https://github.com/llvm/llvm-project/issues/149561
-# XFAIL: Clang && Vulkan && !VK_KHR_shader_float_controls2
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7695
-# XFAIL: DXC && Vulkan
+# Bug https://github.com/llvm/llvm-project/issues/149561 and https://github.com/llvm/offload-test-suite/issues/568
+# XFAIL: Clang && Vulkan
 
 # REQUIRES: Half
 # RUN: split-file %s %t
