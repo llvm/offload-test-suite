@@ -12,6 +12,7 @@ on:
 jobs:
   Windows-D3D12-Warp-Clang:
     permissions:
+      contents: read
       checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
