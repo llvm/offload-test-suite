@@ -2,7 +2,6 @@ name: Execution Testing
 
 permissions:
   contents: read
-  checks: write
 
 on:
   pull_request:
@@ -15,6 +14,8 @@ concurrency:
 
 jobs:
   Exec-Tests-Windows:
+    permissions:
+      checks: write
     strategy:
       fail-fast: false
       matrix:
@@ -30,6 +31,8 @@ jobs:
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-Windows-Warp:
+    permissions:
+      checks: write
     strategy:
       fail-fast: false
       matrix:
@@ -45,6 +48,8 @@ jobs:
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-Extra:
+    permissions:
+      checks: write
     if: contains( github.event.pull_request.labels.*.name, 'test-all')
     strategy:
       fail-fast: false
@@ -61,6 +66,8 @@ jobs:
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-MacOS:
+    permissions:
+      checks: write
     strategy:
       fail-fast: false
       matrix:

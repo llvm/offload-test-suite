@@ -2,7 +2,6 @@ name: macOS Metal DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
@@ -14,6 +13,8 @@ on:
 
 jobs:
   macOS-Metal-DXC:
+    permissions:
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: macOS

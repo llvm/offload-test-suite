@@ -2,7 +2,6 @@ name: Windows Vulkan AMD Clang
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
@@ -14,6 +13,8 @@ on:
 
 jobs:
   Windows-VK-AMD-Clang:
+    permissions:
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows

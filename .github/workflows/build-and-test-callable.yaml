@@ -2,7 +2,6 @@ name: HLSL Test
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
@@ -104,6 +103,8 @@ on:
 
 jobs:
   build:
+    permissions:
+      checks: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
       - name: Checkout DXC

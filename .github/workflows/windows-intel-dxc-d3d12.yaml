@@ -2,7 +2,6 @@ name: Windows D3D12 Intel DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
