@@ -2,7 +2,6 @@ name: Windows Vulkan NVIDIA Clang
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
@@ -14,6 +13,9 @@ on:
 
 jobs:
   Windows-VK-NVIDIA-Clang:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
