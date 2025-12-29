@@ -45,7 +45,8 @@ public:
   virtual GPUAPI getAPI() const = 0;
   virtual llvm::Error executeProgram(Pipeline &P) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
-  virtual uint32_t getSubgroupSize() = 0;
+  virtual uint32_t getSubgroupSize() const = 0;
+  virtual std::pair<uint32_t, uint32_t> getMinMaxSubgroupSize() const = 0;
 
   virtual ~Device() = 0;
 

@@ -337,6 +337,28 @@ public:
     return Caps;
   }
 
+  uint32_t getSubgroupSize() const override {
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 Options1 = {};
+    if (FAILED(Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1,
+                                           &Options1, sizeof(Options1))))
+      return 0;
+    return Options1.WaveLaneCountMin;
+  }
+  std::pair<uint32_t, uint32_t> getMinMaxSubgroupSize() const override {
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 Options1 = {};
+    if (FAILED(Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1,
+                                           &Options1, sizeof(Options1))))
+      return {0, 0};
+    return {Options1.WaveLaneCountMin, Options1.WaveLaneCountMax};
+  }
+
+  void printExtra(llvm::raw_ostream &OS) override {
+    OS << "  SubgroupSize: " << getSubgroupSize() << "\n";
+    auto MinMax = getMinMaxSubgroupSize();
+    OS << "  MinSubgroupSize: " << MinMax.first << "\n";
+    OS << "  MaxSubgroupSize: " << MinMax.second << "\n";
+  }
+
   void queryCapabilities() {
     CD3DX12FeatureSupport Features;
     Features.Init(Device.Get());
