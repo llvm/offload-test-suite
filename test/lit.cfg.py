@@ -111,6 +111,9 @@ def setDeviceFeatures(config, device, compiler):
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
+        # Add subgroup size feature.
+        if "SubgroupSize" in device:
+            config.available_features.add("SubgroupSize" + str(device["SubgroupSize"]))
 
 
 offloader_args = []

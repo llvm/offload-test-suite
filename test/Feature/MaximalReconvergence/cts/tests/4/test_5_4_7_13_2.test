@@ -217,7 +217,7 @@ DescriptorSets:
 
 ...
 #--- end
-# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
+# UNSUPPORTED: Vulkan && ( !VK_KHR_shader_maximal_reconvergence || !SubgroupSize4 )
 
 # Bug: Some wave operations are not yet implemented.
 # XFAIL: Clang

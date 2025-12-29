@@ -325,6 +325,16 @@ public:
 
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+  uint32_t getSubgroupSize() override {
+    VkPhysicalDeviceSubgroupProperties SubgroupProps = {};
+    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 subgroupProperties2 = {};
+    subgroupProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    subgroupProperties2.pNext = &SubgroupProps;
+    vkGetPhysicalDeviceProperties2(Device, &subgroupProperties2);
+    return SubgroupProps.subgroupSize;
+  }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
@@ -361,6 +371,7 @@ public:
   }
 
   void printExtra(llvm::raw_ostream &OS) override {
+    OS << "  SubgroupSize: " << getSubgroupSize() << "\n";
     OS << "  Layers:\n";
     for (auto Layer : getLayers()) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
