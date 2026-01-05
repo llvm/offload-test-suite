@@ -125,7 +125,7 @@ static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
                                    "Failed creating PNG data");
   png_infop PNGInfo = png_create_info_struct(PNG);
   FILE *F = nullptr;
-  llvm::scope_exit ScopeExit([&PNG, &PNGInfo, &F]() {
+  const llvm::scope_exit ScopeExit([&PNG, &PNGInfo, &F]() {
     png_destroy_write_struct(&PNG, &PNGInfo);
     if (F)
       fclose(F);
@@ -192,7 +192,7 @@ llvm::Expected<Image> Image::loadPNG(llvm::StringRef Path) {
     return llvm::createStringError(std::errc::io_error,
                                    "Failed reading PNG header from file");
 
-  llvm::scope_exit ScopeExit([&PNG]() { png_image_free(&PNG); });
+  const llvm::scope_exit ScopeExit([&PNG]() { png_image_free(&PNG); });
 
   PNG.format = PNG_FORMAT_RGB;
   const size_t Size = PNG_IMAGE_SIZE(PNG);
