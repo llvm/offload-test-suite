@@ -81,9 +81,6 @@ DescriptorSets:
         Binding: 2
 #--- end
 
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7666
-# XFAIL: DXC && Vulkan
-
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -HV 202x -Fo %t.o %t/source.hlsl
