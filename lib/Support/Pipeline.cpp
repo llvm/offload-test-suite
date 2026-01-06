@@ -292,6 +292,7 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
   I.mapRequired("Kind", R.Kind);
   I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapOptional("TilesMapped", R.TilesMapped);
+  I.mapOptional("IsReserved", R.IsReserved);
   I.mapRequired("DirectXBinding", R.DXBinding);
   I.mapOptional("VulkanBinding", R.VKBinding);
 }

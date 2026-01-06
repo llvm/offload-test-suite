@@ -144,6 +144,7 @@ struct Resource {
   Buffer *BufferPtr = nullptr;
   bool HasCounter;
   std::optional<uint32_t> TilesMapped;
+  bool IsReserved = false;
 
   bool isRaw() const {
     switch (Kind) {

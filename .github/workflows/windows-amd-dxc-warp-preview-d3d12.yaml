@@ -2,7 +2,6 @@ name: Windows D3D12 Warp Preview DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
@@ -12,6 +11,9 @@ on:
 
 jobs:
   Windows-D3D12-Warp-DXC:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
