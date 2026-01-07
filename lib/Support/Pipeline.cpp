@@ -10,12 +10,29 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Pipeline.h"
+#include "llvm/ADT/DenseMap.h"
 
 using namespace offloadtest;
 
 static bool isFloatingPointFormat(DataFormat Format) {
   return Format == DataFormat::Float16 || Format == DataFormat::Float32 ||
          Format == DataFormat::Float64;
+}
+
+void IOPushConstants::getContent(llvm::SmallVectorImpl<uint8_t> &Output) const {
+  Output.clear();
+  for (const PushConstantValue &V : Values) {
+    size_t StartIndex = Output.size();
+    Output.resize(StartIndex + V.Data.size() + V.Offset);
+    memcpy(Output.data() + StartIndex + V.Offset, V.Data.data(), V.Data.size());
+  }
+}
+
+size_t IOPushConstants::size() const {
+  size_t Size = 0;
+  for (const PushConstantValue &V : Values)
+    Size += V.Offset + V.Data.size();
+  return Size;
 }
 
 namespace llvm {
@@ -30,6 +47,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
+  I.mapOptional("PushConstants", P.PushConstants);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
@@ -322,6 +340,59 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("VertexBuffer", B.VertexBuffer);
   I.mapOptional("VertexAttributes", B.VertexAttributes);
   I.mapOptional("RenderTarget", B.RenderTarget);
+}
+
+void MappingTraits<offloadtest::IOPushConstants>::mapping(
+    IO &I, offloadtest::IOPushConstants &B) {
+  I.mapOptional("Values", B.Values);
+}
+
+template <typename T>
+static void setData(IO &I, offloadtest::PushConstantValue &B) {
+  llvm::SmallVector<T, 4> Bytes;
+  I.mapRequired("Data", Bytes);
+  size_t Size = Bytes.size() * sizeof(T);
+  B.Data.resize(Size);
+  memcpy(B.Data.data(), Bytes.data(), Size);
+}
+
+void MappingTraits<offloadtest::PushConstantValue>::mapping(
+    IO &I, offloadtest::PushConstantValue &B) {
+  I.mapRequired("Format", B.Format);
+  I.mapOptional("Offset", B.Offset);
+
+  using DF = offloadtest::DataFormat;
+  switch (B.Format) {
+  case DF::Hex8:
+    return setData<llvm::yaml::Hex8>(I, B);
+  case DF::Hex16:
+    return setData<llvm::yaml::Hex16>(I, B);
+  case DF::Hex32:
+    return setData<llvm::yaml::Hex32>(I, B);
+  case DF::Hex64:
+    return setData<llvm::yaml::Hex64>(I, B);
+  case DF::UInt16:
+    return setData<uint16_t>(I, B);
+  case DF::UInt32:
+    return setData<uint32_t>(I, B);
+  case DF::UInt64:
+    return setData<uint64_t>(I, B);
+  case DF::Int16:
+    return setData<int16_t>(I, B);
+  case DF::Int32:
+    return setData<int32_t>(I, B);
+  case DF::Int64:
+    return setData<int64_t>(I, B);
+  case DF::Float16:
+    return setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
+  case DF::Float32:
+    return setData<float>(I, B);
+  case DF::Float64:
+    return setData<double>(I, B);
+  case DF::Bool:
+    return setData<uint32_t>(I, B); // Because sizeof(bool) is 1 but HLSL
+                                    // represents a bool using 4 bytes.
+  }
 }
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(

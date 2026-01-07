@@ -288,6 +288,31 @@ struct IOBindings {
   }
 };
 
+// Describes a contiguous group of bytes in a push constant block.
+struct PushConstantValue {
+  // Format used to describe this value in the YAML.
+  DataFormat Format;
+  // The bytes of this group.
+  llvm::SmallVector<char, 4> Data;
+  // The size of the padding in bytes at the start of this group.
+  size_t Offset;
+};
+
+// Describes the content of the push constant buffer.
+struct IOPushConstants {
+  // The values/group of values composing this buffer.
+  llvm::SmallVector<PushConstantValue> Values;
+
+  // True if there are no push constants.
+  bool empty() const { return size() == 0; }
+
+  // Layout the push constant content in output.
+  void getContent(llvm::SmallVectorImpl<uint8_t> &output) const;
+
+  // Returns the size in bytes of the whole push constant once laid out.
+  size_t size() const;
+};
+
 struct SpecializationConstant {
   uint32_t ConstantID;
   DataFormat Type;
@@ -307,6 +332,7 @@ struct Pipeline {
   RuntimeSettings Settings;
 
   IOBindings Bindings;
+  IOPushConstants PushConstants;
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -349,6 +375,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
 
 namespace llvm {
 namespace yaml {
@@ -383,6 +410,14 @@ template <> struct MappingTraits<offloadtest::VulkanBinding> {
 
 template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::IOPushConstants> {
+  static void mapping(IO &I, offloadtest::IOPushConstants &B);
+};
+
+template <> struct MappingTraits<offloadtest::PushConstantValue> {
+  static void mapping(IO &I, offloadtest::PushConstantValue &B);
 };
 
 template <> struct MappingTraits<offloadtest::VertexAttribute> {
