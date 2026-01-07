@@ -22,7 +22,7 @@ static bool isFloatingPointFormat(DataFormat Format) {
 void IOPushConstants::getContent(llvm::SmallVectorImpl<uint8_t> &Output) const {
   Output.clear();
   for (const PushConstantValue &V : Values) {
-    size_t StartIndex = Output.size();
+    const size_t StartIndex = Output.size();
     Output.resize(StartIndex + V.Data.size() + V.Offset);
     memcpy(Output.data() + StartIndex + V.Offset, V.Data.data(), V.Data.size());
   }
@@ -351,7 +351,7 @@ template <typename T>
 static void setData(IO &I, offloadtest::PushConstantValue &B) {
   llvm::SmallVector<T, 4> Bytes;
   I.mapRequired("Data", Bytes);
-  size_t Size = Bytes.size() * sizeof(T);
+  const size_t Size = Bytes.size() * sizeof(T);
   B.Data.resize(Size);
   memcpy(B.Data.data(), Bytes.data(), Size);
 }
