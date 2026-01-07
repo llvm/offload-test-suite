@@ -967,13 +967,13 @@ public:
     PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
     PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
 
-    VkPushConstantRange range = {};
+    VkPushConstantRange Range = {};
     if (!P.PushConstants.empty()) {
-      range.stageFlags = IS.getFullShaderStageMask();
-      range.offset = 0;
-      range.size = P.PushConstants.size();
+      Range.stageFlags = IS.getFullShaderStageMask();
+      Range.offset = 0;
+      Range.size = P.PushConstants.size();
       PipelineCreateInfo.pushConstantRangeCount = 1;
-      PipelineCreateInfo.pPushConstantRanges = &range;
+      PipelineCreateInfo.pPushConstantRanges = &Range;
     }
 
     if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
