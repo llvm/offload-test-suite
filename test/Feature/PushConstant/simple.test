@@ -1,0 +1,49 @@
+#--- source.hlsl
+struct S {
+  uint a;
+};
+
+[[vk::push_constant]] S buffer;
+
+RWStructuredBuffer<uint> output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  output[0] = buffer.a;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: output
+    Format: Int32
+    Data: [ 0, 0 ]
+PushConstants:
+  Values:
+    - Format: Int32
+      Data: [ 12 ]
+DescriptorSets:
+  - Resources:
+    - Name: output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+# UNSUPPORTED: Metal && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: output
+# CHECK: Data: [
+# CHECK: 12,
+# CHECK: 0
+# CHECK: ]
