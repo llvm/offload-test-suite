@@ -9,7 +9,7 @@ struct A {
 [[vk::binding(5)]]
 A a1 : register(u5);
 
-A a2;
+A a2; // will bind to register u0
   
 [numthreads(8, 1, 1)]
 void main(uint3 ID : SV_GroupThreadID) {

@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-// This test verifies handling of a array of structs with a resource.
+// This test verifies handling of an array of structs with a resource.
 
 struct A {
   RWBuffer<int> Buf;

@@ -48,12 +48,12 @@ Buffers:
     Data:
      [ 10, 20, 30, 40 ]
 
-  - Name: Buf_g_e_UavBufs1
+  - Name: Buf_g_e_UavBuf1
     Format: Int32
     Data:
       [ 100, 200, 300, 400 ]
 
-  - Name: Buf_g_UavBufs2
+  - Name: Buf_g_UavBuf2
     Format: Int32
     Data:
       [ 1000, 2000, 3000, 4000 ]
@@ -92,14 +92,14 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 4
-    - Name: Buf_g_e_UavBufs1
+    - Name: Buf_g_e_UavBuf1
       Kind: RWBuffer
       DirectXBinding:
         Register: 5
         Space: 0
       VulkanBinding:
         Binding: 5
-    - Name: Buf_g_UavBufs2
+    - Name: Buf_g_UavBuf2
       Kind: RWBuffer
       DirectXBinding:
         Register: 6

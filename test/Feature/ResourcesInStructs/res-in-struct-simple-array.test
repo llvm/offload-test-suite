@@ -12,8 +12,8 @@ B b2;
   
 [numthreads(4,1,1)]
 void main(uint3 ID : SV_GroupThreadID) {
-  float x = b1.Bufs[0][ID.x];
-  float y = b1.Bufs[1][ID.x];
+  int x = b1.Bufs[0][ID.x];
+  int y = b1.Bufs[1][ID.x];
   
   b2.Bufs[0][ID.x] = x + y;
   b2.Bufs[1][ID.x] = x * y;
