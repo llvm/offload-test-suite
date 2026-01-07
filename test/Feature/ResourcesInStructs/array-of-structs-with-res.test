@@ -4,7 +4,6 @@
 
 struct A {
   RWBuffer<int> Buf;
-  uint n;
 };
 
 A d[8] : register(u10);

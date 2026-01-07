@@ -14,6 +14,7 @@ class G : F {
   E e;
   StructuredBuffer<int> SrvBuf2;
   RWBuffer<int> UavBuf2;
+  uint n;
 };
 
 RWStructuredBuffer<int4> Out : register(u0);
@@ -118,6 +119,16 @@ DescriptorSets:
 
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/367
 # XFAIL: Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/642
+# XFAIL: Metal
+
+# Bug https://github.com/llvm/offload-test-suite/issues/643
+# XFAIL: Intel
+
+# Vulkan does not support global structures with buffers or structures
+# containing both resources and non-resources.
+# UNSUPPORTED: Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
