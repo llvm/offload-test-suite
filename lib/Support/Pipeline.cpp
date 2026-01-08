@@ -26,10 +26,11 @@ void PushConstantBlock::getContent(
     memcpy(Output.data() + V.OffsetInBytes, V.Data.data(), V.Data.size());
 }
 
-size_t PushConstantBlock::size() const {
-  size_t Size = 0;
+uint32_t PushConstantBlock::size() const {
+  uint32_t Size = 0;
   for (const PushConstantValue &V : Values)
-    Size = std::max(Size, V.OffsetInBytes + V.Data.size());
+    Size =
+        std::max(Size, V.OffsetInBytes + static_cast<uint32_t>(V.Data.size()));
   return Size;
 }
 
