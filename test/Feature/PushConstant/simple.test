@@ -24,6 +24,7 @@ Buffers:
 PushConstants:
   Values:
     - Format: Int32
+      Offset: 0
       Data: [ 12 ]
 DescriptorSets:
   - Resources:

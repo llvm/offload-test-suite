@@ -295,7 +295,7 @@ struct PushConstantValue {
   // The bytes of this group.
   llvm::SmallVector<char, 4> Data;
   // The size of the padding in bytes at the start of this group.
-  size_t Offset;
+  size_t OffsetInBytes;
 };
 
 // Describes the content of the push constant buffer.
