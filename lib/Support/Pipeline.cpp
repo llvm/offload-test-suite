@@ -19,13 +19,13 @@ static bool isFloatingPointFormat(DataFormat Format) {
          Format == DataFormat::Float64;
 }
 
-void IOPushConstants::getContent(llvm::SmallVectorImpl<uint8_t> &Output) const {
+void PushConstantBlock::getContent(llvm::SmallVectorImpl<uint8_t> &Output) const {
   Output.resize(size());
   for (const PushConstantValue &V : Values)
     memcpy(Output.data() + V.OffsetInBytes, V.Data.data(), V.Data.size());
 }
 
-size_t IOPushConstants::size() const {
+size_t PushConstantBlock::size() const {
   size_t Size = 0;
   for (const PushConstantValue &V : Values)
     Size = std::max(Size, V.OffsetInBytes + V.Data.size());
@@ -339,9 +339,9 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("RenderTarget", B.RenderTarget);
 }
 
-void MappingTraits<offloadtest::IOPushConstants>::mapping(
-    IO &I, offloadtest::IOPushConstants &B) {
-  I.mapOptional("Values", B.Values);
+void MappingTraits<offloadtest::PushConstantBlock>::mapping(IO &I, offloadtest::PushConstantBlock &B) {
+  I.mapRequired("Stage", B.Stage);
+  I.mapRequired("Values", B.Values);
 }
 
 template <typename T>
