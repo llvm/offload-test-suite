@@ -1,7 +1,6 @@
 #--- source.hlsl
 struct S {
   uint3 a;
-  // 4 byte padding
   uint  b;
 };
 
@@ -33,7 +32,7 @@ PushConstants:
       Offset: 0
       Data: [ 12, 13, 14 ]
     - Format: Int32
-      Offset: 16
+      Offset: 12
       Data: [ 15 ]
 DescriptorSets:
   - Resources:
@@ -47,6 +46,9 @@ DescriptorSets:
 ...
 #--- end
 # UNSUPPORTED: Metal || DirectX
+
+# Clang adds a 4-byte padding between `a` and `b`.
+# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
