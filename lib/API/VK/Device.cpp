@@ -968,8 +968,10 @@ public:
     PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
 
     llvm::SmallVector<VkPushConstantRange, 1> Ranges;
-    for (const auto& PCB : P.PushConstants) {
-      const VkPushConstantRange R = { getShaderStageFlag(PCB.Stage), /* offset= */ 0, static_cast<uint32_t>(PCB.size()) };
+    for (const auto &PCB : P.PushConstants) {
+      const VkPushConstantRange R = {getShaderStageFlag(PCB.Stage),
+                                     /* offset= */ 0,
+                                     static_cast<uint32_t>(PCB.size())};
       Ranges.emplace_back(std::move(R));
     }
     PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
@@ -1786,7 +1788,7 @@ public:
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
 
-    for (const auto& PCB : P.PushConstants) {
+    for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
       vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
