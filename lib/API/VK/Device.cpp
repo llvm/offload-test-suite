@@ -969,9 +969,9 @@ public:
 
     llvm::SmallVector<VkPushConstantRange, 1> Ranges;
     for (const auto &PCB : P.PushConstants) {
-      const VkPushConstantRange R = {getShaderStageFlag(PCB.Stage),
-                                     /* offset= */ 0,
-                                     static_cast<uint32_t>(PCB.size())};
+      const VkPushConstantRange R = {
+          static_cast<VkShaderStageFlags>(getShaderStageFlag(PCB.Stage)),
+          /* offset= */ 0, static_cast<uint32_t>(PCB.size())};
       Ranges.emplace_back(std::move(R));
     }
     PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
