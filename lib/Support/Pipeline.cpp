@@ -20,18 +20,15 @@ static bool isFloatingPointFormat(DataFormat Format) {
 }
 
 void IOPushConstants::getContent(llvm::SmallVectorImpl<uint8_t> &Output) const {
-  Output.clear();
-  for (const PushConstantValue &V : Values) {
-    const size_t StartIndex = Output.size();
-    Output.resize(StartIndex + V.Data.size() + V.Offset);
-    memcpy(Output.data() + StartIndex + V.Offset, V.Data.data(), V.Data.size());
-  }
+  Output.resize(size());
+  for (const PushConstantValue &V : Values)
+    memcpy(Output.data() + V.OffsetInBytes, V.Data.data(), V.Data.size());
 }
 
 size_t IOPushConstants::size() const {
   size_t Size = 0;
   for (const PushConstantValue &V : Values)
-    Size += V.Offset + V.Data.size();
+    Size = std::max(Size, V.OffsetInBytes + V.Data.size());
   return Size;
 }
 
@@ -359,7 +356,7 @@ static void setData(IO &I, offloadtest::PushConstantValue &B) {
 void MappingTraits<offloadtest::PushConstantValue>::mapping(
     IO &I, offloadtest::PushConstantValue &B) {
   I.mapRequired("Format", B.Format);
-  I.mapOptional("Offset", B.Offset);
+  I.mapRequired("Offset", B.OffsetInBytes);
 
   using DF = offloadtest::DataFormat;
   switch (B.Format) {
