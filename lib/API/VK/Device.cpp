@@ -967,14 +967,13 @@ public:
     PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
     PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
 
-    VkPushConstantRange Range = {};
-    if (!P.PushConstants.empty()) {
-      Range.stageFlags = IS.getFullShaderStageMask();
-      Range.offset = 0;
-      Range.size = P.PushConstants.size();
-      PipelineCreateInfo.pushConstantRangeCount = 1;
-      PipelineCreateInfo.pPushConstantRanges = &Range;
+    llvm::SmallVector<VkPushConstantRange, 1> Ranges;
+    for (const auto& PCB : P.PushConstants) {
+      const VkPushConstantRange R = { getShaderStageFlag(PCB.Stage), /* offset= */ 0, static_cast<uint32_t>(PCB.size()) };
+      Ranges.emplace_back(std::move(R));
     }
+    PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
+    PipelineCreateInfo.pPushConstantRanges = Ranges.data();
 
     if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
                                &IS.PipelineLayout))
@@ -1787,11 +1786,11 @@ public:
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
 
-    if (!P.PushConstants.empty()) {
+    for (const auto& PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
-      P.PushConstants.getContent(Data);
+      PCB.getContent(Data);
       vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
-                         IS.getFullShaderStageMask(), 0, Data.size(),
+                         getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }
 

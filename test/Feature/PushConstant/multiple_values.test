@@ -24,7 +24,8 @@ Buffers:
     Format: Int32
     Data: [ 0, 0 ]
 PushConstants:
-  Values:
+  - Stage: Compute
+    Values:
     - Format: Int32
       Offset: 0
       Data: [ 12 ]
