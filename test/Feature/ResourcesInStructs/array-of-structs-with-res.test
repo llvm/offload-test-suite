@@ -1,0 +1,107 @@
+#--- source.hlsl
+
+// This test verifies handling of an array of structs with a resource.
+
+struct A {
+  RWBuffer<int> Buf;
+};
+
+A d[8] : register(u10);
+A e[6];
+
+RWBuffer<int> Out : register(u100);
+  
+[numthreads(4, 1, 1)]
+void main(uint3 ID : SV_GroupThreadID) {
+  int x = d[2].Buf[ID.x];
+  int y = d[7].Buf[ID.x];
+
+  e[0].Buf[ID.x] = x + y;
+  e[1].Buf[ID.x] = x * y;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufD2
+    Format: Int32
+    Data:
+      [ 1, 2, 3, 4 ]
+
+  - Name: BufD7
+    Format: Int32
+    Data:
+      [ 10, 20, 30, 40 ]
+
+  - Name: BufE1
+    Format: Int32
+    FillSize: 16
+
+  - Name: BufE3
+    Format: Int32
+    FillSize: 16
+
+  - Name: ExpectedBufE1
+    Format: Int32
+    Data:
+      [ 11, 22, 33, 44 ]
+
+  - Name: ExpectedBufE3
+    Format: Int32
+    Data:
+      [ 10, 40, 90, 160 ]
+
+Results:
+  - Result: ExpectedResult1
+    Rule: BufferExact
+    Actual: BufE1
+    Expected: ExpectedBufE1
+
+  - Result: ExpectedResult2
+    Rule: BufferExact
+    Actual: BufE3
+    Expected: ExpectedBufE3
+
+DescriptorSets:
+  - Resources:
+    - Name: BufD2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 12
+        Space: 0
+      VulkanBinding:
+        Binding: 12
+    - Name: BufD7
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 17
+        Space: 0
+      VulkanBinding:
+        Binding: 17
+    - Name: BufE1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufE3
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

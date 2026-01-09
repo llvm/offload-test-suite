@@ -1,0 +1,81 @@
+#--- source.hlsl
+
+// This test verifies handling of a resource array in a struct.
+
+struct B {
+  RWBuffer<int> Bufs[2];
+};
+
+[[vk::binding(3)]]
+B b1 : register(u3);
+B b2;
+  
+[numthreads(4,1,1)]
+void main(uint3 ID : SV_GroupThreadID) {
+  int x = b1.Bufs[0][ID.x];
+  int y = b1.Bufs[1][ID.x];
+  
+  b2.Bufs[0][ID.x] = x + y;
+  b2.Bufs[1][ID.x] = x * y;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufB1
+    Format: Int32
+    ArraySize: 2
+    Data:
+      - [ 1, 2, 3, 4 ]
+      - [ 10, 20, 30, 40 ]
+
+  - Name: BufB2
+    Format: Int32
+    ArraySize: 2
+    FillSize: 16
+
+  - Name: ExpectedBufB2
+    Format: Int32
+    ArraySize: 2
+    Data:
+      - [ 11, 22, 33, 44 ]
+      - [ 10, 40, 90, 160 ]
+
+Results:
+  - Result: ExpectedResult
+    Rule: BufferExact
+    Actual: BufB2
+    Expected: ExpectedBufB2
+
+DescriptorSets:
+  - Resources:
+    - Name: BufB1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: BufB2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
+# XFAIL: Clang
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
