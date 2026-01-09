@@ -44,7 +44,7 @@ DescriptorSets:
 ...
 #--- end
 # UNSUPPORTED: Metal || DirectX
-# XFAIL: Windows && Intel && Vulkan
+# XFAIL: Windows && Intel && Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
