@@ -288,6 +288,34 @@ struct IOBindings {
   }
 };
 
+// Describes a contiguous group of bytes in a push constant block.
+struct PushConstantValue {
+  // Format used to describe those bytes in the YAML.
+  DataFormat Format;
+  // The bytes of this group.
+  llvm::SmallVector<char, 4> Data;
+  // The offset of this group from the start of the push constant buffer.
+  uint32_t OffsetInBytes;
+};
+
+// Describes the content of the push constant buffer.
+struct PushConstantBlock {
+  // The stages this is push constant is active for.
+  Stages Stage;
+
+  // The values/group of values composing this buffer.
+  llvm::SmallVector<PushConstantValue> Values;
+
+  // True if there are no push constants.
+  bool empty() const { return size() == 0; }
+
+  // Layout the push constant content in output.
+  void getContent(llvm::SmallVectorImpl<uint8_t> &output) const;
+
+  // Returns the size in bytes of the whole push constant once laid out.
+  uint32_t size() const;
+};
+
 struct SpecializationConstant {
   uint32_t ConstantID;
   DataFormat Type;
@@ -307,6 +335,7 @@ struct Pipeline {
   RuntimeSettings Settings;
 
   IOBindings Bindings;
+  llvm::SmallVector<PushConstantBlock> PushConstants;
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -349,6 +378,8 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantBlock)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
 
 namespace llvm {
 namespace yaml {
@@ -383,6 +414,14 @@ template <> struct MappingTraits<offloadtest::VulkanBinding> {
 
 template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::PushConstantValue> {
+  static void mapping(IO &I, offloadtest::PushConstantValue &B);
+};
+
+template <> struct MappingTraits<offloadtest::PushConstantBlock> {
+  static void mapping(IO &I, offloadtest::PushConstantBlock &B);
 };
 
 template <> struct MappingTraits<offloadtest::VertexAttribute> {

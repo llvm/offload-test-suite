@@ -966,6 +966,17 @@ public:
     PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
     PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
+
+    llvm::SmallVector<VkPushConstantRange, 1> Ranges;
+    for (const auto &PCB : P.PushConstants) {
+      const VkPushConstantRange R = {
+          static_cast<VkShaderStageFlags>(getShaderStageFlag(PCB.Stage)),
+          /* offset= */ 0, static_cast<uint32_t>(PCB.size())};
+      Ranges.emplace_back(std::move(R));
+    }
+    PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
+    PipelineCreateInfo.pPushConstantRanges = Ranges.data();
+
     if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
                                &IS.PipelineLayout))
       return llvm::createStringError(std::errc::device_or_resource_busy,
@@ -1776,6 +1787,14 @@ public:
       vkCmdBindDescriptorSets(IS.CmdBuffer, BindPoint, IS.PipelineLayout, 0,
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
+
+    for (const auto &PCB : P.PushConstants) {
+      llvm::SmallVector<uint8_t, 4> Data;
+      PCB.getContent(Data);
+      vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
+                         getShaderStageFlag(PCB.Stage), 0, Data.size(),
+                         Data.data());
+    }
 
     if (P.isCompute()) {
       const llvm::ArrayRef<int> DispatchSize =
