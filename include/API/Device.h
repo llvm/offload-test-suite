@@ -33,6 +33,8 @@ struct Pipeline;
 struct DeviceConfig {
   bool EnableDebugLayer = false;
   bool EnableValidationLayer = false;
+  int AdapterIndex = -1;
+  std::string AdapterSubstring = "";
 };
 
 class Device {
