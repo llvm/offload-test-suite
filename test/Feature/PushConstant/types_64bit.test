@@ -1,0 +1,93 @@
+#--- source.hlsl
+struct S {
+  double d;
+  uint64_t u64;
+  int64_t i64;
+};
+
+[[vk::push_constant]] S buffer;
+
+RWStructuredBuffer<double> output_d : register(u0);
+RWStructuredBuffer<uint64_t> output_u : register(u1);
+RWStructuredBuffer<int64_t> output_i : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  output_d[0] = buffer.d;
+  output_u[0] = buffer.u64;
+  output_i[0] = buffer.i64;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: output_d
+    Format: Float64
+    Data: [ 0.0 ]
+  - Name: output_u
+    Format: UInt64
+    Data: [ 0 ]
+  - Name: output_i
+    Format: Int64
+    Data: [ 0 ]
+PushConstants:
+  - Stage: Compute
+    Values:
+    - Format: Float64
+      Offset: 0
+      Data: [ 3.14159 ]
+    - Format: UInt64
+      Offset: 8
+      Data: [ 18446744073709551615 ]
+    - Format: Int64
+      Offset: 16
+      Data: [ -9223372036854775808 ]
+DescriptorSets:
+  - Resources:
+    - Name: output_d
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: output_u
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: output_i
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+# UNSUPPORTED: Metal || DirectX
+# REQUIRES: Double, Int64
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: output_d
+# CHECK: Data: [
+# CHECK: 3.14159
+# CHECK: ]
+
+# CHECK: Name: output_u
+# CHECK: Data: [
+# CHECK: 18446744073709551615
+# CHECK: ]
+
+# CHECK: Name: output_i
+# CHECK: Data: [
+# CHECK: -9223372036854775808
+# CHECK: ]

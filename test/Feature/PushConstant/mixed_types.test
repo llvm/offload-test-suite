@@ -1,0 +1,70 @@
+#--- source.hlsl
+struct Inner {
+  float2 v;
+};
+
+struct S {
+  int i;
+  Inner inner;
+  float arr[2];
+};
+
+[[vk::push_constant]] S buffer;
+
+RWStructuredBuffer<float> output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  output[0] = (float)buffer.i;
+  output[1] = buffer.inner.v.x;
+  output[2] = buffer.inner.v.y;
+  output[3] = buffer.arr[0];
+  output[4] = buffer.arr[1];
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: output
+    Format: Float32
+    Data: [ 0.0, 0.0, 0.0, 0.0, 0.0 ]
+PushConstants:
+  - Stage: Compute
+    Values:
+    - Format: Int32
+      Offset: 0
+      Data: [ 42 ]
+    - Format: Float32
+      Offset: 4
+      Data: [ 1.5, 2.5 ]
+    - Format: Float32
+      Offset: 12
+      Data: [ 3.5, 4.5 ]
+DescriptorSets:
+  - Resources:
+    - Name: output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+# UNSUPPORTED: Metal || DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: output
+# CHECK: Data: [
+# CHECK: 42,
+# CHECK: 1.5,
+# CHECK: 2.5,
+# CHECK: 3.5,
+# CHECK: 4.5
+# CHECK: ]

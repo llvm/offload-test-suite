@@ -1,0 +1,57 @@
+#--- source.hlsl
+struct S {
+  float2x2 m;
+};
+
+[[vk::push_constant]] S buffer;
+
+RWStructuredBuffer<float> output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  output[0] = buffer.m[0][0];
+  output[1] = buffer.m[0][1];
+  output[2] = buffer.m[1][0];
+  output[3] = buffer.m[1][1];
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: output
+    Format: Float32
+    Data: [ 0.0, 0.0, 0.0, 0.0 ]
+PushConstants:
+  - Stage: Compute
+    Values:
+    - Format: Float32
+      Offset: 0
+      Data: [ 1.0, 2.0, 3.0, 4.0 ]
+DescriptorSets:
+  - Resources:
+    - Name: output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+# UNSUPPORTED: Metal || DirectX
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: output
+# CHECK: Data: [
+# CHECK: 1,
+# CHECK: 3,
+# CHECK: 2,
+# CHECK: 4
+# CHECK: ]
