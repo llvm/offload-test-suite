@@ -1611,12 +1611,12 @@ static std::string getAdapterDescription(IDXCoreAdapter *Adapter) {
 }
 
 static bool icontains(std::string Hay, std::string Needle) {
-  auto toLower = [](std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    return s;
+  auto ToLower = [](std::string S) {
+    std::transform(S.begin(), S.end(), S.begin(),
+                   [](unsigned char C) { return (char)std::tolower(C); });
+    return S;
   };
-  return toLower(Hay).find(toLower(Needle)) != std::string::npos;
+  return ToLower(Hay).find(ToLower(Needle)) != std::string::npos;
 }
 
 llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
@@ -1654,10 +1654,10 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
   // If the user requested a specific adapter by substring, pick the first
   // match.
   if (!Config.AdapterSubstring.empty()) {
-    for (uint32_t i = 0; i < Count; ++i) {
+    for (uint32_t I = 0; I < Count; ++I) {
       ComPtr<IDXCoreAdapter> Adapter;
       if (auto Err =
-              HR::toError(AdapterList->GetAdapter(i, Adapter.GetAddressOf()),
+              HR::toError(AdapterList->GetAdapter(I, Adapter.GetAddressOf()),
                           "Failed to acquire adapter"))
         return Err;
       const std::string Desc = getAdapterDescription(Adapter.Get());
@@ -1677,8 +1677,8 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
 
   // Check Index is not -1 (i.e user wants to use index) and bounds check it.
   if (Config.AdapterIndex >= 0) {
-    const uint32_t idx = static_cast<uint32_t>(Config.AdapterIndex);
-    if (idx >= Count) {
+    const uint32_t Idx = static_cast<uint32_t>(Config.AdapterIndex);
+    if (Idx >= Count) {
       return llvm::createStringError(
           std::errc::result_out_of_range,
           "AdapterIndex %d out of range (have %u adapters).",
@@ -1687,7 +1687,7 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
 
     ComPtr<IDXCoreAdapter> Adapter;
     if (auto Err =
-            HR::toError(AdapterList->GetAdapter(idx, Adapter.GetAddressOf()),
+            HR::toError(AdapterList->GetAdapter(Idx, Adapter.GetAddressOf()),
                         "Failed to acquire adapter"))
       return Err;
 
