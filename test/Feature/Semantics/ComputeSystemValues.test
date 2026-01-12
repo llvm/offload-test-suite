@@ -1,0 +1,39 @@
+#--- system_values.hlsl
+RWStructuredBuffer<uint4> Out : register(u0);
+
+[numthreads(2, 1, 1)]
+void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID : SV_GroupThreadID, uint GI : SV_GroupIndex) {
+    Out[DTID.x] = uint4(DTID.x, GID.x, GTID.x, GI);
+}
+
+//--- system_values.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [2, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/system_values.hlsl
+# RUN: %offloader %t/system_values.yaml %t.o | FileCheck %s
+
+# CHECK: Name: Out
+# CHECK: [ 0, 0, 0, 0,
+# CHECK:   1, 0, 1, 1,
+# CHECK:   2, 1, 0, 0,
+# CHECK:   3, 1, 1, 1 ]

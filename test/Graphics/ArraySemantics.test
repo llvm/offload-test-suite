@@ -1,0 +1,91 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 position : POSITION;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    float arr[4] : MY_ARRAY;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput output;
+    output.position = input.position;
+    output.arr[0] = 1.0;
+    output.arr[1] = 2.0;
+    output.arr[2] = 3.0;
+    output.arr[3] = 4.0;
+    return output;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+    float arr[4] : MY_ARRAY;
+};
+
+RWStructuredBuffer<float> Out : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    Out[0] = input.arr[0];
+    Out[1] = input.arr[1];
+    Out[2] = input.arr[2];
+    Out[3] = input.arr[3];
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [ -1.0, -1.0, 0.0, 1.0,
+             3.0, -1.0, 0.0, 1.0,
+            -1.0,  3.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: ResultBuffer
+    Format: Float32
+    FillSize: 16
+    FillValue: 0.0
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang && !Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
+
+# CHECK: Name: ResultBuffer
+# CHECK: [ 1, 2, 3, 4 ]

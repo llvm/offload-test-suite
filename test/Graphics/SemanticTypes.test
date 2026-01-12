@@ -1,0 +1,101 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 position : POSITION;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    int    i_val    : MY_INT;
+    uint   u_val    : MY_UINT;
+    float  f_val    : MY_FLOAT;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput output;
+    output.position = input.position;
+    output.i_val = -1.0;
+    output.u_val = 2.0;
+    output.f_val = 3.5;
+    return output;
+}
+
+#--- pixel.hlsl
+struct S {
+    int   i_val;
+    uint  u_val;
+    float f_val;
+};
+
+struct PSInput {
+    float4 position : SV_POSITION;
+    int    i_val    : MY_INT;
+    uint   u_val    : MY_UINT;
+    float  f_val    : MY_FLOAT;
+};
+
+RWStructuredBuffer<S> Out : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    Out[0].i_val = input.i_val;
+    Out[0].u_val = input.u_val;
+    Out[0].f_val = input.f_val;
+
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [ -1.0, -1.0, 0.0, 1.0,
+             3.0, -1.0, 0.0, 1.0,
+            -1.0,  3.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 16
+  - Name: ResultBuffer
+    Format: Int32
+    FillSize: 12
+    FillValue: 0
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# UNSUPPORTED: Clang && !Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
+
+# CHECK: Name: ResultBuffer
+# 1080033280 == 0x40600000 == IEEE_754_f32(3.5)
+# CHECK: [ -1, 2, 1080033280 ]
