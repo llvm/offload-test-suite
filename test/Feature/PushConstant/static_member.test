@@ -6,7 +6,7 @@ struct S {
 };
 
 // Initialize static member
-static uint S::s = 20;
+uint S::s = 20;
 
 [[vk::push_constant]] S buffer;
 
