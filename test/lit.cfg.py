@@ -144,7 +144,7 @@ if config.offloadtest_enable_debug:
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
 if ShouldSearchByGPuName:
-    offloader_args.extend([f"-adapter-substring=\"{GPUName}\""])
+    offloader_args.extend([f'-adapter-substring="{GPUName}"'])
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
@@ -212,7 +212,11 @@ for device in devices["Devices"]:
             target_device = device
         elif is_warp and config.offloadtest_test_warp:
             target_device = device
-        elif not ShouldSearchByGPuName and not is_warp and not config.offloadtest_test_warp:
+        elif (
+            not ShouldSearchByGPuName
+            and not is_warp
+            and not config.offloadtest_test_warp
+        ):
             target_device = device
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
