@@ -315,6 +315,7 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/offload-test-suite/issues/433
 # XFAIL: WARP && arm64
+# XFAIL: WARP && DXC
 
 REQUIRES: Double
 
