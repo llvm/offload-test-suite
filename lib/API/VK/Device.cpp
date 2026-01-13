@@ -704,7 +704,7 @@ public:
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
-    ImageCreateInfo.mipLevels = 1;
+    ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
@@ -1192,7 +1192,8 @@ public:
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
-          ViewCreateInfo.subresourceRange.levelCount = 1;
+          ViewCreateInfo.subresourceRange.levelCount =
+              R.BufferPtr->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
@@ -1712,20 +1713,28 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::Buffer &B = *R.BufferPtr;
-      VkBufferImageCopy BufferCopyRegion = {};
-      BufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      BufferCopyRegion.imageSubresource.mipLevel = 0;
-      BufferCopyRegion.imageSubresource.baseArrayLayer = 0;
-      BufferCopyRegion.imageSubresource.layerCount = 1;
-      BufferCopyRegion.imageExtent.width = B.OutputProps.Width;
-      BufferCopyRegion.imageExtent.height = B.OutputProps.Height;
-      BufferCopyRegion.imageExtent.depth = 1;
-      BufferCopyRegion.bufferOffset = 0;
+      llvm::SmallVector<VkBufferImageCopy> Regions;
+      uint64_t CurrentOffset = 0;
+      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
+        VkBufferImageCopy Region = {};
+        Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        Region.imageSubresource.mipLevel = I;
+        Region.imageSubresource.baseArrayLayer = 0;
+        Region.imageSubresource.layerCount = 1;
+        Region.imageExtent.width = std::max(1, B.OutputProps.Width >> I);
+        Region.imageExtent.height = std::max(1, B.OutputProps.Height >> I);
+        Region.imageExtent.depth = std::max(1, B.OutputProps.Depth >> I);
+        Region.bufferOffset = CurrentOffset;
+        Regions.push_back(Region);
+        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
+                         Region.imageExtent.height * Region.imageExtent.depth *
+                         B.getElementSize();
+      }
 
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
-      SubRange.levelCount = 1;
+      SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
 
       VkImageMemoryBarrier ImageBarrier = {};
@@ -1745,8 +1754,8 @@ public:
                              nullptr, 1, &ImageBarrier);
 
         vkCmdCopyBufferToImage(IS.CmdBuffer, ResRef.Host.Buffer,
-                               ResRef.Image.Image, VK_IMAGE_LAYOUT_GENERAL, 1,
-                               &BufferCopyRegion);
+                               ResRef.Image.Image, VK_IMAGE_LAYOUT_GENERAL,
+                               Regions.size(), Regions.data());
       }
 
       ImageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1782,10 +1791,11 @@ public:
     if (!R.isReadWrite())
       return;
     if (R.isImage()) {
+      const offloadtest::Buffer &B = *R.BufferPtr;
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
-      SubRange.levelCount = 1;
+      SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
 
       VkImageMemoryBarrier ImageBarrier = {};
@@ -1805,20 +1815,28 @@ public:
                              nullptr, 1, &ImageBarrier);
       }
 
-      const offloadtest::Buffer &B = *R.BufferPtr;
-      VkBufferImageCopy BufferCopyRegion = {};
-      BufferCopyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      BufferCopyRegion.imageSubresource.mipLevel = 0;
-      BufferCopyRegion.imageSubresource.baseArrayLayer = 0;
-      BufferCopyRegion.imageSubresource.layerCount = 1;
-      BufferCopyRegion.imageExtent.width = B.OutputProps.Width;
-      BufferCopyRegion.imageExtent.height = B.OutputProps.Height;
-      BufferCopyRegion.imageExtent.depth = 1;
-      BufferCopyRegion.bufferOffset = 0;
+      llvm::SmallVector<VkBufferImageCopy> Regions;
+      uint64_t CurrentOffset = 0;
+      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
+        VkBufferImageCopy Region = {};
+        Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        Region.imageSubresource.mipLevel = I;
+        Region.imageSubresource.baseArrayLayer = 0;
+        Region.imageSubresource.layerCount = 1;
+        Region.imageExtent.width = std::max(1, B.OutputProps.Width >> I);
+        Region.imageExtent.height = std::max(1, B.OutputProps.Height >> I);
+        Region.imageExtent.depth = std::max(1, B.OutputProps.Depth >> I);
+        Region.bufferOffset = CurrentOffset;
+        Regions.push_back(Region);
+        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
+                         Region.imageExtent.height * Region.imageExtent.depth *
+                         B.getElementSize();
+      }
+
       for (auto &ResRef : R.ResourceRefs)
         vkCmdCopyImageToBuffer(IS.CmdBuffer, ResRef.Image.Image,
-                               VK_IMAGE_LAYOUT_GENERAL, ResRef.Host.Buffer, 1,
-                               &BufferCopyRegion);
+                               VK_IMAGE_LAYOUT_GENERAL, ResRef.Host.Buffer,
+                               Regions.size(), Regions.data());
 
       VkBufferMemoryBarrier Barrier = {};
       Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
