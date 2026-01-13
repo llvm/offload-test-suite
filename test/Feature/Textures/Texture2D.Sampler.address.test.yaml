@@ -1,0 +1,119 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState ClampSamp : register(s0);
+[[vk::binding(2, 0)]] SamplerState RepeatSamp : register(s1);
+[[vk::binding(3, 0)]] SamplerState BorderSamp : register(s2);
+[[vk::binding(4, 0)]] SamplerState MirrorSamp : register(s3);
+[[vk::binding(5, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // Texture 2x1: [Red, Green]
+  // Red covers [0.0, 0.5], Center 0.25
+  // Green covers [0.5, 1.0], Center 0.75
+
+  // Coordinate 1.25 is to the right of the texture.
+  float2 uv = float2(1.25, 0.5);
+
+  // 1. Clamp: Snaps 1.25 -> 1.0 (Edge). Result: Green.
+  Out[0] = Tex.SampleLevel(ClampSamp, uv, 0);
+
+  // 2. Repeat: Wraps 1.25 -> 0.25 (Start). Result: Red.
+  Out[1] = Tex.SampleLevel(RepeatSamp, uv, 0);
+
+  // 3. Border: 1.25 is outside. Result: Border Color (0,0,0,0).
+  Out[2] = Tex.SampleLevel(BorderSamp, uv, 0);
+
+  // 4. Mirror: Test at 1.75
+  // Range [1.0, 2.0] is mirrored [1.0, 0.0].
+  // 1.75 maps to 1.0 - (0.75) = 0.25 (Center of Red).
+  // Result: Red.
+  // Note: Repeat/Clamp would map 1.75 to Green (0.75 or 1.0).
+  Out[3] = Tex.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0 ] # Green
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.0, 1.0, 0.0, 1.0,  # Clamp -> Green
+            1.0, 0.0, 0.0, 1.0,  # Repeat -> Red
+            0.0, 0.0, 0.0, 0.0,  # Border -> Transparent Black
+            1.0, 0.0, 0.0, 1.0 ] # Mirror -> Red
+
+Samplers:
+  - Name: ClampSamp
+    Address: Clamp
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: RepeatSamp
+    Address: Repeat
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: BorderSamp
+    Address: Border
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: MirrorSamp
+    Address: Mirror
+    MinFilter: Nearest
+    MagFilter: Nearest
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: ClampSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: RepeatSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: BorderSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: MirrorSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+
+Results:
+  - Result: AddressTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

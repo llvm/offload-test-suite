@@ -127,7 +127,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-enum DXResourceKind { UAV, SRV, CBV };
+enum DXResourceKind { UAV, SRV, CBV, SAMPLER };
 
 static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   switch (RK) {
@@ -145,6 +145,9 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
 
   case ResourceKind::ConstantBuffer:
     return CBV;
+
+  case ResourceKind::Sampler:
+    return SAMPLER;
   }
   llvm_unreachable("All cases handled");
 }
@@ -206,6 +209,7 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::RWTexture2D:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::Sampler:
     llvm_unreachable("Not an SRV type!");
   }
   return Desc;
@@ -242,6 +246,7 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::Sampler:
     llvm_unreachable("Not a UAV type!");
   }
   return Desc;
@@ -938,6 +943,10 @@ public:
         Resources.push_back(std::make_pair(&R, *ExRes));
         break;
       }
+      case SAMPLER:
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Samplers are not yet implemented for DirectX.");
       }
       return llvm::Error::success();
     };

@@ -1,0 +1,92 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState LinearSamp : register(s0);
+[[vk::binding(2, 0)]] SamplerState PointSamp : register(s1);
+[[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // 2x2 Texture:
+  // (0,0) Red   (1,0) Green
+  // (0,1) Blue  (1,1) White
+
+  // Linear sample at center (0.5, 0.5)
+  // Should average all 4 pixels: (1+0+0+1)/4 = 0.5 for R, etc.
+  // Expected: (0.5, 0.5, 0.5, 1.0)
+  Out[0] = Tex.SampleLevel(LinearSamp, float2(0.5, 0.5), 0);
+
+  // Point sample at top-left center (0.25, 0.25)
+  // Should pick (0,0) -> Red
+  // Expected: (1.0, 0.0, 0.0, 1.0)
+  Out[1] = Tex.SampleLevel(PointSamp, float2(0.25, 0.25), 0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0 ] # White (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 32 # 2 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.5, 0.5, 0.5, 1.0,  # Linear Result
+            1.0, 0.0, 0.0, 1.0 ] # Point Result
+
+Samplers:
+  - Name: LinearSamp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+  - Name: PointSamp
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: LinearSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: PointSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+
+Results:
+  - Result: SamplerTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
