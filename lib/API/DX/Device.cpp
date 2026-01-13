@@ -123,11 +123,14 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
+    return D3D12_RESOURCE_DIMENSION_UNKNOWN;
   }
   llvm_unreachable("All cases handled");
 }
 
-enum DXResourceKind { UAV, SRV, CBV };
+enum DXResourceKind { UAV, SRV, CBV, SAMPLER };
 
 static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   switch (RK) {
@@ -145,6 +148,10 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
 
   case ResourceKind::ConstantBuffer:
     return CBV;
+
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
+    return SAMPLER;
   }
   llvm_unreachable("All cases handled");
 }
@@ -206,6 +213,8 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::RWTexture2D:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an SRV type!");
   }
   return Desc;
@@ -242,6 +251,8 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not a UAV type!");
   }
   return Desc;
@@ -417,6 +428,8 @@ public:
         case CBV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
+        case SAMPLER:
+          llvm_unreachable("Not an implemented yet.");
         }
         Ranges.get()[RangeIdx].NumDescriptors = R.BufferPtr->ArraySize;
         Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
@@ -938,6 +951,10 @@ public:
         Resources.push_back(std::make_pair(&R, *ExRes));
         break;
       }
+      case SAMPLER:
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Samplers are not yet implemented for DirectX.");
       }
       return llvm::Error::success();
     };
@@ -964,6 +981,8 @@ public:
         case CBV:
           HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
           break;
+        case SAMPLER:
+          llvm_unreachable("Not an implemented yet.");
         }
       }
     }
@@ -1146,6 +1165,8 @@ public:
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
+          case SAMPLER:
+            llvm_unreachable("Not an implemented yet.");
           }
           ++RootDescIt;
           break;
