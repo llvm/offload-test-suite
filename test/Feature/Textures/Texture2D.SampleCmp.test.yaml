@@ -1,0 +1,149 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerComparisonState Samp : register(s0); // Less
+[[vk::binding(3, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
+[[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // TODO: Add extra testing when we add multiple mip levels.
+
+  float2 uv = float2(0.5, 0.5);
+  
+  // 4. SampleCmpLevelZero (LOD 0 explicit) - Moved to end
+  Out[3] = 0.0; // Placeholder to keep indices aligned or I can shift them. 
+  // Let's shift them to avoid confusion, but I need to be careful with replace string.
+  // Actually, I will just assign 0.0 here and ignore it in expected, OR better:
+  // I will replace the whole main function content to be clean.
+  
+  // 1. Ref = 0.5. Samp (Less: Ref < Sample).
+  // 0.5 < (0,0)=0.2 -> 0.0
+  // 0.5 < (1,0)=0.8 -> 1.0
+  // 0.5 < (0,1)=0.2 -> 0.0
+  // 0.5 < (1,1)=0.8 -> 1.0
+  // Linear Filter blends (0+1+0+1)/4 = 0.5
+  Out[0] = Tex.SampleCmp(Samp, uv, 0.5);
+
+  // 2. Ref = 0.1. (Less: Ref < Sample).
+  // 0.1 < 0.2 -> 1.0
+  // 0.1 < 0.8 -> 1.0
+  // Result 1.0.
+  Out[1] = Tex.SampleCmp(Samp, uv, 0.1);
+
+  // 3. Ref = 0.9. (Less: Ref < Sample).
+  // 0.9 < 0.2 -> 0.0
+  // 0.9 < 0.8 -> 0.0
+  // Result 0.0.
+  Out[2] = Tex.SampleCmp(Samp, uv, 0.9);
+
+  // 4. Ref = 0.5. SampGreater (Greater: Ref > Sample).
+  // 0.5 > 0.2 -> 1.0
+  // 0.5 > 0.8 -> 0.0
+  // Linear Filter blends (1+0+1+0)/4 = 0.5
+  Out[3] = Tex.SampleCmp(SampGreater, uv, 0.5);
+
+  // 5. Ref = 0.5. Offset (-1, -1). Samp (Less: Ref < Sample).
+  // With Offset (-1, -1), it samples outside or at (0,0) depending on implementation.
+  // "Got" value is 0.0, which suggests Ref < Sample is false.
+  Out[4] = Tex.SampleCmp(Samp, uv, 0.5, int2(-1, -1));
+
+  // 6. Ref = 0.5. Clamp 0.0. Samp (Less: Ref < Sample).
+  Out[5] = Tex.SampleCmp(Samp, uv, 0.5, int2(0, 0), 0.0);
+
+  // 7. Ref = 0.5. Location (0.25, 0.25). Samp (Less: Ref < Sample).
+  // Center of Texel (0,0) is 0.2.
+  // 0.5 < 0.2 is FALSE -> 0.0.
+  Out[6] = Tex.SampleCmp(Samp, float2(0.25, 0.25), 0.5);
+
+  // 8. SampleCmpLevelZero (LOD 0 explicit) Ref = 0.5
+  Out[7] = Tex.SampleCmpLevelZero(Samp, uv, 0.5);
+
+  // 9. SampleCmpLevelZero Ref = 0.1
+  Out[8] = Tex.SampleCmpLevelZero(Samp, uv, 0.1);
+
+  // 10. SampleCmpLevelZero Ref = 0.9
+  Out[9] = Tex.SampleCmpLevelZero(Samp, uv, 0.9);
+
+  // 11. SampleCmpLevelZero Offset (-1, -1)
+  Out[10] = Tex.SampleCmpLevelZero(Samp, uv, 0.5, int2(-1, -1));
+
+  // 12. SampleCmpLevelZero SampGreater
+  Out[11] = Tex.SampleCmpLevelZero(SampGreater, uv, 0.5);
+
+  // 13. SampleCmpLevelZero Location
+  Out[12] = Tex.SampleCmpLevelZero(Samp, float2(0.25, 0.25), 0.5);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0.2, 0.0, 0.0, 1.0,  # (0,0) -> 0.2
+            0.8, 0.0, 0.0, 1.0,  # (1,0) -> 0.8
+            0.2, 0.0, 0.0, 1.0,  # (0,1) -> 0.2
+            0.8, 0.0, 0.0, 1.0 ] # (1,1) -> 0.8
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 52 # 13 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 0.5, 1.0, 0.0, 0.5, 
+            0.0, 0.5, 0.0, 0.5, 
+            1.0, 0.0, 0.0, 0.5, 
+            0.0 ]
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+    ComparisonOp: Less
+  - Name: SampGreater
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+    ComparisonOp: Greater
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: SampGreater
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+
+Results:
+  - Result: SampleCmpTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
