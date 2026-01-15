@@ -63,6 +63,10 @@ static cl::opt<bool> Validation("validation-layer",
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
+static cl::opt<bool> Capture("capture",
+			     cl::desc("Capture frame using RenderDoc. Currently \
+				      only supported for Vulkan on Windows."));
+
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
@@ -141,7 +145,7 @@ int run() {
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
-    ExitOnErr(D->executeProgram(PipelineDesc));
+    ExitOnErr(D->executeProgram(PipelineDesc, Capture));
 
     // check the results
     llvm::Error ResultErr = Error::success();

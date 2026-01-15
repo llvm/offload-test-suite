@@ -43,7 +43,7 @@ public:
   virtual const Capabilities &getCapabilities() = 0;
   virtual llvm::StringRef getAPIName() const = 0;
   virtual GPUAPI getAPI() const = 0;
-  virtual llvm::Error executeProgram(Pipeline &P) = 0;
+  virtual llvm::Error executeProgram(Pipeline &P, bool Capture = false) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual ~Device() = 0;
