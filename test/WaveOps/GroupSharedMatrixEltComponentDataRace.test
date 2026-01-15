@@ -1,0 +1,67 @@
+#--- source.hlsl
+
+// This tests that we can concurrently write to the components of a int4x4
+// as though it is an array. The large group size is used to force the write
+// to occur across multiple waves so that the datarace can be observed.
+
+RWStructuredBuffer<int> In : register(u0);
+RWStructuredBuffer<int> Out : register(u1);
+
+groupshared int4x4 SharedMat;
+
+[numthreads(32, 4, 4)]
+void main(uint3 ThreadID : SV_GroupThreadID) {
+  uint FlatIdx = ThreadID.y + ThreadID.z * 4;
+  if (ThreadID.x == 0) {
+    SharedMat[ThreadID.y][ThreadID.z] = In[FlatIdx];
+  }
+  GroupMemoryBarrierWithGroupSync();
+  if (ThreadID.x == 0) {
+    Out[FlatIdx] = SharedMat[ThreadID.y][ThreadID.z];
+  }
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+  - Name: Out
+    Format: Int32
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+
