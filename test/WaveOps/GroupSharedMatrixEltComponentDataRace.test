@@ -61,6 +61,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: https://github.com/llvm/llvm-project/issues/174629
+# XFAIL: Clang
+
 # Bug https://github.com/llvm/llvm-project/issues/172577
 # XFAIL: Clang && Vulkan
 
