@@ -1,13 +1,13 @@
 #--- source.hlsl
 
-// This tests that we can concurrently write to the components of a int4x4
+// This tests that we can concurrently write to the components of a float4x4
 // as though it is an array. The large group size is used to force the write
 // to occur across multiple waves so that the datarace can be observed.
 
-RWStructuredBuffer<int> In : register(u0);
-RWStructuredBuffer<int> Out : register(u1);
+RWStructuredBuffer<float> In : register(u0);
+RWStructuredBuffer<float> Out : register(u1);
 
-groupshared int4x4 SharedMat;
+groupshared float4x4 SharedMat;
 
 [numthreads(32, 4, 4)]
 void main(uint3 ThreadID : SV_GroupThreadID) {
@@ -29,17 +29,18 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
-    Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0 ]
   - Name: Out
-    Format: Int32
+    Format: Float32
     FillSize: 64
   - Name: ExpectedOut
-    Format: Int32
-    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0 ]
 Results:
   - Result: Out
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 0
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
@@ -62,13 +63,10 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/llvm-project/issues/174629
-# XFAIL: Clang
+# XFAIL: Clang && !WARP
 
 # Bug https://github.com/llvm/llvm-project/issues/172577
 # XFAIL: Clang && Vulkan
-
-# Bug https://github.com/llvm/offload-test-suite/issues/445
-# XFAIL: DirectX && Intel
 
 # Bug https://github.com/llvm/offload-test-suite/issues/452
 # XFAIL: Metal
