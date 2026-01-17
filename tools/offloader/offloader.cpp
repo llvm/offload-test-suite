@@ -63,6 +63,14 @@ static cl::opt<bool> Validation("validation-layer",
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
+static cl::opt<int> AdapterIndex("adapter-index",
+                                 cl::desc("Which GPU to use by index"),
+                                 cl::init(-1));
+static cl::opt<std::string>
+    AdapterSubstring("adapter-substring",
+                     cl::desc("Which GPU vendor to use by name"),
+                     cl::value_desc("<name>"), cl::init(""));
+
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
@@ -86,7 +94,8 @@ int main(int ArgC, char **ArgV) {
 
 int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
-  const DeviceConfig Config = {Debug, Validation};
+  const DeviceConfig Config = {Debug, Validation, AdapterIndex,
+                               AdapterSubstring};
   logAllUnhandledErrors(Device::initialize(Config), errs(),
                         "gpu-exec: warning: ");
 
