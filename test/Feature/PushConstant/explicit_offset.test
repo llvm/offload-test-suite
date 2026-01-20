@@ -45,7 +45,7 @@ DescriptorSets:
 #--- end
 # UNSUPPORTED: Metal || DirectX
 
-# vk::offset not working.
+# Unimplemented: https://github.com/llvm/llvm-project/issues/136896
 # XFAIL: Clang
 
 # RUN: split-file %s %t
