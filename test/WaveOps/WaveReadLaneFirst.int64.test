@@ -314,7 +314,8 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/offload-test-suite/issues/433
 # XFAIL: WARP && arm64
-# XFAIL: WARP && DXC
+# UNSUPPORTED: WARP && DXC
+# Apparently passing on AMD64, but cannot be differentiated.
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
