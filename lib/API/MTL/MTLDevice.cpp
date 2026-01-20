@@ -484,6 +484,47 @@ public:
   MTLDevice(MTL::Device *D) : Device(D) {
     Description = Device->name()->utf8String();
   }
+  uint32_t getSubgroupSize() const override {
+    const char *Src = R"(
+      #include <metal_stdlib>
+      using namespace metal;
+      kernel void k() {}
+    )";
+    NS::Error *Err = nullptr;
+    MTL::Library *Lib = Device->newLibrary(
+        NS::String::string(Src, NS::UTF8StringEncoding), nullptr, &Err);
+    if (!Lib) {
+      if (Err)
+        Err->release();
+      return 0;
+    }
+    MTL::Function *Func =
+        Lib->newFunction(NS::String::string("k", NS::UTF8StringEncoding));
+    Lib->release();
+    if (!Func)
+      return 0;
+    MTL::ComputePipelineState *PSO =
+        Device->newComputePipelineState(Func, &Err);
+    Func->release();
+    if (!PSO) {
+      if (Err)
+        Err->release();
+      return 0;
+    }
+    uint32_t SubgroupSize = PSO->threadExecutionWidth();
+    PSO->release();
+    return SubgroupSize;
+  }
+  void printExtra(llvm::raw_ostream &OS) override {
+    OS << "  SubgroupSize: " << getSubgroupSize() << "\n";
+  }
+
+  std::pair<uint32_t, uint32_t> getMinMaxSubgroupSize() const override {
+    // Metal currently only exposes a single subgroup size.
+    const uint32_t SGSize = getSubgroupSize();
+    return {SGSize, SGSize};
+  }
+
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
       queryCapabilities();
