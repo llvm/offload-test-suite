@@ -72,8 +72,12 @@ DescriptorSets:
 #--- end
 # UNSUPPORTED: Metal || DirectX
 #
-# FIXME: determine the row/col order?
-# XFAIL: Clang || DXC
+# XFAIL: Clang
+#   Clang: matrices support missing.
+#
+# XFAIL: DXC
+#   DXC observed output: [ 1, 3, 2, 4, 5, 7, 6, 8 ]
+#   Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8080
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
