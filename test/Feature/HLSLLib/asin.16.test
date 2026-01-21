@@ -61,6 +61,10 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: Looks like it might be a driver bug but the gpu is out of support
+# so we will not investigate this. 
+# XFAIL: Intel && Vulkan
+
 # REQUIRES: Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
