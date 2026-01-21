@@ -314,9 +314,7 @@ DescriptorSets:
 # XFAIL: AMD && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/433
-# XFAIL: WARP && arm64
-# UNSUPPORTED: WARP && DXC
-# Apparently passing on AMD64, but cannot be differentiated.
+# UNSUPPORTED: WARP
 
 REQUIRES: Double
 

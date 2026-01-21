@@ -313,9 +313,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/433
-# XFAIL: WARP && arm64
-# UNSUPPORTED: WARP && DXC
-# Apparently passing on AMD64, but cannot be differentiated.
+# UNSUPPORTED: WARP
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
