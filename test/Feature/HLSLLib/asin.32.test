@@ -65,6 +65,11 @@ DescriptorSets:
 # so we will not investigate this. 
 # XFAIL: Intel && Vulkan
 
+# Unimplemented: support for the Gis flag generating the
+# SignedZeroInfNanPreserve capability needs to be added to clang
+# https://github.com/llvm/llvm-project/issues/177497
+# XFAIL: Amd && Vulkan && Clang
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
