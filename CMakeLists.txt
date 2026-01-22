@@ -73,6 +73,7 @@ configure_file(
   ${CMAKE_CURRENT_BINARY_DIR}/include/Config.h)
 
 set(DIRECTX_HEADERS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third-party/DirectX-Headers)
+set(RENDERDOC_HEADERS_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third-party/Renderdoc)
 
 if (WIN32)
   message(STATUS "Including vendored zlib")
