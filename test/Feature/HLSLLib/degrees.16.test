@@ -25,8 +25,8 @@ Buffers:
   - Name: In
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x8001, 0x8000, 0x0000, 0x0001, 0x7c00, 0x3c00, 0xbc00, 0x4000, 0xc248, 0x4248,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1, -1, 2, -3.1415926, 3.1415926,
+    Data: [ 0x7e00, 0xfc00, 0x8c19, 0x8000, 0x0000, 0x0c19, 0x7c00, 0x3c00, 0xbc00, 0x4000, 0xc248, 0x4248,]
+    #  NaN, -Inf, -0.00025, -0, 0, 0.00025, Inf, 1, -1, 2, -3.1415926, 3.1415926,
   - Name: Out
     Format: Float16
     Stride: 8
@@ -34,8 +34,8 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x8039, 0x8000, 0x0000, 0x0039, 0x7c00, 0x5329, 0xd329, 0x5729, 0xd99f, 0x599f,]
-    #  NaN, -inf, --0.0000033974648, -0, 0, 0.0000033974648, inf, 57.295779, -57.295779, 114.592, -180, 180,
+    Data: [ 0x7e00, 0xfc00, 0xa356, 0x8000, 0x0000, 0x2356, 0x7c00, 0x5329, 0xd329, 0x5729, 0xd99f, 0x599f,]
+    #  NaN, -inf, -0.0143, -0, 0, 0.0143, inf, 57.295779, -57.295779, 114.592, -180, 180,
 Results:
   - Result: Test1
     Rule: BufferFloatULP
@@ -60,9 +60,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/572
-# XFAIL: QC && Vulkan
 
 # REQUIRES: Half
 # RUN: split-file %s %t
