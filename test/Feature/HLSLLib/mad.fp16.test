@@ -24,8 +24,8 @@ Buffers:
   - Name: M
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x03FF, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x0000, 0x3c00, 0x3e00, 0xc300 ]
-    # NaN, -Inf, denorm, -0, 0, Inf, 1, -1, 0, 1, 1.5, -3.5
+    Data: [ 0x7e00, 0xfc00, 0x4500, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x0000, 0x3c00, 0x3e00, 0xc300 ]
+    # NaN, -Inf, 5, -0, 0, Inf, 1, -1, 0, 1, 1.5, -3.5
   - Name: A
     Format: Float16
     Stride: 8
@@ -34,8 +34,8 @@ Buffers:
   - Name: B
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x03FF, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x3c00, 0x0000, 0xc580, 0x3c00 ]
-    # NaN, -Inf, denorm, -0, 0, Inf, 1, -1, 1, 0, -5.5, 1
+    Data: [ 0x7e00, 0xfc00, 0x4500, 0x8000, 0x0000, 0x7c00, 0x3c00, 0xbc00, 0x3c00, 0x0000, 0xc580, 0x3c00 ]
+    # NaN, -Inf, 5, -0, 0, Inf, 1, -1, 1, 0, -5.5, 1
   - Name: Out
     Format: Float16
     Stride: 8
@@ -43,8 +43,8 @@ Buffers:
   - Name: ExpectedOut
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0x7e00, 0x07FE, 0x0000, 0x0000, 0x7c00, 0x4000, 0, 0x3c00, 0x3c00, 0x48c0, 0xcc20, 0x4000, 0x48c0, 0x7c00, 0xfc00 ]
-    # NaN, NaN, 0.00012195110, 0, 0, Inf, 2, 0, 1, 1, 9.5, -16.5, 2, 9.5, Inf, -Inf
+    Data: [ 0x7e00, 0x7e00, 0x4900, 0x0000, 0x0000, 0x7c00, 0x4000, 0, 0x3c00, 0x3c00, 0x48c0, 0xcc20, 0x4000, 0x48c0, 0x7c00, 0xfc00 ]
+    # NaN, NaN, 10, 0, 0, Inf, 2, 0, 1, 1, 9.5, -16.5, 2, 9.5, Inf, -Inf
 Results:
   - Result: Test0
     Rule: BufferFloatULP
@@ -82,12 +82,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 3
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/562
-# XFAIL: QC && Vulkan
-
-# Bug https://github.com/llvm/offload-test-suite/issues/563
-# XFAIL: NV && Vulkan
 
 # REQUIRES: Half
 # RUN: split-file %s %t

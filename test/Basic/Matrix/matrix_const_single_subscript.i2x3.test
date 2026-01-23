@@ -93,7 +93,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/170534
+# Bug: https://github.com/llvm/offload-test-suite/issues/660
 # XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
