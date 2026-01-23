@@ -55,7 +55,7 @@ DescriptorSets:
 ...
 #--- end
 
-# REQUIRES: WaveSize_64
+# REQUIRES: WaveSize_128
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
