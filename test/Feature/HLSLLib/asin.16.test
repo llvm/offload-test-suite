@@ -62,13 +62,15 @@ DescriptorSets:
 #--- end
 
 # Bug: Looks like it might be a driver bug but the gpu is out of support
-# so we will not investigate this. 
-# XFAIL: Intel && Vulkan
+# so we will not investigate this.
+# only fails with DXC so once Gis spirv support is added to Clang I suspect it will
+# fail with clang as well.
+# XFAIL: Intel && Vulkan && DXC
 
 # Unimplemented: support for the Gis flag generating the
 # SignedZeroInfNanPreserve capability needs to be added to clang
 # https://github.com/llvm/llvm-project/issues/177497
-# XFAIL: Amd && Vulkan && Clang
+# XFAIL: AMD && Vulkan && Clang
 
 # REQUIRES: Half
 # RUN: split-file %s %t
