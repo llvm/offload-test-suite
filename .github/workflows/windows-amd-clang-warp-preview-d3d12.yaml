@@ -20,4 +20,4 @@ jobs:
       SKU: windows-amd
       TestTarget: check-hlsl-clang-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On -DWARP_VERSION=1.0.15-preview
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On -DWARP_VERSION=1.0.17
