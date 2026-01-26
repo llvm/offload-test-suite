@@ -200,7 +200,15 @@ struct Resource {
     case ResourceKind::Sampler:
     case ResourceKind::SamplerComparison:
       return true;
-    default:
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
       return false;
     }
   }
@@ -249,6 +257,10 @@ struct Resource {
     // ByteAddressBuffers are treated as 4-byte elements to match their memory
     // format.
     return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
+  }
+
+  uint32_t getArraySize() const {
+    return isSampler() ? 1 : BufferPtr->ArraySize;
   }
 
   uint32_t size() const {
@@ -401,12 +413,8 @@ struct Pipeline {
   uint32_t getDescriptorCountWithFlattenedArrays() const {
     uint32_t DescriptorCount = 0;
     for (auto &D : Sets)
-      for (auto &R : D.Resources) {
-        if (R.isSampler())
-          DescriptorCount += 1; // Sampler arrays not supported in YAML yet
-        else
-          DescriptorCount += R.BufferPtr->ArraySize;
-      }
+      for (auto &R : D.Resources)
+        DescriptorCount += R.getArraySize();
     return DescriptorCount;
   }
 

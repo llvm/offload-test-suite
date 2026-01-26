@@ -153,9 +153,18 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
-  default:
+  case ResourceKind::Buffer:
+  case ResourceKind::RWBuffer:
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::ConstantBuffer:
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an image view!");
   }
+  llvm_unreachable("All cases handled");
 }
 
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
@@ -798,7 +807,7 @@ public:
       }
     }
     if (R.HasCounter) {
-      for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
+      for (uint32_t I = 0; I < R.getArraySize(); ++I) {
         uint32_t CounterValue = 0;
         auto ExHostBuf = createBuffer(IS,
                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -995,14 +1004,10 @@ public:
     uint32_t DescriptorCounts[DescriptorTypesSize] = {0};
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
-        if (R.isSampler())
-          DescriptorCounts[getDescriptorType(R.Kind)] += 1;
-        else {
-          DescriptorCounts[getDescriptorType(R.Kind)] += R.BufferPtr->ArraySize;
-          if (R.HasCounter)
-            DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
-                R.BufferPtr->ArraySize;
-        }
+        DescriptorCounts[getDescriptorType(R.Kind)] += R.getArraySize();
+        if (R.HasCounter)
+          DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
+              R.getArraySize();
       }
     }
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
@@ -1046,14 +1051,14 @@ public:
               R.Name.c_str());
         Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
-        Binding.descriptorCount = R.isSampler() ? 1 : R.BufferPtr->ArraySize;
+        Binding.descriptorCount = R.getArraySize();
         Binding.stageFlags = IS.getFullShaderStageMask();
         Bindings.push_back(Binding);
         if (R.HasCounter) {
           VkDescriptorSetLayoutBinding CounterBinding = {};
           CounterBinding.binding = *R.VKBinding->CounterBinding;
           CounterBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterBinding.descriptorCount = R.BufferPtr->ArraySize;
+          CounterBinding.descriptorCount = R.getArraySize();
           CounterBinding.stageFlags = IS.getFullShaderStageMask();
           Bindings.push_back(CounterBinding);
         }
@@ -1121,7 +1126,7 @@ public:
           ImageInfoCount += 1;
           continue;
         }
-        const uint32_t Count = R.BufferPtr->ArraySize;
+        const uint32_t Count = R.getArraySize();
         if (R.isTexture())
           ImageInfoCount += Count;
         else if (R.isRaw())
@@ -1217,7 +1222,7 @@ public:
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = R.VKBinding->Binding;
-        WDS.descriptorCount = R.isSampler() ? 1 : R.BufferPtr->ArraySize;
+        WDS.descriptorCount = R.getArraySize();
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (R.isTexture() || R.isSampler())
           WDS.pImageInfo = &ImageInfos[IndexOfFirstBufferDataInArray];
@@ -1241,7 +1246,7 @@ public:
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
           CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
           CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
-          CounterWDS.descriptorCount = R.BufferPtr->ArraySize;
+          CounterWDS.descriptorCount = R.getArraySize();
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
           llvm::outs() << "Updating Counter Descriptor [" << OverallResIdx
@@ -1971,7 +1976,7 @@ public:
         }
         if (R.HasCounter) {
           R.BufferPtr->Counters.clear();
-          for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
+          for (uint32_t I = 0; I < R.getArraySize(); ++I) {
             uint32_t *Mapped = nullptr; // NOLINT(misc-const-correctness)
             auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
             vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,

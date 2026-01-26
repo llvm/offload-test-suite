@@ -429,15 +429,15 @@ public:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
         case SAMPLER:
-          llvm_unreachable("Not an implemented yet.");
+          llvm_unreachable("Not implemented yet.");
         }
-        Ranges.get()[RangeIdx].NumDescriptors = R.BufferPtr->ArraySize;
+        Ranges.get()[RangeIdx].NumDescriptors = R.getArraySize();
         Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
         Ranges.get()[RangeIdx].RegisterSpace = R.DXBinding.Space;
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
             DescriptorIdx;
         RangeIdx++;
-        DescriptorIdx += R.BufferPtr->ArraySize;
+        DescriptorIdx += R.getArraySize();
       }
       RootParams.push_back(
           D3D12_ROOT_PARAMETER{D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
@@ -982,7 +982,7 @@ public:
           HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
           break;
         case SAMPLER:
-          llvm_unreachable("Not an implemented yet.");
+          llvm_unreachable("Not implemented yet.");
         }
       }
     }
@@ -1127,7 +1127,7 @@ public:
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
           auto &Constant = std::get<dx::RootConstant>(Param.Data);
-          if (Constant.BufferPtr->ArraySize != 1)
+          if (Constant.getArraySize() != 1)
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root constant cannot refer to resource arrays.");
@@ -1145,7 +1145,7 @@ public:
           break;
         case dx::RootParamKind::RootDescriptor:
           assert(RootDescIt != IS.RootResources.end());
-          if (RootDescIt->first->BufferPtr->ArraySize != 1)
+          if (RootDescIt->first->getArraySize() != 1)
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root descriptor cannot refer to resource arrays.");
@@ -1166,7 +1166,7 @@ public:
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case SAMPLER:
-            llvm_unreachable("Not an implemented yet.");
+            llvm_unreachable("Not implemented yet.");
           }
           ++RootDescIt;
           break;
