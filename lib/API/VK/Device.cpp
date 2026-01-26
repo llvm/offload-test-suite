@@ -268,6 +268,8 @@ class VKDevice : public offloadtest::Device {
 private:
   VkPhysicalDevice Device;
   VkPhysicalDeviceProperties Props;
+  VkPhysicalDeviceDriverProperties DriverProps;
+  VkPhysicalDeviceProperties2 Props2;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
   LayerVector Layers;
@@ -377,9 +379,20 @@ private:
 public:
   VKDevice(VkPhysicalDevice D) : Device(D) {
     vkGetPhysicalDeviceProperties(Device, &Props);
-    const uint64_t StrSz =
+    const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
-    Description = std::string(Props.deviceName, StrSz);
+    Description = std::string(Props.deviceName, DeviceNameSz);
+#if defined(__APPLE__) && defined(__aarch64__)
+    DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    DriverProps.pNext = nullptr;
+    Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    Props2.pNext = &DriverProps;
+    vkGetPhysicalDeviceProperties2(Device, &Props2);
+    const uint64_t DriverNameSz =
+        strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
+    Description +=
+        " (" + std::string(DriverProps.driverName, DriverNameSz) + ")";
+#endif
   }
   VKDevice(const VKDevice &) = default;
 
