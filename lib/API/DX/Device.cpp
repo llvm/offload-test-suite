@@ -1600,24 +1600,6 @@ public:
   }
 };
 } // namespace
-static std::string getAdapterDescription(IDXCoreAdapter *Adapter) {
-  size_t BufferSize = 0;
-  Adapter->GetPropertySize(DXCoreAdapterProperty::DriverDescription,
-                           &BufferSize);
-  std::vector<char> DescVec(BufferSize);
-  Adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, BufferSize,
-                       DescVec.data());
-  return std::string(DescVec.data());
-}
-
-static bool icontains(std::string Hay, std::string Needle) {
-  auto ToLower = [](std::string S) {
-    std::transform(S.begin(), S.end(), S.begin(),
-                   [](unsigned char C) { return (char)std::tolower(C); });
-    return S;
-  };
-  return ToLower(Hay).find(ToLower(Needle)) != std::string::npos;
-}
 
 llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
 #ifdef _WIN32
@@ -1649,58 +1631,8 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
     return Err;
   }
 
-  const uint32_t Count = AdapterList->GetAdapterCount();
-
-  // If the user requested a specific adapter by substring, pick the first
-  // match.
-  if (!Config.AdapterSubstring.empty()) {
-    for (uint32_t I = 0; I < Count; ++I) {
-      ComPtr<IDXCoreAdapter> Adapter;
-      if (auto Err =
-              HR::toError(AdapterList->GetAdapter(I, Adapter.GetAddressOf()),
-                          "Failed to acquire adapter"))
-        return Err;
-      const std::string Desc = getAdapterDescription(Adapter.Get());
-      if (icontains(Desc, Config.AdapterSubstring)) {
-        auto ExDevice = DXDevice::create(Adapter, Config);
-        if (!ExDevice)
-          return ExDevice.takeError();
-        auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
-        Device::registerDevice(std::static_pointer_cast<Device>(ShPtr));
-        return llvm::Error::success();
-      }
-    }
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "No adapter matches substring \"%s\".",
-                                   Config.AdapterSubstring.c_str());
-  }
-
-  // Check Index is not -1 (i.e user wants to use index) and bounds check it.
-  if (Config.AdapterIndex >= 0) {
-    const uint32_t Idx = static_cast<uint32_t>(Config.AdapterIndex);
-    if (Idx >= Count) {
-      return llvm::createStringError(
-          std::errc::result_out_of_range,
-          "AdapterIndex %d out of range (have %u adapters).",
-          Config.AdapterIndex, Count);
-    }
-
-    ComPtr<IDXCoreAdapter> Adapter;
-    if (auto Err =
-            HR::toError(AdapterList->GetAdapter(Idx, Adapter.GetAddressOf()),
-                        "Failed to acquire adapter"))
-      return Err;
-
-    auto ExDevice = DXDevice::create(Adapter, Config);
-    if (!ExDevice)
-      return ExDevice.takeError();
-    auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
-    Device::registerDevice(std::static_pointer_cast<Device>(ShPtr));
-    return llvm::Error::success();
-  }
-
-  // Default behavior: register all adapters.
-  for (uint32_t AdapterIndex = 0; AdapterIndex < Count; ++AdapterIndex) {
+  for (unsigned AdapterIndex = 0; AdapterIndex < AdapterList->GetAdapterCount();
+       ++AdapterIndex) {
     ComPtr<IDXCoreAdapter> Adapter;
     if (auto Err = HR::toError(
             AdapterList->GetAdapter(AdapterIndex, Adapter.GetAddressOf()),

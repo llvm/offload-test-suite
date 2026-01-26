@@ -92,10 +92,14 @@ int main(int ArgC, char **ArgV) {
   return 0;
 }
 
+static bool icontains(StringRef GPUDescription, StringRef SearchStr) {
+  const llvm::Regex R(SearchStr, llvm::Regex::IgnoreCase);
+  return R.isValid() && R.match(GPUDescription);
+}
+
 int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
-  const DeviceConfig Config = {Debug, Validation, AdapterIndex,
-                               AdapterSubstring};
+  const DeviceConfig Config = {Debug, Validation};
   logAllUnhandledErrors(Device::initialize(Config), errs(),
                         "gpu-exec: warning: ");
 
@@ -145,12 +149,19 @@ int run() {
     return 1;
   }
 
+  int Index = 0;
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
+    if (AdapterIndex != -1 && AdapterIndex != Index)
+      continue;
+    if (!AdapterSubstring.empty() &&
+        !icontains(D->getDescription(), AdapterSubstring))
+      continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
+    ++Index;
 
     // check the results
     llvm::Error ResultErr = Error::success();

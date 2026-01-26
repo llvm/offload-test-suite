@@ -204,9 +204,10 @@ query_string = subprocess.check_output(api_query)
 devices = yaml.safe_load(query_string)
 target_device = None
 # Find the right device to configure against
+pattern = re.compile(GPUName, re.IGNORECASE)
 for device in devices["Devices"]:
     is_warp = "Microsoft Basic Render Driver" in device["Description"]
-    is_gpu_name_match = GPUName in device["Description"]
+    is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:
         if ShouldSearchByGPuName and is_gpu_name_match:
             target_device = device
@@ -221,7 +222,10 @@ for device in devices["Devices"]:
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
-        target_device = device
+        if ShouldSearchByGPuName and is_gpu_name_match:
+            target_device = device
+        elif not ShouldSearchByGPuName:
+            target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
         break
