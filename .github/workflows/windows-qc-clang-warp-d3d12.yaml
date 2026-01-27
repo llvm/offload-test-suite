@@ -2,18 +2,20 @@ name: Windows ARM64 D3D12 Warp Clang
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */2 * * *' # run every 2 hours
+    - cron: '0 */6 * * *' # run every 6 hours
   pull_request:
     paths:
      - .github/workflows/windows-qc-clang-warp-d3d12.yaml
 
 jobs:
   Windows-ARM64-D3D12-Warp-Clang:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows

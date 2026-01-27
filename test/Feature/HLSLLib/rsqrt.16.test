@@ -25,8 +25,8 @@ Buffers:
   - Name: In
     Format: Float16
     Stride: 8
-    Data: [ 0x7e00, 0xfc00, 0x8001, 0x8000, 0x0000, 0x03FF, 0x7c00, 0xbc00, 0x4c00, 0x5c00, 0x7bff, 0x7e00,]
-    #  NaN, -Inf, -denorm, -0, 0, 0.00006097555, Inf, -1, 16.0, 256.0, 65504,
+    Data: [ 0x7e00, 0xfc00, 0x8400, 0x8000, 0x0000, 0x0400, 0x7c00, 0xbc00, 0x4c00, 0x5c00, 0x7bff, 0x7e00,]
+    #  NaN, -Inf, -0.00006103515625, -0, 0, 0.00006103515625, Inf, -1, 16.0, 256.0, 65504,
   - Name: Out
     Format: Float16
     Stride: 8

@@ -1,0 +1,107 @@
+#--- source.hlsl
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Index : register(u1);
+RWBuffer<int> Out : register(u2);
+RWBuffer<int> Out2 : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+    int4 A = int4(In[0],  In[1],  In[2],  In[3]);
+    int4 B = int4(In[4],  In[5],  In[6],  In[7]);
+    int4 C = int4(In[8],  In[9],  In[10], In[11]);
+    int4 D = int4(In[12], In[13], In[14], In[15]);
+
+    int4x4 Mat;
+    Mat[Index[0]] = A;
+    Mat[Index[1]] = B;
+    Mat[Index[2]] = C;
+    Mat[Index[3]] = D;
+
+    int4x4 Mat2;
+    Mat2[Index[3]] = Mat[Index[0]];
+    Mat2[Index[2]] = Mat[Index[1]];
+    Mat2[Index[1]] = Mat[Index[2]];
+    Mat2[Index[0]] = Mat[Index[3]];
+
+    const uint COLS = 4;
+    for(int i = 0; i < 16; i++) {
+        uint row = i / COLS;
+        uint col = i % COLS;
+        Out[i] = Mat[row][col];
+        Out2[i] = Mat2[row][col];
+    }   
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+  - Name: Index
+    Format: Int32
+    Data: [ 2, 0, 3, 1 ]
+  - Name: Out
+    Format: Int32
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 5, 6, 7, 8, 13, 14, 15, 16, 1, 2, 3, 4, 9, 10, 11, 12]
+  - Name: Out2
+    Format: Int32
+    FillSize: 64
+  - Name: ExpectedOut2
+    Format: Int32
+    Data: [ 9, 10, 11, 12, 1, 2, 3, 4, 13, 14, 15, 16, 5, 6, 7, 8]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: Out2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Index
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/660
+# XFAIL: Vulkan && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

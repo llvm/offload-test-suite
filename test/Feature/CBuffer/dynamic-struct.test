@@ -107,8 +107,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/164517
-# XFAIL: Clang
+# Bug https://github.com/llvm/llvm-project/issues/172577
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl

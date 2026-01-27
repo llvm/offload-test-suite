@@ -789,8 +789,8 @@ public:
             std::errc::invalid_argument,
             "No RenderTarget buffer specified for graphics pipeline.");
       Resource FrameBuffer = {
-          ResourceKind::Texture2D,     "RenderTarget", {},          {},
-          P.Bindings.RTargetBufferPtr, false,          std::nullopt};
+          ResourceKind::Texture2D,     "RenderTarget", {},           {},
+          P.Bindings.RTargetBufferPtr, false,          std::nullopt, false};
       IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
       IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
       IS.FrameBufferResource.ImageLayout =
@@ -817,8 +817,8 @@ public:
             std::errc::invalid_argument,
             "No Vertex buffer specified for graphics pipeline.");
       const Resource VertexBuffer = {
-          ResourceKind::StructuredBuffer, "VertexBuffer", {},          {},
-          P.Bindings.VertexBufferPtr,     false,          std::nullopt};
+          ResourceKind::StructuredBuffer, "VertexBuffer", {},           {},
+          P.Bindings.VertexBufferPtr,     false,          std::nullopt, false};
       auto ExVHostBuf =
           createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),
@@ -966,6 +966,17 @@ public:
     PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
     PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
+
+    llvm::SmallVector<VkPushConstantRange, 1> Ranges;
+    for (const auto &PCB : P.PushConstants) {
+      const VkPushConstantRange R = {
+          static_cast<VkShaderStageFlags>(getShaderStageFlag(PCB.Stage)),
+          /* offset= */ 0, static_cast<uint32_t>(PCB.size())};
+      Ranges.emplace_back(std::move(R));
+    }
+    PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
+    PipelineCreateInfo.pPushConstantRanges = Ranges.data();
+
     if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
                                &IS.PipelineLayout))
       return llvm::createStringError(std::errc::device_or_resource_busy,
@@ -1776,6 +1787,14 @@ public:
       vkCmdBindDescriptorSets(IS.CmdBuffer, BindPoint, IS.PipelineLayout, 0,
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
+
+    for (const auto &PCB : P.PushConstants) {
+      llvm::SmallVector<uint8_t, 4> Data;
+      PCB.getContent(Data);
+      vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
+                         getShaderStageFlag(PCB.Stage), 0, Data.size(),
+                         Data.data());
+    }
 
     if (P.isCompute()) {
       const llvm::ArrayRef<int> DispatchSize =
