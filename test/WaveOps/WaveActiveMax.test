@@ -87,7 +87,7 @@ DescriptorSets:
 # DirectX driver implementations seem to match SPIR-V, except WARP, which does
 # not treat -INF as an identity.
 
-# XFAIL: !x64 && DirectX && WARP
+# XFAIL: arm64 && DirectX && WARP
 
 
 # CHECK: Name: Nans
