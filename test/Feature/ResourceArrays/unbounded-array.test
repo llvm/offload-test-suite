@@ -56,6 +56,7 @@ DescriptorSets:
 
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
+# XFAIL: DXC && Vulkan && KosmicKrisp
 
 # Bug https://github.com/llvm/offload-test-suite/issues/556
 # XFAIL: Vulkan && QC && Clang
