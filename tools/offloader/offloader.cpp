@@ -63,9 +63,6 @@ static cl::opt<bool> Validation("validation-layer",
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
-static cl::opt<int> AdapterIndex("adapter-index",
-                                 cl::desc("Which GPU to use by index"),
-                                 cl::init(-1));
 static cl::opt<std::string>
     AdapterSubstring("adapter-substring",
                      cl::desc("Which GPU vendor to use by name"),
@@ -149,19 +146,15 @@ int run() {
     return 1;
   }
 
-  int Index = 0;
   for (const auto &D : Device::devices()) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
-    if (AdapterIndex != -1 && AdapterIndex != Index)
-      continue;
     if (!AdapterSubstring.empty() &&
         !icontains(D->getDescription(), AdapterSubstring))
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
-    ++Index;
 
     // check the results
     llvm::Error ResultErr = Error::success();

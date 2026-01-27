@@ -268,8 +268,8 @@ class VKDevice : public offloadtest::Device {
 private:
   VkPhysicalDevice Device;
   VkPhysicalDeviceProperties Props;
-  VkPhysicalDeviceDriverProperties DriverProps;
   VkPhysicalDeviceProperties2 Props2;
+  VkPhysicalDeviceDriverProperties DriverProps;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
   LayerVector Layers;
