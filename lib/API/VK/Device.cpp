@@ -382,7 +382,6 @@ public:
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
-#if defined(__APPLE__) && defined(__aarch64__)
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     DriverProps.pNext = nullptr;
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
@@ -390,9 +389,8 @@ public:
     vkGetPhysicalDeviceProperties2(Device, &Props2);
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
-    Description +=
-        " (" + std::string(DriverProps.driverName, DriverNameSz) + ")";
-#endif
+    DriverName = std::string(DriverProps.driverName, DriverNameSz);
+    Description += " (" + DriverName + ")";
   }
   VKDevice(const VKDevice &) = default;
 
