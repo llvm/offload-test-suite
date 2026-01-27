@@ -1127,7 +1127,7 @@ public:
         switch (Param.Kind) {
         case dx::RootParamKind::Constant: {
           auto &Constant = std::get<dx::RootConstant>(Param.Data);
-          if (Constant.getArraySize() != 1)
+          if (Constant.BufferPtr->ArraySize != 1)
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root constant cannot refer to resource arrays.");
