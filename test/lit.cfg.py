@@ -79,7 +79,6 @@ def setDeviceFeatures(config, device, compiler):
     config.available_features.add(config.offloadtest_os)
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
-        print(config.warp_arch)
         config.available_features.add(config.warp_arch)
 
     if "Intel" in device["Description"]:
