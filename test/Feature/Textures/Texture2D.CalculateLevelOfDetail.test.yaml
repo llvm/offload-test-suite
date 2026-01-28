@@ -1,0 +1,86 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp : register(s0);
+[[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+
+[numthreads(2, 2, 1)]
+void main(uint3 GTid : SV_GroupThreadID) {
+  // Case 1: Derivative = 0.5. Texture Size = 4.
+  // LOD = log2(0.5 * 4) = 1.0
+  float2 uv0 = 0.25 + float2(GTid.xy) * 0.5;
+  
+  // Case 2: Derivative = 2.0. Texture Size = 4.
+  // LOD = log2(2.0 * 4) = 3.0.
+  // Note: Since the texture has 3 mip levels (0, 1, 2), 
+  // the clamped LOD will be 2.0.
+  float2 uv1 = 0.25 + float2(GTid.xy) * 2.0;
+
+  if (all(GTid.xy == 0)) {
+    Out[0] = Tex.CalculateLevelOfDetail(Samp, uv0);
+    Out[1] = Tex.CalculateLevelOfDetail(Samp, uv1);
+    Out[2] = Tex.CalculateLevelOfDetailUnclamped(Samp, uv0);
+    Out[3] = Tex.CalculateLevelOfDetailUnclamped(Samp, uv1);
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
+    FillSize: 336 # (16+4+1)*16
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 16 # 4 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 1.0, 2.0, 1.0, 3.0 ]
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: LODTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
+# Unimplemented: Clang + VK: https://github.com/llvm/llvm-project/issues/175630
+# XFAIL: DirectX || Metal || Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
