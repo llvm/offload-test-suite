@@ -68,7 +68,12 @@ DescriptorSets:
 # XFAIL: QC && Vulkan && Clang
 
 # Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2594
-# XFAIL: Vulkan && Darwin && MoltenVK && Clang
+# XFAIL: Vulkan && MoltenVK && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/680
+# Expects: [ 3, 3, 3, 3, 2, 2, 0 ] 
+# Retsult: [ 3, 3, 3, 3, 4, 4, 0 ]
+# XFAIL: Vulkan && KosmicKrisp && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

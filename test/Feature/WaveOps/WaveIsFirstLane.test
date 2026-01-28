@@ -65,6 +65,11 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/681
+# Expected: [ 1, 0, 1, 1, 1, 0, 0, 0 ]
+# Result:   [ 1, 0, 0, 0, 1, 0, 0, 0 ]
+# XFAIL: Vulkan && KosmicKrisp
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
