@@ -24,7 +24,7 @@ function(setup_warp version)
   guess_nuget_arch(NUGET_ARCH)
 
   if (version STREQUAL "LKG")
-    set(version "1.0.15")
+    set(version "1.0.17")
     set(version_description "Latest Known Good for ${NUGET_ARCH} (${version})")
   else ()
     set(version_description "Custom (${version})")
