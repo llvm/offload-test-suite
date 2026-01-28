@@ -332,7 +332,7 @@ DescriptorSets:
 # XFAIL: NV && Clang && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/355
-# XFAIL: Metal
+# XFAIL: Metal || (Vulkan && MoltenVK)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
