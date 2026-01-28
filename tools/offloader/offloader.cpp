@@ -63,6 +63,12 @@ static cl::opt<bool> Validation("validation-layer",
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
+static cl::opt<std::string> AdapterRegex(
+    "adapter-regex",
+    cl::desc(
+        "Case-insensitive regular expression to match GPU adapter description"),
+    cl::value_desc("<regex>"), cl::init(""));
+
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
@@ -82,6 +88,12 @@ int main(int ArgC, char **ArgV) {
     return 1;
   Device::uninitialize();
   return 0;
+}
+
+static bool matchesRegexIgnoreCase(StringRef GPUDescription,
+                                   StringRef SearchExpr) {
+  const llvm::Regex R(SearchExpr, llvm::Regex::IgnoreCase);
+  return R.isValid() && R.match(GPUDescription);
 }
 
 int run() {
@@ -140,6 +152,9 @@ int run() {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
+      continue;
+    if (!AdapterRegex.empty() &&
+        !matchesRegexIgnoreCase(D->getDescription(), AdapterRegex))
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
 

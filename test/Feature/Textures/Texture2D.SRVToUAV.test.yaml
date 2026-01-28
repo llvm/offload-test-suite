@@ -70,7 +70,8 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
+# Unimplemented: https://github.com/llvm/llvm-project/issues/175630 (for SPIRV)
+# XFAIL: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

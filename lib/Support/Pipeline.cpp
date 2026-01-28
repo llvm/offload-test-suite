@@ -43,6 +43,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("RuntimeSettings", P.Settings);
 
   I.mapRequired("Buffers", P.Buffers);
+  I.mapOptional("Samplers", P.Samplers);
   I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
@@ -51,9 +52,15 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        R.BufferPtr = P.getBuffer(R.Name);
-        if (!R.BufferPtr)
-          I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+        if (R.isSampler()) {
+          R.SamplerPtr = P.getSampler(R.Name);
+          if (!R.SamplerPtr)
+            I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
+        } else {
+          R.BufferPtr = P.getBuffer(R.Name);
+          if (!R.BufferPtr)
+            I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+        }
       }
     }
 
@@ -240,6 +247,18 @@ static void setCounters(IO &I, offloadtest::Buffer &B) {
            "number of counters should match the number of buffers");
     I.mapRequired("Counters", B.Counters);
   }
+}
+
+void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
+                                                  offloadtest::Sampler &S) {
+  I.mapRequired("Name", S.Name);
+  I.mapOptional("MinFilter", S.MinFilter);
+  I.mapOptional("MagFilter", S.MagFilter);
+  I.mapOptional("Address", S.Address);
+  I.mapOptional("MinLOD", S.MinLOD);
+  I.mapOptional("MaxLOD", S.MaxLOD);
+  I.mapOptional("MipLODBias", S.MipLODBias);
+  I.mapOptional("ComparisonOp", S.ComparisonOp);
 }
 
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,

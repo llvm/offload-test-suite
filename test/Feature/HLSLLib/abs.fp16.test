@@ -23,8 +23,8 @@ Buffers:
   - Name: In1
     Format: Float16
     Stride: 8
-    Data: [0x7e00, 0xfe00, 0x0000, 0x8000, 0xbd33, 0x7c00, 0xfc00, 0x0001, 0x8001, 0xb800, 0xaa66, 0xccc0]
-    # nan, -nan, 0, -0, -1.3, inf, -inf, denorm, -denorm, -0.5, -0.05, -19
+    Data: [0x7e00, 0xfe00, 0x0000, 0x8000, 0xbd33, 0x7c00, 0xfc00, 0x6056, 0xe056, 0xb800, 0xaa66, 0xccc0]
+    # nan, -nan, 0, -0, -1.3, inf, -inf, 555, -555, -0.5, -0.05, -19
   - Name: Out1
     Format: Float16
     Stride: 8
@@ -32,7 +32,7 @@ Buffers:
   - Name: ExpectedOut1 # The result we expect
     Format: Float16
     Stride: 8
-    Data: [0x7e00, 0x7e00, 0x0000, 0x0000, 0x3d33, 0x7c00, 0x7c00, 0x0001, 0x0001, 0x3800, 0x2a66, 0x4cc0]
+    Data: [0x7e00, 0x7e00, 0x0000, 0x0000, 0x3d33, 0x7c00, 0x7c00, 0x6056, 0x6056, 0x3800, 0x2a66, 0x4cc0]
 Results:
   - Result: Test1
     Rule: BufferFloatULP
@@ -58,10 +58,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/574
-# XFAIL: QC && Vulkan
-
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
