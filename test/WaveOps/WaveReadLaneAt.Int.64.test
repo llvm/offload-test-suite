@@ -101,7 +101,7 @@ DescriptorSets:
 # UNSUPPORTED: Metal
 
 # Bug Tracked by https://github.com/llvm/offload-test-suite/issues/672
-# XFAIL: Vulkan && Darwin && MoltenVK
+# XFAIL: Vulkan && MoltenVK
 
 # Bug https://github.com/llvm/offload-test-suite/issues/533
 # XFAIL: DirectX && AMD

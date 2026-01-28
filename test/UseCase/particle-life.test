@@ -359,7 +359,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # No idea what is going on here, but the results are _way_ off.
-# XFAIL: Clang && Vulkan && Darwin && MoltenVK
+# XFAIL: Clang && Vulkan && MoltenVK
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/particle-life.hlsl
