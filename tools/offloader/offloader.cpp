@@ -63,10 +63,11 @@ static cl::opt<bool> Validation("validation-layer",
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
-static cl::opt<std::string>
-    AdapterSubstring("adapter-substring",
-                     cl::desc("Which GPU vendor to use by name"),
-                     cl::value_desc("<name>"), cl::init(""));
+static cl::opt<std::string> AdapterRegex(
+    "adapter-regex",
+    cl::desc(
+        "Case-insensitive regular expression to match GPU adapter description"),
+    cl::value_desc("<regex>"), cl::init(""));
 
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
@@ -89,8 +90,9 @@ int main(int ArgC, char **ArgV) {
   return 0;
 }
 
-static bool icontains(StringRef GPUDescription, StringRef SearchStr) {
-  const llvm::Regex R(SearchStr, llvm::Regex::IgnoreCase);
+static bool matchesRegexIgnoreCase(StringRef GPUDescription,
+                                   StringRef SearchExpr) {
+  const llvm::Regex R(SearchExpr, llvm::Regex::IgnoreCase);
   return R.isValid() && R.match(GPUDescription);
 }
 
@@ -151,8 +153,8 @@ int run() {
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
       continue;
-    if (!AdapterSubstring.empty() &&
-        !icontains(D->getDescription(), AdapterSubstring))
+    if (!AdapterRegex.empty() &&
+        !matchesRegexIgnoreCase(D->getDescription(), AdapterRegex))
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
 

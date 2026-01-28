@@ -144,7 +144,7 @@ if config.offloadtest_enable_debug:
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
 if ShouldSearchByGPuName:
-    offloader_args.extend([f'-adapter-substring="{GPUName}"'])
+    offloader_args.extend([f'-adapter-regex="{GPUName}"'])
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
