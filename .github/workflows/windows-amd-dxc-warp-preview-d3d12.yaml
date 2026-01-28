@@ -2,13 +2,18 @@ name: Windows D3D12 Warp Preview DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+     - .github/workflows/windows-amd-dxc-warp-preview-d3d12.yaml
 
 jobs:
   Windows-D3D12-Warp-DXC:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows

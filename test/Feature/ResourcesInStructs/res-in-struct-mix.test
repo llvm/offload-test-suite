@@ -1,0 +1,138 @@
+#--- source.hlsl
+
+// This test verifies handling of a resource array in a struct.
+
+class E {
+  RWBuffer<int> UavBuf1;
+};
+
+class F {
+  StructuredBuffer<int> SrvBuf1;
+};
+
+class G : F {
+  E e;
+  StructuredBuffer<int> SrvBuf2;
+  RWBuffer<int> UavBuf2;
+  uint n;
+};
+
+RWStructuredBuffer<int4> Out : register(u0);
+
+G g : register(u5) : register(t3);
+
+[numthreads(4, 1, 1)]
+void main(uint3 ID : SV_GroupThreadID) {
+  int x = g.e.UavBuf1[ID.x];
+  int y = g.SrvBuf1[ID.x];
+  int z = g.SrvBuf2[ID.x];
+  int w = g.UavBuf2[ID.x];
+  
+  Out[ID.x] = int4(x, y, z, w);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Buf_g_F_SrvBuf1
+    Format: Int32
+    Data:
+     [ 1, 2, 3, 4 ]
+
+  - Name: Buf_g_SrvBuf2
+    Format: Int32
+    Data:
+     [ 10, 20, 30, 40 ]
+
+  - Name: Buf_g_e_UavBuf1
+    Format: Int32
+    Data:
+      [ 100, 200, 300, 400 ]
+
+  - Name: Buf_g_UavBuf2
+    Format: Int32
+    Data:
+      [ 1000, 2000, 3000, 4000 ]
+
+  - Name: BufOut
+    Format: Int32
+    FillSize: 64
+
+  - Name: ExpectedBufOut
+    Format: Int32
+    Data:
+      [ 100, 1, 10, 1000,
+        200, 2, 20, 2000,
+        300, 3, 30, 3000,
+        400, 4, 40, 4000 ]
+
+Results:
+  - Result: ExpectedResult
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedBufOut
+
+DescriptorSets:
+  - Resources:
+    - Name: Buf_g_F_SrvBuf1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Buf_g_SrvBuf2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Buf_g_e_UavBuf1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Buf_g_UavBuf2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: BufOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/655
+# XFAIL: AMD
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
+# XFAIL: Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/642
+# XFAIL: Metal
+
+# Bug https://github.com/llvm/offload-test-suite/issues/643
+# XFAIL: Intel
+
+# Vulkan does not support global structures with buffers or structures
+# containing both resources and non-resources.
+# UNSUPPORTED: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

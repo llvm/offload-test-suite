@@ -2,15 +2,20 @@ name: Windows Vulkan AMD DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 */6 * * *' # run every 6 hours
+  pull_request:
+    paths:
+     - .github/workflows/windows-amd-dxc-vk.yaml
 
 jobs:
   Windows-VK-AMD-DXC:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows

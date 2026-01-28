@@ -71,8 +71,59 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
+    return VK_DESCRIPTOR_TYPE_SAMPLER;
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkFilter getVKFilter(FilterMode Mode) {
+  switch (Mode) {
+  case FilterMode::Nearest:
+    return VK_FILTER_NEAREST;
+  case FilterMode::Linear:
+    return VK_FILTER_LINEAR;
+  }
+  llvm_unreachable("All filter cases handled");
+}
+
+static VkSamplerAddressMode getVKAddressMode(AddressMode Mode) {
+  switch (Mode) {
+  case AddressMode::Clamp:
+    return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+  case AddressMode::Repeat:
+    return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  case AddressMode::Mirror:
+    return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+  case AddressMode::Border:
+    return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+  case AddressMode::MirrorOnce:
+    return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+  }
+  llvm_unreachable("All address mode cases handled");
+}
+
+static VkCompareOp getVKCompareOp(CompareFunction Func) {
+  switch (Func) {
+  case CompareFunction::Never:
+    return VK_COMPARE_OP_NEVER;
+  case CompareFunction::Less:
+    return VK_COMPARE_OP_LESS;
+  case CompareFunction::Equal:
+    return VK_COMPARE_OP_EQUAL;
+  case CompareFunction::LessEqual:
+    return VK_COMPARE_OP_LESS_OR_EQUAL;
+  case CompareFunction::Greater:
+    return VK_COMPARE_OP_GREATER;
+  case CompareFunction::NotEqual:
+    return VK_COMPARE_OP_NOT_EQUAL;
+  case CompareFunction::GreaterEqual:
+    return VK_COMPARE_OP_GREATER_OR_EQUAL;
+  case CompareFunction::Always:
+    return VK_COMPARE_OP_ALWAYS;
+  }
+  llvm_unreachable("All compare op cases handled");
 }
 
 static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
@@ -90,7 +141,9 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
-    llvm_unreachable("Textures don't have buffer usage bits!");
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
+    llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -107,8 +160,11 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::Sampler:
+  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an image view!");
   }
+  llvm_unreachable("All cases handled");
 }
 
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
@@ -120,6 +176,7 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
   }
+  llvm_unreachable("All cases handled");
 }
 
 static std::string getMessageSeverityString(
@@ -211,6 +268,8 @@ class VKDevice : public offloadtest::Device {
 private:
   VkPhysicalDevice Device;
   VkPhysicalDeviceProperties Props;
+  VkPhysicalDeviceProperties2 Props2;
+  VkPhysicalDeviceDriverProperties DriverProps;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
   LayerVector Layers;
@@ -245,6 +304,11 @@ private:
     bool isImage() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
              DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+    }
+
+    bool isSampler() const {
+      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
+             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     }
 
     bool isBuffer() const {
@@ -315,9 +379,20 @@ private:
 public:
   VKDevice(VkPhysicalDevice D) : Device(D) {
     vkGetPhysicalDeviceProperties(Device, &Props);
-    const uint64_t StrSz =
+    const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
-    Description = std::string(Props.deviceName, StrSz);
+    Description = std::string(Props.deviceName, DeviceNameSz);
+#if defined(__APPLE__) && defined(__aarch64__)
+    DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    DriverProps.pNext = nullptr;
+    Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    Props2.pNext = &DriverProps;
+    vkGetPhysicalDeviceProperties2(Device, &Props2);
+    const uint64_t DriverNameSz =
+        strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
+    Description +=
+        " (" + std::string(DriverProps.driverName, DriverNameSz) + ")";
+#endif
   }
   VKDevice(const VKDevice &) = default;
 
@@ -672,7 +747,49 @@ public:
     return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
   }
 
-  llvm::Error createBuffer(Resource &R, InvocationState &IS) {
+  llvm::Expected<ResourceRef> createSampler(InvocationState &IS, Resource &R,
+                                            BufferRef &Host) {
+    VkSamplerCreateInfo SamplerInfo = {};
+    SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    const Sampler &S = *R.SamplerPtr;
+    SamplerInfo.magFilter = getVKFilter(S.MagFilter);
+    SamplerInfo.minFilter = getVKFilter(S.MinFilter);
+    SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    SamplerInfo.addressModeU = getVKAddressMode(S.Address);
+    SamplerInfo.addressModeV = getVKAddressMode(S.Address);
+    SamplerInfo.addressModeW = getVKAddressMode(S.Address);
+    SamplerInfo.mipLodBias = S.MipLODBias;
+    SamplerInfo.anisotropyEnable = VK_FALSE;
+    SamplerInfo.maxAnisotropy = 1.0f;
+    SamplerInfo.compareEnable =
+        R.Kind == ResourceKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+    SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
+    SamplerInfo.minLod = S.MinLOD;
+    SamplerInfo.maxLod = S.MaxLOD;
+    SamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    SamplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler Sampler;
+    if (vkCreateSampler(IS.Device, &SamplerInfo, nullptr, &Sampler))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create sampler.");
+
+    return ResourceRef(Host, ImageRef{0, Sampler, 0});
+  }
+
+  llvm::Error createResource(Resource &R, InvocationState &IS) {
+    // Samplers don't have backing data buffers, so handle them separately
+    if (R.isSampler()) {
+      ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
+      BufferRef HostBuf = {0, 0};
+      auto ExSamplerRef = createSampler(IS, R, HostBuf);
+      if (!ExSamplerRef)
+        return ExSamplerRef.takeError();
+      Bundle.ResourceRefs.push_back(*ExSamplerRef);
+      IS.Resources.push_back(Bundle);
+      return llvm::Error::success();
+    }
+
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
@@ -703,7 +820,7 @@ public:
       }
     }
     if (R.HasCounter) {
-      for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
+      for (uint32_t I = 0; I < R.getArraySize(); ++I) {
         uint32_t CounterValue = 0;
         auto ExHostBuf = createBuffer(IS,
                                       VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
@@ -775,10 +892,10 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
+  llvm::Error createResources(Pipeline &P, InvocationState &IS) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (auto Err = createBuffer(R, IS))
+        if (auto Err = createResource(R, IS))
           return Err;
       }
     }
@@ -788,9 +905,15 @@ public:
         return llvm::createStringError(
             std::errc::invalid_argument,
             "No RenderTarget buffer specified for graphics pipeline.");
-      Resource FrameBuffer = {
-          ResourceKind::Texture2D,     "RenderTarget", {},          {},
-          P.Bindings.RTargetBufferPtr, false,          std::nullopt};
+      Resource FrameBuffer = {ResourceKind::Texture2D,
+                              "RenderTarget",
+                              {},
+                              {},
+                              P.Bindings.RTargetBufferPtr,
+                              nullptr,
+                              false,
+                              std::nullopt,
+                              false};
       IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
       IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
       IS.FrameBufferResource.ImageLayout =
@@ -816,9 +939,15 @@ public:
         return llvm::createStringError(
             std::errc::invalid_argument,
             "No Vertex buffer specified for graphics pipeline.");
-      const Resource VertexBuffer = {
-          ResourceKind::StructuredBuffer, "VertexBuffer", {},          {},
-          P.Bindings.VertexBufferPtr,     false,          std::nullopt};
+      const Resource VertexBuffer = {ResourceKind::StructuredBuffer,
+                                     "VertexBuffer",
+                                     {},
+                                     {},
+                                     P.Bindings.VertexBufferPtr,
+                                     nullptr,
+                                     false,
+                                     std::nullopt,
+                                     false};
       auto ExVHostBuf =
           createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),
@@ -888,10 +1017,10 @@ public:
     uint32_t DescriptorCounts[DescriptorTypesSize] = {0};
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
-        DescriptorCounts[getDescriptorType(R.Kind)] += R.BufferPtr->ArraySize;
+        DescriptorCounts[getDescriptorType(R.Kind)] += R.getArraySize();
         if (R.HasCounter)
           DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
-              R.BufferPtr->ArraySize;
+              R.getArraySize();
       }
     }
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
@@ -935,14 +1064,14 @@ public:
               R.Name.c_str());
         Binding.binding = R.VKBinding->Binding;
         Binding.descriptorType = getDescriptorType(R.Kind);
-        Binding.descriptorCount = R.BufferPtr->ArraySize;
+        Binding.descriptorCount = R.getArraySize();
         Binding.stageFlags = IS.getFullShaderStageMask();
         Bindings.push_back(Binding);
         if (R.HasCounter) {
           VkDescriptorSetLayoutBinding CounterBinding = {};
           CounterBinding.binding = *R.VKBinding->CounterBinding;
           CounterBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterBinding.descriptorCount = R.BufferPtr->ArraySize;
+          CounterBinding.descriptorCount = R.getArraySize();
           CounterBinding.stageFlags = IS.getFullShaderStageMask();
           Bindings.push_back(CounterBinding);
         }
@@ -966,6 +1095,17 @@ public:
     PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
     PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
+
+    llvm::SmallVector<VkPushConstantRange, 1> Ranges;
+    for (const auto &PCB : P.PushConstants) {
+      const VkPushConstantRange R = {
+          static_cast<VkShaderStageFlags>(getShaderStageFlag(PCB.Stage)),
+          /* offset= */ 0, static_cast<uint32_t>(PCB.size())};
+      Ranges.emplace_back(std::move(R));
+    }
+    PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
+    PipelineCreateInfo.pPushConstantRanges = Ranges.data();
+
     if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
                                &IS.PipelineLayout))
       return llvm::createStringError(std::errc::device_or_resource_busy,
@@ -995,7 +1135,11 @@ public:
     uint32_t BufferViewCount = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        const uint32_t Count = R.BufferPtr->ArraySize;
+        if (R.isSampler()) {
+          ImageInfoCount += 1;
+          continue;
+        }
+        const uint32_t Count = R.getArraySize();
         if (R.isTexture())
           ImageInfoCount += Count;
         else if (R.isRaw())
@@ -1027,7 +1171,14 @@ public:
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         uint32_t IndexOfFirstBufferDataInArray;
-        if (R.isTexture()) {
+        if (R.isSampler()) {
+          IndexOfFirstBufferDataInArray = ImageInfos.size();
+          for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
+            const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, 0,
+                                                     VK_IMAGE_LAYOUT_UNDEFINED};
+            ImageInfos.push_back(ImageInfo);
+          }
+        } else if (R.isTexture()) {
           VkImageViewCreateInfo ViewCreateInfo = {};
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
@@ -1084,9 +1235,9 @@ public:
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = R.VKBinding->Binding;
-        WDS.descriptorCount = R.BufferPtr->ArraySize;
+        WDS.descriptorCount = R.getArraySize();
         WDS.descriptorType = getDescriptorType(R.Kind);
-        if (R.isTexture())
+        if (R.isTexture() || R.isSampler())
           WDS.pImageInfo = &ImageInfos[IndexOfFirstBufferDataInArray];
         else if (R.isRaw())
           WDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
@@ -1108,7 +1259,7 @@ public:
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
           CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
           CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
-          CounterWDS.descriptorCount = R.BufferPtr->ArraySize;
+          CounterWDS.descriptorCount = R.getArraySize();
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
           llvm::outs() << "Updating Counter Descriptor [" << OverallResIdx
@@ -1557,6 +1708,8 @@ public:
   }
 
   void copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
+    if (R.isSampler())
+      return;
     if (R.isImage()) {
       const offloadtest::Buffer &B = *R.BufferPtr;
       VkBufferImageCopy BufferCopyRegion = {};
@@ -1777,6 +1930,14 @@ public:
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
 
+    for (const auto &PCB : P.PushConstants) {
+      llvm::SmallVector<uint8_t, 4> Data;
+      PCB.getContent(Data);
+      vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
+                         getShaderStageFlag(PCB.Stage), 0, Data.size(),
+                         Data.data());
+    }
+
     if (P.isCompute()) {
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
@@ -1828,7 +1989,7 @@ public:
         }
         if (R.HasCounter) {
           R.BufferPtr->Counters.clear();
-          for (uint32_t I = 0; I < R.BufferPtr->ArraySize; ++I) {
+          for (uint32_t I = 0; I < R.getArraySize(); ++I) {
             uint32_t *Mapped = nullptr; // NOLINT(misc-const-correctness)
             auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
             vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
@@ -1876,6 +2037,8 @@ public:
         if (R.isBuffer()) {
           vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
           vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
+        } else if (R.isSampler()) {
+          vkDestroySampler(IS.Device, ResRef.Image.Sampler, nullptr);
         } else {
           assert(R.isImage());
           vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
@@ -1943,7 +2106,7 @@ public:
     if (auto Err = createCommandBuffer(State))
       return Err;
     llvm::outs() << "Copy command buffer created.\n";
-    if (auto Err = createBuffers(P, State))
+    if (auto Err = createResources(P, State))
       return Err;
     if (P.isGraphics()) {
       if (auto Err = createRenderPass(P, State))
