@@ -16,10 +16,15 @@
 
 #include <memory>
 #include <numeric>
+#include <set>
 #include <system_error>
 #include <vulkan/vulkan.h>
 
 using namespace offloadtest;
+
+// We use 64KB tile size because DX has a fixed tile size, and the offload test
+// suite must work for all APIs.
+constexpr uint32_t SparseBufferTileSize = 65536;
 
 #define VKFormats(FMT, BITS)                                                   \
   if (Channels == 1)                                                           \
@@ -58,6 +63,7 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
 static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
+    return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
   case ResourceKind::Texture2D:
@@ -343,6 +349,9 @@ private:
   struct InvocationState {
     VkDevice Device;
     VkQueue Queue;
+    uint32_t QueueFamilyIndex = 0;
+    VkQueue SparseQueue = VK_NULL_HANDLE;
+    uint32_t SparseQueueFamilyIndex = 0;
     VkCommandPool CmdPool;
     VkCommandBuffer CmdBuffer;
     VkPipelineLayout PipelineLayout;
@@ -510,6 +519,27 @@ private:
       std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
 #endif
 #include "VKFeatures.def"
+
+    Caps.insert(
+        std::make_pair("residencyNonResidentStrict",
+                       make_capability<bool>(
+                           "residencyNonResidentStrict",
+                           Props.sparseProperties.residencyNonResidentStrict)));
+    Caps.insert(std::make_pair(
+        "residencyStandard2DBlockShape",
+        make_capability<bool>(
+            "residencyStandard2DBlockShape",
+            Props.sparseProperties.residencyStandard2DBlockShape)));
+    Caps.insert(std::make_pair(
+        "residencyStandard2DMultisampleBlockShape",
+        make_capability<bool>(
+            "residencyStandard2DMultisampleBlockShape",
+            Props.sparseProperties.residencyStandard2DMultisampleBlockShape)));
+    Caps.insert(std::make_pair(
+        "residencyStandard3DBlockShape",
+        make_capability<bool>(
+            "residencyStandard3DBlockShape",
+            Props.sparseProperties.residencyStandard3DBlockShape)));
   }
 
   void queryLayers() {
@@ -539,7 +569,6 @@ private:
 
 public:
   llvm::Error createDevice(InvocationState &IS) {
-
     // Find a queue family that supports both graphics and compute.
     uint32_t QueueCount = 0;
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, nullptr);
@@ -552,33 +581,68 @@ public:
     vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount,
                                              QueueFamilyProps.get());
 
-    int SelectedIdx = -1;
+    int MainQueueIdx = -1;
+    int SparseQueueIdx = -1;
+
+    // Try to find a single queue family that supports everything
     for (uint32_t I = 0; I < QueueCount; ++I) {
       const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
-      // Prefer family supporting both GRAPHICS and COMPUTE
-      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
-        SelectedIdx = static_cast<int>(I);
+      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT) &&
+          (Flags & VK_QUEUE_SPARSE_BINDING_BIT)) {
+        MainQueueIdx = SparseQueueIdx = static_cast<int>(I);
         break;
       }
     }
 
-    if (SelectedIdx == -1)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "No suitable queue family found.");
+    // If not found, find separate queues
+    if (MainQueueIdx == -1) {
+      for (uint32_t I = 0; I < QueueCount; ++I) {
+        const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
+        if (MainQueueIdx == -1 && (Flags & VK_QUEUE_GRAPHICS_BIT) &&
+            (Flags & VK_QUEUE_COMPUTE_BIT))
+          MainQueueIdx = static_cast<int>(I);
+        if (SparseQueueIdx == -1 && (Flags & VK_QUEUE_SPARSE_BINDING_BIT))
+          SparseQueueIdx = static_cast<int>(I);
+        if (MainQueueIdx != -1 && SparseQueueIdx != -1)
+          break;
+      }
+    }
 
-    const uint32_t QueueIdx = static_cast<uint32_t>(SelectedIdx);
+    if (MainQueueIdx == -1)
+      return llvm::createStringError(
+          std::errc::no_such_device,
+          "No suitable queue family found for graphics and compute.");
 
-    VkDeviceQueueCreateInfo QueueInfo = {};
+    if (SparseQueueIdx == -1)
+      return llvm::createStringError(
+          std::errc::no_such_device,
+          "No suitable queue family found for sparse "
+          "binding.");
+
+    IS.QueueFamilyIndex = static_cast<uint32_t>(MainQueueIdx);
+    IS.SparseQueueFamilyIndex = static_cast<uint32_t>(SparseQueueIdx);
+
     const float QueuePriority = 1.0f;
-    QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    QueueInfo.queueFamilyIndex = QueueIdx;
-    QueueInfo.queueCount = 1;
-    QueueInfo.pQueuePriorities = &QueuePriority;
+    std::vector<VkDeviceQueueCreateInfo> QueueCreateInfos;
+
+    std::set<uint32_t> UniqueQueueFamilyIndices;
+    UniqueQueueFamilyIndices.insert(IS.QueueFamilyIndex);
+    UniqueQueueFamilyIndices.insert(IS.SparseQueueFamilyIndex);
+
+    for (uint32_t QueueFamilyIndex : UniqueQueueFamilyIndices) {
+      VkDeviceQueueCreateInfo QueueCreateInfo = {};
+      QueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+      QueueCreateInfo.queueFamilyIndex = QueueFamilyIndex;
+      QueueCreateInfo.queueCount = 1;
+      QueueCreateInfo.pQueuePriorities = &QueuePriority;
+      QueueCreateInfos.push_back(QueueCreateInfo);
+    }
 
     VkDeviceCreateInfo DeviceInfo = {};
     DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    DeviceInfo.queueCreateInfoCount = 1;
-    DeviceInfo.pQueueCreateInfos = &QueueInfo;
+    DeviceInfo.queueCreateInfoCount =
+        static_cast<uint32_t>(QueueCreateInfos.size());
+    DeviceInfo.pQueueCreateInfos = QueueCreateInfos.data();
 
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -604,17 +668,23 @@ public:
 #endif
     vkGetPhysicalDeviceFeatures2(Device, &Features);
 
+    Features.features.sparseBinding = VK_TRUE;
+    Features.features.sparseResidencyBuffer = VK_TRUE;
+    Features.features.sparseResidencyImage2D = VK_TRUE;
+    Features.features.shaderResourceResidency = VK_TRUE;
+
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
 
     if (vkCreateDevice(Device, &DeviceInfo, nullptr, &IS.Device))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Could not create Vulkan logical device.");
-    vkGetDeviceQueue(IS.Device, QueueIdx, 0, &IS.Queue);
+    vkGetDeviceQueue(IS.Device, IS.QueueFamilyIndex, 0, &IS.Queue);
+    vkGetDeviceQueue(IS.Device, IS.SparseQueueFamilyIndex, 0, &IS.SparseQueue);
 
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    CmdPoolInfo.queueFamilyIndex = QueueIdx;
+    CmdPoolInfo.queueFamilyIndex = IS.QueueFamilyIndex;
     CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     if (vkCreateCommandPool(IS.Device, &CmdPoolInfo, nullptr, &IS.CmdPool))
@@ -790,6 +860,11 @@ public:
       return llvm::Error::success();
     }
 
+    if (!R.BufferPtr)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Resource '%s' has no backing buffer.",
+                                     R.Name.c_str());
+
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
@@ -805,15 +880,44 @@ public:
           return ExImageRef.takeError();
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
-        auto ExDeviceBuf = createBuffer(
-            IS,
-            getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+        VkDeviceSize CopySize = R.size();
+
+        auto ExDeviceBuf = [&]() -> llvm::Expected<BufferRef> {
+          if (R.TilesMapped)
+            return createSparseBuffer(
+                IS,
+                getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size(), *R.TilesMapped);
+
+          return createBuffer(IS,
+                              getFlagBits(R.Kind) |
+                                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                                  VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+        }();
+
         if (!ExDeviceBuf)
           return ExDeviceBuf.takeError();
+
+        if (R.TilesMapped) {
+          // For sparse buffers, we copy the portion of the buffer that is on
+          // the tiles.
+          VkMemoryRequirements MemReqs;
+          vkGetBufferMemoryRequirements(IS.Device, ExDeviceBuf->Buffer,
+                                        &MemReqs);
+          if (SparseBufferTileSize % MemReqs.alignment != 0)
+            return llvm::createStringError(
+                std::errc::not_supported,
+                "Sparse buffer alignment must be a factor of 64KB.");
+
+          VkDeviceSize MappedSize = *R.TilesMapped * SparseBufferTileSize;
+          if (CopySize > MappedSize)
+            CopySize = MappedSize;
+        }
+
         VkBufferCopy Copy = {};
-        Copy.size = R.size();
+        Copy.size = CopySize;
         vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
                         &Copy);
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
@@ -846,6 +950,97 @@ public:
     }
     IS.Resources.push_back(Bundle);
     return llvm::Error::success();
+  }
+
+  llvm::Expected<BufferRef>
+  createSparseBuffer(InvocationState &IS, VkBufferUsageFlags Usage,
+                     VkMemoryPropertyFlags MemoryFlags, size_t Size,
+                     uint32_t TilesMapped) {
+    VkBuffer Buffer;
+    VkDeviceMemory Memory;
+    VkBufferCreateInfo BufferInfo = {};
+    BufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufferInfo.size = Size;
+    BufferInfo.usage = Usage;
+    BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    BufferInfo.flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT |
+                       VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT;
+
+    if (vkCreateBuffer(IS.Device, &BufferInfo, nullptr, &Buffer))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Could not create sparse buffer.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(IS.Device, Buffer, &MemReqs);
+
+    if (SparseBufferTileSize % MemReqs.alignment != 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Sparse buffer alignment must be a factor of 64KB.");
+
+    // Calculate size for the mapped region (TilesMapped * SparseBufferTileSize)
+    VkDeviceSize MappedSize = TilesMapped * SparseBufferTileSize;
+
+    if (MappedSize > MemReqs.size)
+      MappedSize = MemReqs.size;
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MappedSize;
+
+    llvm::Expected<uint32_t> MemIdx =
+        getMemoryIndex(Device, MemReqs.memoryTypeBits, MemoryFlags);
+    if (!MemIdx)
+      return MemIdx.takeError();
+
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Sparse memory allocation failed.");
+
+    // Bind the allocated memory to the start of the buffer
+    VkSparseMemoryBind Bind = {};
+    Bind.resourceOffset = 0;
+    Bind.size = MappedSize;
+    Bind.memory = Memory;
+    Bind.memoryOffset = 0;
+    Bind.flags = 0;
+
+    VkSparseBufferMemoryBindInfo BufferBindInfo = {};
+    BufferBindInfo.buffer = Buffer;
+    BufferBindInfo.bindCount = 1;
+    BufferBindInfo.pBinds = &Bind;
+
+    VkBindSparseInfo BindInfo = {};
+    BindInfo.sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO;
+    BindInfo.bufferBindCount = 1;
+    BindInfo.pBufferBinds = &BufferBindInfo;
+
+    // Use a fence to ensure binding is complete before use, though for simple
+    // cases strict ordering might suffice if on same queue. Ideally we should
+    // wait, but here we just submit. IS.Queue is used for commands. Note:
+    // vkQueueBindSparse requires the queue to support SPARSI_BINDING. We assume
+    // the main queue supports it.
+    VkFence Fence;
+    VkFenceCreateInfo FenceInfo = {};
+    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(IS.Device, &FenceInfo, nullptr, &Fence))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create fence for sparse bind");
+
+    if (vkQueueBindSparse(IS.SparseQueue, 1, &BindInfo, Fence) != VK_SUCCESS)
+      return llvm::createStringError(std::errc::io_error,
+                                     "vkQueueBindSparse failed");
+
+    if (vkWaitForFences(IS.Device, 1, &Fence, VK_TRUE, UINT64_MAX) !=
+        VK_SUCCESS)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to wait for sparse bind fence");
+
+    vkDestroyFence(IS.Device, Fence, nullptr);
+
+    return BufferRef{Buffer, Memory};
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
@@ -991,7 +1186,7 @@ public:
     // Submit to the queue
     if (vkQueueSubmit(IS.Queue, 1, &SubmitInfo, Fence))
       return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to submit to queue.");
+                                     "Failed to submit command buffer.");
     if (vkWaitForFences(IS.Device, 1, &Fence, VK_TRUE, UINT64_MAX))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed waiting for fence.");
@@ -1153,9 +1348,9 @@ public:
 
     // reserve enough space for the descriptor infos so it never needs to be
     // resized (we need the memory fixed in place)
-    llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
-    llvm::SmallVector<VkDescriptorBufferInfo> BufferInfos;
-    llvm::SmallVector<VkBufferView> BufferViews;
+    std::vector<VkDescriptorImageInfo> ImageInfos;
+    std::vector<VkDescriptorBufferInfo> BufferInfos;
+    std::vector<VkBufferView> BufferViews;
     ImageInfos.reserve(ImageInfoCount);
     BufferInfos.reserve(BufferInfoCount);
     BufferViews.reserve(BufferViewCount);
@@ -1163,16 +1358,15 @@ public:
     llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
     WriteDescriptors.reserve(ImageInfoCount + BufferInfoCount +
                              BufferViewCount);
-    assert(IS.BufferViews.empty());
 
+    // Pass 1: Create image views and populate the info/view vectors.
+    // We already reserved enough space above.
     uint32_t OverallResIdx = 0;
     for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
-        uint32_t IndexOfFirstBufferDataInArray;
         if (R.isSampler()) {
-          IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, 0,
                                                      VK_IMAGE_LAYOUT_UNDEFINED};
@@ -1193,7 +1387,6 @@ public:
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
           ViewCreateInfo.subresourceRange.levelCount = 1;
-          IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
             VkImageView View = {0};
@@ -1206,7 +1399,6 @@ public:
             ImageInfos.push_back(ImageInfo);
           }
         } else if (R.isRaw()) {
-          IndexOfFirstBufferDataInArray = BufferInfos.size();
           for (auto ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
                                                VK_WHOLE_SIZE};
@@ -1219,10 +1411,9 @@ public:
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
           ViewCreateInfo.format = Format;
           ViewCreateInfo.range = VK_WHOLE_SIZE;
-          VkBufferView View = {0};
-          IndexOfFirstBufferDataInArray = BufferViews.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.buffer = ResRef.Device.Buffer;
+            VkBufferView View = {0};
             if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
@@ -1231,52 +1422,70 @@ public:
           }
         }
 
+        if (R.HasCounter) {
+          for (auto ResRef : IS.Resources[OverallResIdx].CounterResourceRefs) {
+            const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
+                                               VK_WHOLE_SIZE};
+            BufferInfos.push_back(BI);
+          }
+        }
+      }
+    }
+
+    // Pass 2: Set up the WriteDescriptorSet structures using pointers to the
+    // stable vectors.
+    uint32_t CurrentImageInfoIdx = 0;
+    uint32_t CurrentBufferInfoIdx = 0;
+    uint32_t CurrentBufferViewIdx = 0;
+
+    OverallResIdx = 0;
+    for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
+      for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
+           ++RIdx, ++OverallResIdx) {
+        const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         WDS.dstSet = IS.DescriptorSets[SetIdx];
         WDS.dstBinding = R.VKBinding->Binding;
         WDS.descriptorCount = R.getArraySize();
         WDS.descriptorType = getDescriptorType(R.Kind);
-        if (R.isTexture() || R.isSampler())
-          WDS.pImageInfo = &ImageInfos[IndexOfFirstBufferDataInArray];
-        else if (R.isRaw())
-          WDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
-        else
-          WDS.pTexelBufferView = &BufferViews[IndexOfFirstBufferDataInArray];
+
+        if (R.isTexture() || R.isSampler()) {
+          WDS.pImageInfo = &ImageInfos[CurrentImageInfoIdx];
+          CurrentImageInfoIdx += WDS.descriptorCount;
+        } else if (R.isRaw()) {
+          WDS.pBufferInfo = &BufferInfos[CurrentBufferInfoIdx];
+          CurrentBufferInfoIdx += WDS.descriptorCount;
+        } else {
+          WDS.pTexelBufferView = &BufferViews[CurrentBufferViewIdx];
+          CurrentBufferViewIdx += WDS.descriptorCount;
+        }
         llvm::outs() << "Updating Descriptor [" << OverallResIdx << "] { "
                      << SetIdx << ", " << RIdx << " }\n";
         WriteDescriptors.push_back(WDS);
 
         if (R.HasCounter) {
-          IndexOfFirstBufferDataInArray = BufferInfos.size();
-          for (auto ResRef : IS.Resources[OverallResIdx].CounterResourceRefs) {
-            const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
-                                               VK_WHOLE_SIZE};
-            BufferInfos.push_back(BI);
-          }
-
           VkWriteDescriptorSet CounterWDS = {};
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
           CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
           CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
           CounterWDS.descriptorCount = R.getArraySize();
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
-          llvm::outs() << "Updating Counter Descriptor [" << OverallResIdx
-                       << "] { " << SetIdx << ", " << RIdx << " }\n";
-          llvm::outs() << "Binding = " << CounterWDS.dstBinding << "\n";
+          CounterWDS.pBufferInfo = &BufferInfos[CurrentBufferInfoIdx];
+          CurrentBufferInfoIdx += CounterWDS.descriptorCount;
           WriteDescriptors.push_back(CounterWDS);
         }
       }
     }
-    assert(ImageInfos.size() == ImageInfoCount &&
-           BufferInfos.size() == BufferInfoCount &&
-           BufferViews.size() == BufferViewCount &&
-           "size of buffer infos does not match expected count");
 
-    llvm::outs() << "WriteDescriptors: " << WriteDescriptors.size() << "\n";
+    llvm::outs() << "Final vector sizes: ImageInfos=" << ImageInfos.size()
+                 << ", BufferInfos=" << BufferInfos.size()
+                 << ", BufferViews=" << BufferViews.size() << "\n";
+    llvm::outs() << "Calling vkUpdateDescriptorSets with "
+                 << WriteDescriptors.size() << " writes...\n";
     vkUpdateDescriptorSets(IS.Device, WriteDescriptors.size(),
                            WriteDescriptors.data(), 0, nullptr);
+    llvm::outs() << "vkUpdateDescriptorSets returned successfully.\n";
     return llvm::Error::success();
   }
 
@@ -2227,8 +2436,12 @@ public:
 
       if (Config.EnableValidationLayer) {
         const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
-        if (TmpDev->isLayerSupported(ValidationLayer))
+        if (TmpDev->isLayerSupported(ValidationLayer)) {
           Layers.push_back(ValidationLayer.data());
+          llvm::outs() << "The validation layer are being enabled.\n";
+        } else {
+          llvm::outs() << "The validation layer were not found.\n";
+        }
       }
 
       if (Config.EnableDebugLayer) {
