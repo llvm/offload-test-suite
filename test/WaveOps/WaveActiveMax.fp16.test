@@ -310,7 +310,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# REQUIRES: Float16
+# REQUIRES: Half
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
