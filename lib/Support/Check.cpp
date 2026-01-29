@@ -16,6 +16,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
+#include <cstdlib>
 #include <sstream>
 
 constexpr uint16_t Float16BitSign = 0x8000;
@@ -397,6 +398,27 @@ llvm::Error verifyResult(offloadtest::Result R) {
     OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str() << "\n";
     break;
   }
+  }
+
+  if (!std::getenv("OFFLOADTEST_SUPPRESS_DIFF")) {
+    OS << "Expected:\n";
+    llvm::yaml::Output YAMLOS(OS);
+    YAMLOS << *R.ExpectedPtr;
+    OS << "Got:\n";
+    YAMLOS << *R.ActualPtr;
+
+    // Now print exact hex64 representations of each element of the
+    // actual and expected buffers.
+
+    const std::string ExpectedBufferStr =
+        getBufferStr(R.ExpectedPtr, R.ComparisonRule);
+    const std::string ActualBufferStr =
+        getBufferStr(R.ActualPtr, R.ComparisonRule);
+
+    OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
+       << ExpectedBufferStr << "\n";
+    OS << "Full Hex 64bit representation of Actual Buffer Values:\n"
+       << ActualBufferStr << "\n";
   }
 
   return llvm::createStringError(Str.c_str());
