@@ -1,9 +1,10 @@
 name: HLSL Test
 
 permissions:
-  contents: write
-  checks: write
-  pull-requests: write
+  contents: read
+  # contents: write
+  # checks: write
+  # pull-requests: write
 
 
 on:
@@ -107,7 +108,9 @@ on:
 jobs:
   build:
     permissions:
+      # contents: write
       checks: write
+      # pull-requests: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
       - name: Checkout DXC
@@ -199,17 +202,16 @@ jobs:
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
-          check_name: "HLSL Test Results"
           comment_mode: off
           files: llvm-project/build/**/testresults.xunit.xml
-      - name: Publish Maximal Reconvergence Test Results
-        uses: EnricoMi/publish-unit-test-result-action/composite@v2
-        if: always()
-        with:
-          check_name: "Maximal Reconvergence Test Results (${{ inputs.SKU }} ${{ inputs.TestTarget }})"
-          comment_mode: off
-          files: llvm-project/build/**/testresults-max-reconv.xunit.xml
-          report_individual_runs: true
-          json_thousands_separator: ','
-          badge_branch: badges
-          badge_label: "Maximal Reconvergence"
+      # - name: Publish Maximal Reconvergence Test Results
+      #   uses: EnricoMi/publish-unit-test-result-action/composite@v2
+      #   if: always()
+      #   with:
+      #     check_name: "Maximal Reconvergence Test Results (${{ inputs.SKU }} ${{ inputs.TestTarget }})"
+      #     comment_mode: off
+      #     files: llvm-project/build/**/testresults-max-reconv.xunit.xml
+      #     report_individual_runs: true
+      #     json_thousands_separator: ','
+      #     badge_branch: badges
+      #     badge_label: "Maximal Reconvergence"
