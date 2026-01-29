@@ -106,10 +106,12 @@ on:
 
 jobs:
   build:
+    permissions:
+      checks: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
       - name: Checkout DXC
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: Microsoft/DirectXShaderCompiler
           ref: ${{ inputs.DXC-branch }}
@@ -117,21 +119,21 @@ jobs:
           fetch-depth: 1
           submodules: true
       - name: Checkout LLVM
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: ${{ inputs.LLVM-fork }}/llvm-project
           ref: ${{ inputs.LLVM-branch }}
           path: llvm-project
           fetch-depth: 1
       - name: Checkout OffloadTest
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: llvm/offload-test-suite
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1
       - name: Checkout Golden Images
-        uses: actions/checkout@v4
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
           repository: llvm/offload-golden-images
           ref: main
@@ -139,12 +141,12 @@ jobs:
           fetch-depth: 1
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
-        uses: llvm/actions/setup-windows@main
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: amd64
       - name: Setup Windows
         if: inputs.OS == 'windows' && runner.arch == 'ARM64'
-        uses: llvm/actions/setup-windows@main
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64
       - name: Detect Clang
@@ -194,7 +196,7 @@ jobs:
             cd build
             ./bin/llvm-lit -v --xunit-xml-output=testresults-max-reconv.xunit.xml ${{ github.workspace }}/OffloadTest/tools/TestGenerator/reconvergence/tests
       - name: Publish Test Results
-        uses: EnricoMi/publish-unit-test-result-action/macos@v2
+        uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
           check_name: "HLSL Test Results"

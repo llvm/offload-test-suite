@@ -2,15 +2,20 @@ name: Windows D3D12 Intel DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 * * * *' # run every 30 minutes
+  pull_request:
+    paths:
+     - .github/workflows/windows-intel-dxc-d3d12.yaml
 
 jobs:
   Windows-D3D12-Intel-DXC:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
