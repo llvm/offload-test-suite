@@ -96,7 +96,7 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("NV")
-    if "AMD" in device["Description"]:
+    if "AMD" in device["Description"] or "Radeon" in device["Description"]:
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
         config.available_features.add("QC")
