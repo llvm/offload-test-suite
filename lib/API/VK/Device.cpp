@@ -390,7 +390,12 @@ public:
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
+#if defined(__APPLE__) && defined(__aarch64__)
+    // Apple silicon Macs may have multiple Vulkan drivers sharing one device
+    // name. Include the driver name in the description to enable
+    // adapter-regex matching.
     Description += " (" + DriverName + ")";
+#endif
   }
   VKDevice(const VKDevice &) = default;
 
