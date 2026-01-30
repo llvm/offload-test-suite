@@ -8,7 +8,7 @@ void main(uint3 tid : SV_GroupThreadID) {
   
   // this should be an ascending sequence of numbers
   Out1[tid.x] = WavePrefixCountBits(true);
-  // this should look more like 1, 1, 2, 2, 3, 3, etc.
+  // this should look more like 0, 1, 1, 2, 2, 3, 3, etc.
   Out2[tid.x] = WavePrefixCountBits(tid.x % 2 == 0);
 }
 
