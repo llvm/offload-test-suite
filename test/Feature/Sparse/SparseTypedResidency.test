@@ -1,0 +1,93 @@
+#--- source.hlsl
+Buffer<int4> X : register(t0);
+
+RWStructuredBuffer<int> Out : register(u1);
+RWStructuredBuffer<uint> CAFM : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  uint status;
+  int4 Result;
+
+  // Index 0: Tile 0 of X. Mapped.
+  Result = X.Load(0, status);
+  CAFM[0] = CheckAccessFullyMapped(status);
+  Out[0] = CAFM[0] ? Result.x : 9003;
+
+  // Index 5000: Tile 1 of X. Unmapped.
+  Result = X.Load(5000, status);
+  CAFM[1] = CheckAccessFullyMapped(status);
+  Out[1] = CAFM[1] ? Result.x : 9003;
+}
+
+//--- pipeline.yaml
+---
+
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Int32
+    Channels: 4
+    FillSize: 131072 # 128KB
+    FillValue: 9001
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    FillSize: 8
+  - Name: CAFM
+    Format: Int32
+    Stride: 4
+    FillSize: 8
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: Buffer
+      IsReserved: true
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      TilesMapped: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: CAFM
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# REQUIRES: !Vulkan || sparseBinding
+# REQUIRES: !Vulkan || sparseResidencyBuffer
+# REQUIRES: !Vulkan || shaderResourceResidency
+# REQUIRES: !Vulkan || residencyNonResidentStrict
+
+# XFAIL: lavapipe
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/166954
+# XFAIL: Vulkan && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK:      - Name:            Out
+# CHECK-NEXT:   Format:          Int32
+# CHECK-NEXT:   Stride:          4
+# CHECK-NEXT:   Data:            [ 9001, 9003 ]
+
+# CHECK:      - Name:            CAFM
+# CHECK-NEXT:   Format:          Int32
+# CHECK-NEXT:   Stride:          4
+# CHECK-NEXT:   Data:            [ 1, 0 ]

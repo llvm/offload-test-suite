@@ -1,0 +1,75 @@
+#--- source.hlsl
+RWByteAddressBuffer X : register(u0);
+RWStructuredBuffer<int> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  // Index 0: Offset 0.
+  Out[0] = X.Load(0);
+
+  // Offset 128000: Second tile.
+  Out[1] = X.Load(128000);
+}
+
+//--- pipeline.yaml
+---
+
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Int32
+    Stride: 4
+    FillSize: 131072
+    FillValue: 9001
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    FillSize: 8
+    FillValue: 0
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [9001, 0]
+
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: RWByteAddressBuffer
+      IsReserved: true
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      TilesMapped: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# REQUIRES: !Vulkan || sparseBinding
+# REQUIRES: !Vulkan || sparseResidencyBuffer
+
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK:      - Name:            Out
+# CHECK-NEXT:   Format:          Int32
+# CHECK-NEXT:   Stride:          4
+# CHECK-NEXT:   Data:            [ 9001, 0 ]

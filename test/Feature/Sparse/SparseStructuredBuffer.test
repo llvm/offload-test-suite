@@ -1,0 +1,83 @@
+#--- source.hlsl
+RWBuffer<int> X : register(u0);
+RWStructuredBuffer<int> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  // Index 0: Guaranteed to be in the first mapped tile.
+  Out[0] = X[0];
+
+  // Index 32000: 32000 * 4 bytes = 128,000 bytes.
+  // If tile size is 64KB (65536 bytes), this is in the second tile (offset 65536+).
+  // This should return 0 since it is unmapped.
+  Out[1] = X[32000];
+}
+
+//--- pipeline.yaml
+---
+
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Int32
+    Stride: 4
+    FillSize: 131072 # 128KB total bytes (32768 elements)
+    FillValue: 9001
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    FillSize: 8
+    FillValue: 0
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [9001, 0]
+
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: RWBuffer
+      IsReserved: true
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      TilesMapped: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# REQUIRES: !Vulkan || sparseBinding
+# REQUIRES: !Vulkan || sparseResidencyBuffer
+# REQUIRES: !Vulkan || residencyNonResidentStrict
+
+# RUN: split-file %s %t
+
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+
+
+# CHECK:      - Name:            Out
+
+# CHECK-NEXT:   Format:          Int32
+
+# CHECK-NEXT:   Stride:          4
+
+# CHECK-NEXT:   Data:            [ 9001, 0 ]
