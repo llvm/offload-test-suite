@@ -91,20 +91,20 @@ Buffers:
 
   - Name: Out1
     Format: Float64
-    Stride: 4
+    Stride: 8
     # 1 double is 8 bytes, * 4 halves for 4 threads, * 4 thread masks, * 2 value sets
     FillSize: 256  
   - Name: Out2
     Format: Float64
-    Stride: 8
+    Stride: 16
     FillSize: 512
   - Name: Out3
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 1024
   - Name: Out4
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 1024
   - Name: Out5
     Format: Float64
@@ -309,9 +309,6 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
-
-# Bug https://github.com/llvm/offload-test-suite/issues/625
-# XFAIL: AMD && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/433
 # UNSUPPORTED: WARP
