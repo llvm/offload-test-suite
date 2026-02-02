@@ -197,6 +197,9 @@ else:
     )
     HLSLCompiler = "DXC"
 
+if config.offloadtest_enable_edge_cond_tests:
+    config.available_features.add("EdgeConditions")
+
 config.available_features.add(HLSLCompiler)
 
 tools.append(ToolSubst("obj2yaml", FindTool("obj2yaml")))
