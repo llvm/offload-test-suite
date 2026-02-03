@@ -10,6 +10,16 @@ void main() {
   Out[1] = Tex.Load(int3(1, 0, 0)); // Green
   Out[2] = Tex.Load(int3(0, 1, 0)); // Blue
   Out[3] = Tex.Load(int3(1, 1, 0)); // White
+
+  // Load(int3, int2) - With Offset
+  // (0,0) + (1,0) = (1,0) -> Green
+  Out[4] = Tex.Load(int3(0, 0, 0), int2(1, 0)); 
+  
+  // (1,1) + (-1,-1) = (0,0) -> Red
+  Out[5] = Tex.Load(int3(1, 1, 0), int2(-1, -1));
+
+  // (0,0) + (1,1) = (1,1) -> White
+  Out[6] = Tex.Load(int3(0, 0, 0), int2(1, 1));
 }
 
 //--- pipeline.yaml
@@ -32,7 +42,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64 # 4 * sizeof(float4)
+    FillSize: 112 # 7 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -40,7 +50,10 @@ Buffers:
     Data: [ 1.0, 0.0, 0.0, 1.0,
             0.0, 1.0, 0.0, 1.0,
             0.0, 0.0, 1.0, 1.0,
-            1.0, 1.0, 1.0, 1.0 ]
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,  # Offset (1,0) -> Green
+            1.0, 0.0, 0.0, 1.0,  # Offset (-1,-1) -> Red
+            1.0, 1.0, 1.0, 1.0 ] # Offset (1,1) -> White
 
 DescriptorSets:
   - Resources:
@@ -63,7 +76,7 @@ Results:
 
 # Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
 # Unimplemented: Clang + VK: https://github.com/llvm/llvm-project/issues/175630
-# XFAIL: DirectX || Metal || Clang
+# XFAIL: Clang
 
 
 
