@@ -82,6 +82,10 @@ def setDeviceFeatures(config, device, compiler):
     config.available_features.add(API)
     config.available_features.add(compiler)
     config.available_features.add(config.offloadtest_os)
+    # Note: For now just Darwin. In the future just check
+    # not Windows.
+    if device["Driver"] and "Darwin" == config.offloadtest_os:
+        config.available_features.add(device["Driver"])
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
         config.available_features.add(config.warp_arch)
@@ -96,7 +100,7 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("NV")
-    if "AMD" in device["Description"]:
+    if "AMD" in device["Description"] or "Radeon" in device["Description"]:
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
         config.available_features.add("QC")

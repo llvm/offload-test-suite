@@ -34,6 +34,7 @@ int main(int ArgC, char **ArgV) {
   for (const auto &D : Device::devices()) {
     outs() << "- API: " << D->getAPIName() << "\n";
     outs() << "  Description: " << D->getDescription() << "\n";
+    outs() << "  Driver: " << D->getDriverName() << "\n";
     outs() << "  Features: \n";
     for (const auto &C : D->getCapabilities()) {
       outs() << "    ";

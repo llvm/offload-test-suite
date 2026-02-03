@@ -310,7 +310,7 @@ DescriptorSets:
 # XFAIL: Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
+# XFAIL: Metal || (Vulkan && MoltenVK)
 
 # Bug https://github.com/llvm/offload-test-suite/issues/433
 # UNSUPPORTED: WARP
