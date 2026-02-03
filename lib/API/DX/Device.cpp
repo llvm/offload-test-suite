@@ -67,6 +67,8 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
     DXFormats(SINT) break;
   case DataFormat::Float32:
     DXFormats(FLOAT) break;
+  case DataFormat::Depth32:
+    return DXGI_FORMAT_D32_FLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }

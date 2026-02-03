@@ -360,6 +360,7 @@ static const std::string getBufferStr(offloadtest::Buffer *B,
     return formatBuffer<llvm::yaml::Hex16>(B,
                                            Rule); // assuming no native float16
   case DF::Float32:
+  case DF::Depth32:
     return formatBuffer<float>(B, Rule);
   case DF::Float64:
     return formatBuffer<double>(B, Rule);

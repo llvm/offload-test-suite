@@ -42,13 +42,13 @@ Shaders:
 
 Buffers:
   - Name: Tex
-    Format: Float32
-    Channels: 4
+    Format: Depth32
+    Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
-    Data: [ 0.2, 0.0, 0.0, 1.0,  # (0,0) R=0.2
-            0.8, 0.0, 0.0, 1.0,  # (1,0) R=0.8
-            0.2, 0.0, 0.0, 1.0,  # (0,1) R=0.2
-            0.8, 0.0, 0.0, 1.0 ] # (1,1) R=0.8
+    Data: [ 0.2,  # (0,0) R=0.2
+            0.8,  # (1,0) R=0.8
+            0.2,  # (0,1) R=0.2
+            0.8 ] # (1,1) R=0.8
 
   - Name: Out
     Format: Float32

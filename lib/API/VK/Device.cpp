@@ -49,6 +49,8 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
     VKFormats(UINT, 64) break;
   case DataFormat::Float64:
     VKFormats(SFLOAT, 64) break;
+  case DataFormat::Depth32:
+    return VK_FORMAT_D32_SFLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -1191,7 +1193,9 @@ public:
               VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
           ViewCreateInfo.subresourceRange.aspectMask =
-              VK_IMAGE_ASPECT_COLOR_BIT;
+              R.BufferPtr->Format == DataFormat::Depth32
+                  ? VK_IMAGE_ASPECT_DEPTH_BIT
+                  : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
