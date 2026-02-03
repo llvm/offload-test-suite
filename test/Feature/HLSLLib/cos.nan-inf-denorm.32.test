@@ -1,0 +1,70 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  float4 Tmp = {cos(In[0].x), cos(In[0].yzw)};
+  Out[0] = Tmp;
+  Out[1] = cos(In[1].xyzw);
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ nan, -inf, -0x1.e7d42cp-127, 0x1.e7d42cp-127, inf, nan, nan, nan ]
+    #  NaN, -Inf, -denorm, denorm, Inf, NaN, NaN, NaN
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 32
+  - Name: ExpectedOut # The result we expect
+    Format: Float32
+    Stride: 16
+    Data: [ nan, nan, 1.0, 1.0, nan, nan, nan, nan ]
+    #  NaN, NaN, 1.0, 1.0, NaN, NaN, NaN, NaN 
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
+# XFAIL: Vulkan && MoltenVK
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/701
+# XFAIL: Metal && !AppleM1 && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
