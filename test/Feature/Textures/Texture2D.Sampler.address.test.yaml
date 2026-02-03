@@ -1,0 +1,164 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState ClampSamp : register(s0);
+[[vk::binding(2, 0)]] SamplerState RepeatSamp : register(s1);
+[[vk::binding(3, 0)]] SamplerState BorderSamp : register(s2);
+[[vk::binding(4, 0)]] SamplerState MirrorSamp : register(s3);
+[[vk::binding(5, 0)]] RWBuffer<float4> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // Texture 2x1: [Red, Green]
+  // Red covers [0.0, 0.5], Center 0.25
+  // Green covers [0.5, 1.0], Center 0.75
+
+  // Coordinate 1.25 is to the right of the texture.
+  float2 uv = float2(1.25, 0.5);
+
+  // 1. Clamp: Snaps 1.25 -> 1.0 (Edge). Result: Green.
+  Out[0] = Tex.SampleLevel(ClampSamp, uv, 0);
+
+  // 2. Repeat: Wraps 1.25 -> 0.25 (Start). Result: Red.
+  Out[1] = Tex.SampleLevel(RepeatSamp, uv, 0);
+
+  // 3. Border: 1.25 is outside. Result: Border Color (0,0,0,0).
+  Out[2] = Tex.SampleLevel(BorderSamp, uv, 0);
+
+  // 4. Mirror: Test at 1.75
+  // Range [1.0, 2.0] is mirrored [1.0, 0.0].
+  // 1.75 maps to 1.0 - (0.75) = 0.25 (Center of Red).
+  // Result: Red.
+  // Note: Repeat/Clamp would map 1.75 to Green (0.75 or 1.0).
+  Out[3] = Tex.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
+  return float4(0,0,0,0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0 ] # Green
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.0, 1.0, 0.0, 1.0,  # Clamp -> Green
+            1.0, 0.0, 0.0, 1.0,  # Repeat -> Red
+            0.0, 0.0, 0.0, 0.0,  # Border -> Transparent Black
+            1.0, 0.0, 0.0, 1.0 ] # Mirror -> Red
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps: { Width: 1, Height: 1, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: ClampSamp
+    Address: Clamp
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: RepeatSamp
+    Address: Repeat
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: BorderSamp
+    Address: Border
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: MirrorSamp
+    Address: Mirror
+    MinFilter: Nearest
+    MagFilter: Nearest
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: ClampSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: RepeatSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: BorderSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: MirrorSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+
+Results:
+  - Result: AddressTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
+# XFAIL: DirectX || Metal
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/175630
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

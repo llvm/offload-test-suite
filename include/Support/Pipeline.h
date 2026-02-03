@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
+#include <limits>
 #include <memory>
 #include <string>
 #include <variant>
@@ -56,6 +57,34 @@ enum class ResourceKind {
   RWByteAddressBuffer,
   RWTexture2D,
   ConstantBuffer,
+  Sampler,
+  SamplerComparison,
+};
+
+enum class FilterMode { Nearest, Linear };
+
+enum class AddressMode { Clamp, Repeat, Mirror, Border, MirrorOnce };
+
+enum class CompareFunction {
+  Never,
+  Less,
+  Equal,
+  LessEqual,
+  Greater,
+  NotEqual,
+  GreaterEqual,
+  Always
+};
+
+struct Sampler {
+  std::string Name;
+  FilterMode MinFilter = FilterMode::Linear;
+  FilterMode MagFilter = FilterMode::Linear;
+  AddressMode Address = AddressMode::Clamp;
+  float MinLOD = 0.0f;
+  float MaxLOD = std::numeric_limits<float>::max();
+  float MipLODBias = 0.0f;
+  CompareFunction ComparisonOp = CompareFunction::Never;
 };
 
 struct DirectXBinding {
@@ -142,6 +171,7 @@ struct Resource {
   DirectXBinding DXBinding;
   std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
+  Sampler *SamplerPtr = nullptr;
   bool HasCounter;
   std::optional<uint32_t> TilesMapped;
   bool IsReserved = false;
@@ -152,6 +182,8 @@ struct Resource {
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::Sampler:
+    case ResourceKind::SamplerComparison:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -163,6 +195,24 @@ struct Resource {
     llvm_unreachable("All cases handled");
   }
 
+  bool isSampler() const {
+    switch (Kind) {
+    case ResourceKind::Sampler:
+    case ResourceKind::SamplerComparison:
+      return true;
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+      return false;
+    }
+  }
+
   bool isTexture() const {
     switch (Kind) {
     case ResourceKind::Buffer:
@@ -172,6 +222,8 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
+    case ResourceKind::Sampler:
+    case ResourceKind::SamplerComparison:
       return false;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
@@ -201,12 +253,20 @@ struct Resource {
   }
 
   uint32_t getElementSize() const {
+    assert(!isSampler() && "Samplers do not have element size");
     // ByteAddressBuffers are treated as 4-byte elements to match their memory
     // format.
     return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
   }
 
-  uint32_t size() const { return BufferPtr->size(); }
+  uint32_t getArraySize() const {
+    return isSampler() ? 1 : BufferPtr->ArraySize;
+  }
+
+  uint32_t size() const {
+    assert(!isSampler() && "Samplers do not have size");
+    return BufferPtr->size();
+  }
 
   bool isReadWrite() const {
     switch (Kind) {
@@ -215,6 +275,8 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::ConstantBuffer:
+    case ResourceKind::Sampler:
+    case ResourceKind::SamplerComparison:
       return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -337,6 +399,7 @@ struct Pipeline {
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
   llvm::SmallVector<Buffer> Buffers;
+  llvm::SmallVector<Sampler> Samplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
 
@@ -351,7 +414,7 @@ struct Pipeline {
     uint32_t DescriptorCount = 0;
     for (auto &D : Sets)
       for (auto &R : D.Resources)
-        DescriptorCount += R.BufferPtr->ArraySize;
+        DescriptorCount += R.getArraySize();
     return DescriptorCount;
   }
 
@@ -359,6 +422,13 @@ struct Pipeline {
     for (auto &B : Buffers)
       if (Name == B.Name)
         return &B;
+    return nullptr;
+  }
+
+  Sampler *getSampler(llvm::StringRef Name) {
+    for (auto &S : Samplers)
+      if (Name == S.Name)
+        return &S;
     return nullptr;
   }
 
@@ -373,6 +443,7 @@ struct Pipeline {
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Sampler)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
@@ -394,6 +465,10 @@ template <> struct MappingTraits<offloadtest::DescriptorSet> {
 
 template <> struct MappingTraits<offloadtest::Buffer> {
   static void mapping(IO &I, offloadtest::Buffer &R);
+};
+
+template <> struct MappingTraits<offloadtest::Sampler> {
+  static void mapping(IO &I, offloadtest::Sampler &S);
 };
 
 template <> struct MappingTraits<offloadtest::Result> {
@@ -476,6 +551,42 @@ template <> struct ScalarEnumerationTraits<offloadtest::DenormMode> {
   }
 };
 
+template <> struct ScalarEnumerationTraits<offloadtest::FilterMode> {
+  static void enumeration(IO &I, offloadtest::FilterMode &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::FilterMode::Val)
+    ENUM_CASE(Nearest);
+    ENUM_CASE(Linear);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::AddressMode> {
+  static void enumeration(IO &I, offloadtest::AddressMode &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::AddressMode::Val)
+    ENUM_CASE(Clamp);
+    ENUM_CASE(Repeat);
+    ENUM_CASE(Mirror);
+    ENUM_CASE(Border);
+    ENUM_CASE(MirrorOnce);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::CompareFunction> {
+  static void enumeration(IO &I, offloadtest::CompareFunction &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::CompareFunction::Val)
+    ENUM_CASE(Never);
+    ENUM_CASE(Less);
+    ENUM_CASE(Equal);
+    ENUM_CASE(LessEqual);
+    ENUM_CASE(Greater);
+    ENUM_CASE(NotEqual);
+    ENUM_CASE(GreaterEqual);
+    ENUM_CASE(Always);
+#undef ENUM_CASE
+  }
+};
+
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   static void enumeration(IO &I, offloadtest::DataFormat &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataFormat::Val)
@@ -509,6 +620,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(RWByteAddressBuffer);
     ENUM_CASE(RWTexture2D);
     ENUM_CASE(ConstantBuffer);
+    ENUM_CASE(Sampler);
+    ENUM_CASE(SamplerComparison);
 #undef ENUM_CASE
   }
 };
