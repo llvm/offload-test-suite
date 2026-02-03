@@ -24,7 +24,7 @@ Buffers:
     Format: Float32
     Stride: 16
     Data: [ nan, -inf, -0x1.e7d42cp-127, 0x1.e7d42cp-127, inf, nan, nan, nan ]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, NaN
+    #  NaN, -Inf, -denorm, denorm, Inf, NaN, Nan, NaN
   - Name: Out
     Format: Float32
     Stride: 16
