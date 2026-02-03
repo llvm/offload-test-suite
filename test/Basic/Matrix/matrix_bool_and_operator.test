@@ -1,0 +1,143 @@
+#--- source.hlsl
+
+RWStructuredBuffer<bool> In : register(u0);
+RWStructuredBuffer<bool> AndTrueTrueOut : register(u1);
+RWStructuredBuffer<bool> AndTrueFalseOut : register(u2);
+RWStructuredBuffer<bool> AndTrueMixOut : register(u3);
+RWStructuredBuffer<bool> AndTrueMix2Out : register(u4);
+
+[numthreads(1,1,1)]
+void main() {
+  bool2x3 MatFalse = bool2x3(In[0], In[1], In[2],
+                            In[0], In[1], In[2]);
+  bool2x3 MatTrue = bool2x3(In[3], In[4], In[5],
+                            In[3], In[4], In[5]); 
+  bool2x3 MatMix  = bool2x3(In[0], In[1], In[2],
+                            In[3], In[4], In[5]); 
+  bool2x3 MatMix2  = bool2x3(In[3], In[4], In[5],
+                             In[0], In[1], In[2]); 
+
+  bool2x3 MatAndTrueTrue = and(MatTrue,MatTrue);
+  bool2x3 MatAndTrueFalse = and(MatTrue,MatFalse);
+  bool2x3 MatAndTrueMix1 = and(MatTrue,MatMix);
+  bool2x3 MatAndTrueMix2 = and(MatTrue,MatMix2);
+
+  const uint COLS = 3;          // bool2x3 => 2 rows, 3 columns
+  for(uint i = 0; i < 6; i++) {
+    uint row = i / COLS;
+    uint col = i % COLS;
+    AndTrueTrueOut[i]  = MatAndTrueTrue[row][col];
+    AndTrueFalseOut[i] = MatAndTrueFalse[row][col];
+    AndTrueMixOut[i]   = MatAndTrueMix1[row][col];
+    AndTrueMix2Out[i]  = MatAndTrueMix2[row][col];
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 0, 0, 0, 1, 1, 1 ]
+  - Name: AndTrueTrueOut
+    Format: Int32
+    FillSize: 24
+  - Name: AndTrueTrueExpectedOut
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1 ]
+  - Name: AndTrueFalseOut
+    Format: Int32
+    FillSize: 24
+  - Name: AndTrueFalseExpectedOut
+    Format: Int32
+    Data: [ 0, 0, 0, 0, 0, 0 ]
+  - Name: AndTrueMixOut
+    Format: Int32
+    FillSize: 24
+  - Name: AndTrueMixExpectedOut
+    Format: Int32
+    Data: [ 0, 0, 0, 1, 1, 1 ]
+  - Name: AndTrueMix2Out
+    Format: Int32
+    FillSize: 24
+  - Name: AndTrueMix2ExpectedOut
+    Format: Int32
+    Data: [ 1, 1, 1, 0, 0, 0 ]
+Results:
+  - Result: AndTrueTrueOut
+    Rule: BufferExact
+    Actual: AndTrueTrueOut
+    Expected: AndTrueTrueExpectedOut
+  - Result: AndTrueFalseOut
+    Rule: BufferExact
+    Actual: AndTrueFalseOut
+    Expected: AndTrueFalseExpectedOut
+  - Result: AndTrueMixOut
+    Rule: BufferExact
+    Actual: AndTrueMixOut
+    Expected: AndTrueMixExpectedOut
+  - Result: AndTrueMix2Out
+    Rule: BufferExact
+    Actual: AndTrueMix2Out
+    Expected: AndTrueMix2ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: AndTrueTrueOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: AndTrueFalseOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: AndTrueMixOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: AndTrueMix2Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8129
+# XFAIL: DXC && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/703
+# XFAIL: Clang && NV && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/704
+# XFAIL: Clang && Intel && Vulkan
+
+# Note: Metal does not support boolean matrix types. For
+# Vulkan KosmicKrisp and MoltenVK the output is always False.
+# UNSUPPORTED: Darwin
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
