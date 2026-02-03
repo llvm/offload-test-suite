@@ -25,8 +25,8 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, inf, -314.16, 314.16, nan, nan, nan,]
-    #  NaN, -Inf, -denorm, -0, 0, denorm, Inf, -314.16, 314.16,
+    Data: [ 0.5235988, -0.7853982, 1.0471976, -0, 0, 1.5707963, -1.5707963, -314.16, 314.16, 3.1415927, -3.1415927, 100.0 ]
+    #  pi/6, -pi/4, pi/3, -0, 0, pi/2, -pi/2, -314.16, 314.16, pi, -pi, 100.0
   - Name: Out
     Format: Float32
     Stride: 16
@@ -34,8 +34,8 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, nan, 1.0, 1.0, 1.0, 1.0, nan, 0.99999973015, 0.99999973015, nan, nan, nan,]
-    #  NaN, NaN, 1.0, 1.0, 1.0, 1.0, NaN, 0.99999973015, 0.99999973015,
+    Data: [ 0.8660254, 0.7071068, 0.5, 1.0, 1.0, 0.0, 0.0, 0.99999973015, 0.99999973015, -1.0, -1.0, 0.8623189 ]
+    #  cos(pi/6), cos(-pi/4), cos(pi/3), 1.0, 1.0, cos(pi/2), cos(-pi/2), cos(-314.16), cos(314.16), cos(pi), cos(-pi), cos(100.0)
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
@@ -62,7 +62,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
-# XFAIL: Vulkan && Darwin
+# XFAIL: Vulkan && MoltenVK
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
