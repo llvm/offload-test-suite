@@ -22,6 +22,8 @@ config.offloadtest_os = "@CMAKE_SYSTEM_NAME@"
 config.offloadtest_enable_debug = @OFFLOADTEST_ENABLE_DEBUG@
 config.offloadtest_enable_validation = @OFFLOADTEST_ENABLE_VALIDATION@
 
+config.test_source_root = r"@TEST_SOURCE_ROOT@"
+
 import lit.llvm
 lit.llvm.initialize(lit_config, config)
 

@@ -21,5 +21,6 @@ jobs:
       OS: windows
       SKU: windows-qc
       TestTarget: check-hlsl-clang-warp-d3d12
+      TestTargetReconvergence: check-hlsl-clang-reconvergence-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On

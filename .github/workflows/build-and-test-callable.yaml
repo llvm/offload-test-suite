@@ -2,10 +2,6 @@ name: HLSL Test
 
 permissions:
   contents: read
-  # contents: write
-  # checks: write
-  # pull-requests: write
-
 
 on:
   workflow_dispatch:
@@ -62,6 +58,10 @@ on:
         required: false
         default: ''
         type: string
+      TestReconvergenceTarget:
+        required: false
+        default: 'check-hlsl-reconvergence'
+        type: string
   workflow_call:
     inputs:
       OffloadTest-branch:
@@ -104,13 +104,14 @@ on:
         required: false
         default: ''
         type: string
-
+      TestReconvergenceTarget:
+        required: false
+        default: 'check-hlsl-reconvergence'
+        type: string
 jobs:
   build:
     permissions:
-      # contents: write
       checks: write
-      # pull-requests: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
       - name: Checkout DXC
@@ -162,14 +163,14 @@ jobs:
             cd DXC
             mkdir build
             cd build
-            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v --filter-out=Feature/MaximalReconvergence" ${{ github.workspace }}/DXC/
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
             ninja
       - name: Build LLVM
         run: |
             cd llvm-project
             mkdir build
             cd build
-            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v --filter-out=Feature/MaximalReconvergence" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
+            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
             ninja hlsl-test-depends
       - name: Dump GPU Info
         run: |
@@ -182,14 +183,7 @@ jobs:
             cd build
             ninja check-hlsl-unit
             ninja ${{ inputs.TestTarget }}
-      - name: Generate maximal Reconvergence Tests
-        if: always()
-        run: |
-            rm -rf OffloadTest/tools/TestGenerator/reconvergence/tests/*
-            cd OffloadTest/tools/TestGenerator/reconvergence
-            cmake -G Ninja -B build/
-            ninja -C build
-      - name: Run Maximal Reconvergence Test
+      - name: Run Maximal Reconvergence Tests
         if: always()
         continue-on-error: true
         env:
@@ -197,21 +191,16 @@ jobs:
         run: |
             cd llvm-project
             cd build
-            ./bin/llvm-lit -v --xunit-xml-output=testresults-max-reconv.xunit.xml ${{ github.workspace }}/OffloadTest/tools/TestGenerator/reconvergence/tests
+            ninja ${{ inputs.TestReconvergenceTarget }}
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
           comment_mode: off
           files: llvm-project/build/**/testresults.xunit.xml
-      # - name: Publish Maximal Reconvergence Test Results
-      #   uses: EnricoMi/publish-unit-test-result-action/composite@v2
-      #   if: always()
-      #   with:
-      #     check_name: "Maximal Reconvergence Test Results (${{ inputs.SKU }} ${{ inputs.TestTarget }})"
-      #     comment_mode: off
-      #     files: llvm-project/build/**/testresults-max-reconv.xunit.xml
-      #     report_individual_runs: true
-      #     json_thousands_separator: ','
-      #     badge_branch: badges
-      #     badge_label: "Maximal Reconvergence"
+      #- name: Publish Test Results
+      #  uses: EnricoMi/publish-unit-test-result-action/windows@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
+      #  if: always() && inputs.OS == 'windows'
+      #  with:
+      #    comment_mode: off
+      #    files: llvm-project/build/**/testresults.xunit.xml

@@ -20,5 +20,6 @@ jobs:
       SKU: windows-amd
       BuildType: Debug
       TestTarget: check-hlsl-warp-d3d12
+      TestTargetReconvergence: check-hlsl-reconvergence-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWARP_VERSION=1.0.15-preview

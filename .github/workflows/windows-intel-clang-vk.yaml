@@ -21,5 +21,6 @@ jobs:
       OS: windows
       SKU: windows-intel
       TestTarget: check-hlsl-clang-vk
+      TestTargetReconvergence: check-hlsl-clang-reconvergence-vk
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On

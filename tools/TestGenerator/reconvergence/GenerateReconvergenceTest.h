@@ -13,7 +13,7 @@ public:
       const std::map<uint32_t, uint32_t> &nestingLevelToTestsCount,
       uint32_t subgroupSize, uint32_t workgroupSizeX, uint32_t workgroupSizeY);
 
-  bool save_shader_ = true;
+  bool save_shader_ = false;
 
 private:
   TestCase createSingleTest(uint32_t seed, uint32_t maxNestingLevel,

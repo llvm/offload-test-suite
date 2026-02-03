@@ -31,7 +31,8 @@ config.suffixes = [".test", ".yaml"]
 config.excludes = ["Inputs", "CMakeLists.txt", "README.txt", "LICENSE.txt"]
 
 # test_source_root: The root path where tests are located.
-config.test_source_root = os.path.dirname(__file__)
+if not hasattr(config, "test_source_root"):
+    config.test_source_root = os.path.dirname(__file__)
 
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(

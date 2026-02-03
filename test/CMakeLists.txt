@@ -191,3 +191,73 @@ endif()
 
 umbrella_lit_testsuite_end(check-hlsl)
 set_target_properties(check-hlsl PROPERTIES FOLDER "HLSL tests")
+
+# Location where tests are generated (defined by tool execution in its binary dir)
+set(RECONVERGENCE_TEST_DIR "${OFFLOADTEST_BINARY_DIR}/tools/TestGenerator/reconvergence/tests")
+
+# Initialize test flags based on enabled platforms
+set(TEST_SOURCE_ROOT "${RECONVERGENCE_TEST_DIR}")
+
+function(add_reconvergence_lit_suite suite)
+  configure_lit_site_cfg(
+    ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.site.cfg.py
+    MAIN_CONFIG
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.cfg.py
+    PATHS
+    "OFFLOADTEST_BINARY_DIR"
+    "LLVM_TOOLS_DIR"
+    )
+
+  add_lit_testsuite(check-hlsl-${suite}
+    "Running the HLSL reconvergence tests for ${suite}"
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}
+    DEPENDS generate-reconvergence-tests ${OFFLOADTEST_DEPS}
+    )
+  set_target_properties(check-hlsl-${suite} PROPERTIES FOLDER "HLSL tests")
+endfunction()
+
+foreach(platform ${platforms_to_test})
+  # Reset all to false first
+  set(TEST_vk False)
+  set(TEST_d3d12 False)
+  set(TEST_mtl False)
+  
+  # Enable current
+  set(TEST_${platform} True)
+
+  # DXC
+  set(FORCE_CLANG False)
+  set(FORCE_WARP False)
+  add_reconvergence_lit_suite(reconvergence-${platform})
+
+  # Clang
+  if (OFFLOADTEST_TEST_CLANG)
+    set(FORCE_CLANG True)
+    set(FORCE_WARP False)
+    add_reconvergence_lit_suite(clang-reconvergence-${platform})
+  endif()
+endforeach()
+
+# WARP targets (D3D12 only)
+if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
+  # Configure for WARP (D3D12 only)
+  set(TEST_vk False)
+  set(TEST_mtl False)
+  set(TEST_d3d12 True)
+  
+  get_property(WARP_ARCHITECTURE GLOBAL PROPERTY WARP_ARCHITECTURE)
+
+  # DXC WARP
+  set(FORCE_CLANG False)
+  set(FORCE_WARP True)
+  add_reconvergence_lit_suite(reconvergence-warp-d3d12)
+
+  # Clang WARP
+  if (OFFLOADTEST_TEST_CLANG)
+    set(FORCE_CLANG True)
+    set(FORCE_WARP True)
+    add_reconvergence_lit_suite(clang-reconvergence-warp-d3d12)
+  endif()
+endif()
+

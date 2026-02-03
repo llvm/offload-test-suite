@@ -117,7 +117,7 @@ void ReconvergenceTestGenerator::saveShader(const TestCase &test) {
   uint32_t workgroupSizeY = test.getWorkgroupSizeY();
   uint32_t maxNestingLevel = test.getMaxNestingLevel();
   uint32_t seed = test.getSeed();
-  std::string path = "../shaders/" + std::to_string(subgroupSize);
+  std::string path = "shaders/" + std::to_string(subgroupSize);
   std::filesystem::create_directories(path);
   std::string filename = path + "/test_" + std::to_string(maxNestingLevel) +
                          "_" + std::to_string(subgroupSize) + "_" +
@@ -135,7 +135,7 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &test) {
   uint32_t workgroupSizeY = test.getWorkgroupSizeY();
   uint32_t maxNestingLevel = test.getMaxNestingLevel();
   uint32_t seed = test.getSeed();
-  std::string path = "../tests/" + std::to_string(subgroupSize);
+  std::string path = "tests/" + std::to_string(subgroupSize);
   std::filesystem::create_directories(path);
   std::string filename = path + "/test_" + std::to_string(maxNestingLevel) +
                          "_" + std::to_string(subgroupSize) + "_" +
