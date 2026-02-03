@@ -38,9 +38,10 @@ Buffers:
   - Name: Tex
     Format: Float32
     Channels: 4
-    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
     Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
-            0.0, 1.0, 0.0, 1.0 ] # Green
+            0.0, 1.0, 0.0, 1.0,  # Green
+            0.5, 0.5, 0.0, 1.0 ] # Mip 1
 
   - Name: Out
     Format: Float32
@@ -52,8 +53,8 @@ Buffers:
     Channels: 4
     Data: [ 0.7, 0.3, 0.0, 1.0,  # Linear
             1.0, 0.0, 0.0, 1.0,  # Nearest
-            1.0, 0.0, 0.0, 1.0,  # Nearest
-            0.7, 0.3, 0.0, 1.0 ] # Linear
+            0.5, 0.5, 0.0, 1.0,  # Nearest (LOD 1)
+            0.5, 0.5, 0.0, 1.0 ] # Linear (LOD 1)
 
 Samplers:
   - Name: MagLinearMinPoint

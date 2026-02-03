@@ -30,20 +30,27 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float2 uv = float2(1.25, 0.5);
 
   // 1. Clamp: Snaps 1.25 -> 1.0 (Edge). Result: Green.
-  Out[0] = Tex.SampleLevel(ClampSamp, uv, 0);
+  float4 r0 = Tex.SampleLevel(ClampSamp, uv, 0);
 
   // 2. Repeat: Wraps 1.25 -> 0.25 (Start). Result: Red.
-  Out[1] = Tex.SampleLevel(RepeatSamp, uv, 0);
+  float4 r1 = Tex.SampleLevel(RepeatSamp, uv, 0);
 
   // 3. Border: 1.25 is outside. Result: Border Color (0,0,0,0).
-  Out[2] = Tex.SampleLevel(BorderSamp, uv, 0);
+  float4 r2 = Tex.SampleLevel(BorderSamp, uv, 0);
 
   // 4. Mirror: Test at 1.75
   // Range [1.0, 2.0] is mirrored [1.0, 0.0].
   // 1.75 maps to 1.0 - (0.75) = 0.25 (Center of Red).
   // Result: Red.
   // Note: Repeat/Clamp would map 1.75 to Green (0.75 or 1.0).
-  Out[3] = Tex.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
+  float4 r3 = Tex.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+  }
   return float4(0,0,0,0);
 }
 

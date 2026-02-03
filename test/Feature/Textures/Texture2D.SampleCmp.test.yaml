@@ -30,54 +30,70 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 0.5 < (0,1)=0.2 -> 0.0
   // 0.5 < (1,1)=0.8 -> 1.0
   // Linear Filter blends (0+1+0+1)/4 = 0.5
-  Out[0] = Tex.SampleCmp(Samp, uv, 0.5);
+  float r0 = Tex.SampleCmp(Samp, uv, 0.5);
 
   // 2. Ref = 0.1. (Less: Ref < Sample).
   // 0.1 < 0.2 -> 1.0
   // 0.1 < 0.8 -> 1.0
   // Result 1.0.
-  Out[1] = Tex.SampleCmp(Samp, uv, 0.1);
+  float r1 = Tex.SampleCmp(Samp, uv, 0.1);
 
   // 3. Ref = 0.9. (Less: Ref < Sample).
   // 0.9 < 0.2 -> 0.0
   // 0.9 < 0.8 -> 0.0
   // Result 0.0.
-  Out[2] = Tex.SampleCmp(Samp, uv, 0.9);
+  float r2 = Tex.SampleCmp(Samp, uv, 0.9);
 
   // 4. Ref = 0.5. SampGreater (Greater: Ref > Sample).
   // 0.5 > 0.2 -> 1.0
   // 0.5 > 0.8 -> 0.0
   // Linear Filter blends (1+0+1+0)/4 = 0.5
-  Out[3] = Tex.SampleCmp(SampGreater, uv, 0.5);
+  float r3 = Tex.SampleCmp(SampGreater, uv, 0.5);
 
   // 5. Ref = 0.5. Offset (-1, -1). Samp (Less: Ref < Sample).
-  Out[4] = Tex.SampleCmp(Samp, uv, 0.5, int2(-1, -1));
+  float r4 = Tex.SampleCmp(Samp, uv, 0.5, int2(-1, -1));
 
   // 6. Ref = 0.5. Clamp 0.0. Samp (Less: Ref < Sample).
-  Out[5] = Tex.SampleCmp(Samp, uv, 0.5, int2(0, 0), 0.0);
+  float r5 = Tex.SampleCmp(Samp, uv, 0.5, int2(0, 0), 0.0);
 
   // 7. Ref = 0.5. Location (0.25, 0.25). Samp (Less: Ref < Sample).
   // Center of Texel (0,0) is 0.2.
   // 0.5 < 0.2 is FALSE -> 0.0.
-  Out[6] = Tex.SampleCmp(Samp, float2(0.25, 0.25), 0.5);
+  float r6 = Tex.SampleCmp(Samp, float2(0.25, 0.25), 0.5);
 
   // 8. SampleCmpLevelZero (LOD 0 explicit) Ref = 0.5
-  Out[7] = Tex.SampleCmpLevelZero(Samp, uv, 0.5);
+  float r7 = Tex.SampleCmpLevelZero(Samp, uv, 0.5);
 
   // 9. SampleCmpLevelZero Ref = 0.1
-  Out[8] = Tex.SampleCmpLevelZero(Samp, uv, 0.1);
+  float r8 = Tex.SampleCmpLevelZero(Samp, uv, 0.1);
 
   // 10. SampleCmpLevelZero Ref = 0.9
-  Out[9] = Tex.SampleCmpLevelZero(Samp, uv, 0.9);
+  float r9 = Tex.SampleCmpLevelZero(Samp, uv, 0.9);
 
   // 11. SampleCmpLevelZero Offset (-1, -1)
-  Out[10] = Tex.SampleCmpLevelZero(Samp, uv, 0.5, int2(-1, -1));
+  float r10 = Tex.SampleCmpLevelZero(Samp, uv, 0.5, int2(-1, -1));
 
   // 12. SampleCmpLevelZero SampGreater
-  Out[11] = Tex.SampleCmpLevelZero(SampGreater, uv, 0.5);
+  float r11 = Tex.SampleCmpLevelZero(SampGreater, uv, 0.5);
 
   // 13. SampleCmpLevelZero Location
-  Out[12] = Tex.SampleCmpLevelZero(Samp, float2(0.25, 0.25), 0.5);
+  float r12 = Tex.SampleCmpLevelZero(Samp, float2(0.25, 0.25), 0.5);
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+    Out[4] = r4;
+    Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
+    Out[12] = r12;
+  }
   return float4(0,0,0,0);
 }
 
@@ -180,8 +196,6 @@ Results:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/175630
 # XFAIL: Clang
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/690
-# XFAIL: Vulkan && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
