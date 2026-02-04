@@ -8,14 +8,14 @@ void main(uint3 threadID : SV_DispatchThreadID) {
   // 0xBFFFFFFF
   Out[0] = WaveActiveBallot(threadID.x != 30 && threadID.x != 62);
 
-  // We expect the first resulting uint's bitmask to be 
+  // We expect the first resulting uint's bitmask to be
   // 0x0000FFFF, and the second to be 0xFFFF0000
   Out[1] = WaveActiveBallot(threadID.x < 16 || threadID.x > 47 );
 
   // We expect the resulting uint4 to be 4 0x00000000's
   Out[2] = WaveActiveBallot(false);
 
-  // We expect the first and second resulting uint's bitmask to be 
+  // We expect the first and second resulting uint's bitmask to be
   // 0xAAAAAAAA
   Out[3] = WaveActiveBallot(threadID.x % 2 == 1);
 }
@@ -27,10 +27,10 @@ Shaders:
   - Stage: Compute
     Entry: main
     DispatchSize: [1, 1, 1]
-Buffers:  
+Buffers:
   - Name: Out
     Format: UInt32
-    Stride: 4
+    Stride: 16
     FillSize: 64
   - Name: ExpectedOut
     Format: UInt32
@@ -42,7 +42,7 @@ Results:
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
-  - Resources:    
+  - Resources:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
@@ -54,9 +54,6 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: WaveSize_64
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/688
-# XFAIL: AMD && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
