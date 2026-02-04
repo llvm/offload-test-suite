@@ -1,0 +1,52 @@
+#--- source.hlsl
+RWStructuredBuffer<uint4> Out : register(u1);
+
+[WaveSize(64)]
+[numthreads(64, 1, 1)]
+void main(uint3 threadID : SV_DispatchThreadID) {
+  // We expect the first and second resulting uint's bitmask to be 
+  // 0xAAAAAAAA
+  Out[0] = WaveActiveBallot(threadID.x % 2 == 1);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:  
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [2863311530, 2863311530, 0, 0]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:    
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: WaveSize_64
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/711
+# XFAIL: WARP && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
