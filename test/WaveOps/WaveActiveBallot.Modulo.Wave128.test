@@ -45,7 +45,7 @@ DescriptorSets:
 # REQUIRES: WaveSize_128
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/711
-# XFAIL: WARP
+# XFAIL: WARP && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
