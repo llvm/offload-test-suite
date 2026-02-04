@@ -423,12 +423,14 @@ public:
         uint32_t r = deRandom_getUint32(&rnd) % 11;
         switch (r) {
         default:
+          [[fallthrough]];
           // fallthrough
         case 2:
           if (loopNesting) {
             genIf(IF_LOOPCOUNT);
             break;
           }
+          [[fallthrough]];
           // fallthrough
         case 10:
           genIf(IF_LOCAL_INVOCATION_INDEX);
@@ -503,8 +505,10 @@ public:
               genSwitchLoopCount();
               break;
             }
+            [[fallthrough]];
             // fallthrough
           case 2:
+            [[fallthrough]];
             // fallthrough
           case 3:
             genSwitchVar();
@@ -939,15 +943,12 @@ public:
     auto prerequisites =
         makePrerequisites(outputP, subgroupSize, primitiveStride, stateStack,
                           outLoc, subgroupCount);
-    const Ballot fullSubgroupMask =
-        subgroupSizeToMask(subgroupSize, subgroupCount);
 
     logFailureCount = 10u;
     nesting = 0;
     loopNesting = 0;
 
     int32_t i = 0;
-    uint32_t loopCount = 0;
 
     while (i < (int32_t)ops.size()) {
       add_cref<Ballots> activeMask = stateStack[nesting].activeMask;
@@ -1259,7 +1260,6 @@ public:
         break;
       }
       i++;
-      loopCount++;
     }
     uint32_t maxLoc = 0;
     for (uint32_t id = 0; id < (uint32_t)outLoc.size(); ++id)

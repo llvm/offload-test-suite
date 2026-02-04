@@ -29,21 +29,17 @@ void ReconvergenceTestGenerator::createRandomizedTests(
   for (uint32_t maxNestingLevel = 2; maxNestingLevel <= totalMaxNestingLevel;
        ++maxNestingLevel) {
     uint32_t seed = 0;
-    for (int seedGroup = 0; seedGroup < totalSeedGroup; ++seedGroup) {
+    for (uint32_t seedGroup = 0; seedGroup < totalSeedGroup; ++seedGroup) {
       uint32_t testsCount = nestingLevelToTestsCount.at(maxNestingLevel);
       for (uint32_t _ = 0; _ < testsCount; ++_) {
-        try {
-          const TestCase &test =
-              createSingleTest(seed, maxNestingLevel, subgroupSize,
-                               workgroupSizeX, workgroupSizeY);
-          if (save_shader_) {
-            saveShader(test);
-          }
-          saveTestConfig(test);
-        } catch (const std::exception &e) {
-          std::cout << "Failed to create test " << testId << ": " << e.what()
-                    << std::endl;
+        const TestCase &test =
+            createSingleTest(seed, maxNestingLevel, subgroupSize,
+                             workgroupSizeX, workgroupSizeY);
+        if (save_shader_) {
+          saveShader(test);
         }
+        saveTestConfig(test);
+
         testId++;
         seed++;
         std::cout << "\rShader " << testId << " / " << totalTestsCount
@@ -51,7 +47,7 @@ void ReconvergenceTestGenerator::createRandomizedTests(
       }
     }
   }
-};
+}
 
 TestCase ReconvergenceTestGenerator::createSingleTest(uint32_t seed,
                                                       uint32_t maxNestingLevel,
@@ -70,12 +66,8 @@ TestCase ReconvergenceTestGenerator::createSingleTest(uint32_t seed,
       program.execute(/*countOnly=*/true, subgroupSize, invocationStride, ref);
   maxLoc++;
   maxLoc *= invocationStride;
-  try {
-    ref.resize(maxLoc, UVec4(0u, 0u, 0u, 0u));
-  } catch (const std::exception &e) {
-    std::cout << "Failed to resize reference vector: " << e.what() << std::endl;
-    throw e;
-  }
+  ref.resize(maxLoc, UVec4(0u, 0u, 0u, 0u));
+
   program.execute(/*countOnly=*/false, subgroupSize, invocationStride, ref);
   testCase.setExpectedResult(ref);
 
@@ -109,7 +101,7 @@ TestCase ReconvergenceTestGenerator::createSingleTest(uint32_t seed,
   setup << "void main(uint gIndex : SV_GroupIndex)\n" << "{\n";
   shader << setup.str() << main.str() << "}\n";
   return testCase;
-};
+}
 
 void ReconvergenceTestGenerator::saveShader(const TestCase &test) {
   uint32_t subgroupSize = test.getSubgroupSize();
@@ -176,7 +168,7 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &test) {
     Stride: 16
     Data: )"""";
   buffers << "[ ";
-  for (int i = 0; i < expectedResult.size(); ++i) {
+  for (size_t i = 0; i < expectedResult.size(); ++i) {
     const UVec4 &vec = expectedResult[i];
     buffers << vec.x() << ", " << vec.y() << ", " << vec.z() << ", " << vec.w();
     if (i < expectedResult.size() - 1) {
