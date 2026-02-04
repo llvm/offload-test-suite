@@ -22,6 +22,6 @@ jobs:
       SKU: windows-intel
       BuildType: Debug
       TestTarget: check-hlsl-d3d12
-      TestTargetReconvergence: check-hlsl-reconvergence-d3d12
+      TestTargetReconvergence: check-hlsl-d3d12-reconvergence
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

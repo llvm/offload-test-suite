@@ -22,12 +22,14 @@ jobs:
       matrix:
         SKU: [windows-intel]
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        TestTargetReconvergence: [check-hlsl-d3d12-reconvergence, check-hlsl-vk-reconvergence, check-hlsl-clang-d3d12-reconvergence, check-hlsl-clang-vk-reconvergence]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
+      TestTargetReconvergence: ${{ matrix.TestTargetReconvergence }}
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
@@ -40,12 +42,15 @@ jobs:
       matrix:
         SKU: [windows-intel, windows-qc]
         TestTarget: [check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
+        TestTargetReconvergence: [check-hlsl-warp-d3d12-reconvergence, check-hlsl-clang-warp-d3d12-reconvergence]
+
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
+      TestTargetReconvergence: ${{ matrix.TestTargetReconvergence }}
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
@@ -59,12 +64,13 @@ jobs:
       matrix:
         SKU: [windows-nvidia, windows-amd, windows-qc]
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
-
+        TestTargetReconvergence: [check-hlsl-d3d12-reconvergence, check-hlsl-vk-reconvergence, check-hlsl-clang-d3d12-reconvergence, check-hlsl-clang-vk-reconvergence]
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
+      TestTargetReconvergence: ${{ matrix.TestTargetReconvergence }}
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
@@ -77,10 +83,11 @@ jobs:
       matrix:
         SKU: [macos]
         TestTarget: [check-hlsl-mtl, check-hlsl-clang-mtl]
-
+        TestTargetReconvergence: [check-hlsl-mtl-reconvergence, check-hlsl-clang-mtl-reconvergence]
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: macOS
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
+      TestTargetReconvergence: ${{ matrix.TestTargetReconvergence }}
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}

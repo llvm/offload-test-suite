@@ -229,13 +229,13 @@ foreach(platform ${platforms_to_test})
   # DXC
   set(FORCE_CLANG False)
   set(FORCE_WARP False)
-  add_reconvergence_lit_suite(reconvergence-${platform})
+  add_reconvergence_lit_suite(${platform}-reconvergence)
 
   # Clang
   if (OFFLOADTEST_TEST_CLANG)
     set(FORCE_CLANG True)
     set(FORCE_WARP False)
-    add_reconvergence_lit_suite(clang-reconvergence-${platform})
+    add_reconvergence_lit_suite(clang-${platform}-reconvergence)
   endif()
 endforeach()
 
@@ -251,13 +251,13 @@ if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
   # DXC WARP
   set(FORCE_CLANG False)
   set(FORCE_WARP True)
-  add_reconvergence_lit_suite(reconvergence-warp-d3d12)
+  add_reconvergence_lit_suite(warp-d3d12-reconvergence)
 
   # Clang WARP
   if (OFFLOADTEST_TEST_CLANG)
     set(FORCE_CLANG True)
     set(FORCE_WARP True)
-    add_reconvergence_lit_suite(clang-reconvergence-warp-d3d12)
+    add_reconvergence_lit_suite(clang-warp-d3d12-reconvergence)
   endif()
 endif()
 

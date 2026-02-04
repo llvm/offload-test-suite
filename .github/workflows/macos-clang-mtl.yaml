@@ -21,5 +21,5 @@ jobs:
       OS: macOS
       SKU: macos
       TestTarget: check-hlsl-clang-mtl
-      TestTargetReconvergence: check-hlsl-clang-reconvergence-mtl
+      TestTargetReconvergence: check-hlsl-clang-mtl-reconvergence
       OffloadTest-branch: ${{ github.ref }}
