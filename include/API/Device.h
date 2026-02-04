@@ -38,6 +38,7 @@ struct DeviceConfig {
 class Device {
 protected:
   std::string Description;
+  std::string DriverName;
 
 public:
   virtual const Capabilities &getCapabilities() = 0;
@@ -51,6 +52,7 @@ public:
   virtual ~Device() = 0;
 
   llvm::StringRef getDescription() const { return Description; }
+  llvm::StringRef getDriverName() const { return DriverName; }
 
   static void registerDevice(std::shared_ptr<Device> D);
   static llvm::Error initialize(const DeviceConfig Config);

@@ -58,7 +58,7 @@ on:
         required: false
         default: ''
         type: string
-      TestReconvergenceTarget:
+      TestTargetReconvergence:
         required: false
         default: 'check-hlsl-reconvergence'
         type: string
@@ -104,7 +104,7 @@ on:
         required: false
         default: ''
         type: string
-      TestReconvergenceTarget:
+      TestTargetReconvergence:
         required: false
         default: 'check-hlsl-reconvergence'
         type: string
@@ -191,7 +191,7 @@ jobs:
         run: |
             cd llvm-project
             cd build
-            ninja ${{ inputs.TestReconvergenceTarget }}
+            ninja ${{ inputs.TestTargetReconvergence }}
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'

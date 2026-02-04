@@ -290,6 +290,7 @@ class MTLDevice : public offloadtest::Device {
                                                            Height, false);
         break;
       case ResourceKind::Sampler:
+      case ResourceKind::SamplerComparison:
         llvm_unreachable("Not implemented yet.");
       case ResourceKind::StructuredBuffer:
       case ResourceKind::RWStructuredBuffer:
