@@ -108,7 +108,7 @@ def setDeviceFeatures(config, device, compiler):
     appleSilicon = re.search(r"\bApple M(\d+)\b", device["Description"])
     if appleSilicon:
         gen = appleSilicon.group(1)
-    config.available_features.add(f"AppleM{gen}")
+        config.available_features.add(f"AppleM{gen}")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
