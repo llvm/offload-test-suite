@@ -1,0 +1,85 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Explicit Load(int3)
+  // Location: (x, y, mip)
+  Out[0] = Tex.Load(int3(0, 0, 0)); // Red
+  Out[1] = Tex.Load(int3(1, 0, 0)); // Green
+  Out[2] = Tex.Load(int3(0, 1, 0)); // Blue
+  Out[3] = Tex.Load(int3(1, 1, 0)); // White
+
+  // Load(int3, int2) - With Offset
+  // (0,0) + (1,0) = (1,0) -> Green
+  Out[4] = Tex.Load(int3(0, 0, 0), int2(1, 0)); 
+  
+  // (1,1) + (-1,-1) = (0,0) -> Red
+  Out[5] = Tex.Load(int3(1, 1, 0), int2(-1, -1));
+
+  // (0,0) + (1,1) = (1,1) -> White
+  Out[6] = Tex.Load(int3(0, 0, 0), int2(1, 1));
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0 ] # White (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 112 # 7 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,  # Offset (1,0) -> Green
+            1.0, 0.0, 0.0, 1.0,  # Offset (-1,-1) -> Red
+            1.0, 1.0, 1.0, 1.0 ] # Offset (1,1) -> White
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results:
+  - Result: LoadTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
+# Unimplemented: Clang + VK: https://github.com/llvm/llvm-project/issues/175630
+# XFAIL: Clang
+
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
