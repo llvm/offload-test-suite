@@ -1,10 +1,29 @@
 #--- source.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
 [[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0);
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
 
-[numthreads(2, 2, 1)]
-void main(uint3 GTid : SV_GroupThreadID) {
+float4 mainPS(VSOutput input) : SV_Target {
+  // Use SV_Position (pixel coordinates) to simulate the grid logic.
+  // Input position is [-1, 1], mapped to viewport 2x2.
+  // Pixel centers will be at (0.5, 0.5), (1.5, 0.5), etc.
+  
+  uint2 GTid = (uint2)input.Pos.xy;
+
   // Case 1: Derivative = 0.5. Texture Size = 4.
   // LOD = log2(0.5 * 4) = 1.0
   float2 uv0 = 0.25 + float2(GTid.xy) * 0.5;
@@ -26,14 +45,16 @@ void main(uint3 GTid : SV_GroupThreadID) {
     Out[2] = lod2;
     Out[3] = lod3;
   }
+  return float4(0, 0, 0, 0);
 }
 
 //--- pipeline.yaml
 ---
 Shaders:
-  - Stage: Compute
-    Entry: main
-    DispatchSize: [1, 1, 1]
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
 
 Buffers:
   - Name: Tex
@@ -51,6 +72,28 @@ Buffers:
     Format: Float32
     Channels: 1
     Data: [ 1.0, 2.0, 1.0, 3.0 ]
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
 
 Samplers:
   - Name: Samp
@@ -87,5 +130,6 @@ Results:
 # XFAIL: DirectX || Metal || Clang
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/source.hlsl
+# RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
