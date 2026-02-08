@@ -5,13 +5,18 @@
 
 ## 1. What is UTM?
 
-UTM is a macOS app that runs virtual machines using Apple’s Hypervisor framework
-and QEMU, with support for both native (Apple Silicon) and emulated architectures.
+**UTM** is a macOS application for running virtual machines using Apple’s **Hypervisor.framework** and **QEMU**. It supports both:
+
+- **Native virtualization** (Apple Silicon → ARM64 guests)
+- **Emulated architectures** (e.g. x86_64 on ARM, with reduced performance)
 
 ### Hypervisor.framework
 
-QEMU includes support for the `hvf` accelerator which provides same architecture 
-virtualization (x86 -> x86 or ARM64 -> ARM64) on macOS.
+QEMU supports the `hvf` accelerator, which enables **same-architecture virtualization** on macOS:
+- ARM64 → ARM64 (Apple Silicon)
+- x86_64 → x86_64 (Intel Macs)
+
+This provides near-native CPU performance for supported guests
 
 ### UTM's GPU Acceleration
 
@@ -47,21 +52,46 @@ the physical GPU. Instead of GPU Pass through its like command-stream forwarding
 
 ## 2. Installing UTM & Linux Setup
 
-To use Venus you need UTM v5.0.0 or newer. This version is not currently
-availalable on the Mac App Store and can only be downloaded from
- [UTM's github](https://github.com/utmapp/UTM/releases).
+To use Venus you need **UTM v5.0.0 or newer**. 
+> ⚠️ This version is not currently availalable on the Mac App Store and can
+only be downloaded from [UTM's github](https://github.com/utmapp/UTM/releases).
 
 ### Step 1: Download Linux
-Choose a Linux version and architecture that matches your Mac. These docs used [**ARM64 Ubuntu 24.04 LTS**](https://cdimage.ubuntu.com/noble/daily-live/pending/) Since its a relible VM iso for Apple silicon based macs.
+Choose a Linux distribution and architecture that **matches your Mac's CPU**.
+
+These instructions assume:
+
+- **Ubuntu 24.04 LTS (ARM64)**
+- Apple Silicon host
+
+There is no offical 24.04 ARM64 ISO but you You can find daily ISOs here:
+
+- https://cdimage.ubuntu.com/noble/daily-live/pending/
+
 
 ### Step 2: Setup UTM
 
-#### Storage requirments
-Between all the dependencies you will need to install and the build directories for llvm and dxc plan to devote at least 100GB to this vm. Don't rely on expanding the drive later. That doesn't work well.
+#### Storage Requirements
 
-#### Memory and CPU requirements
-For best results plan to devote atleast 4 cores and 14GB of ram to your vm so you can build llvm smoothly.
+Allocate **at least 100 GB** of disk space for:
 
+- LLVM build trees
+- DirectXShaderCompiler builds
+- Mesa and Vulkan tooling
+- LLVM and DXC software requirments
+  - (complers, linkers, build systems, etc)
+- Offload Test Suite artifacts
+
+> ⚠️ Do **not** rely on expanding the disk later—UTM disk resizing is unreliable.
+
+#### CPU and Memory
+
+Recommended minimums:
+
+- **4 CPU cores**
+- **14 GB RAM**
+
+This avoids excessive LLVM build times and out-of-memory failures.
 
 ### Step 3: Create a New VM in UTM
 
