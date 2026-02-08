@@ -1,18 +1,20 @@
 # Enabling GPU API virtualization on UTM VMs with macOS hosts 
 
-> Note: These docs are for mac users wanting on device linux development or a frictionless way to try out Venus.
->
+> Note: These docs are for mac users wanting on device linux development or a
+> frictionless way to try out Venus.
 
 ## 1. What is UTM?
 
-**UTM** is a macOS application for running virtual machines using Apple’s **Hypervisor.framework** and **QEMU**. It supports both:
+**UTM** is a macOS application for running virtual machines using Apple’s
+**Hypervisor.framework** and **QEMU**. It supports both:
 
 - **Native virtualization** (Apple Silicon → ARM64 guests)
 - **Emulated architectures** (e.g. x86_64 on ARM, with reduced performance)
 
 ### Hypervisor.framework
 
-QEMU supports the `hvf` accelerator, which enables **same-architecture virtualization** on macOS:
+QEMU supports the `hvf` accelerator, which enables 
+**same-architecture virtualization** on macOS:
 - ARM64 → ARM64 (Apple Silicon)
 - x86_64 → x86_64 (Intel Macs)
 
@@ -43,7 +45,8 @@ The graphics architecture of UTM involves many separate translation layers.
 ```
 ### Venus
 
-The important one for the offload test suite is the [virtio-gpu Venus Mesa Driver](https://docs.mesa3d.org/drivers/venus.html)
+The important one for the offload test suite is the 
+[virtio-gpu Venus Mesa Driver](https://docs.mesa3d.org/drivers/venus.html)
 Venus lets a VM use Vulkan by forwarding Vulkan API calls to the host GPU via
 virtio-gpu. In other words the guest does not need a native Vulkan driver for
 the physical GPU. Instead of GPU Pass through its like command-stream forwarding.
@@ -82,7 +85,8 @@ Allocate **at least 100 GB** of disk space for:
   - (complers, linkers, build systems, etc)
 - Offload Test Suite artifacts
 
-> ⚠️ Do **not** rely on expanding the disk later—UTM disk resizing is unreliable.
+> ⚠️ Do **not** rely on expanding the disk later—UTM disk resizing is
+unreliable.
 
 #### CPU and Memory
 
@@ -138,11 +142,13 @@ after building the offload test suite like so:
 
 ## 3. Running the Offload Test Suite with Venus
 
-To run the LLVM offload test suite against Venus, set the target GPU name explicitly:
+To run the LLVM offload test suite against Venus, set the target GPU name
+explicitly:
 
 ```bash
 OFFLOADTEST_GPU_NAME=Venus ninja -C <offload_build_dir> check-hlsl-clang-vk
 OFFLOADTEST_GPU_NAME=Venus ninja -C <offload_build_dir> check-hlsl-vk
 ```
 
-This forces the test harness to select the Venus Vulkan device instead of the software render `llvmpipe`.
+This forces the test harness to select the Venus Vulkan device instead of the
+software render `llvmpipe`.
