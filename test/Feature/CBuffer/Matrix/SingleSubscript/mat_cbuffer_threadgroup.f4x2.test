@@ -1,0 +1,68 @@
+#--- source.hlsl
+RWStructuredBuffer<float2> Out : register(u0);
+
+cbuffer example : register(b1) {
+    float4x2 M1;
+};
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+    Out[GI] = M1[GI];
+   
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+  - Name: cbuffer
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 ]
+  - Name: Out
+    Format: Float32
+    FillSize: 32
+  - Name: ExpectedOut
+    Format: Float32
+    Data: [ 1.1, 5.5, 2.2, 6.6, 3.3, 7.7, 4.4, 8.8]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: cbuffer
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+
+# Note: Nvidia crashes on both clang and DXC
+# XFAIL: NV && Vulkan
+
+# NOTE: AMD on Clang and DXC have result:
+# [ 1.1, 2.2, 3.3, 4.4, 8.8, 0, 0, 0 ]
+# XFAIL: AMD && DirectX
+
+# BUG https://github.com/llvm/offload-test-suite/issues/226
+# XFAIL: Intel
+
+# Note: Metal and Vulkan KosmicKrisp and MoltenVK 
+# Are always empty
+# UNSUPPORTED: Darwin
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
