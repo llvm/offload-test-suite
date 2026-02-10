@@ -135,6 +135,7 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
+
 # Bug https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
 
