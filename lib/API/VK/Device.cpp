@@ -385,6 +385,7 @@ public:
     Description = std::string(Props.deviceName, DeviceNameSz);
     FloatControlProp.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
+    FloatControlProp.pNext = nullptr;
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     DriverProps.pNext = &FloatControlProp;
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
