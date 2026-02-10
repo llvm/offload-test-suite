@@ -463,6 +463,9 @@ private:
 
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceFloatControlsProperties FloatControls{};
+    FloatControls.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     VkPhysicalDeviceVulkan11Features Features11{};
     Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
     VkPhysicalDeviceVulkan12Features Features12{};
@@ -473,8 +476,8 @@ private:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
-
-    Features.pNext = &Features11;
+    Features.pNext = &FloatControls;
+    FloatControls.pNext = &Features11;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
       Features11.pNext = &Features12;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
@@ -498,6 +501,9 @@ private:
 #define VULKAN_FEATURE_BOOL(Name)                                              \
   Caps.insert(std::make_pair(                                                  \
       #Name, make_capability<bool>(#Name, Features.features.Name)));
+#define VULKAN_FLOAT_CONTROLS_FEATURE_BOOL(Name)                               \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, make_capability<bool>(#Name, FloatControls.Name)));
 #define VULKAN11_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, make_capability<bool>(#Name, Features11.Name)));
@@ -583,6 +589,10 @@ public:
     DeviceInfo.queueCreateInfoCount = 1;
     DeviceInfo.pQueueCreateInfos = &QueueInfo;
 
+    VkPhysicalDeviceFloatControlsProperties FloatControls{};
+    FloatControls.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
+
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     VkPhysicalDeviceVulkan11Features Features11{};
@@ -596,7 +606,8 @@ public:
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
 
-    Features.pNext = &Features11;
+    Features.pNext = &FloatControls;
+    FloatControls.pNext = &Features11;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
       Features11.pNext = &Features12;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
