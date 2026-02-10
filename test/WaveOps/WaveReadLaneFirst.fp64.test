@@ -112,7 +112,7 @@ Buffers:
     FillSize: 32
   - Name: Masks
     Format: Int32
-    Stride: 32
+    Stride: 16
     # 4 active mask sets for threads 0, 1, 2, 3:
     # 0 0 0 0
     # 1 1 1 1    
@@ -122,7 +122,7 @@ Buffers:
     0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0]
   - Name: ExpectedOut1
     Format: Float64
-    Stride: 32
+    Stride: 8
     # 2 value sets, 4 masks per value set, 4 threads per mask, 1 result value per thread
     Data:  [ 0, 0, 0, 0, 
     2.5, 2.5, 2.5, 2.5, 
@@ -134,7 +134,7 @@ Buffers:
     0, 11.5, 11.5, 0 ]
   - Name: ExpectedOut2
     Format: Float64
-    Stride: 32
+    Stride: 16
     # 2 value sets, 4 masks per value set, 4 threads per mask, 1 result value per thread
     Data: [ 0, 0, 0, 0, 
     0, 0, 0, 0, 
