@@ -26,7 +26,6 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [ 0x03FF, 0x8000, 0x0000, 0xbc00, 0x4170, 0x63d1, 0xC764]
-    #  0.00006097555, -0, 0, -1, 2.719, 1000.5, -7.390625,
   - Name: Out
     Format: Float16
     Stride: 8
@@ -35,7 +34,6 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [ 0x3FF, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 ]
-    #  NaN, NaN, 0.00006097555, 0, 0, NaN, 0, 0.719, 0.5, 0.6098633,
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
