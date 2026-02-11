@@ -1,11 +1,24 @@
 #--- system_values.hlsl
 RWStructuredBuffer<uint4> Out : register(u0);
 
-[numthreads(2, 1, 1)]
+[numthreads(2, 2, 2)]
 void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID : SV_GroupThreadID, uint GI : SV_GroupIndex) {
-    Out[DTID.x * 3 + 0] = uint4(DTID.x, GID.x, GTID.x, GI);
-    Out[DTID.x * 3 + 1] = uint4(DTID.y, GID.y, GTID.y,  0);
-    Out[DTID.x * 3 + 2] = uint4(DTID.z, GID.z, GTID.z,  0);
+  const uint3 DISPATCH_SIZE = uint3(2, 2, 2);
+  const uint3 NUMTHREADS    = uint3(2, 2, 2);
+
+  // Computing the global threads index.
+  const uint THREAD_PER_LINE = NUMTHREADS.x * DISPATCH_SIZE.x;
+  const uint THREAD_PER_PLANE = THREAD_PER_LINE * NUMTHREADS.y * DISPATCH_SIZE.y;
+  const uint GX = GID.x * NUMTHREADS.x + GTID.x;
+  const uint GY = GID.y * NUMTHREADS.y + GTID.y;
+  const uint GZ = GID.z * NUMTHREADS.z + GTID.z;
+
+  // Computing the flat global index.
+  const uint FID = GZ * THREAD_PER_PLANE + GY * THREAD_PER_LINE + GX;
+
+  Out[FID * 3 + 0] = uint4( GID.x,  GID.y,  GID.z, FID);
+  Out[FID * 3 + 1] = uint4(GTID.x, GTID.y, GTID.z,  GI);
+  Out[FID * 3 + 2] = uint4(DTID.x, DTID.y, DTID.z,   0);
 }
 
 //--- system_values.yaml
@@ -13,11 +26,16 @@ void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID :
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [2, 1, 1]
+    DispatchSize: [2, 2, 2]
 Buffers:
   - Name: Out
     Format: UInt32
-    FillSize: 192
+    # dispatch:             2 * 2 * 2 = 8
+    # numthreads:           2 * 2 * 2 = 8
+    # thread count:         8 * 8 = 64
+    # each writes 3 uint4:  64 * 3 * 4 = 768
+    # each uint is 4 bytes: 768 * 4 = 3072
+    FillSize: 3072
     FillValue: 0
 DescriptorSets:
   - Resources:
@@ -37,25 +55,454 @@ DescriptorSets:
 
 # CHECK: Name: Out
 # CHECK: Data: [
-# ------------------ DTID.x == 0
-# CHECK: 0, 0, 0, 0,
-# CHECK: 0, 0, 0, 0,
-# CHECK: 0, 0, 0, 0,
-# ------------------ DTID.x == 1
-# CHECK: 1, 0, 1, 1,
-# CHECK: 0, 0, 0, 0,
-# CHECK: 0, 0, 0, 0,
-# ------------------ DTID.x == 2
-# CHECK: 2, 1, 0, 0,
-# CHECK: 0, 0, 0, 0,
-# CHECK: 0, 0, 0, 0,
-# ------------------ DTID.x == 3
-# CHECK: 3, 1, 1, 1,
-# CHECK: 0, 0, 0, 0,
-# CHECK: 0, 0, 0, 0
-#        |  |  |  |
-#        |  |  |  `-> GI, 0, 0
-#        |  |  `-> GTID.x, y, z
-#        |  `-> GID.x, y, z
-#        `-> DTID.x, y, z
+
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,    0,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       0,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,    1,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       0,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,    2,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       0,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,    3,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       0,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,    4,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       1,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,    5,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       1,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,    6,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       1,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,    7,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       1,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,    8,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       2,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,    9,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       2,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   10,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       2,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   11,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       2,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,   12,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       3,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,   13,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       3,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   14,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       3,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   15,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       3,       0,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,   16,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       0,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,   17,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       0,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,   18,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       0,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,   19,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       0,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,   20,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       1,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       0,   21,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       1,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,   22,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       1,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       0,   23,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       1,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,   24,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       2,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,   25,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       2,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   26,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       2,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   27,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       2,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,   28,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       3,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       0,   29,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       3,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   30,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       3,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       0,   31,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       3,       1,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   32,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       0,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   33,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       0,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   34,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       0,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   35,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       0,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   36,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       1,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   37,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       1,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   38,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       1,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   39,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       1,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   40,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       2,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   41,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       2,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   42,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       0,    0,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       2,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   43,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       0,    1,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       2,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   44,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       3,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   45,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       3,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   46,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       0,    2,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       3,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   47,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       0,    3,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       3,       2,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   48,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       0,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   49,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       0,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   50,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       0,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   51,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       0,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   52,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       1,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       0,       1,   53,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       1,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   54,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       1,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       0,       1,   55,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       1,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   56,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       2,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   57,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       2,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   58,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       0,       1,    4,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       2,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   59,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       0,       1,    5,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       2,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   60,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       0,       3,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       0,       1,       1,   61,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       1,       3,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   62,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       0,       1,       1,    6,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       2,       3,       3,    0,
+# ------+--------------------------------
+#       |  GID.x |  GID.y |  GID.z | FID
+# CHECK:       1,       1,       1,   63,
+#       | GTID.x | GTID.y | GTID.z |  GI
+# CHECK:       1,       1,       1,    7,
+#       | DTID.x | DTID.y | DTID.z |   0
+# CHECK:       3,       3,       3,    0
+
 # CHECK: ]
