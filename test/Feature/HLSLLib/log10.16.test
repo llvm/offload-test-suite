@@ -24,16 +24,20 @@ Shaders:
 Buffers:
   - Name: In
     Format: Float16
-    Stride: 8
+    Stride: 0
     Data: [0x8000, 0x0000, 0x3c00, 0xbc00, 0x4900, 0x2e66, 0x5640,]
+    #  [-0.0, 0.0, 1.0, -1.0, 10.0, 0.0960693359375, 100.0]
   - Name: Out
     Format: Float16
-    Stride: 8
+    Stride: 0
     FillSize: 24
   - Name: ExpectedOut # The result we expect
     Format: Float16
-    Stride: 8
-    Data: [ 0xFC00, 0xFC00, 0x0, 0xFE00, 0xFC00, 0xFC00, 0xFC00, 0xFC00, 0xFC00, 0xFC00, 0xFC00, 0xFC00 ]
+    Stride: 0
+    Data: [ 0xFC00, 0xFC00, 0x0000, 0x7FFF, 0x3BFF, 0xBC00, 0x3FFF, 0xFC00, 0xFC00, 0xFC00, 0xFC00, 0xFC00 ]
+    # [-inf, -inf, 0.0, NaN, 0.999755859375, -1.0, 1.999755859375, -inf, -inf, -inf, -inf, -inf]
+    
+    
 Results:
   - Result: Test1
     Rule: BufferFloatULP
