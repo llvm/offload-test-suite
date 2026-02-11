@@ -103,7 +103,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int16
-    Stride: 2
+    Stride: 8
     Data: [ 1, 10, 100, 1000]
   - Name: Out1
     Format: Int16
@@ -143,11 +143,11 @@ Buffers:
     Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
   - Name: ExpectedOut5
     Format: Int16
-    Stride: 2
+    Stride: 8
     Data: [ 4, 8, 12, 16 ]
   - Name: UIn
     Format: UInt16
-    Stride: 2
+    Stride: 8
     Data: [ 1, 10, 100, 1000]
   - Name: UOut1
     Format: UInt16
@@ -187,7 +187,7 @@ Buffers:
     Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
   - Name: UExpectedOut5
     Format: UInt16
-    Stride: 2
+    Stride: 8
     Data: [ 4, 8, 12, 16 ]
 Results:
   - Result: ExpectedOut1

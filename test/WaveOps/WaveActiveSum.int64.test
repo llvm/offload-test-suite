@@ -103,7 +103,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int64
-    Stride: 4
+    Stride: 32
     Data: [ 1, 10, 100, 1000]
   - Name: Out1
     Format: Int64
@@ -143,11 +143,11 @@ Buffers:
     Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
   - Name: ExpectedOut5
     Format: Int64
-    Stride: 8
+    Stride: 32
     Data: [ 4, 8, 12, 16 ]
   - Name: UIn
     Format: UInt64
-    Stride: 8
+    Stride: 32
     Data: [ 1, 10, 100, 1000]
   - Name: UOut1
     Format: UInt64
