@@ -19,11 +19,11 @@ Shaders:
 Buffers:  
   - Name: Out
     Format: UInt32
-    Stride: 4
+    Stride: 16
     FillSize: 16
   - Name: ExpectedOut
     Format: UInt32
-    Stride: 4
+    Stride: 16
     Data: [2863311530, 2863311530, 0, 0]
 Results:
   - Result: Test
