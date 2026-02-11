@@ -53,7 +53,7 @@ DescriptorSets:
 # XFAIL: Intel
 
 # Bug https://github.com/llvm/offload-test-suite/issues/337
-# XFAIL: AMD
+# XFAIL: AMD && Clang && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
