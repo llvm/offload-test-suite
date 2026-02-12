@@ -178,7 +178,7 @@ Results:
 # XFAIL: DirectX || Metal || Vulkan && Darwin
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/175630
-# XFAIL: Clang
+# XFAIL: Clang && !Intel
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/690
 # XFAIL: Vulkan && DXC
