@@ -28,7 +28,7 @@ void main(uint3 ID : SV_GroupThreadID) {
   int z = g.SrvBuf2[ID.x];
   int w = g.UavBuf2[ID.x];
   
-  Out[NonUniformResourceIndex(ID.x)] = int4(x, y, z, w);
+  Out[ID.x] = int4(x, y, z, w);
   
 }
 
