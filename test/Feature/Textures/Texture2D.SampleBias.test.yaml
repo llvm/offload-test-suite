@@ -149,7 +149,7 @@ Results:
 # XFAIL: Clang && !Intel
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/690
-# XFAIL: Vulkan && DXC
+# XFAIL: Vulkan && DXC && !Intel
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
