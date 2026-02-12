@@ -57,7 +57,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Float32
-    Stride: 4
+    Stride: 16
     Data: [ 1.0, 10.0, 100.0, 1000.0]
   - Name: Out1
     Format: Float32
@@ -169,7 +169,16 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
+# XFAIL: Vulkan && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/524
+# XFAIL: WARP && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/525
+# XFAIL: NV && Clang && DirectX
+
+# Bug https://github.com/llvm/offload-test-suite/issues/526
+# XFAIL: Metal && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

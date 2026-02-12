@@ -2,15 +2,20 @@ name: Windows Vulkan NVIDIA Clang
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '0 */2 * * *' # run every 2 hours
+  pull_request:
+    paths:
+     - .github/workflows/windows-nvidia-clang-vk.yaml
 
 jobs:
   Windows-VK-NVIDIA-Clang:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows

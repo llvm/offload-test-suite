@@ -57,12 +57,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Clang introduces a data-race (but it is not observable on WARP)
-# Bug https://github.com/llvm/llvm-project/issues/160208
-# XFAIL: Clang && !WARP
+# Bug https://github.com/llvm/llvm-project/issues/172577
+# XFAIL: Clang && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/452
-# XFAIL: DXC && Metal
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

@@ -1,0 +1,115 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> WOut : register(u1);
+RWStructuredBuffer<uint> QOut : register(u2);
+RWStructuredBuffer<float> XOut : register(u3);
+
+struct S {
+  float x[2];
+  uint q;
+};
+
+cbuffer cb0 : register(b0) {
+  uint32_t3 w[4];
+  S v[4];
+}
+
+[numthreads(4, 1, 1)]
+void main(uint GI : SV_GroupIndex) {
+  WOut[GI] = w[GI].z;
+  QOut[GI] = v[GI].q;
+  XOut[GI] = v[GI].x[1];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [
+      0x1, 0x2, 0x3, 0x5A5A5A5A,
+      0x4, 0x5, 0x6, 0x5A5A5A5A,
+      0x7, 0x8, 0x9, 0x5A5A5A5A,
+      0xA, 0xB, 0xC, 0x5A5A5A5A,
+      0x7f7fffff, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x3f800000, 0x20, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xc0000000, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x40000000, 0x21, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x40490fdb, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x40400000, 0x22, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x3eaaaaab, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x40800000, 0x23, 0x5A5A5A5A, 0x5A5A5A5A,
+    ]
+  - Name: WOut
+    Format: UInt32
+    FillSize: 16
+  - Name: QOut
+    Format: UInt32
+    FillSize: 16
+  - Name: XOut
+    Format: Float32
+    FillSize: 16
+  - Name: ExpectedWOut
+    Format: UInt32
+    Data: [ 3, 6, 9, 12 ]
+  - Name: ExpectedQOut
+    Format: UInt32
+    Data: [ 32, 33, 34, 35 ]
+  - Name: ExpectedXOut
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0 ]
+Results:
+  - Result: CheckW
+    Rule: BufferExact
+    Actual: WOut
+    Expected: ExpectedWOut
+  - Result: CheckQ
+    Rule: BufferExact
+    Actual: QOut
+    Expected: ExpectedQOut
+  - Result: CheckX
+    Rule: BufferExact
+    Actual: XOut
+    Expected: ExpectedXOut
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: WOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: QOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: XOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/172577
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -85,8 +85,11 @@ DescriptorSets:
 
 # REQUIRES: Half, Int16
 
-# Bug https://github.com/llvm/llvm-project/issues/138996
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/159602
+# XFAIL: Clang && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/577
+# XFAIL: QC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl

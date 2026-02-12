@@ -1,0 +1,66 @@
+#--- source.hlsl
+
+// Verify handling of unbounded resource array.
+
+[[vk::binding(0)]]
+RWBuffer<int> Buf[] : register(u0);
+
+[numthreads(4,2,1)]
+void main() {
+  for (int i = 0; i < 4; i++) {
+    Buf[1][i] = Buf[0][i] * 2;
+    Buf[2][i] = Buf[0][i] + Buf[1][i];
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Buf
+    Format: Int32
+    ArraySize: 3
+    Data:
+      - [ 1, 2, 3, 4 ]
+      - [ 0, 0, 0, 0 ]
+      - [ 0, 0, 0, 0 ]
+
+  - Name: ExpectedBuf
+    Format: Int32
+    ArraySize: 3
+    Data:
+      - [ 1, 2, 3, 4 ]
+      - [ 2, 4, 6, 8 ]
+      - [ 3, 6, 9, 12 ]
+
+Results:
+  - Result: Buf
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+
+DescriptorSets:
+  - Resources:
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+# XFAIL: DXC && Vulkan && KosmicKrisp
+
+# Bug https://github.com/llvm/offload-test-suite/issues/556
+# XFAIL: Vulkan && QC && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
