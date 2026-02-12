@@ -29,7 +29,6 @@ void main(uint3 ID : SV_GroupThreadID) {
   int w = g.UavBuf2[ID.x];
   
   Out[ID.x] = int4(x, y, z, w);
-  
 }
 
 //--- pipeline.yaml
