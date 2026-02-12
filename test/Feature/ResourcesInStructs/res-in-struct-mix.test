@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-// This test verifies handling of a resource array in a struct.
+// This test verifies handling of a resource in a class.
 
 class E {
   RWBuffer<int> UavBuf1;
@@ -124,9 +124,6 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/offload-test-suite/issues/642
 # XFAIL: Metal
-
-# Bug https://github.com/llvm/offload-test-suite/issues/643
-# XFAIL: Intel
 
 # Vulkan does not support global structures with buffers or structures
 # containing both resources and non-resources.
