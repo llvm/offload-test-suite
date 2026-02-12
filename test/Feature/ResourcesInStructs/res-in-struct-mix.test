@@ -28,7 +28,8 @@ void main(uint3 ID : SV_GroupThreadID) {
   int z = g.SrvBuf2[ID.x];
   int w = g.UavBuf2[ID.x];
   
-  Out[ID.x] = int4(x, y, z, w);
+  Out[NonUniformResourceIndex(ID.x)] = int4(x, y, z, w);
+  
 }
 
 //--- pipeline.yaml
@@ -60,10 +61,12 @@ Buffers:
 
   - Name: BufOut
     Format: Int32
+    Stride: 16
     FillSize: 64
 
   - Name: ExpectedBufOut
     Format: Int32
+    Stride: 16
     Data:
       [ 100, 1, 10, 1000,
         200, 2, 20, 2000,
@@ -107,7 +110,7 @@ DescriptorSets:
       VulkanBinding:
         Binding: 6
     - Name: BufOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
@@ -118,7 +121,7 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/655
-# XFAIL: AMD
+
 
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/367
 # XFAIL: Clang
