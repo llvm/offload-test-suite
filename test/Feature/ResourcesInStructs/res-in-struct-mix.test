@@ -119,9 +119,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/655
-
-
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/367
 # XFAIL: Clang
 
