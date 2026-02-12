@@ -72,6 +72,12 @@ DescriptorSets:
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/system_values.hlsl
 # RUN: %offloader %t/system_values.yaml %t.o | FileCheck %s
 
+# Metal is reporting DispatchThreadID value ot 8 for the x dimension.
+# Since we have numthreads.x == 2 and dispatch.x == 2, we should at most
+# get 3 for the x dimension.
+# See https://github.com/llvm/offload-test-suite/issues/735
+# XFAIL: Metal
+
 # CHECK: Name: Out
 # CHECK: Data: [
 
