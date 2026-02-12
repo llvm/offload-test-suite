@@ -8,19 +8,18 @@ void main() {
                       In[4],  In[5],  In[6],  In[7],
                       In[8],  In[9],  In[10], In[11],
                       In[12], In[13], In[14], In[15]);
-    
-    for (int i = 0; i < 4; i++) {
-        int4 B;
-        if (i % 2 == 0)
-            B = A[i];
-        else if (i % 3 == 0)
-            B = A[i].bagr;
-        else // i == 1
-            B.agrb = A[i]; // equivalent: B = A[1].bgar
+    int4x4 B;
 
-        for (int j = 0; j < 4; j++) {
-            Out[i*4 + j] = B[j];
-        }
+    B[0] = A[3];
+    B[1].rbag = A[1];
+    B[2] = A[2].bagr;
+    B[3] = A[0];
+    
+    const uint COLS = 4;
+    for(int i = 0; i < 16; i++) {
+        uint row = i / COLS;
+        uint col = i % COLS;
+        Out[i] = B[row][col];
     }
 }
 //--- pipeline.yaml
@@ -39,7 +38,7 @@ Buffers:
     FillSize: 64
   - Name: ExpectedOut
     Format: Int32
-    Data: [ 1, 2, 3, 4, 7, 6, 8, 5, 9, 10, 11, 12, 15, 16, 14, 13 ]
+    Data: [ 13, 14, 15, 16, 5, 8, 6, 7, 11, 12, 10, 9, 1, 2, 3, 4 ]
 Results:
   - Result: Out
     Rule: BufferExact
@@ -64,7 +63,6 @@ DescriptorSets:
 ...
 #--- end
 
-# XFAIL: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

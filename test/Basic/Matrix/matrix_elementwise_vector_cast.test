@@ -1,0 +1,81 @@
+#--- source.hlsl
+RWBuffer<float> In : register(u0);
+RWBuffer<float> FloatMatOut : register(u1);
+RWBuffer<int> IntMatOut : register(u2);
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  float4 V = float4(In[0], In[1],In[2], In[3]);
+  float2x2 M = (float2x2)V;
+  int2x2  M2 = (int2x2)V;
+  const uint COLS = 2;          // float2x2 => 2 rows, 2 columns
+  uint row = GI / COLS;         // 0..1
+  uint col = GI % COLS;         // 0..1
+
+  FloatMatOut[GI]    = M[row][col];
+  IntMatOut[GI]      = M2[row][col];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4]
+  - Name: FloatMatOut
+    Format: Float32
+    FillSize: 16
+  - Name: IntMatOut
+    Format: Int32
+    FillSize: 16
+  - Name: ExpectedFloatOut
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4]
+  - Name: ExpectedIntOut
+    Format: Int32
+    Data: [ 1, 2, 3, 4 ]
+Results:
+  - Result: FloatMatOut
+    Rule: BufferExact
+    Actual: FloatMatOut
+    Expected: ExpectedFloatOut
+  - Result: IntMatOut
+    Rule: BufferExact
+    Actual: IntMatOut
+    Expected: ExpectedIntOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: FloatMatOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: IntMatOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/599
+# XFAIL: Intel && Vulkan && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

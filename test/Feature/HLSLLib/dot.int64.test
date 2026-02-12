@@ -131,6 +131,12 @@ DescriptorSets:
         Binding: 5
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/569
+# XFAIL: QC && Vulkan && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/570
+# XFAIL: AMD && DirectX
+
 # REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl

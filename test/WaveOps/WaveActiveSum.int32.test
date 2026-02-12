@@ -102,7 +102,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int32
-    Stride: 4
+    Stride: 16
     Data: [ 1, 10, 100, 1000]
   - Name: Out1
     Format: Int32
@@ -146,7 +146,7 @@ Buffers:
     Data: [ 4, 8, 12, 16 ]
   - Name: UIn
     Format: UInt32
-    Stride: 4
+    Stride: 16
     Data: [ 1, 10, 100, 1000]
   - Name: UOut1
     Format: UInt32
@@ -324,7 +324,13 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
+# XFAIL: Vulkan && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/524
+# XFAIL: WARP && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/525
+# XFAIL: NV && Clang && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

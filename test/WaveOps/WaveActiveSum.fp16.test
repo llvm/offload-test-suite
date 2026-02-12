@@ -57,7 +57,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Float16
-    Stride: 2
+    Stride: 8
     Data: [ 0x3c00, 0x4900, 0x5640, 0x63d0]
   - Name: Out1
     Format: Float16
@@ -169,7 +169,13 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
+# XFAIL: Vulkan && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/524
+# XFAIL: WARP && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/525
+# XFAIL: NV && Clang && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal

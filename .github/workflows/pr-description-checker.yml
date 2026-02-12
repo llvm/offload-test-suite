@@ -11,7 +11,7 @@ jobs:
   check-pr-description:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
       - uses: jadrol/pr-description-checker-action@c659fed338a52d657d34462c8bc7fc1f65d25758
         id: description-checker
         with:

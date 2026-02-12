@@ -1,0 +1,157 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp : register(s0); // Mag=Nearest, Min=Linear
+[[vk::binding(3, 0)]] SamplerState Samp2 : register(s1); // Mag=Linear, Min=Nearest
+[[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // Setup UVs to have a derivative of exactly 0.5.
+  // LOD_calculated = log2(max(abs(ddx), abs(ddy)) * TextureSize)
+  // TextureSize = 2.
+  // LOD_calculated = log2(0.5 * 2) = log2(1.0) = 0.0.
+  uint2 GTid = (uint2)Pos.xy;
+  float2 sample_uv = 0.5 + float2(GTid.xy) * 0.5;
+
+  if (all(GTid.xy == 0)) {
+    // 1. Bias = -0.1 -> LOD = -0.1 -> Mag(Nearest) -> White
+    Out[0] = Tex.SampleBias(Samp, sample_uv, -0.1);
+
+    // 2. Bias = 0.1 -> LOD = 0.1 -> Min(Linear) -> Grey
+    Out[1] = Tex.SampleBias(Samp, sample_uv, 0.1);
+
+    // 3. Bias = -0.1, Offset = (-1, -1) -> UV = (0.5, 0.5) -> Texel (1, 1). Offset (-1, -1) -> Texel (0, 0) -> Red
+    Out[2] = Tex.SampleBias(Samp, sample_uv, -0.1, int2(-1, -1));
+
+    // 4. Bias = -0.1, Clamp = 0.1 -> LOD = 0.1 -> Mag(Linear) -> Grey
+    Out[3] = Tex.SampleBias(Samp, sample_uv, -0.1, int2(0, 0), 0.1);
+
+    // 5. Bias = -0.1 -> LOD = -0.1 -> Mag(Linear) -> Grey
+    Out[4] = Tex.SampleBias(Samp2, sample_uv, -0.1);
+
+    // 6. Sample at (0.25, 0.25) -> Red.
+    Out[5] = Tex.SampleBias(Samp, float2(0.25, 0.25), -0.1);
+  }
+  return float4(0,0,0,0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0 ] # White (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 96 # 6 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 1.0, 1.0, 1.0,  # Bias -0.1 -> Mag(Nearest) -> White
+            0.5, 0.5, 0.5, 1.0,  # Bias 0.1 -> Min(Linear)  -> Grey
+            1.0, 0.0, 0.0, 1.0,  # Offset (-1, -1) -> Red
+            0.5, 0.5, 0.5, 1.0,  # Clamp 0.1 ->  Min(Linear)  -> Grey
+            0.5, 0.5, 0.5, 1.0,  # Bias -0.1 -> Mag(Linear) -> Grey
+            1.0, 0.0, 0.0, 1.0 ] # Sample at (0.25, 0.25) -> Red
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Nearest
+    Address: Clamp
+  - Name: Samp2
+    MinFilter: Nearest
+    MagFilter: Linear
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Samp2
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+
+Results:
+  - Result: SampleBiasTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
+# XFAIL: DirectX || Metal || Vulkan && Darwin
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/175630
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/690
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

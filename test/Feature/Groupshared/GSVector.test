@@ -1,0 +1,54 @@
+#--- source.hlsl
+
+// This test makes sure groupshared vector elements can be updated
+// individually from different threads.
+
+RWStructuredBuffer<uint4> Out;
+
+groupshared uint4 GSMem;
+
+[numthreads(4, 1, 1)]
+void main(uint3 ThreadID : SV_GroupThreadID) {
+  GSMem[ThreadID.x] = ThreadID.x + 10;
+  GroupMemoryBarrierWithGroupSync();
+  Out[0] = GSMem;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Channels: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: UInt32
+    Channels: 4
+    Data: [ 10, 11, 12, 13 ]
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/170241
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
