@@ -1,0 +1,101 @@
+#--- source.hlsl
+RWBuffer<int> In : register(u0);
+RWBuffer<int> Index : register(u1);
+RWBuffer<int> Out : register(u2);
+RWBuffer<int> Out2 : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+    int3 A = int3(In[0], In[1], In[2]);
+    int3 B = int3(In[3], In[4], In[5]);
+
+    int2x3 Mat;
+    Mat[1].xzy = A;
+    Mat[0] = B.zyx;
+
+    int2x3 Mat2;
+    Mat2[Index[0]] = Mat[1].yzx;
+    Mat2[0].zxy = Mat[Index[1]];
+
+    const uint COLS = 3;
+    for(uint i = 0; i < 6; i++) {
+        uint row = i / COLS;
+        uint col = i % COLS;
+        Out[i] = Mat[row][col];
+        Out2[i] = Mat2[row][col];
+    }
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6]
+  - Name: Index
+    Format: Int32
+    Data: [ 1, 0]
+  - Name: Out
+    Format: Int32
+    FillSize: 24
+  - Name: ExpectedOut
+    Format: Int32
+    Data: [ 6, 5, 4, 1, 3, 2 ]
+  - Name: Out2
+    Format: Int32
+    FillSize: 24
+  - Name: ExpectedOut2
+    Format: Int32
+    Data: [ 5, 4, 6, 3, 2, 1 ]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: Out2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Index
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/660
+# XFAIL: Vulkan && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

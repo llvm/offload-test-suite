@@ -141,8 +141,8 @@ DescriptorSets:
         Binding: 7
 #--- end
 
-# https://github.com/llvm/llvm-project/issues/140095
-# UNSUPPORTED: Clang && Vulkan
+# Bug https://github.com/llvm/offload-test-suite/issues/412
+# XFAIL: AMD && DirectX
 
 # REQUIRES: Int64
 # RUN: split-file %s %t

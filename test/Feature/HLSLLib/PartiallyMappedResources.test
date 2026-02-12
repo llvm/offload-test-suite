@@ -1,0 +1,155 @@
+#--- source.hlsl
+
+StructuredBuffer<int4> X : register(t0);
+StructuredBuffer<int4> Y : register(t1);
+
+RWStructuredBuffer<int> Out : register(u2);
+RWStructuredBuffer<bool> CAFM : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  // 4096 int4's inside X or Y occupy 64KB of data. 
+  // (4096 int4's * 4 ints * 4 bytes per int)
+  // So, any index into the buffer >= [4096] will access a new "tile"
+
+  uint idx = 0;
+
+  uint status;
+  int4 Result = X.Load(0, status);
+  bool CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+
+  idx += 1;
+
+  Result = X.Load(4100, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+  
+  idx += 1;
+
+  Result = Y.Load(0, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+
+  idx += 1;
+
+  Result = Y.Load(4100, status);
+  CAFMResult = CheckAccessFullyMapped(status);
+  CAFM[idx] = CAFMResult;
+  if (CAFMResult)
+    Out[idx] = Result.x;
+  else 
+    Out[idx] = 9003;
+
+  idx += 1;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: X
+    Format: Int32
+    Stride: 16
+    FillSize: 131072
+    FillValue: 9001
+  - Name: Y
+    Format: Int32
+    Stride: 16
+    FillSize: 131072
+    FillValue: 9002
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    # first 4 values are the actual data retrieved. For non-resident loads, 0 is expected.
+    Data: [9001, 9003, 9003, 9003]
+  - Name: CAFM
+    Format: Bool
+    Stride: 4
+    FillSize: 16
+    FillValue: 0
+  - Name: ExpectedCAFM
+    Format: Bool
+    Stride: 4
+    # Only the first data access should be accessing fully mapped memory
+    Data: [1, 0, 0, 0]
+
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: TestCAFM
+    Rule: BufferExact
+    Actual: CAFM
+    Expected: ExpectedCAFM
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      TilesMapped: 1
+      IsReserved: True
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+      TilesMapped: 0
+      IsReserved: True
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: CAFM
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/514
+# XFAIL: Vulkan
+# Unimplemented https://github.com/llvm/llvm-project/issues/166954
+# XFAIL: Clang-Vulkan
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/515
+# XFAIL: Metal
+
+# Bug https://github.com/llvm/offload-test-suite/issues/485
+# XFAIL: Intel
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

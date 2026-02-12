@@ -1,0 +1,315 @@
+#--- source.hlsl
+#define VALUE_SETS 2
+#define NUM_MASKS 4
+#define NUM_THREADS 4
+
+struct MaskStruct {
+    int mask[NUM_THREADS];
+};
+
+StructuredBuffer<int16_t4> In  : register(t0);
+RWStructuredBuffer<int16_t> Out1 : register(u1);  // test scalar
+RWStructuredBuffer<int16_t2> Out2 : register(u2); // test int16_t2
+RWStructuredBuffer<int16_t4> Out3 : register(u3); // test int16_t3
+RWStructuredBuffer<int16_t4> Out4 : register(u4); // test int16_t4
+RWStructuredBuffer<int16_t4> Out5 : register(u5); // constant folding
+StructuredBuffer<MaskStruct> Masks  : register(t6);
+
+
+[numthreads(NUM_THREADS,1,1)]
+void main(uint3 tid : SV_GroupThreadID)
+{
+    for (uint ValueSet = 0; ValueSet < VALUE_SETS; ValueSet++) {
+        const uint ValueSetOffset = ValueSet * NUM_MASKS * NUM_THREADS;
+        for (uint MaskIdx = 0; MaskIdx < NUM_MASKS; MaskIdx++) {
+            int16_t4 v = In[ValueSet * ValueSetOffset + MaskIdx * NUM_THREADS + tid.x];
+            const uint OutIdx = ValueSetOffset + MaskIdx * NUM_THREADS + tid.x;
+            if (Masks[MaskIdx].mask[tid.x]) {
+                Out1[OutIdx] = WaveReadLaneFirst( v.x );
+                Out2[OutIdx].xy = WaveReadLaneFirst( v.xy );
+                Out3[OutIdx].xyz = WaveReadLaneFirst( v.xyz );
+                Out4[OutIdx] = WaveReadLaneFirst( v );
+            }
+        }
+    }
+
+    // constant folding case
+    Out5[0] = WaveReadLaneFirst(int16_t4(1,2,3,4));
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int16
+    Stride: 8
+    # 2 value sets
+    # For each value set, 
+    # and for each specific one of the 4 thread masks in that value set,
+    # and for each of the 4 threads in that thread mask,
+    # there will be a unique set of 4 values, such that 
+    # none of the other threads in that thread mask share any values
+    Data: [
+    1, 2, 3, 4, # <-- Value set 0, thread mask 0, thread id 0 will read these In values
+    5, 6, 7, 8, # <-- Value set 0, thread mask 0, thread id 1 will read these In values
+    9, 10, 11, 12,
+    13, 14, 15, 16,
+    2, 3, 4, 5, # <-- Value set 0, thread mask 1, thread id 0 will read these In values
+    6, 7, 8, 9,
+    10, 11, 12, 13,
+    14, 15, 16, 1,
+    3, 4, 5, 6,
+    7, 8, 9, 10,
+    11, 12, 13, 14,
+    15, 16, 1, 2,
+    4, 5, 6, 7,
+    8, 9, 10, 11,
+    12, 13, 14, 15,
+    16, 1, 2, 3,
+    4, 3, 2, 1, # <-- Value set 1, thread mask 0, thread id 0 will read these In values
+    8, 7, 6, 5, 
+    12, 11, 10, 9, 
+    16, 15, 14, 13, 
+    5, 4, 3, 2, 
+    9, 8, 7, 6, 
+    13, 12, 11, 10, 
+    1, 16, 15, 14, 
+    6, 5, 4, 3, 
+    10, 9, 8, 7, 
+    14, 13, 12, 11, 
+    2, 1, 16, 15, 
+    7, 6, 5, 4, 
+    11, 10, 9, 8, 
+    15, 14, 13, 12, 
+    3, 2, 1, 16 ]
+
+  - Name: Out1
+    Format: Int16
+    Stride: 2
+    # 1 int16_t is 2 bytes, * 4 halves for 4 threads, * 4 thread masks, * 2 value sets
+    FillSize: 64  
+  - Name: Out2
+    Format: Int16
+    Stride: 4
+    FillSize: 128
+  - Name: Out3
+    Format: Int16
+    Stride: 8
+    FillSize: 256
+  - Name: Out4
+    Format: Int16
+    Stride: 8
+    FillSize: 256
+  - Name: Out5
+    Format: Int16
+    Stride: 8
+    FillSize: 8
+  - Name: Masks
+    Format: Int32
+    Stride: 16
+    # 4 active mask sets for threads 0, 1, 2, 3:
+    # 0 0 0 0
+    # 1 1 1 1    
+    # 1 0 0 0
+    # 0 1 1 0
+    Data: [ 
+    0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0]
+  - Name: ExpectedOut1
+    Format: Int16
+    Stride: 8
+    # 2 value sets, 4 masks per value set, 4 threads per mask, 1 result value per thread
+    Data:  [ 0, 0, 0, 0, 
+    2, 2, 2, 2, 
+    3, 0, 0, 0, 
+    0, 8, 8, 0, 
+    0, 0, 0, 0, 
+    5, 5, 5, 5, 
+    6, 0, 0, 0,
+    0, 11, 11, 0 ]
+  - Name: ExpectedOut2
+    Format: Int16
+    Stride: 8
+    # 2 value sets, 4 masks per value set, 4 threads per mask, 1 result value per thread
+    Data: [ 0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    2, 3, 2, 3, 
+    2, 3, 2, 3, 
+    3, 4, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 8, 9, 
+    8, 9, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    5, 4, 5, 4, 
+    5, 4, 5, 4, 
+    6, 5, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 11, 10, 
+    11, 10, 0, 0 ]
+  - Name: ExpectedOut3
+    Format: Int16
+    Stride: 8
+    # 2 value sets, 4 masks per value set, 4 threads per mask, 4 result values per thread
+    # Note, vecs of 3 must be aligned, so the 3 result values are placed into a 4 element vec
+    Data: [ 0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    2, 3, 4, 0, 
+    2, 3, 4, 0, 
+    2, 3, 4, 0, 
+    2, 3, 4, 0, 
+    3, 4, 5, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0,
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    8, 9, 10, 0, 
+    8, 9, 10, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    5, 4, 3, 0, 
+    5, 4, 3, 0, 
+    5, 4, 3, 0, 
+    5, 4, 3, 0, 
+    6, 5, 4, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    11, 10, 9, 0, 
+    11, 10, 9, 0, 
+    0, 0, 0, 0 ]
+  - Name: ExpectedOut4
+    Format: Int16
+    Stride: 8
+    Data: [ 0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    2, 3, 4, 5, 
+    2, 3, 4, 5, 
+    2, 3, 4, 5, 
+    2, 3, 4, 5, 
+    3, 4, 5, 6, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    8, 9, 10, 11, 
+    8, 9, 10, 11, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    5, 4, 3, 2, 
+    5, 4, 3, 2, 
+    5, 4, 3, 2, 
+    5, 4, 3, 2, 
+    6, 5, 4, 3, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    0, 0, 0, 0, 
+    11, 10, 9, 8, 
+    11, 10, 9, 8, 
+    0, 0, 0, 0 ]
+  - Name: ExpectedOut5
+    Format: Int16
+    Stride: 8
+    Data: [ 1, 2, 3, 4 ]
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Masks
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/156775
+# XFAIL: Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/393
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o 

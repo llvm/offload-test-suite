@@ -103,7 +103,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int16
-    Stride: 2
+    Stride: 8
     Data: [ 1, 10, 100, 1000]
   - Name: Out1
     Format: Int16
@@ -143,11 +143,11 @@ Buffers:
     Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
   - Name: ExpectedOut5
     Format: Int16
-    Stride: 2
+    Stride: 8
     Data: [ 4, 8, 12, 16 ]
   - Name: UIn
     Format: UInt16
-    Stride: 2
+    Stride: 8
     Data: [ 1, 10, 100, 1000]
   - Name: UOut1
     Format: UInt16
@@ -187,7 +187,7 @@ Buffers:
     Data: [ 1, 10, 100, 1000, 2, 20, 200, 2000, 3, 30, 300, 3000, 4, 40, 400, 4000 ]
   - Name: UExpectedOut5
     Format: UInt16
-    Stride: 2
+    Stride: 8
     Data: [ 4, 8, 12, 16 ]
 Results:
   - Result: ExpectedOut1
@@ -323,10 +323,16 @@ DescriptorSets:
 # REQUIRES: Int16
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
+# XFAIL: Vulkan && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/524
+# XFAIL: WARP && Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/525
+# XFAIL: NV && Clang && DirectX
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
+# XFAIL: Metal || (Vulkan && MoltenVK)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl

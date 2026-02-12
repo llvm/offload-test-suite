@@ -59,9 +59,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Clang introduces a data-race (but it is not observable on WARP)
-# Bug https://github.com/llvm/llvm-project/issues/160208
-# XFAIL: Clang && !WARP
+# Bug https://github.com/llvm/llvm-project/issues/172577
+# XFAIL: Clang && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/445
 # XFAIL: DirectX && Intel

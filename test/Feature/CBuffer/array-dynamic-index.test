@@ -78,8 +78,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/159602
-# XFAIL: Clang && Vulkan
+# Bug https://github.com/llvm/llvm-project/issues/177806
+# XFAIL: Vulkan && MoltenVK && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl

@@ -1,0 +1,76 @@
+#--- source.hlsl
+RWBuffer<float> In : register(u0);
+RWBuffer<int> OutInt : register(u1);
+RWBuffer<float> OutFloat : register(u2);
+
+[numthreads(6,1,1)]
+void main(uint GI : SV_GroupIndex) {
+    float2x3 A = In[0];
+    int2x3 B = (int)In[0];
+    const uint COLS = 3;          // float2x3 => 2 rows, 3 columns
+    uint row = GI / COLS;         // 0..1
+    uint col = GI % COLS;         // 0..2
+    OutFloat[GI] = A[row][col];
+    OutInt[GI]   = B[row][col];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Data: [3.24]
+  - Name: OutInt
+    Format: Int32
+    FillSize: 24
+  - Name: OutFloat
+    Format: Float32
+    FillSize: 24
+  - Name: ExpectedOutInt
+    Format: Int32
+    Data: [3, 3, 3, 3, 3, 3]
+  - Name: ExpectedOutFloat
+    Format: Float32
+    Data: [3.24, 3.24, 3.24, 3.24, 3.24, 3.24]
+Results:
+  - Result: OutInt
+    Rule: BufferExact
+    Actual: OutInt
+    Expected: ExpectedOutInt
+  - Result: OutFloat
+    Rule: BufferExact
+    Actual: OutFloat
+    Expected: ExpectedOutFloat
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutInt
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutFloat
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
