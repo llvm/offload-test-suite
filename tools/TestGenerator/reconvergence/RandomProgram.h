@@ -28,10 +28,10 @@ public:
         loopNestingThisFunction(0), callNesting(0), minCount(30), indent(0),
         isLoopInf(100, false), doneInfLoopBreak(100, false),
         storeBase(0x10000) {
-    deRandom_init(&rnd, testCase.getSeed());
+    Random_init(&rnd, testCase.getSeed());
     for (int i = 0; i < numMasks; ++i) {
-      const uint64_t lo = deRandom_getUint64(&rnd);
-      const uint64_t hi = deRandom_getUint64(&rnd);
+      const uint64_t lo = Random_getUint64(&rnd);
+      const uint64_t hi = Random_getUint64(&rnd);
       const UVec4 v4(static_cast<uint32_t>(lo), static_cast<uint32_t>(lo >> 32),
                      static_cast<uint32_t>(hi),
                      static_cast<uint32_t>(hi >> 32));
@@ -43,7 +43,7 @@ public:
 
   const TestCase &testCase;
   const uint32_t invocationStride;
-  deRandom rnd;
+  Random rnd;
   std::vector<OP> ops;
   std::vector<uint64_t> masks;
   std::vector<Ballot> ballotMasks;
@@ -63,7 +63,7 @@ public:
   int32_t storeBase;
 
   virtual void genIf(IFType ifType, uint32_t maxLocalIndexCmp = 0u) {
-    uint32_t maskIdx = deRandom_getUint32(&rnd) % numMasks;
+    uint32_t maskIdx = Random_getUint32(&rnd) % numMasks;
     uint64_t mask = masks[maskIdx];
     Ballot bmask = ballotMasks[maskIdx];
     if (ifType == IF_UNIFORM) {
@@ -72,7 +72,7 @@ public:
     }
 
     uint32_t localIndexCmp =
-        deRandom_getUint32(&rnd) %
+        Random_getUint32(&rnd) %
         (maxLocalIndexCmp ? maxLocalIndexCmp : invocationStride);
     if (ifType == IF_LOCAL_INVOCATION_INDEX) {
       ops.push_back({OP_IF_LOCAL_INVOCATION_INDEX, localIndexCmp});
@@ -89,7 +89,7 @@ public:
     pickOP(2);
     size_t thenEnd = ops.size();
 
-    uint32_t randElse = (deRandom_getUint32(&rnd) % 100);
+    uint32_t randElse = (Random_getUint32(&rnd) % 100);
     if (randElse < 50) {
       if (ifType == IF_LOCAL_INVOCATION_INDEX)
         ops.push_back({OP_ELSE_LOCAL_INVOCATION_INDEX, localIndexCmp});
@@ -111,7 +111,7 @@ public:
   }
 
   void genForUnif() {
-    uint32_t iterCount = (deRandom_getUint32(&rnd) % 5) + 1;
+    uint32_t iterCount = (Random_getUint32(&rnd) % 5) + 1;
     ops.push_back({OP_BEGIN_FOR_UNIF, iterCount});
     uint32_t loopheader = (uint32_t)ops.size() - 1;
     nesting++;
@@ -125,7 +125,7 @@ public:
   }
 
   void genDoWhileUnif() {
-    uint32_t iterCount = (deRandom_getUint32(&rnd) % 5) + 1;
+    uint32_t iterCount = (Random_getUint32(&rnd) % 5) + 1;
     ops.push_back({OP_BEGIN_DO_WHILE_UNIF, iterCount});
     uint32_t loopheader = (uint32_t)ops.size() - 1;
     nesting++;
@@ -206,7 +206,7 @@ public:
   void genBreak() {
     if (loopNestingThisFunction > 0) {
       // Sometimes put the break in a divergent if
-      if ((deRandom_getUint32(&rnd) % 100) < 10) {
+      if ((Random_getUint32(&rnd) % 100) < 10) {
         ops.push_back({OP_IF_MASK, masks[0]});
         ops.back().bvalue = ballotMasks[0];
         ops.push_back({OP_BREAK, 0});
@@ -227,7 +227,7 @@ public:
     if (loopNestingThisFunction > 0 &&
         !(isLoopInf[loopNesting] /*&& !doneInfLoopBreak[loopNesting]*/)) {
       // Sometimes put the continue in a divergent if
-      if ((deRandom_getUint32(&rnd) % 100) < 10) {
+      if ((Random_getUint32(&rnd) % 100) < 10) {
         ops.push_back({OP_IF_MASK, masks[0]});
         ops.back().bvalue = ballotMasks[0];
         ops.push_back({OP_CONTINUE, 0});
@@ -249,11 +249,11 @@ public:
       // Put something interesting before the break
       genBallot();
       genBallot();
-      if ((deRandom_getUint32(&rnd) % 100) < 10)
+      if ((Random_getUint32(&rnd) % 100) < 10)
         pickOP(1);
 
       // if we're in a function, sometimes  use return instead
-      if (callNesting > 0 && (deRandom_getUint32(&rnd) % 100) < 30)
+      if (callNesting > 0 && (Random_getUint32(&rnd) % 100) < 30)
         ops.push_back({OP_RETURN, 0});
       else
         genBreak();
@@ -266,7 +266,7 @@ public:
   }
 
   void genReturn() {
-    uint32_t r = deRandom_getUint32(&rnd) % 100;
+    uint32_t r = Random_getUint32(&rnd) % 100;
     if (nesting > 0 &&
         // Use return rarely in main, 20% of the time in a singly nested loop in
         // a function and 50% of the time in a multiply nested loop in a
@@ -274,7 +274,7 @@ public:
         (r < 5 || (callNesting > 0 && loopNestingThisFunction > 0 && r < 20) ||
          (callNesting > 0 && loopNestingThisFunction > 1 && r < 50))) {
       genBallot();
-      if ((deRandom_getUint32(&rnd) % 100) < 10) {
+      if ((Random_getUint32(&rnd) % 100) < 10) {
         ops.push_back({OP_IF_MASK, masks[0]});
         ops.back().bvalue = ballotMasks[0];
         ops.push_back({OP_RETURN, 0});
@@ -311,7 +311,7 @@ public:
   // case r+2: ... break; // should not execute
   // }
   void genSwitchUnif() {
-    uint32_t r = deRandom_getUint32(&rnd) % 5;
+    uint32_t r = Random_getUint32(&rnd) % 5;
     ops.push_back({OP_SWITCH_UNIF_BEGIN, r});
     nesting++;
 
@@ -390,7 +390,7 @@ public:
   // default: ... break;
   // }
   void genSwitchLoopCount() {
-    uint32_t r = deRandom_getUint32(&rnd) % loopNesting;
+    uint32_t r = Random_getUint32(&rnd) % loopNesting;
     ops.push_back({OP_SWITCH_LOOP_COUNT_BEGIN, r});
     nesting++;
 
@@ -420,7 +420,7 @@ public:
     for (uint32_t i = 0; i < count; ++i) {
       genBallot();
       if (nesting < maxNesting) {
-        uint32_t r = deRandom_getUint32(&rnd) % 11;
+        uint32_t r = Random_getUint32(&rnd) % 11;
         switch (r) {
         default:
           [[fallthrough]];
@@ -445,7 +445,7 @@ public:
           // don't nest loops too deeply, to avoid extreme memory usage or
           // timeouts
           if (loopNesting <= 3) {
-            uint32_t r2 = deRandom_getUint32(&rnd) % 3;
+            uint32_t r2 = Random_getUint32(&rnd) % 3;
             switch (r2) {
             default:
             case 0:
@@ -470,7 +470,7 @@ public:
           genElect(false);
           break;
         case 7: {
-          uint32_t r2 = deRandom_getUint32(&rnd) % 5;
+          uint32_t r2 = Random_getUint32(&rnd) % 5;
           if (r2 == 0 && callNesting == 0 && nesting < maxNesting - 2)
             genCall();
           else
@@ -481,7 +481,7 @@ public:
           // don't nest loops too deeply, to avoid extreme memory usage or
           // timeouts
           if (loopNesting <= 3) {
-            uint32_t r2 = deRandom_getUint32(&rnd) % 2;
+            uint32_t r2 = Random_getUint32(&rnd) % 2;
             switch (r2) {
             default:
             case 0:
@@ -494,7 +494,7 @@ public:
           }
         } break;
         case 9: {
-          uint32_t r2 = deRandom_getUint32(&rnd) % 4;
+          uint32_t r2 = Random_getUint32(&rnd) % 4;
           switch (r2) {
           default:
           case 0:
@@ -524,7 +524,7 @@ public:
   void genBallot() {
     // optionally insert ballots, stores, and noise. Ballots and stores are used
     // to determine correctness.
-    if ((deRandom_getUint32(&rnd) % 100) < 20) {
+    if ((Random_getUint32(&rnd) % 100) < 20) {
       if (ops.size() < 2 || !(ops[ops.size() - 1].type == OP_BALLOT ||
                               (ops[ops.size() - 1].type == OP_STORE &&
                                ops[ops.size() - 2].type == OP_BALLOT))) {
@@ -532,7 +532,7 @@ public:
       }
     }
 
-    if ((deRandom_getUint32(&rnd) % 100) < 10) {
+    if ((Random_getUint32(&rnd) % 100) < 10) {
       if (ops.size() < 2 || !(ops[ops.size() - 1].type == OP_STORE ||
                               (ops[ops.size() - 1].type == OP_BALLOT &&
                                ops[ops.size() - 2].type == OP_STORE))) {
@@ -540,7 +540,7 @@ public:
       }
     }
 
-    uint32_t r = deRandom_getUint32(&rnd) % 10000;
+    uint32_t r = Random_getUint32(&rnd) % 10000;
     if (r < 3)
       ops.push_back({OP_NOISE, 0});
     else if (r < 10)
@@ -664,7 +664,7 @@ public:
         printIndent(*css);
         if (ops[i].value == ~0ULL) {
           // This equality test will always succeed, since InputA[i] == i
-          int idx = deRandom_getUint32(&rnd) % 4;
+          int idx = Random_getUint32(&rnd) % 4;
           *css << "if (InputA[" << idx << "] == " << idx << ") {\n";
         } else {
           const UVec4 v(ops[i].bvalue);

@@ -2,22 +2,31 @@
 #define EXPERIMENTAL_USERS_CLUCIE_RANDOMUTILS_H_
 
 #include <cstdint>
+#include <memory>
+#include "llvm/Support/RandomNumberGenerator.h"
+
+namespace llvm {
+class Module;
+class LLVMContext;
+} // namespace llvm
 
 namespace reconvergence {
 
-typedef struct deRandom_s {
-  uint32_t x; /*!< Current random state. */
-  uint32_t y;
-  uint32_t z;
-  uint32_t w;
-} deRandom;
+struct Random {
+  std::unique_ptr<llvm::RandomNumberGenerator> RNG;
 
-void deRandom_init(deRandom *rnd, uint32_t seed);
-uint32_t deRandom_getUint32(deRandom *rnd);
-uint64_t deRandom_getUint64(deRandom *rnd);
-float deRandom_getFloat(deRandom *rnd);
-double deRandom_getDouble(deRandom *rnd);
-bool deRandom_getBool(deRandom *rnd);
+  Random();
+  ~Random();
+  Random(Random&&) = default;
+  Random& operator=(Random&&) = default;
+};
+
+void Random_init(Random *rnd, uint32_t seed);
+uint32_t Random_getUint32(Random *rnd);
+uint64_t Random_getUint64(Random *rnd);
+float Random_getFloat(Random *rnd);
+double Random_getDouble(Random *rnd);
+bool Random_getBool(Random *rnd);
 
 } // namespace reconvergence
 
