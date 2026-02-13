@@ -1,5 +1,5 @@
-#ifndef EXPERIMENTAL_USERS_CLUCIE_RANDOMPROGRAM_H_
-#define EXPERIMENTAL_USERS_CLUCIE_RANDOMPROGRAM_H_
+#ifndef RANDOMPROGRAM_H_
+#define RANDOMPROGRAM_H_
 
 #include <cstdint>
 #include <memory>
@@ -21,8 +21,8 @@ public:
   RandomProgram(const TestCase &testCase, uint32_t invocationCount = 0u)
       : testCase(testCase),
         invocationStride(invocationCount ? invocationCount
-                                         : (testCase.getWorkgroupSizeX() *
-                                            testCase.getWorkgroupSizeY())),
+                                         : (testCase.getThreadgroupSizeX() *
+                                            testCase.getThreadgroupSizeY())),
         rnd(), ops(), masks(), ballotMasks(), numMasks(5), nesting(0),
         maxNesting(testCase.getMaxNestingLevel()), loopNesting(0),
         loopNestingThisFunction(0), callNesting(0), minCount(30), indent(0),
@@ -585,7 +585,7 @@ public:
     uint32_t isSwitch;
   };
 
-  struct SubgroupState2 {
+  struct WaveState {
     // Currently executing
     Ballots activeMask;
     // Have executed a continue instruction in this loop
@@ -600,11 +600,11 @@ public:
     uint32_t isCall;
     // is this nesting a switch?
     uint32_t isSwitch;
-    virtual ~SubgroupState2() = default;
-    SubgroupState2() : SubgroupState2(0) {}
-    SubgroupState2(uint32_t subgroupCount)
-        : activeMask(subgroupCount), continueMask(subgroupCount), header(),
-          tripCount(), isLoop(), isCall(), isSwitch() {}
+    virtual ~WaveState() = default;
+    WaveState() : WaveState(0) {}
+    WaveState(uint32_t waveCount)
+        : activeMask(waveCount), continueMask(waveCount), header(), tripCount(),
+          isLoop(), isCall(), isSwitch() {}
   };
 
   struct Prerequisites {};
@@ -631,7 +631,7 @@ public:
                                bool endWithSemicolon = false) {
     printIndent(css);
 
-    // When inside loop(s), use partitionBallot rather than subgroupBallot to
+    // When inside loop(s), use partitionBallot rather than WaveActiveBallot to
     // compute a ballot, to make sure the ballot is "diverged enough". Don't do
     // this for subgroup_uniform_control_flow, since we only validate results
     // that must be fully reconverged.
@@ -926,10 +926,10 @@ public:
   // Simulate execution of the program. If countOnly is true, just return
   // the max number of outputs written. If it's false, store out the result
   // values to ref.
-  virtual uint32_t simulate(bool countOnly, uint32_t subgroupSize,
+  virtual uint32_t simulate(bool countOnly, uint32_t waveSize,
                             add_ref<std::vector<uint64_t>> ref) = 0;
 
-  virtual uint32_t execute(bool countOnly, const uint32_t subgroupSize,
+  virtual uint32_t execute(bool countOnly, const uint32_t waveSize,
                            const uint32_t primitiveStride,
                            add_ref<std::vector<UVec4>> ref,
                            add_cref<std::vector<uint32_t>> outputP = {},
@@ -937,12 +937,11 @@ public:
                            const uint32_t primitiveID = (~0u)) {
     // Per-invocation output location counters
     std::vector<uint32_t> outLoc;
-    std::vector<SubgroupState2> stateStack;
-    uint32_t subgroupCount;
+    std::vector<WaveState> stateStack;
+    uint32_t waveCount;
     uint32_t logFailureCount;
-    auto prerequisites =
-        makePrerequisites(outputP, subgroupSize, primitiveStride, stateStack,
-                          outLoc, subgroupCount);
+    auto prerequisites = makePrerequisites(outputP, waveSize, primitiveStride,
+                                           stateStack, outLoc, waveCount);
 
     logFailureCount = 10u;
     nesting = 0;
@@ -968,7 +967,7 @@ public:
         nesting++;
         stateStack[nesting].activeMask =
             stateStack[nesting - 1].activeMask &
-            ballotsFromBallot(ops[i].bvalue, subgroupSize, subgroupCount);
+            ballotsFromBallot(ops[i].bvalue, waveSize, waveCount);
         stateStack[nesting].header = i;
         stateStack[nesting].isLoop = 0;
         stateStack[nesting].isSwitch = 0;
@@ -976,8 +975,8 @@ public:
       case OP_ELSE_MASK:
         stateStack[nesting].activeMask =
             stateStack[nesting - 1].activeMask &
-            ~ballotsFromBallot(ops[stateStack[nesting].header].bvalue,
-                               subgroupSize, subgroupCount);
+            ~ballotsFromBallot(ops[stateStack[nesting].header].bvalue, waveSize,
+                               waveCount);
         break;
       case OP_IF_LOOPCOUNT: {
         uint32_t n = nesting;
@@ -988,7 +987,7 @@ public:
         nesting++;
         stateStack[nesting].activeMask =
             stateStack[nesting - 1].activeMask &
-            ballotsFromBallot(tripBallot, subgroupSize, subgroupCount);
+            ballotsFromBallot(tripBallot, waveSize, waveCount);
         stateStack[nesting].header = i;
         stateStack[nesting].isLoop = 0;
         stateStack[nesting].isSwitch = 0;
@@ -1002,16 +1001,16 @@ public:
 
         stateStack[nesting].activeMask =
             stateStack[nesting - 1].activeMask &
-            ~ballotsFromBallot(tripBallot, subgroupSize, subgroupCount);
+            ~ballotsFromBallot(tripBallot, waveSize, waveCount);
         break;
       }
       case OP_IF_LOCAL_INVOCATION_INDEX: {
         // all bits >= N
-        Ballots mask(subgroupCount);
-        const uint32_t maxID = subgroupCount * subgroupSize;
+        Ballots mask(waveCount);
+        const uint32_t maxID = waveCount * waveSize;
         for (uint32_t id = static_cast<uint32_t>(ops[i].value); id < maxID;
              ++id) {
-          mask.set(Ballots::findBit(id, subgroupSize));
+          mask.set(Ballots::findBit(id, waveSize));
         }
 
         nesting++;
@@ -1024,11 +1023,11 @@ public:
       }
       case OP_ELSE_LOCAL_INVOCATION_INDEX: {
         // all bits < N
-        Ballots mask(subgroupCount);
-        const uint32_t maxID = subgroupCount * subgroupSize;
+        Ballots mask(waveCount);
+        const uint32_t maxID = waveCount * waveSize;
         for (uint32_t id = 0u;
              id < static_cast<uint32_t>(ops[i].value) && id < maxID; ++id) {
-          mask.set(Ballots::findBit(id, subgroupSize));
+          mask.set(Ballots::findBit(id, waveSize));
         }
 
         stateStack[nesting].activeMask =
@@ -1104,13 +1103,13 @@ public:
         stateStack[nesting].activeMask |= stateStack[nesting].continueMask;
         stateStack[nesting].continueMask = 0;
         Ballot tripBallot;
-        if (subgroupSize != stateStack[nesting].tripCount) {
+        if (waveSize != stateStack[nesting].tripCount) {
           for (uint32_t bit = stateStack[nesting].tripCount;
                bit < tripBallot.size(); ++bit)
             tripBallot.set(bit);
         }
         stateStack[nesting].activeMask &=
-            ballotsFromBallot(tripBallot, subgroupSize, subgroupCount);
+            ballotsFromBallot(tripBallot, waveSize, waveCount);
 
         if (stateStack[nesting].activeMask.any()) {
           i = stateStack[nesting].header + 1;
@@ -1230,7 +1229,7 @@ public:
       case OP_CASE_MASK_BEGIN:
         stateStack[nesting].activeMask =
             stateStack[nesting - 1].activeMask &
-            ballotsFromBallot(ops[i].bvalue, subgroupSize, subgroupCount);
+            ballotsFromBallot(ops[i].bvalue, waveSize, waveCount);
         break;
       case OP_CASE_LOOP_COUNT_BEGIN: {
         uint32_t n = nesting;
@@ -1270,33 +1269,35 @@ public:
 
 protected:
   virtual std::shared_ptr<Prerequisites>
-  makePrerequisites(add_cref<std::vector<uint32_t>> outputP,
-                    const uint32_t subgroupSize, const uint32_t primitiveStride,
-                    add_ref<std::vector<SubgroupState2>> stateStack,
-                    add_ref<std::vector<uint32_t>> outLoc,
-                    add_ref<uint32_t> subgroupCount) {
+  makePrerequisites(add_cref<std::vector<uint32_t>> /*outputP*/,
+                    const uint32_t /*waveSize*/,
+                    const uint32_t /*primitiveStride*/,
+                    add_ref<std::vector<WaveState>> /*stateStack*/,
+                    add_ref<std::vector<uint32_t>> /*outLoc*/,
+                    add_ref<uint32_t> /*waveCount*/) {
     return std::make_shared<Prerequisites>();
   }
 
-  virtual void simulateBallot(const bool countOnly,
-                              add_cref<Ballots> activeMask,
-                              const uint32_t primitiveID,
-                              const int32_t opsIndex,
-                              add_ref<std::vector<uint32_t>> outLoc,
-                              add_ref<std::vector<UVec4>> ref,
-                              std::shared_ptr<Prerequisites> prerequisites,
-                              add_ref<uint32_t> logFailureCount,
-                              const OPType reason, const UVec4 *cmp) {}
+  virtual void simulateBallot(const bool /*countOnly*/,
+                              add_cref<Ballots> /*activeMask*/,
+                              const uint32_t /*primitiveID*/,
+                              const int32_t /*opsIndex*/,
+                              add_ref<std::vector<uint32_t>> /*outLoc*/,
+                              add_ref<std::vector<UVec4>> /*ref*/,
+                              std::shared_ptr<Prerequisites> /*prerequisites*/,
+                              add_ref<uint32_t> /*logFailureCount*/,
+                              const OPType /*reason*/, const UVec4 * /*cmp*/) {}
 
-  virtual void simulateStore(const bool countOnly, add_cref<Ballots> activeMask,
-                             const uint32_t primitiveID,
-                             const uint64_t storeValue,
-                             add_ref<std::vector<uint32_t>> outLoc,
-                             add_ref<std::vector<UVec4>> ref,
-                             std::shared_ptr<Prerequisites> prerequisites,
-                             add_ref<uint32_t> logFailureCount,
-                             const OPType reason, const UVec4 *cmp) {}
+  virtual void simulateStore(const bool /*countOnly*/,
+                             add_cref<Ballots> /*activeMask*/,
+                             const uint32_t /*primitiveID*/,
+                             const uint64_t /*storeValue*/,
+                             add_ref<std::vector<uint32_t>> /*outLoc*/,
+                             add_ref<std::vector<UVec4>> /*ref*/,
+                             std::shared_ptr<Prerequisites> /*prerequisites*/,
+                             add_ref<uint32_t> /*logFailureCount*/,
+                             const OPType /*reason*/, const UVec4 * /*cmp*/) {}
 };
 } // namespace reconvergence
 
-#endif // EXPERIMENTAL_USERS_CLUCIE_RANDOMPROGRAM_H_
+#endif // RANDOMPROGRAM_H_

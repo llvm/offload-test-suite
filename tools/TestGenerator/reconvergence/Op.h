@@ -1,5 +1,5 @@
-#ifndef EXPERIMENTAL_USERS_CLUCIE_OP_H_
-#define EXPERIMENTAL_USERS_CLUCIE_OP_H_
+#ifndef OP_H_
+#define OP_H_
 
 #include "Ballot.h"
 #include "VectorUtils.h"
@@ -8,8 +8,8 @@ namespace reconvergence {
 enum OPType {
   // store subgroupBallot().
   // For OP_BALLOT, OP::caseValue is initialized to zero, and then
-  // set to 1 by simulate if the ballot is not workgroup- (or subgroup-_uniform.
-  // Only workgroup-uniform ballots are validated for correctness in
+  // set to 1 by simulate if the ballot is not threadgroup- (or wave-_uniform.
+  // Only threadgroup-uniform ballots are validated for correctness in
   // WUCF modes.
   OP_BALLOT,
 
@@ -170,4 +170,4 @@ public:
 };
 } // namespace reconvergence
 
-#endif // EXPERIMENTAL_USERS_CLUCIE_OP_H_
+#endif // OP_H_

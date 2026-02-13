@@ -15,143 +15,140 @@
 
 namespace reconvergence {
 void ReconvergenceTestGenerator::createRandomizedTests(
-    uint32_t totalMaxNestingLevel, uint32_t totalSeedGroup,
-    const std::map<uint32_t, uint32_t> &nestingLevelToTestsCount,
-    uint32_t subgroupSize, uint32_t workgroupSizeX, uint32_t workgroupSizeY) {
-  uint32_t totalTestsCount = 0;
-  for (uint32_t maxNestingLevel = 2; maxNestingLevel <= totalMaxNestingLevel;
-       ++maxNestingLevel) {
-    uint32_t testsCount = nestingLevelToTestsCount.at(maxNestingLevel);
-    totalTestsCount += testsCount * totalSeedGroup;
+    uint32_t TotalMaxNestingLevel, uint32_t TotalSeedGroup,
+    const std::map<uint32_t, uint32_t> &NestingLevelToTestsCount,
+    uint32_t WaveSize, uint32_t ThreadgroupSizeX, uint32_t ThreadgroupSizeY) {
+  uint32_t TotalTestsCount = 0;
+  for (uint32_t MaxNestingLevel = 2; MaxNestingLevel <= TotalMaxNestingLevel;
+       ++MaxNestingLevel) {
+    const uint32_t TestsCount = NestingLevelToTestsCount.at(MaxNestingLevel);
+    TotalTestsCount += TestsCount * TotalSeedGroup;
   }
 
-  uint32_t testId = 0;
-  for (uint32_t maxNestingLevel = 2; maxNestingLevel <= totalMaxNestingLevel;
-       ++maxNestingLevel) {
-    uint32_t seed = 0;
-    for (uint32_t seedGroup = 0; seedGroup < totalSeedGroup; ++seedGroup) {
-      uint32_t testsCount = nestingLevelToTestsCount.at(maxNestingLevel);
-      for (uint32_t _ = 0; _ < testsCount; ++_) {
-        const TestCase &test =
-            createSingleTest(seed, maxNestingLevel, subgroupSize,
-                             workgroupSizeX, workgroupSizeY);
-        if (save_shader_) {
-          saveShader(test);
+  uint32_t TestId = 0;
+  for (uint32_t MaxNestingLevel = 2; MaxNestingLevel <= TotalMaxNestingLevel;
+       ++MaxNestingLevel) {
+    uint32_t Seed = 0;
+    for (uint32_t SeedGroup = 0; SeedGroup < TotalSeedGroup; ++SeedGroup) {
+      const uint32_t TestsCount = NestingLevelToTestsCount.at(MaxNestingLevel);
+      for (uint32_t _ = 0; _ < TestsCount; ++_) {
+        const TestCase &Test =
+            createSingleTest(Seed, MaxNestingLevel, WaveSize, ThreadgroupSizeX,
+                             ThreadgroupSizeY);
+        if (SaveShader) {
+          saveShader(Test);
         }
-        saveTestConfig(test);
+        saveTestConfig(Test);
 
-        testId++;
-        seed++;
-        std::cout << "\rShader " << testId << " / " << totalTestsCount
-                  << " generated successfully." << std::flush;
+        TestId++;
+        Seed++;
+        std::cout << "\rShader with wave size " << WaveSize << " (" << TestId
+                  << " / " << TotalTestsCount << ") generated successfully."
+                  << std::flush;
       }
     }
   }
 }
 
-TestCase ReconvergenceTestGenerator::createSingleTest(uint32_t seed,
-                                                      uint32_t maxNestingLevel,
-                                                      uint32_t subgroupSize,
-                                                      uint32_t workgroupSizeX,
-                                                      uint32_t workgroupSizeY) {
-  TestCase testCase(seed, maxNestingLevel, subgroupSize, workgroupSizeX,
-                    workgroupSizeY);
-  ComputeRandomProgram program(testCase);
+TestCase ReconvergenceTestGenerator::createSingleTest(
+    uint32_t Seed, uint32_t MaxNestingLevel, uint32_t WaveSize,
+    uint32_t ThreadgroupSizeX, uint32_t ThreadgroupSizeY) {
+  TestCase TestCase(Seed, MaxNestingLevel, WaveSize, ThreadgroupSizeX,
+                    ThreadgroupSizeY);
+  ComputeRandomProgram Program(TestCase);
 
-  program.generateRandomProgram();
+  Program.generateRandomProgram();
 
-  std::vector<UVec4> ref;
-  const uint32_t invocationStride = workgroupSizeX * workgroupSizeY;
-  uint32_t maxLoc =
-      program.execute(/*countOnly=*/true, subgroupSize, invocationStride, ref);
-  maxLoc++;
-  maxLoc *= invocationStride;
-  ref.resize(maxLoc, UVec4(0u, 0u, 0u, 0u));
+  std::vector<UVec4> Ref;
+  const uint32_t InvocationStride = ThreadgroupSizeX * ThreadgroupSizeY;
+  uint32_t MaxLoc =
+      Program.execute(/*countOnly=*/true, WaveSize, InvocationStride, Ref);
+  MaxLoc++;
+  MaxLoc *= InvocationStride;
+  Ref.resize(MaxLoc, UVec4(0u, 0u, 0u, 0u));
 
-  program.execute(/*countOnly=*/false, subgroupSize, invocationStride, ref);
-  testCase.setExpectedResult(ref);
+  Program.execute(/*countOnly=*/false, WaveSize, InvocationStride, Ref);
+  TestCase.setExpectedResult(Ref);
 
-  std::stringstream functions, main;
-  program.printCodeHlsl(functions, main);
+  std::stringstream Functions, Main;
+  Program.printCodeHlsl(Functions, Main);
 
-  std::stringstream header, layout, globals;
+  std::stringstream Header, Layout, Globals;
 
-  header << "#define THREADS_X " << workgroupSizeX << "\n";
-  header << "#define THREADS_Y " << workgroupSizeY << "\n\n";
+  Header << "#define THREADS_X " << ThreadgroupSizeX << "\n";
+  Header << "#define THREADS_Y " << ThreadgroupSizeY << "\n\n";
 
-  layout << "StructuredBuffer<uint> InputA : register(t0);\n";
-  layout << "RWStructuredBuffer<uint4> OutputB : register(u1);\n\n";
+  Layout << "StructuredBuffer<uint> InputA : register(t0);\n";
+  Layout << "RWStructuredBuffer<uint4> OutputB : register(u1);\n\n";
 
-  globals << "bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> "
+  Globals << "bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> "
              "(bit % 32)) & 1) != 0; }\n";
 
-  globals << "static int outLoc = 0;\n";
-  globals << "static int invocationStride = " << invocationStride << ";\n\n";
+  Globals << "static int outLoc = 0;\n";
+  Globals << "static int invocationStride = " << InvocationStride << ";\n\n";
 
-  std::stringstream &shader = testCase.getShader();
-  shader << header.str();
-  shader << layout.str();
-  shader << globals.str();
+  std::stringstream &Shader = TestCase.getShader();
+  Shader << Header.str();
+  Shader << Layout.str();
+  Shader << Globals.str();
 
-  shader << functions.str() << "\n";
+  Shader << Functions.str() << "\n";
 
-  std::stringstream setup;
+  std::stringstream Setup;
 
-  setup << "[numthreads(THREADS_X, THREADS_Y, 1)]\n";
-  setup << "void main(uint gIndex : SV_GroupIndex)\n" << "{\n";
-  shader << setup.str() << main.str() << "}\n";
-  return testCase;
+  Setup << "[numthreads(THREADS_X, THREADS_Y, 1)]\n";
+  Setup << "void main(uint gIndex : SV_GroupIndex)\n" << "{\n";
+  Shader << Setup.str() << Main.str() << "}\n";
+  return TestCase;
 }
 
-void ReconvergenceTestGenerator::saveShader(const TestCase &test) {
-  uint32_t subgroupSize = test.getSubgroupSize();
-  uint32_t workgroupSizeX = test.getWorkgroupSizeX();
-  uint32_t workgroupSizeY = test.getWorkgroupSizeY();
-  uint32_t maxNestingLevel = test.getMaxNestingLevel();
-  uint32_t seed = test.getSeed();
-  std::string path = "shaders/" + std::to_string(subgroupSize);
-  std::filesystem::create_directories(path);
-  std::string filename = path + "/test_" + std::to_string(maxNestingLevel) +
-                         "_" + std::to_string(subgroupSize) + "_" +
-                         std::to_string(workgroupSizeX) + "_" +
-                         std::to_string(workgroupSizeY) + "_" +
-                         std::to_string(seed) + ".hlsl";
-  std::ofstream ofs(filename);
-  ofs << test.getShaderString() << std::endl;
-  ofs.close();
+void ReconvergenceTestGenerator::saveShader(const TestCase &Test) {
+  const uint32_t WaveSize = Test.getWaveSize();
+  const uint32_t ThreadgroupSizeX = Test.getThreadgroupSizeX();
+  const uint32_t ThreadgroupSizeY = Test.getThreadgroupSizeY();
+  const uint32_t MaxNestingLevel = Test.getMaxNestingLevel();
+  const uint32_t Seed = Test.getSeed();
+  const std::string Path = "shaders/" + std::to_string(WaveSize);
+  std::filesystem::create_directories(Path);
+  const std::string Filename =
+      Path + "/test_" + std::to_string(MaxNestingLevel) + "_" +
+      std::to_string(WaveSize) + "_" + std::to_string(ThreadgroupSizeX) + "_" +
+      std::to_string(ThreadgroupSizeY) + "_" + std::to_string(Seed) + ".hlsl";
+  std::ofstream Ofs(Filename);
+  Ofs << Test.getShaderString() << std::endl;
+  Ofs.close();
 }
 
-void ReconvergenceTestGenerator::saveTestConfig(const TestCase &test) {
-  uint32_t subgroupSize = test.getSubgroupSize();
-  uint32_t workgroupSizeX = test.getWorkgroupSizeX();
-  uint32_t workgroupSizeY = test.getWorkgroupSizeY();
-  uint32_t maxNestingLevel = test.getMaxNestingLevel();
-  uint32_t seed = test.getSeed();
-  std::string path = "tests/" + std::to_string(subgroupSize);
-  std::filesystem::create_directories(path);
-  std::string filename = path + "/test_" + std::to_string(maxNestingLevel) +
-                         "_" + std::to_string(subgroupSize) + "_" +
-                         std::to_string(workgroupSizeX) + "_" +
-                         std::to_string(workgroupSizeY) + "_" +
-                         std::to_string(seed) + ".test";
-  std::ofstream ofs(filename);
+void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
+  const uint32_t WaveSize = Test.getWaveSize();
+  const uint32_t ThreadgroupSizeX = Test.getThreadgroupSizeX();
+  const uint32_t ThreadgroupSizeY = Test.getThreadgroupSizeY();
+  const uint32_t MaxNestingLevel = Test.getMaxNestingLevel();
+  const uint32_t Seed = Test.getSeed();
+  const std::string Path = "reconvergence-tests/" + std::to_string(WaveSize);
+  std::filesystem::create_directories(Path);
+  const std::string Filename =
+      Path + "/test_" + std::to_string(MaxNestingLevel) + "_" +
+      std::to_string(WaveSize) + "_" + std::to_string(ThreadgroupSizeX) + "_" +
+      std::to_string(ThreadgroupSizeY) + "_" + std::to_string(Seed) + ".test";
+  std::ofstream Ofs(Filename);
 
-  ofs << "#--- source.hlsl\n" << std::endl;
-  ofs << test.getShaderString() << std::endl;
-  ofs << "//--- pipeline.yaml\n" << std::endl;
-  ofs << "---\n" << std::endl;
+  Ofs << "#--- source.hlsl\n" << std::endl;
+  Ofs << Test.getShaderString() << std::endl;
+  Ofs << "//--- pipeline.yaml\n" << std::endl;
+  Ofs << "---\n" << std::endl;
 
   // Configuration for the pipeline.
-  std::stringstream shaders;
-  shaders <<
+  std::stringstream Shaders;
+  Shaders <<
       R""""(Shaders:
   - Stage: Compute
     Entry: main
     DispatchSize: [1, 1, 1]
 )"""";
 
-  std::stringstream buffers;
-  buffers <<
+  std::stringstream Buffers;
+  Buffers <<
       R""""(Buffers:
   - Name: InputA
     Format: UInt32
@@ -160,34 +157,34 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &test) {
     Format: UInt32
     Stride: 16
     FillSize: )"""";
-  const auto &expectedResult = test.getExpectedResult();
-  buffers << expectedResult.size() * 16;
-  buffers << R""""(
+  const auto &ExpectedResult = Test.getExpectedResult();
+  Buffers << ExpectedResult.size() * 16;
+  Buffers << R""""(
   - Name: ExpectedOutputB
     Format: UInt32
     Stride: 16
     Data: )"""";
-  buffers << "[ ";
-  for (size_t i = 0; i < expectedResult.size(); ++i) {
-    const UVec4 &vec = expectedResult[i];
-    buffers << vec.x() << ", " << vec.y() << ", " << vec.z() << ", " << vec.w();
-    if (i < expectedResult.size() - 1) {
-      buffers << ",";
+  Buffers << "[ ";
+  for (size_t I = 0; I < ExpectedResult.size(); ++I) {
+    const UVec4 &Vec = ExpectedResult[I];
+    Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", " << Vec.w();
+    if (I < ExpectedResult.size() - 1) {
+      Buffers << ",";
     }
-    buffers << " ";
+    Buffers << " ";
   }
-  buffers << "]" << std::endl;
+  Buffers << "]" << std::endl;
 
-  std::stringstream results;
-  results << R"""(Results:
+  std::stringstream Results;
+  Results << R"""(Results:
   - Result: Test
     Rule: BufferExact
     Actual: OutputB
     Expected: ExpectedOutputB
 )""";
 
-  std::stringstream descriptorSets;
-  descriptorSets << R"""(DescriptorSets:
+  std::stringstream DescriptorSets;
+  DescriptorSets << R"""(DescriptorSets:
   - Resources:
     - Name: InputA
       Kind: StructuredBuffer
@@ -205,24 +202,24 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &test) {
         Binding: 1
 )""";
 
-  ofs << shaders.str() << buffers.str() << results.str() << descriptorSets.str()
+  Ofs << Shaders.str() << Buffers.str() << Results.str() << DescriptorSets.str()
       << std::endl;
 
-  ofs << "...\n" << "#--- end\n";
+  Ofs << "...\n" << "#--- end\n";
 
-  std::stringstream command;
-  command << "# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence"
+  std::stringstream Command;
+  Command << "# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence"
           << std::endl;
-  command << "# UNSUPPORTED: !SubgroupSize" << subgroupSize << std::endl;
-  command << R"""(
+  Command << "# UNSUPPORTED: !WaveSize_" << WaveSize << std::endl;
+  Command << R"""(
 # Bug: Some wave operations are not yet implemented.
 # XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o)""";
-  ofs << command.str() << std::endl;
-  ofs.close();
+  Ofs << Command.str() << std::endl;
+  Ofs.close();
 }
 
 } // namespace reconvergence

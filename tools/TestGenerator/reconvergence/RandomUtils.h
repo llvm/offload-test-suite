@@ -1,9 +1,9 @@
-#ifndef EXPERIMENTAL_USERS_CLUCIE_RANDOMUTILS_H_
-#define EXPERIMENTAL_USERS_CLUCIE_RANDOMUTILS_H_
+#ifndef RANDOMUTILS_H_
+#define RANDOMUTILS_H_
 
+#include "llvm/Support/RandomNumberGenerator.h"
 #include <cstdint>
 #include <memory>
-#include "llvm/Support/RandomNumberGenerator.h"
 
 namespace llvm {
 class Module;
@@ -17,17 +17,14 @@ struct Random {
 
   Random();
   ~Random();
-  Random(Random&&) = default;
-  Random& operator=(Random&&) = default;
+  Random(Random &&) = default;
+  Random &operator=(Random &&) = default;
 };
 
-void Random_init(Random *rnd, uint32_t seed);
-uint32_t Random_getUint32(Random *rnd);
-uint64_t Random_getUint64(Random *rnd);
-float Random_getFloat(Random *rnd);
-double Random_getDouble(Random *rnd);
-bool Random_getBool(Random *rnd);
+void Random_init(Random *Rnd, uint32_t Seed);
+uint32_t Random_getUint32(Random *Rnd);
+uint64_t Random_getUint64(Random *Rnd);
 
 } // namespace reconvergence
 
-#endif // EXPERIMENTAL_USERS_CLUCIE_RANDOMUTILS_H_
+#endif // RANDOMUTILS_H_

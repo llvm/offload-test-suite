@@ -1,5 +1,5 @@
-#ifndef EXPERIMENTAL_USERS_CLUCIE_BALLOTS_H_
-#define EXPERIMENTAL_USERS_CLUCIE_BALLOTS_H_
+#ifndef BALLOTS_H_
+#define BALLOTS_H_
 
 #include <bitset>
 #include <cassert>
@@ -13,13 +13,13 @@ namespace reconvergence {
 struct Ballots : protected std::vector<std::bitset<128>> {
   typedef std::vector<value_type> super;
 
-  static const constexpr uint32_t subgroupInvocationSize =
+  static const constexpr uint32_t waveInvocationSize =
       static_cast<uint32_t>(value_type().size());
 
   Ballots() : super() {}
 
-  explicit Ballots(uint32_t subgroupCount, const value_type &ballot = {})
-      : super(subgroupCount) {
+  explicit Ballots(uint32_t waveCount, const value_type &ballot = {})
+      : super(waveCount) {
     if (ballot.any())
       *this = ballot;
   }
@@ -35,7 +35,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
    * @return Returns the number of bits that the Ballots holds.
    */
   uint32_t size() const {
-    return static_cast<uint32_t>(super::size() * subgroupInvocationSize);
+    return static_cast<uint32_t>(super::size() * waveInvocationSize);
   }
 
   /**
@@ -51,26 +51,24 @@ struct Ballots : protected std::vector<std::bitset<128>> {
 
   /**
    * @brief count method
-   * @return Returns the number of bits that are set to true in given subgroup.
+   * @return Returns the number of bits that are set to true in given wave.
    */
-  uint32_t count(uint32_t subgroup) const {
-    assert(subgroup < subgroupCount());
-    return static_cast<uint32_t>(at(subgroup).count());
+  uint32_t count(uint32_t wave) const {
+    assert(wave < waveCount());
+    return static_cast<uint32_t>(at(wave).count());
   }
 
-  uint32_t subgroupCount() const {
-    return static_cast<uint32_t>(super::size());
-  }
+  uint32_t waveCount() const { return static_cast<uint32_t>(super::size()); }
 
   bool test(uint32_t bit) const {
     assert(bit < size());
-    return at(bit / subgroupInvocationSize).test(bit % subgroupInvocationSize);
+    return at(bit / waveInvocationSize).test(bit % waveInvocationSize);
   }
 
   bool set(uint32_t bit, bool value = true) {
     assert(bit <= size());
     const bool before = test(bit);
-    at(bit / subgroupInvocationSize).set((bit % subgroupInvocationSize), value);
+    at(bit / waveInvocationSize).set((bit % waveInvocationSize), value);
     return before;
   }
 
@@ -87,7 +85,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
   }
 
   bool all() const {
-    const uint32_t gg = subgroupCount();
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g) {
       if (false == at(g).all())
         return false;
@@ -96,7 +94,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
   }
 
   bool none() const {
-    const uint32_t gg = subgroupCount();
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g) {
       if (false == at(g).none())
         return false;
@@ -106,17 +104,17 @@ struct Ballots : protected std::vector<std::bitset<128>> {
 
   bool any() const {
     bool res = false;
-    const uint32_t gg = subgroupCount();
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g)
       res |= super::at(g).any();
     return res;
   }
 
   static uint32_t findBit(uint32_t otherFullyQualifiedInvocationID,
-                          uint32_t otherSubgroupSize) {
-    return (((otherFullyQualifiedInvocationID / otherSubgroupSize) *
-             subgroupInvocationSize) +
-            (otherFullyQualifiedInvocationID % otherSubgroupSize));
+                          uint32_t otherWaveSize) {
+    return (((otherFullyQualifiedInvocationID / otherWaveSize) *
+             waveInvocationSize) +
+            (otherFullyQualifiedInvocationID % otherWaveSize));
   }
 
   inline const super &upcast(const Ballots &other) const {
@@ -124,8 +122,8 @@ struct Ballots : protected std::vector<std::bitset<128>> {
   }
 
   Ballots &operator&=(const Ballots &other) {
-    assert(subgroupCount() == other.subgroupCount());
-    const uint32_t gg = subgroupCount();
+    assert(waveCount() == other.waveCount());
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g)
       super::at(g) = super::at(g) & upcast(other).at(g);
     return *this;
@@ -138,8 +136,8 @@ struct Ballots : protected std::vector<std::bitset<128>> {
   }
 
   Ballots &operator|=(const Ballots &other) {
-    assert(subgroupCount() == other.subgroupCount());
-    const uint32_t gg = subgroupCount();
+    assert(waveCount() == other.waveCount());
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g)
       super::at(g) = super::at(g) | upcast(other).at(g);
     return *this;
@@ -154,7 +152,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
   Ballots &operator<<=(uint32_t bits) { return ((*this) = ((*this) << bits)); }
 
   Ballots operator<<(uint32_t bits) const {
-    Ballots res(subgroupCount());
+    Ballots res(waveCount());
     if (bits < size() && bits != 0u) {
       for (uint32_t b = 0; b < size() - bits; ++b)
         res.set((b + bits), test(b));
@@ -164,7 +162,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
 
   Ballots operator~() const {
     Ballots res(*this);
-    const uint32_t gg = subgroupCount();
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g)
       res.at(g) = super::at(g).operator~();
     return res;
@@ -172,7 +170,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
 
   bool operator==(const Ballots &other) const {
     if (super::size() == upcast(other).size()) {
-      const uint32_t gg = subgroupCount();
+      const uint32_t gg = waveCount();
       for (uint32_t g = 0u; g < gg; ++g) {
         if (at(g) != other[g])
           return false;
@@ -183,8 +181,8 @@ struct Ballots : protected std::vector<std::bitset<128>> {
   }
 
   Ballots &operator=(const Ballots &other) {
-    assert((subgroupCount() == other.subgroupCount()));
-    const uint32_t gg = subgroupCount();
+    assert((waveCount() == other.waveCount()));
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g)
       at(g) = other.at(g);
     return *this;
@@ -192,7 +190,7 @@ struct Ballots : protected std::vector<std::bitset<128>> {
 
   Ballots &operator=(const value_type &forAllGroups) {
     assert(super::size() >= 1u);
-    const uint32_t gg = subgroupCount();
+    const uint32_t gg = waveCount();
     for (uint32_t g = 0u; g < gg; ++g)
       at(g) = forAllGroups;
     return *this;
@@ -200,4 +198,4 @@ struct Ballots : protected std::vector<std::bitset<128>> {
 };
 } // namespace reconvergence
 
-#endif // EXPERIMENTAL_USERS_CLUCIE_BALLOTS_H_
+#endif // BALLOTS_H_

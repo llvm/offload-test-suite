@@ -9,18 +9,18 @@ class ReconvergenceTestGenerator {
 public:
   ReconvergenceTestGenerator() = default;
   void createRandomizedTests(
-      uint32_t totalMaxNestingLevel, uint32_t totalSeedGroup,
-      const std::map<uint32_t, uint32_t> &nestingLevelToTestsCount,
-      uint32_t subgroupSize, uint32_t workgroupSizeX, uint32_t workgroupSizeY);
+      uint32_t TotalMaxNestingLevel, uint32_t TotalSeedGroup,
+      const std::map<uint32_t, uint32_t> &NestingLevelToTestsCount,
+      uint32_t WaveSize, uint32_t ThreadgroupSizeX, uint32_t ThreadgroupSizeY);
 
-  bool save_shader_ = false;
+  bool SaveShader = false;
 
 private:
-  TestCase createSingleTest(uint32_t seed, uint32_t maxNestingLevel,
-                            uint32_t subgroupSize, uint32_t workgroupSizeX,
-                            uint32_t workgroupSizeY);
+  TestCase createSingleTest(uint32_t Seed, uint32_t MaxNestingLevel,
+                            uint32_t WaveSize, uint32_t ThreadgroupSizeX,
+                            uint32_t ThreadgroupSizeY);
 
-  void saveShader(const TestCase &test);
-  void saveTestConfig(const TestCase &test);
+  void saveShader(const TestCase &Test);
+  void saveTestConfig(const TestCase &Test);
 };
 } // namespace reconvergence

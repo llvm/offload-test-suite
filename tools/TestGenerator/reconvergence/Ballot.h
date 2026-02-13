@@ -1,5 +1,5 @@
-#ifndef EXPERIMENTAL_USERS_CLUCIE_BALLOT_H_
-#define EXPERIMENTAL_USERS_CLUCIE_BALLOT_H_
+#ifndef BALLOT_H_
+#define BALLOT_H_
 
 #include <bitset>
 #include <cstdint>
@@ -59,4 +59,4 @@ protected:
 };
 } // namespace reconvergence
 
-#endif // EXPERIMENTAL_USERS_CLUCIE_BALLOT_H_
+#endif // BALLOT_H_
