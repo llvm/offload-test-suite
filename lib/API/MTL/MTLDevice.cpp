@@ -14,6 +14,7 @@
 
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 
@@ -355,13 +356,48 @@ class MTLDevice : public offloadtest::Device {
       CmdEncoder->useResource(IS.Buffers[I],
                               MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
 
-    const NS::UInteger TGS =
-        IS.ComputePipeline->maxTotalThreadsPerThreadgroup();
+    NS::UInteger TGS[3] = {IS.ComputePipeline->maxTotalThreadsPerThreadgroup(),
+                           1, 1};
+    if (P.Shaders[0].Reflection) {
+      llvm::Expected<llvm::json::Value> E = llvm::json::parse(
+          llvm::StringRef(P.Shaders[0].Reflection->getBuffer()));
+      if (!E)
+        return E.takeError();
+      llvm::json::Value Reflection = *E;
+
+      llvm::json::Object *ReflectionObj = Reflection.getAsObject();
+      if (!ReflectionObj)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Shader reflection must be a JSON object.");
+      auto StateIt = ReflectionObj->find("state");
+      if (StateIt != ReflectionObj->end()) {
+        llvm::json::Object *State = StateIt->second.getAsObject();
+        auto TGSize = State->find("tg_size");
+        if (TGSize != State->end()) {
+          llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
+          if (TGSizeArr->size() != 3)
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "Threadgroup size in reflection must have three components.");
+          for (size_t I = 0; I < 3; ++I) {
+            auto OpVal = (*TGSizeArr)[I].getAsUINT64();
+            if (!OpVal)
+              return llvm::createStringError(std::errc::invalid_argument,
+                                             "Threadgroup size components in "
+                                             "reflection must be integers.");
+            TGS[I] = *OpVal;
+          }
+        }
+      }
+    }
+
     const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
     const MTL::Size GridSize =
-        MTL::Size(TGS * DispatchSize[0], DispatchSize[1], DispatchSize[2]);
-    const MTL::Size GroupSize(TGS, 1, 1);
+        MTL::Size(TGS[0] * DispatchSize[0], TGS[1] * DispatchSize[1],
+                  TGS[2] * DispatchSize[2]);
+    const MTL::Size GroupSize(TGS[0], TGS[1], TGS[2]);
     CmdEncoder->dispatchThreads(GridSize, GroupSize);
     CmdEncoder->memoryBarrier(MTL::BarrierScopeBuffers);
 

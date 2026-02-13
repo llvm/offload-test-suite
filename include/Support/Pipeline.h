@@ -389,6 +389,7 @@ struct Shader {
   Stages Stage;
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
+  std::unique_ptr<llvm::MemoryBuffer> Reflection;
   int DispatchSize[3];
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
