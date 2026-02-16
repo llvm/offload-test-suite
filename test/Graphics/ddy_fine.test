@@ -83,7 +83,7 @@ DescriptorSets: []
 
 # Bug https://github.com/llvm/wg-hlsl/issues/145
 # Bug https://github.com/llvm/wg-hlsl/issues/146
-# XFAIL: Clang && DirectX
+# XFAIL: Clang && DirectX || Clang && Metal
 # REQUIRES: goldenimage
 
 # RUN: split-file %s %t
