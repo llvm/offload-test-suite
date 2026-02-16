@@ -93,6 +93,9 @@ DescriptorSets:
 
 # XFAIL: DirectX
 
+# Semantics are not implemented in the DXIL backend.
+# XFAIL: Clang && !Vulkan
+
 # FIXME(Keenuts): Clang frontend is crashing with this code.
 # XFAIL: Clang
 
