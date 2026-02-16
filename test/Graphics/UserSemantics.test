@@ -36,9 +36,9 @@ Buffers:
   - Name: VertexData
     Format: Float32
     Stride: 16
-    Data: [ -1.0, -1.0, 0.0, 1.0,
-             3.0, -1.0, 0.0, 1.0,
-            -1.0,  3.0, 0.0, 1.0 ]
+    Data: [ -1.0, 0.0, 0.0, 1.0,
+            -1.0, 1.0, 0.0, 1.0,
+             1.0, 0.0, 0.0, 1.0 ]
   - Name: Output
     Format: Float32
     Channels: 4
@@ -59,8 +59,6 @@ DescriptorSets: []
 ...
 #--- end
 
-# XFAIL: DirectX
-
 # Semantics are not implemented in the DXIL backend.
 # XFAIL: Clang && !Vulkan
 
@@ -70,5 +68,4 @@ DescriptorSets: []
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
 # CHECK: Data:
-# CHECK: [ 0.5, 1, 0, 1, 0.5, 1, 0, 1, 0.5, 1, 0, 1, 0.5, 1,
-# CHECK:   0, 1 ]
+# CHECK: [ 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 1, 0, 1, 0, 0, 0, 0 ]
