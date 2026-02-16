@@ -105,6 +105,11 @@ def setDeviceFeatures(config, device, compiler):
     if "Qualcomm" in device["Description"]:
         config.available_features.add("QC")
 
+    appleSilicon = re.search(r"\bApple M(\d+)\b", device["Description"])
+    if appleSilicon:
+        gen = appleSilicon.group(1)
+        config.available_features.add(f"AppleM{gen}")
+
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
         # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
