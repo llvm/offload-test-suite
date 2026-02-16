@@ -1444,13 +1444,13 @@ public:
         IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
     Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
 
-    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
       IS.CmdList->SetDescriptorHeaps(1, Heaps);
       IS.CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
+    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     IS.CmdList->SetPipelineState(IS.PSO.Get());
 
     IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
