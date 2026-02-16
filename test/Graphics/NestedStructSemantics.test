@@ -91,7 +91,7 @@ DescriptorSets:
 ...
 #--- end
 
-# XFAIL: Metal
+# XFAIL: DirectX
 
 # FIXME(Keenuts): Clang frontend is crashing with this code.
 # XFAIL: Clang

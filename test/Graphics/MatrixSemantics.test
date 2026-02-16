@@ -88,8 +88,7 @@ DescriptorSets:
 ...
 #--- end
 
-# XFAIL: Metal
-# XFAIL: Clang && DirectX
+# XFAIL: DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
