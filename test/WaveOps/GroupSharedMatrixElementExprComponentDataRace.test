@@ -12,12 +12,6 @@ groupshared float4x4 SharedMat;
 [numthreads(128, 4, 1)]
 void main(uint3 ThreadID : SV_GroupThreadID)
 {
-  if (ThreadID.x == 0 && ThreadID.y == 0) {
-    SharedMat = (float4x4)-1.0;
-  }
-
-  GroupMemoryBarrierWithGroupSync();
-
   if (ThreadID.x == 0)
   {
     float4 v = In[ThreadID.y];
