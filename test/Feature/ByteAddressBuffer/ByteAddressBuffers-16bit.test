@@ -88,8 +88,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/108058
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/179560
+# XFAIL: Clang && Vulkan
 
 # REQUIRES: Int16
 # RUN: split-file %s %t
