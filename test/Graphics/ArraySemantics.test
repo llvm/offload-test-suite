@@ -11,10 +11,10 @@ struct VSOutput {
 VSOutput main(VSInput input) {
     VSOutput output;
     output.position = input.position;
-    output.arr[0] = 1.0;
-    output.arr[1] = 2.0;
-    output.arr[2] = 3.0;
-    output.arr[3] = 4.0;
+    output.arr[0] = 0.5;
+    output.arr[1] = 1.0;
+    output.arr[2] = 0.0;
+    output.arr[3] = 1.0;
     return output;
 }
 
@@ -24,14 +24,8 @@ struct PSInput {
     float arr[4] : MY_ARRAY;
 };
 
-RWStructuredBuffer<float> Out : register(u0);
-
 float4 main(PSInput input) : SV_TARGET {
-    Out[0] = input.arr[0];
-    Out[1] = input.arr[1];
-    Out[2] = input.arr[2];
-    Out[3] = input.arr[3];
-    return float4(1.0, 0.0, 0.0, 1.0);
+    return float4(input.arr[0], input.arr[1], input.arr[2], input.arr[3]);
 }
 
 #--- pipeline.yaml
@@ -56,10 +50,6 @@ Buffers:
       Height: 1
       Width: 1
       Depth: 16
-  - Name: ResultBuffer
-    Format: Float32
-    FillSize: 16
-    FillValue: 0.0
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
@@ -68,15 +58,7 @@ Bindings:
       Offset: 0
       Name: POSITION
   RenderTarget: Output
-DescriptorSets:
-  - Resources:
-    - Name: ResultBuffer
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 0
-        Space: 0
-      VulkanBinding:
-        Binding: 0
+DescriptorSets: []
 ...
 #--- end
 
@@ -91,5 +73,5 @@ DescriptorSets:
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
-# CHECK: Name: ResultBuffer
-# CHECK: [ 1, 2, 3, 4 ]
+# CHECK: Data:
+# CHECK: [ 0.5, 1, 0, 1 ]
