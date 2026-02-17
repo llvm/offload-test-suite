@@ -94,9 +94,6 @@ DescriptorSets:
 # Semantics are not implemented in the DXIL backend.
 # XFAIL: Clang && !Vulkan
 
-# FIXME: Crashing, See https://github.com/llvm/llvm-project/issues/181674
-# XFAIL: Clang
-
 # See https://github.com/llvm/offload-test-suite/issues/744
 # XFAIL: Metal
 
