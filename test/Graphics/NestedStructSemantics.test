@@ -73,9 +73,6 @@ DescriptorSets: []
 ...
 #--- end
 
-# XFAIL: DirectX
-# See https://github.com/llvm/offload-test-suite/issues/743
-
 # Semantics are not implemented in the DXIL backend.
 # XFAIL: Clang && !Vulkan
 
