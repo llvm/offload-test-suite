@@ -163,7 +163,7 @@ Results:
 # XFAIL: DirectX || Metal || Vulkan && Darwin
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/175630
-# XFAIL: Clang
+# XFAIL: Clang && !Intel
 
 
 # RUN: split-file %s %t

@@ -271,6 +271,7 @@ private:
   VkPhysicalDevice Device;
   VkPhysicalDeviceProperties Props;
   VkPhysicalDeviceProperties2 Props2;
+  VkPhysicalDeviceFloatControlsProperties FloatControlProp;
   VkPhysicalDeviceDriverProperties DriverProps;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
@@ -384,8 +385,11 @@ public:
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
+    FloatControlProp.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
+    FloatControlProp.pNext = nullptr;
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
-    DriverProps.pNext = nullptr;
+    DriverProps.pNext = &FloatControlProp;
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     Props2.pNext = &DriverProps;
     vkGetPhysicalDeviceProperties2(Device, &Props2);
@@ -497,6 +501,9 @@ private:
         make_capability<uint32_t>("APIMinorVersion",
                                   VK_API_VERSION_MINOR(Props.apiVersion))));
 
+#define VULKAN_FLOAT_CONTROLS_FEATURE_BOOL(Name)                               \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, make_capability<bool>(#Name, FloatControlProp.Name)));
 #define VULKAN_FEATURE_BOOL(Name)                                              \
   Caps.insert(std::make_pair(                                                  \
       #Name, make_capability<bool>(#Name, Features.features.Name)));

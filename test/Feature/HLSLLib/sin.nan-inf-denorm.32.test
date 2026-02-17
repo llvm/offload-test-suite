@@ -63,7 +63,7 @@ DescriptorSets:
 # XFAIL: Vulkan && MoltenVK
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/701
-# XFAIL: Metal && !AppleM1 && Clang
+# XFAIL: Metal && !AppleM1 && !AppleM2 && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl

@@ -57,7 +57,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Float64
-    Stride: 8
+    Stride: 32
     Data: [ 1.0, 10.0, 100.0, 1000.0]
   - Name: Out1
     Format: Float64
