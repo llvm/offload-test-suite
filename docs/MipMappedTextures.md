@@ -1,10 +1,14 @@
 # Mipmapped Textures
 
-The test suite supports textures with multiple mipmap levels. This allows verifying that the compiler correctly generates code for `CalculateLevelOfDetail`, `SampleGrad` (explicit gradients), and direct access via `mips[level][coords]`.
+The test suite supports textures with multiple mipmap levels. This allows
+verifying that the compiler correctly generates code for
+`CalculateLevelOfDetail`, `SampleGrad` (explicit gradients), and direct access
+via `mips[level][coords]`.
 
 ## Defining Mip Levels
 
-To define a texture with multiple mips, specify the `MipLevels` field in `OutputProps`.
+To define a texture with multiple mips, specify the `MipLevels` field in
+`OutputProps`.
 
 **Example:**
 ```yaml
@@ -21,7 +25,10 @@ Buffers:
 
 ## Dimension Calculation
 
-The dimensions of each mip level are calculated automatically based on the base `Width`, `Height`, and `Depth` provided in `OutputProps`. Following standard graphics API conventions (Vulkan, DirectX, Metal), each subsequent mip level is half the size of the previous level, rounded down, with a minimum of 1.
+The dimensions of each mip level are calculated automatically based on the base
+`Width`, `Height`, and `Depth` provided in `OutputProps`. Following standard
+graphics API conventions (Vulkan, DirectX, Metal), each subsequent mip level is
+half the size of the previous level, rounded down, with a minimum of 1.
 
 For Mip Level $N$:
 *   $\text{Width}_N = \max(1, \lfloor \text{Width}_0 / 2^N \rfloor)$
@@ -30,7 +37,8 @@ For Mip Level $N$:
 
 ## Data Layout
 
-The `Data` array in the YAML must contain the texel data for **all mip levels sequentially**, packed tightly without padding.
+The `Data` array in the YAML must contain the texel data for **all mip levels
+sequentially**, packed tightly without padding.
 
 For a 4x4 texture with 3 mip levels, the `Data` array structure is:
 
@@ -74,3 +82,12 @@ float4 val = Tex.mips[1][int2(0,0)];
 // Should return Blue (Mip 2)
 float4 val2 = Tex.Load(int3(0,0,2));
 ```
+
+## Implementation Notes
+
+### Mipmap Filtering
+
+Currently, the test suite hardcodes the mipmap sampling mode to **Nearest**
+(`VK_SAMPLER_MIPMAP_MODE_NEAREST` in Vulkan). This ensures deterministic results
+for tests that verify specific mip level selection without requiring linear
+interpolation between levels. Linear mip filtering is not configurable via YAML.

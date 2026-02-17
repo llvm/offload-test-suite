@@ -320,6 +320,25 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   }
 
   I.mapOptional("OutputProps", B.OutputProps);
+
+  if (!I.outputting() && B.OutputProps.Width > 0) {
+    uint32_t ExpectedSize = 0;
+    uint32_t W = B.OutputProps.Width;
+    uint32_t H = B.OutputProps.Height;
+    uint32_t D = B.OutputProps.Depth;
+    uint32_t ElementSize = B.getElementSize();
+    for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
+      ExpectedSize += W * H * D * ElementSize;
+      W = std::max(1u, W / 2);
+      H = std::max(1u, H / 2);
+      D = std::max(1u, D / 2);
+    }
+
+    if (B.Size != ExpectedSize)
+      I.setError(Twine("Buffer '") + B.Name + "' size (" + Twine(B.Size) +
+                 ") does not match OutputProps dimensions (" +
+                 Twine(ExpectedSize) + ")");
+  }
 }
 
 void MappingTraits<offloadtest::Resource>::mapping(IO &I,

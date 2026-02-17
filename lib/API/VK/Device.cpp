@@ -1733,9 +1733,12 @@ public:
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
         Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width = std::max(1, B.OutputProps.Width >> I);
-        Region.imageExtent.height = std::max(1, B.OutputProps.Height >> I);
-        Region.imageExtent.depth = std::max(1, B.OutputProps.Depth >> I);
+        Region.imageExtent.width =
+            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
+        Region.imageExtent.height =
+            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
+        Region.imageExtent.depth =
+            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
         Region.bufferOffset = CurrentOffset;
         Regions.push_back(Region);
         CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
@@ -1835,9 +1838,12 @@ public:
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
         Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width = std::max(1, B.OutputProps.Width >> I);
-        Region.imageExtent.height = std::max(1, B.OutputProps.Height >> I);
-        Region.imageExtent.depth = std::max(1, B.OutputProps.Depth >> I);
+        Region.imageExtent.width =
+            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
+        Region.imageExtent.height =
+            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
+        Region.imageExtent.depth =
+            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
         Region.bufferOffset = CurrentOffset;
         Regions.push_back(Region);
         CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *

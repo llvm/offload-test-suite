@@ -76,7 +76,7 @@ Buffers:
   - Name: RT
     Format: Float32
     Channels: 4
-    FillSize: 16
+    FillSize: 64
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
 
   - Name: VB
