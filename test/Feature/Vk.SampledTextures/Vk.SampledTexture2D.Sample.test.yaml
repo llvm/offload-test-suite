@@ -158,7 +158,7 @@ Results:
 # UNSUPPORTED: !Vulkan
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/181910
-# UNIMPLEMENTED: Clang && Vulkan
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
