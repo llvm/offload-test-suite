@@ -1,6 +1,6 @@
 #--- vertex.hlsl
 struct Inner {
-    uint b : B;
+    float b : B;
 };
 
 struct VSInput {
@@ -9,40 +9,34 @@ struct VSInput {
 
 struct VSOutput {
     float4 position : SV_POSITION;
-    uint a : A;
+    float a : A;
     Inner inner : D;
-    uint c : C;
+    float c : C;
 };
 
 VSOutput main(VSInput input) {
     VSOutput output;
     output.position = input.position;
-    output.a = 1;
-    output.inner.b = 2;
-    output.c = 3;
+    output.a = 0.5;
+    output.inner.b = 1.0;
+    output.c = 0.75;
     return output;
 }
 
 #--- pixel.hlsl
 struct Inner {
-    uint b : B;
+    float b : B;
 };
 
 struct PSInput {
     float4 position : SV_POSITION;
-    uint a : A;
+    float a : A;
     Inner inner : D;
-    uint c : C;
+    float c : C;
 };
 
-RWStructuredBuffer<uint> Out : register(u0);
-
 float4 main(PSInput input) : SV_TARGET {
-    Out[0] = input.a;
-    Out[1] = input.inner.b;
-    Out[2] = input.c;
-
-    return float4(1, 0, 0, 0);
+    return float4(input.a, input.inner.b, input.c, 0);
 }
 
 #--- pipeline.yaml
@@ -67,10 +61,6 @@ Buffers:
       Height: 1
       Width: 1
       Depth: 16
-  - Name: ResultBuffer
-    Format: Int32
-    FillSize: 12
-    FillValue: 0
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
@@ -79,15 +69,7 @@ Bindings:
       Offset: 0
       Name: POSITION
   RenderTarget: Output
-DescriptorSets:
-  - Resources:
-    - Name: ResultBuffer
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 0
-        Space: 0
-      VulkanBinding:
-        Binding: 0
+DescriptorSets: []
 ...
 #--- end
 
@@ -105,5 +87,5 @@ DescriptorSets:
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
-# CHECK: Name: ResultBuffer
-# CHECK: [ 1, 2, 3 ]
+# CHECK: Data:
+# CHECK: [ 0.5, 1, 0.75, 0 ]
