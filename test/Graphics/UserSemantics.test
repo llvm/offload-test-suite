@@ -36,16 +36,16 @@ Buffers:
   - Name: VertexData
     Format: Float32
     Stride: 16
-    Data: [ -1.0, 0.0, 0.0, 1.0,
-            -1.0, 1.0, 0.0, 1.0,
-             1.0, 0.0, 0.0, 1.0 ]
+    Data: [  0.0,  3.0, 0.0, 1.0,
+             3.0, -3.0, 0.0, 1.0,
+            -3.0, -3.0, 0.0, 1.0 ]
   - Name: Output
     Format: Float32
     Channels: 4
-    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    FillSize: 16 # 1x1 @ 16 bytes per pixel
     OutputProps:
-      Height: 2
-      Width: 2
+      Height: 1
+      Width: 1
       Depth: 16
 Bindings:
   VertexBuffer: VertexData
@@ -68,4 +68,4 @@ DescriptorSets: []
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
 # CHECK: Data:
-# CHECK: [ 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 1, 0, 1, 0, 0, 0, 0 ]
+# CHECK: [ 0.5, 1, 0, 1 ]
