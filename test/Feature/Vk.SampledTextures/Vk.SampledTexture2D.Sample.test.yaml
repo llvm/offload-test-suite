@@ -1,0 +1,166 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> CombinedSamp0 : register(s0); // Mag=Nearest, Min=Linear
+[[vk::binding(1, 0)]] vk::SampledTexture2D<float4> CombinedSamp1 : register(s1); // Mag=Linear, Min=Nearest
+[[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // Base UV at texture center (0.5, 0.5).
+  float2 BaseUV = float2(0.5, 0.5);
+
+  uint2 GTid = (uint2)Pos.xy;
+  float2 offset = float2(GTid.xy);
+
+  // 1. Magnification UVs: Small delta (0.0001). LOD < 0. GPU selects MagFilter.
+  float2 uv_mag = BaseUV + offset * 0.0001;
+
+  // 2. Minification UVs: Large delta (2.0). LOD > 0. GPU selects MinFilter.
+  float2 uv_min = BaseUV + offset * 2.0;
+
+  // Only check the first thread in the quad where UV is exactly (0.5, 0.5).
+  if (all(GTid.xy == 0)) {
+    // We expect:
+    // Samp0 (Mag=Nearest, Min=Linear):
+    //   Sample(uv_mag) -> Mag(Nearest) -> White
+    //   Sample(uv_min) -> Min(Linear)  -> Grey
+    Out[0] = CombinedSamp0.Sample(uv_mag);
+    Out[1] = CombinedSamp0.Sample(uv_min);
+
+    // Samp1 (Mag=Linear, Min=Nearest):
+    //   Sample(uv_mag) -> Mag(Linear)  -> Grey
+    //   Sample(uv_min) -> Min(Nearest) -> White
+    Out[2] = CombinedSamp1.Sample(uv_mag);
+    Out[3] = CombinedSamp1.Sample(uv_min);
+
+    // Overloads with Offset
+    // Offset (-1, -1) applied to (0.5001, 0.5001) effectively samples near (0,0) -> Red
+    Out[4] = CombinedSamp0.Sample(uv_mag, int2(-1, -1));
+
+    // Overloads with Offset and Clamp
+    // Clamp 0.0f should behave normally (Red)
+    Out[5] = CombinedSamp0.Sample(uv_mag, int2(-1, -1), 0.0f);
+  }
+  return float4(0,0,0,0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0 ] # White (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 96 # 6 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 1.0, 1.0, 1.0,       # Samp0 Mag (Nearest) -> White
+            0.5, 0.5, 0.5, 1.0,       # Samp0 Min (Linear)  -> Grey
+            0.5, 0.5, 0.5, 1.0,       # Samp1 Mag (Linear)  -> Grey
+            1.0, 1.0, 1.0, 1.0,       # Samp1 Min (Nearest) -> White
+            1.0, 0.0, 0.0, 1.0,       # Offset (-1,-1) -> Red
+            1.0, 0.0, 0.0, 1.0 ]      # Offset (-1,-1) Clamp 0.0 -> Red
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: Samp0
+    Address: Clamp
+    MinFilter: Linear
+    MagFilter: Nearest
+  - Name: Samp1
+    Address: Clamp
+    MinFilter: Nearest
+    MagFilter: Linear
+
+CombinedImageSamplers:
+  - Name: CombinedSamp0
+    Buffer: Tex
+    Sampler: Samp0
+  - Name: CombinedSamp1
+    Buffer: Tex
+    Sampler: Samp1
+
+DescriptorSets:
+  - Resources:
+    - Name: CombinedSamp0
+      Kind: CombinedImageSampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: CombinedSamp1
+      Kind: CombinedImageSampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: SampleTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: This is a Vulkan specific feature.
+# UNSUPPORTED: !Vulkan
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/181910
+# UNIMPLEMENTED: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
