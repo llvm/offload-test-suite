@@ -8,25 +8,19 @@ void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID :
   const uint3 DISPATCH_SIZE = uint3(2, 2, 2);
   const uint3 NUMTHREADS    = uint3(2, 2, 2);
 
-  // Computing the global threads index.
   const uint THREAD_PER_LINE = NUMTHREADS.x * DISPATCH_SIZE.x;
   const uint THREAD_PER_PLANE = THREAD_PER_LINE * NUMTHREADS.y * DISPATCH_SIZE.y;
-  const uint GX = GID.x * NUMTHREADS.x + GTID.x;
-  const uint GY = GID.y * NUMTHREADS.y + GTID.y;
-  const uint GZ = GID.z * NUMTHREADS.z + GTID.z;
+  const uint ID = DTID.x + DTID.y * THREAD_PER_LINE + DTID.z * THREAD_PER_PLANE;
 
-  // Computing the flat global index.
-  const uint FID = GZ * THREAD_PER_PLANE + GY * THREAD_PER_LINE + GX;
+  OUT_DTID[ID * 3 + 0] = DTID.x;
+  OUT_DTID[ID * 3 + 1] = DTID.y;
+  OUT_DTID[ID * 3 + 2] = DTID.z;
 
-  OUT_DTID[FID * 3 + 0] = DTID.x;
-  OUT_DTID[FID * 3 + 1] = DTID.y;
-  OUT_DTID[FID * 3 + 2] = DTID.z;
+  OUT_GTID[ID * 3 + 0] = GTID.x;
+  OUT_GTID[ID * 3 + 1] = GTID.y;
+  OUT_GTID[ID * 3 + 2] = GTID.z;
 
-  OUT_GTID[FID * 3 + 0] = GTID.x;
-  OUT_GTID[FID * 3 + 1] = GTID.y;
-  OUT_GTID[FID * 3 + 2] = GTID.z;
-
-  OUT_GI[FID] = GI;
+  OUT_GI[ID] = GI;
 }
 //--- system_values.yaml
 ---
