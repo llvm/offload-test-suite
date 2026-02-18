@@ -63,12 +63,6 @@ DescriptorSets:
 # [ 1.1, 2.2, 3.3, 4.4, 8.8, 0, 0, 0 ]
 # XFAIL: AMD && DirectX
 
-# NOTE: Intel On Clang and DXC For both Vulkan and DirectX
-# Only Updates the first two values with result:
-# [ 1.1, 5.5, 0, 0, 0, 0, 0, 0 ]
-# BUG https://github.com/llvm/offload-test-suite/issues/226
-# XFAIL: Intel
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
