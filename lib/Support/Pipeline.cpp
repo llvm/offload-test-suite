@@ -326,7 +326,7 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
     uint32_t W = B.OutputProps.Width;
     uint32_t H = B.OutputProps.Height;
     uint32_t D = B.OutputProps.Depth;
-    uint32_t ElementSize = B.getElementSize();
+    const uint32_t ElementSize = B.getElementSize();
     for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
       ExpectedSize += W * H * D * ElementSize;
       W = std::max(1u, W / 2);
