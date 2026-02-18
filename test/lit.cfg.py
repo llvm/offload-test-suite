@@ -41,6 +41,11 @@ config.test_exec_root = os.path.join(
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
+# Environment equivalents (useful for ninja):
+#   OFFLOADTEST_GPU_NAME
+GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
+ShouldSearchByGPuName = len(GPUName) > 0
+
 tools = [
     ToolSubst("FileCheck", FindTool("FileCheck")),
     ToolSubst("split-file", FindTool("split-file")),
@@ -77,6 +82,10 @@ def setDeviceFeatures(config, device, compiler):
     config.available_features.add(API)
     config.available_features.add(compiler)
     config.available_features.add(config.offloadtest_os)
+    # Note: For now just Darwin. In the future just check
+    # not Windows.
+    if device["Driver"] and "Darwin" == config.offloadtest_os:
+        config.available_features.add(device["Driver"])
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
         config.available_features.add(config.warp_arch)
@@ -91,10 +100,15 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("NV")
-    if "AMD" in device["Description"]:
+    if "AMD" in device["Description"] or "Radeon" in device["Description"]:
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
         config.available_features.add("QC")
+
+    appleSilicon = re.search(r"\bApple M(\d+)\b", device["Description"])
+    if appleSilicon:
+        gen = appleSilicon.group(1)
+        config.available_features.add(f"AppleM{gen}")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
@@ -138,7 +152,8 @@ if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
-
+if ShouldSearchByGPuName:
+    offloader_args.extend([f'-adapter-regex="{GPUName}"'])
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
@@ -197,19 +212,29 @@ api_query = os.path.join(config.llvm_tools_dir, "api-query")
 query_string = subprocess.check_output(api_query)
 devices = yaml.safe_load(query_string)
 target_device = None
-
 # Find the right device to configure against
+pattern = re.compile(GPUName, re.IGNORECASE)
 for device in devices["Devices"]:
     is_warp = "Microsoft Basic Render Driver" in device["Description"]
+    is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:
-        if is_warp and config.offloadtest_test_warp:
+        if ShouldSearchByGPuName and is_gpu_name_match:
             target_device = device
-        elif not is_warp and not config.offloadtest_test_warp:
+        elif is_warp and config.offloadtest_test_warp:
+            target_device = device
+        elif (
+            not ShouldSearchByGPuName
+            and not is_warp
+            and not config.offloadtest_test_warp
+        ):
             target_device = device
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
-        target_device = device
+        if ShouldSearchByGPuName and is_gpu_name_match:
+            target_device = device
+        elif not ShouldSearchByGPuName:
+            target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
         break

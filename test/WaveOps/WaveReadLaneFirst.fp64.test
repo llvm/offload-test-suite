@@ -91,20 +91,20 @@ Buffers:
 
   - Name: Out1
     Format: Float64
-    Stride: 4
+    Stride: 8
     # 1 double is 8 bytes, * 4 halves for 4 threads, * 4 thread masks, * 2 value sets
     FillSize: 256  
   - Name: Out2
     Format: Float64
-    Stride: 8
+    Stride: 16
     FillSize: 512
   - Name: Out3
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 1024
   - Name: Out4
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 1024
   - Name: Out5
     Format: Float64
@@ -122,7 +122,7 @@ Buffers:
     0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0]
   - Name: ExpectedOut1
     Format: Float64
-    Stride: 16
+    Stride: 8
     # 2 value sets, 4 masks per value set, 4 threads per mask, 1 result value per thread
     Data:  [ 0, 0, 0, 0, 
     2.5, 2.5, 2.5, 2.5, 
@@ -154,7 +154,7 @@ Buffers:
     11.5, 10.5, 0, 0 ]
   - Name: ExpectedOut3
     Format: Float64
-    Stride: 16
+    Stride: 32
     # 2 value sets.5, 4 masks per value set, 4 threads per mask, 4 result values per thread
     # Note, vecs of 3 must be aligned.5, so the 3 result values are placed doubleo a 4 element vec
     Data: [ 0, 0, 0, 0, 
@@ -191,7 +191,7 @@ Buffers:
     0, 0, 0, 0]
   - Name: ExpectedOut4
     Format: Float64
-    Stride: 16
+    Stride: 32
     Data: [ 0, 0, 0, 0, 
     0, 0, 0, 0, 
     0, 0, 0, 0, 
@@ -304,17 +304,15 @@ DescriptorSets:
 ...
 #--- end
 
+
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# Bug https://github.com/llvm/offload-test-suite/issues/625
-# XFAIL: AMD && DirectX
-
 # Bug https://github.com/llvm/offload-test-suite/issues/433
-# XFAIL: WARP && arm64
+# UNSUPPORTED: WARP
 
 REQUIRES: Double
 

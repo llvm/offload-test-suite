@@ -49,19 +49,19 @@ void main() {
   // bool
   bool U4 = In0.Load<bool>(64);
   bool V4 = In1.Load<bool>(64);
-  Out.Store<bool>(64, U4 + V4);
+  Out.Store<bool>(64, or(U4, V4));
 
   bool2 U5 = In0.Load<bool2>(64);
   bool2 V5 = In1.Load<bool2>(64);
-  Out.Store<bool2>(80, U5 + V5);
+  Out.Store<bool2>(80, or(U5, V5));
 
   bool3 U6 = In0.Load<bool3>(64);
   bool3 V6 = In1.Load<bool3>(64);
-  Out.Store<bool3>(96, U6 + V6);
+  Out.Store<bool3>(96, or(U6, V6));
 
   bool4 U7 = In0.Load<bool4>(64);
   bool4 V7 = In1.Load<bool4>(64);
-  Out.Store<bool4>(112, U7 + V7);
+  Out.Store<bool4>(112, or(U7, V7));
 
   // structs
   ArrayStruct U8 = In0.Load<ArrayStruct>(0);
@@ -148,8 +148,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/108058
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/179560
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

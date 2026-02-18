@@ -16,19 +16,19 @@ void main(uint32_t3 TID : SV_GroupThreadID) {
   // Int
   OutInt[OutIdx] = WaveReadLaneAt(InInt[TID.x], TID.x);
   uint16_t4 ThreadInInt = {InInt[TID.x].xyz, InInt[TID.x].w};
-  OutInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInInt, TID.x);;
+  OutInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInInt, TID.x);
   OutInt[OutIdx + 2].xy = WaveReadLaneAt(InInt[TID.x].xy, TID.x);
 
   // UInt
   OutUInt[OutIdx] = WaveReadLaneAt(InUInt[TID.x], TID.x);
   int16_t4 ThreadInUInt = {InUInt[TID.x].xyz, InUInt[TID.x].w};
-  OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);;
+  OutUInt[OutIdx + 1] =  WaveReadLaneAt(ThreadInUInt, TID.x);
   OutUInt[OutIdx + 2].xy = WaveReadLaneAt(InUInt[TID.x].xy, TID.x);
 
   // Float
   OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
   float16_t4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
-  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);
   OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
 }
 
@@ -135,11 +135,9 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
+
 # Bug https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
-
-# Bug tracked by https://github.com/llvm/offload-test-suite/issues/396
-# XFAIL: DirectX && WARP
 
 # Bug https://github.com/llvm/offload-test-suite/issues/532
 # XFAIL: DirectX && QC
