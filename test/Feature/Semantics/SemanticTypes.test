@@ -71,7 +71,7 @@ Buffers:
     FillValue: 0
   - Name: ResultBuffer_Expected
     Format: Hex32
-# 0xffffffff == IEEE_754_f32(-1)
+# 0xffffffff == -1
 # 0x40600000 == IEEE_754_f32(3.5)
     Data: [ 0xffffffff, 0x2, 0x40600000 ]
 Bindings:
