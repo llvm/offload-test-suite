@@ -1,0 +1,131 @@
+#--- system_values.hlsl
+RWStructuredBuffer<uint> OUT_DTID : register(u0);
+RWStructuredBuffer<uint> OUT_GTID : register(u1);
+RWStructuredBuffer<uint> OUT_GI : register(u2);
+
+[numthreads(2, 2, 2)]
+void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID : SV_GroupThreadID, uint GI : SV_GroupIndex) {
+  const uint3 DISPATCH_SIZE = uint3(2, 2, 2);
+  const uint3 NUMTHREADS    = uint3(2, 2, 2);
+
+  // Computing the global threads index.
+  const uint THREAD_PER_LINE = NUMTHREADS.x * DISPATCH_SIZE.x;
+  const uint THREAD_PER_PLANE = THREAD_PER_LINE * NUMTHREADS.y * DISPATCH_SIZE.y;
+  const uint GX = GID.x * NUMTHREADS.x + GTID.x;
+  const uint GY = GID.y * NUMTHREADS.y + GTID.y;
+  const uint GZ = GID.z * NUMTHREADS.z + GTID.z;
+
+  // Computing the flat global index.
+  const uint FID = GZ * THREAD_PER_PLANE + GY * THREAD_PER_LINE + GX;
+
+  OUT_DTID[FID * 3 + 0] = DTID.x;
+  OUT_DTID[FID * 3 + 1] = DTID.y;
+  OUT_DTID[FID * 3 + 2] = DTID.z;
+
+  OUT_GTID[FID * 3 + 0] = GTID.x;
+  OUT_GTID[FID * 3 + 1] = GTID.y;
+  OUT_GTID[FID * 3 + 2] = GTID.z;
+
+  OUT_GI[FID] = GI;
+}
+//--- system_values.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [2, 2, 2]
+Buffers:
+  - Name: OUT_DTID
+    Format: Int32
+    FillSize: 768 # 8 (dispatch) x 8 (numthreads) x 3 x 4 (uint)
+    FillValue: 0
+  - Name: OUT_GTID
+    Format: Int32
+    FillSize: 768 # 8 (dispatch) x 8 (numthreads) x 3 x 4 (uint)
+    FillValue: 0
+  - Name: OUT_GI
+    Format: Int32
+    FillSize: 256 # 8 (dispatch) x 8 (numthreads) x 1 x 4 (uint)
+    FillValue: 0
+  - Name: OUT_DTID_Expected
+    Format: Int32
+    Data: [ 0, 0, 0, 1, 0, 0, 2, 0, 0, 3, 0, 0, 0, 1, 0, 1,
+            1, 0, 2, 1, 0, 3, 1, 0, 0, 2, 0, 1, 2, 0, 2, 2,
+            0, 3, 2, 0, 0, 3, 0, 1, 3, 0, 2, 3, 0, 3, 3, 0,
+            0, 0, 1, 1, 0, 1, 2, 0, 1, 3, 0, 1, 0, 1, 1, 1,
+            1, 1, 2, 1, 1, 3, 1, 1, 0, 2, 1, 1, 2, 1, 2, 2,
+            1, 3, 2, 1, 0, 3, 1, 1, 3, 1, 2, 3, 1, 3, 3, 1,
+            0, 0, 2, 1, 0, 2, 2, 0, 2, 3, 0, 2, 0, 1, 2, 1,
+            1, 2, 2, 1, 2, 3, 1, 2, 0, 2, 2, 1, 2, 2, 2, 2,
+            2, 3, 2, 2, 0, 3, 2, 1, 3, 2, 2, 3, 2, 3, 3, 2,
+            0, 0, 3, 1, 0, 3, 2, 0, 3, 3, 0, 3, 0, 1, 3, 1,
+            1, 3, 2, 1, 3, 3, 1, 3, 0, 2, 3, 1, 2, 3, 2, 2,
+            3, 3, 2, 3, 0, 3, 3, 1, 3, 3, 2, 3, 3, 3, 3, 3 ]
+  - Name: OUT_GTID_Expected
+    Format: Int32
+    Data: [ 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1,
+            1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+            0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+            0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1,
+            1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0,
+            1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1,
+            0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1,
+            1, 0, 0, 1, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+            0, 1, 0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0,
+            0, 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 1, 1, 1,
+            1, 1, 0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0, 1, 0, 0,
+            1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1 ]
+  - Name: OUT_GI_Expected
+    Format: Int32
+    Data: [ 0, 1, 0, 1, 2, 3, 2, 3, 0, 1, 0, 1, 2, 3, 2, 3,
+            4, 5, 4, 5, 6, 7, 6, 7, 4, 5, 4, 5, 6, 7, 6, 7,
+            0, 1, 0, 1, 2, 3, 2, 3, 0, 1, 0, 1, 2, 3, 2, 3,
+            4, 5, 4, 5, 6, 7, 6, 7, 4, 5, 4, 5, 6, 7, 6, 7 ]
+Results:
+  - Result: TestDTID
+    Rule: BufferExact
+    Actual: OUT_DTID
+    Expected: OUT_DTID_Expected
+  - Result: TestGTID
+    Rule: BufferExact
+    Actual: OUT_GTID
+    Expected: OUT_GTID_Expected
+  - Result: TestGI
+    Rule: BufferExact
+    Actual: OUT_GI
+    Expected: OUT_GI_Expected
+DescriptorSets:
+  - Resources:
+    - Name: OUT_DTID
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OUT_GTID
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OUT_GI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/system_values.hlsl
+# RUN: %offloader %t/system_values.yaml %t.o
+
+# Metal is reporting DispatchThreadID value ot 8 for the x dimension.
+# Since we have numthreads.x == 2 and dispatch.x == 2, we should at most
+# get 3 for the x dimension.
+# See https://github.com/llvm/offload-test-suite/issues/735
+# XFAIL: Metal
