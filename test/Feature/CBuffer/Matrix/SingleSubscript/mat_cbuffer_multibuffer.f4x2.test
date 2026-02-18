@@ -110,6 +110,10 @@ DescriptorSets:
 # Note: Nvidia crashes on both clang and DXC
 # XFAIL: NV && Vulkan
 
+# Note: clang Vulkan crashes
+# BUG https://github.com/llvm/llvm-project/issues/179879
+# XFAIL: Clang && Vulkan
+
 # Note: Metal and Vulkan KosmicKrisp and MoltenVK 
 # Are always empty
 # UNSUPPORTED: Darwin

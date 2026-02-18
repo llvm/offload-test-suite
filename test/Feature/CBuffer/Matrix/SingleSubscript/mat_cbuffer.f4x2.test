@@ -59,6 +59,10 @@ DescriptorSets:
 # Note: Nvidia crashes on both clang and DXC
 # XFAIL: NV && Vulkan
 
+# Note: clang Vulkan crashes
+# BUG https://github.com/llvm/llvm-project/issues/179879
+# XFAIL: Clang && Vulkan
+
 # NOTE: AMD on Clang and DXC have result:
 # [ 1.1, 2.2, 3.3, 4.4, 8.8, 0, 0, 0 ]
 # XFAIL: AMD && DirectX
