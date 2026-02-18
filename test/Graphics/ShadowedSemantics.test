@@ -1,3 +1,8 @@
+# Testing the correct semantic string override:
+# If a semantic string is present on struct field, it overrides
+# any semantic string attached to the field type definition (or inner
+# fields).
+#
 #--- vertex.hlsl
 struct Inner {
     uint b : B;

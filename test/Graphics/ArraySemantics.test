@@ -70,5 +70,7 @@ DescriptorSets: []
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
-# CHECK: Data:
-# CHECK: [ 0.5, 1, 0, 1 ]
+# CHECK: Name: Output
+# CHECK-NEXT: Format: Float32
+# CHECK-NEXT: Channels: 4
+# CHECK-NEXT: Data: [ 0.5, 1, 0, 1 ]
