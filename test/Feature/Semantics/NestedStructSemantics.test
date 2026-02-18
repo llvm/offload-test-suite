@@ -71,6 +71,9 @@ Buffers:
     Format: Int32
     FillSize: 12
     FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Int32
+    Data: [ 1, 2, 3 ]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
@@ -88,6 +91,11 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
+Results:
+  - Result: Results
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
 ...
 #--- end
 
@@ -100,7 +108,4 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
-# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
-
-# CHECK: Name: ResultBuffer
-# CHECK: [ 1, 2, 3 ]
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
