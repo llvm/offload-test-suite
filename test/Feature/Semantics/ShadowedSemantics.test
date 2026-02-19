@@ -1,0 +1,116 @@
+# Testing the correct semantic string override:
+# If a semantic string is present on struct field, it overrides
+# any semantic string attached to the field type definition (or inner
+# fields).
+#
+#--- vertex.hlsl
+struct Inner {
+    uint b : B;
+};
+
+struct VSInput {
+    float4 position : POSITION;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    uint a : A;
+    Inner inner : D;
+    uint c : C;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput output;
+    output.position = input.position;
+    output.a = 1;
+    output.inner.b = 2;
+    output.c = 3;
+    return output;
+}
+
+#--- pixel.hlsl
+struct Inner {
+    uint b : B;
+};
+
+struct PSInput {
+    float4 position : SV_POSITION;
+    uint a : A;
+    Inner inner : D;
+    uint c : C;
+};
+
+RWStructuredBuffer<uint> Out : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    Out[0] = input.a;
+    Out[1] = input.inner.b;
+    Out[2] = input.c;
+
+    return float4(1, 0, 0, 0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [  0.0,  3.0, 0.0, 1.0,
+             3.0, -3.0, 0.0, 1.0,
+            -3.0, -3.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16 # 1x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 16
+  - Name: ResultBuffer
+    Format: Int32
+    FillSize: 12
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Int32
+    Data: [ 1, 2, 3 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: Results
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# Semantics are not implemented in the DXIL backend.
+# XFAIL: Clang && !Vulkan
+
+# See https://github.com/llvm/offload-test-suite/issues/744
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
