@@ -101,6 +101,7 @@ struct OutputProperties {
   int Height;
   int Width;
   int Depth;
+  int MipLevels = 1;
 };
 
 static inline uint32_t getFormatSize(DataFormat Format) {
