@@ -1,0 +1,56 @@
+#--- source.hlsl
+
+struct Foo {
+    int a[2];
+    int d[2];
+};
+
+StructuredBuffer<Foo> inputs : register(t1);
+RWBuffer< int > g_Intensities : register(u1);
+
+groupshared Foo sharedData;
+
+[shader("compute")]
+[ numthreads( 64, 2, 2 ) ]
+void main( uint GI : SV_GroupIndex)
+{
+  if (GI==0)
+	sharedData = inputs[GI];
+	int rtn;
+	InterlockedAdd(sharedData.d[0], g_Intensities[GI], rtn);
+	g_Intensities[GI] = rtn + sharedData.d[0];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+Buffers:
+  - Name: In
+    Format: Float64
+    Data: [ 2, 4, 6, 8, 10, 12, 14, 16]
+  - Name: Out
+    Format: Float64
+    FillSize: 16
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/116276
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
