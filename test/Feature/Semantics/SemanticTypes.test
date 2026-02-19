@@ -1,0 +1,111 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 position : POSITION;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    int    i_val    : MY_INT;
+    uint   u_val    : MY_UINT;
+    float  f_val    : MY_FLOAT;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput output;
+    output.position = input.position;
+    output.i_val = -1.0;
+    output.u_val = 2.0;
+    output.f_val = 3.5;
+    return output;
+}
+
+#--- pixel.hlsl
+struct S {
+    int   i_val;
+    uint  u_val;
+    float f_val;
+};
+
+struct PSInput {
+    float4 position : SV_POSITION;
+    int    i_val    : MY_INT;
+    uint   u_val    : MY_UINT;
+    float  f_val    : MY_FLOAT;
+};
+
+RWStructuredBuffer<S> Out : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    Out[0].i_val = input.i_val;
+    Out[0].u_val = input.u_val;
+    Out[0].f_val = input.f_val;
+
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [  0.0,  3.0, 0.0, 1.0,
+             3.0, -3.0, 0.0, 1.0,
+            -3.0, -3.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16 # 1x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 16
+  - Name: ResultBuffer
+    Format: Int32
+    FillSize: 12
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Hex32
+# 0xffffffff == -1
+# 0x40600000 == IEEE_754_f32(3.5)
+    Data: [ 0xffffffff, 0x2, 0x40600000 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: Results
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# Semantics are not implemented in the DXIL backend.
+# XFAIL: Clang && !Vulkan
+
+# See https://github.com/llvm/offload-test-suite/issues/744
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
