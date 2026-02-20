@@ -12,8 +12,9 @@ There are some useful CMake options to tweak the configuration to better utilize
 WARP:
 
 * **OFFLOADTEST_WARP_ONLY** - Skips generating d3d test configurations for
-  non-WARP configurations. This is useful if you're running Windows in a VM and
-  do not have a physical GPU.
+  non-WARP configurations and removes dependency on Vulkan. This is useful
+  if you're running Windows in a VM and do not have a physical GPU nor a
+  working Vulkan driver.
 
 * **WARP_VERSION** - Defaults to `LKG` which uses a Known-Good version of WARP.
   This is the default version tested in the GitHub actions. Alternatively this
