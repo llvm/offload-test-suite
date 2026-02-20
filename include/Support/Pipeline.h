@@ -59,6 +59,7 @@ enum class ResourceKind {
   ConstantBuffer,
   Sampler,
   SamplerComparison,
+  CombinedImageSampler,
 };
 
 enum class FilterMode { Nearest, Linear };
@@ -153,6 +154,14 @@ struct Buffer {
   }
 };
 
+struct CombinedImageSampler {
+  std::string Name;
+  std::string Buffer;
+  std::string Sampler;
+  offloadtest::Buffer *BufferPtr = nullptr;
+  offloadtest::Sampler *SamplerPtr = nullptr;
+};
+
 struct Result {
   std::string Name;
   Rule ComparisonRule;
@@ -172,6 +181,7 @@ struct Resource {
   std::optional<VulkanBinding> VKBinding;
   Buffer *BufferPtr = nullptr;
   Sampler *SamplerPtr = nullptr;
+  CombinedImageSampler *CombinedImageSamplerPtr = nullptr;
   bool HasCounter;
   std::optional<uint32_t> TilesMapped;
   bool IsReserved = false;
@@ -184,6 +194,7 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
     case ResourceKind::SamplerComparison:
+    case ResourceKind::CombinedImageSampler:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -199,6 +210,7 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Sampler:
     case ResourceKind::SamplerComparison:
+    case ResourceKind::CombinedImageSampler:
       return true;
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
@@ -227,6 +239,7 @@ struct Resource {
       return false;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::CombinedImageSampler:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -277,6 +290,7 @@ struct Resource {
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
     case ResourceKind::SamplerComparison:
+    case ResourceKind::CombinedImageSampler:
       return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -400,6 +414,7 @@ struct Pipeline {
   llvm::SmallVector<PushConstantBlock> PushConstants;
   llvm::SmallVector<Buffer> Buffers;
   llvm::SmallVector<Sampler> Samplers;
+  llvm::SmallVector<CombinedImageSampler> CombinedImageSamplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
 
@@ -432,6 +447,13 @@ struct Pipeline {
     return nullptr;
   }
 
+  CombinedImageSampler *getCombinedImageSampler(llvm::StringRef Name) {
+    for (auto &CIS : CombinedImageSamplers)
+      if (Name == CIS.Name)
+        return &CIS;
+    return nullptr;
+  }
+
   bool isGraphics() const { return !isCompute(); }
 
   bool isCompute() const {
@@ -451,6 +473,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantBlock)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::CombinedImageSampler)
 
 namespace llvm {
 namespace yaml {
@@ -477,6 +500,10 @@ template <> struct MappingTraits<offloadtest::Result> {
 
 template <> struct MappingTraits<offloadtest::Resource> {
   static void mapping(IO &I, offloadtest::Resource &R);
+};
+
+template <> struct MappingTraits<offloadtest::CombinedImageSampler> {
+  static void mapping(IO &I, offloadtest::CombinedImageSampler &S);
 };
 
 template <> struct MappingTraits<offloadtest::DirectXBinding> {
@@ -622,6 +649,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(ConstantBuffer);
     ENUM_CASE(Sampler);
     ENUM_CASE(SamplerComparison);
+    ENUM_CASE(CombinedImageSampler);
 #undef ENUM_CASE
   }
 };
