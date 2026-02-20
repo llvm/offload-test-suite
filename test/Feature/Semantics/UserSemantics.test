@@ -46,7 +46,7 @@ Buffers:
     OutputProps:
       Height: 1
       Width: 1
-      Depth: 16
+      Depth: 1
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:

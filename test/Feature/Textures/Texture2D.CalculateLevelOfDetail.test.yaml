@@ -1,0 +1,135 @@
+#--- source.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp : register(s0);
+[[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+
+float4 mainPS(VSOutput input) : SV_Target {
+  // Use SV_Position (pixel coordinates) to simulate the grid logic.
+  // Input position is [-1, 1], mapped to viewport 2x2.
+  // Pixel centers will be at (0.5, 0.5), (1.5, 0.5), etc.
+  
+  uint2 GTid = (uint2)input.Pos.xy;
+
+  // Case 1: Derivative = 0.5. Texture Size = 4.
+  // LOD = log2(0.5 * 4) = 1.0
+  float2 uv0 = 0.25 + float2(GTid.xy) * 0.5;
+  
+  // Case 2: Derivative = 2.0. Texture Size = 4.
+  // LOD = log2(2.0 * 4) = 3.0.
+  // Note: Since the texture has 3 mip levels (0, 1, 2), 
+  // the clamped LOD will be 2.0.
+  float2 uv1 = 0.25 + float2(GTid.xy) * 2.0;
+
+  float lod0 = Tex.CalculateLevelOfDetail(Samp, uv0);
+  float lod1 = Tex.CalculateLevelOfDetail(Samp, uv1);
+  float lod2 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv0);
+  float lod3 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv1);
+
+  if (all(GTid.xy == 0)) {
+    Out[0] = lod0;
+    Out[1] = lod1;
+    Out[2] = lod2;
+    Out[3] = lod3;
+  }
+  return float4(0, 0, 0, 0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
+    FillSize: 336 # (16+4+1)*16
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 16 # 4 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 1.0, 2.0, 1.0, 3.0 ]
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: LODTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
+# Unimplemented: Clang + VK: https://github.com/llvm/llvm-project/issues/175630
+# XFAIL: DirectX || Metal || Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/source.hlsl
+# RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

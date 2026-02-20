@@ -63,7 +63,7 @@ Buffers:
     OutputProps:
       Height: 1
       Width: 1
-      Depth: 16
+      Depth: 1
   - Name: ResultBuffer
     Format: Float32
     FillSize: 28
