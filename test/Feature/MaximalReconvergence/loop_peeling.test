@@ -58,9 +58,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/521
 # XFAIL: NV && DirectX
 
-# Bug https://github.com/llvm/offload-test-suite/issues/755
-# XFAIL: AMD && DirectX
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
