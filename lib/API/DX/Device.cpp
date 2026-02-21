@@ -67,6 +67,9 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
     DXFormats(SINT) break;
   case DataFormat::Float32:
     DXFormats(FLOAT) break;
+  case DataFormat::Depth32:
+    llvm_unreachable(
+        "Depth32 format is not yet supported in the DirectX backend.");
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
