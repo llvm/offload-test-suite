@@ -685,21 +685,21 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Memory allocation failed.");
     if (Data) {
-      void *Dst = nullptr;
-      if (vkMapMemory(IS.Device, Memory, 0, Size, 0, &Dst))
+    void *Dst = nullptr;
+    if (vkMapMemory(IS.Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
         return llvm::createStringError(std::errc::not_enough_memory,
                                        "Failed to map memory.");
-      memcpy(Dst, Data, Size);
+    memcpy(Dst, Data, Size);
 
-      VkMappedMemoryRange Range = {};
-      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-      Range.memory = Memory;
-      Range.offset = 0;
-      Range.size = VK_WHOLE_SIZE;
-      vkFlushMappedMemoryRanges(IS.Device, 1, &Range);
+    VkMappedMemoryRange Range = {};
+    Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    Range.memory = Memory;
+    Range.offset = 0;
+    Range.size = VK_WHOLE_SIZE;
+    vkFlushMappedMemoryRanges(IS.Device, 1, &Range);
 
-      vkUnmapMemory(IS.Device, Memory);
-    }
+    vkUnmapMemory(IS.Device, Memory);
+}
 
     if (vkBindBufferMemory(IS.Device, Buffer, Memory, 0))
       return llvm::createStringError(std::errc::not_enough_memory,
