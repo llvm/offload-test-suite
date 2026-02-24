@@ -702,7 +702,7 @@ DescriptorSets:
 #--- end
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/system_values.hlsl
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/system_values.hlsl
 # RUN: %offloader %t/system_values.yaml %t.o
 
 # Metal is reporting DispatchThreadID value of 8 for the x dimension.
