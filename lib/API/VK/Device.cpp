@@ -686,7 +686,7 @@ public:
                                      "Memory allocation failed.");
     if (Data) {
       void *Dst = nullptr;
-      if (vkMapMemory(IS.Device, Memory, 0, Size, 0, &Dst))
+      if (vkMapMemory(IS.Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
         return llvm::createStringError(std::errc::not_enough_memory,
                                        "Failed to map memory.");
       memcpy(Dst, Data, Size);
