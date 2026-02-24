@@ -32,6 +32,11 @@ Buffers:
   - Name: OUTPUT_Expected
     Format: Int32
     Data: [
+
+# Each thread reports 4 lines: DTID, GTID, GID and GI
+# Dispatch: the dispatch coordinates in the 3D grid.
+# thread: the thread coordinates in the thread group.
+#
 # Dispatch x=0 y=0 z=0 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         0, 0, 0,
@@ -52,7 +57,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=0 y=0 z=0 | thread x=0 y=1 z=0
+# Dispatch x=1 y=0 z=0 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         2, 0, 0,
 # GTID  X  Y  Z
@@ -61,29 +66,29 @@ Buffers:
         1, 0, 0,
 #  GI   X  0  0
         0, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        3, 0, 0,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        0, 1, 0,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        2, 0, 0,
 
 # Dispatch x=0 y=0 z=0 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
-        3, 0, 0,
-# GTID  X  Y  Z
-        1, 0, 0,
-#  GID  X  Y  Z
-        1, 0, 0,
-#  GI   X  0  0
-        1, 0, 0,
-
-# Dispatch x=0 y=0 z=0 | thread x=0 y=0 z=1
-# DTID  X  Y  Z
-        0, 1, 0,
-# GTID  X  Y  Z
-        0, 1, 0,
-#  GID  X  Y  Z
-        0, 0, 0,
-#  GI   X  0  0
-        2, 0, 0,
-
-# Dispatch x=0 y=0 z=0 | thread x=1 y=0 z=1
-# DTID  X  Y  Z
         1, 1, 0,
 # GTID  X  Y  Z
         1, 1, 0,
@@ -92,7 +97,7 @@ Buffers:
 #  GI   X  0  0
         3, 0, 0,
 
-# Dispatch x=0 y=0 z=0 | thread x=0 y=1 z=1
+# Dispatch x=1 y=0 z=0 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         2, 1, 0,
 # GTID  X  Y  Z
@@ -102,7 +107,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=0 y=0 z=0 | thread x=1 y=1 z=1
+# Dispatch x=1 y=0 z=0 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         3, 1, 0,
 # GTID  X  Y  Z
@@ -113,7 +118,7 @@ Buffers:
         3, 0, 0,
 
 
-# Dispatch x=1 y=0 z=0 | thread x=0 y=0 z=0
+# Dispatch x=0 y=1 z=0 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         0, 2, 0,
 # GTID  X  Y  Z
@@ -123,7 +128,7 @@ Buffers:
 #  GI   X  0  0
         0, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=1 y=0 z=0
+# Dispatch x=0 y=1 z=0 | thread x=1 y=0 z=0
 # DTID  X  Y  Z
         1, 2, 0,
 # GTID  X  Y  Z
@@ -133,7 +138,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=0 y=1 z=0
+# Dispatch x=1 y=1 z=0 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         2, 2, 0,
 # GTID  X  Y  Z
@@ -143,7 +148,7 @@ Buffers:
 #  GI   X  0  0
         0, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=1 y=1 z=0
+# Dispatch x=1 y=1 z=0 | thread x=1 y=0 z=0
 # DTID  X  Y  Z
         3, 2, 0,
 # GTID  X  Y  Z
@@ -153,7 +158,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=0 y=0 z=1
+# Dispatch x=0 y=1 z=0 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         0, 3, 0,
 # GTID  X  Y  Z
@@ -163,7 +168,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=1 y=0 z=1
+# Dispatch x=0 y=1 z=0 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         1, 3, 0,
 # GTID  X  Y  Z
@@ -173,7 +178,7 @@ Buffers:
 #  GI   X  0  0
         3, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=0 y=1 z=1
+# Dispatch x=1 y=1 z=0 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         2, 3, 0,
 # GTID  X  Y  Z
@@ -183,7 +188,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=1 y=0 z=0 | thread x=1 y=1 z=1
+# Dispatch x=1 y=1 z=0 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         3, 3, 0,
 # GTID  X  Y  Z
@@ -194,7 +199,7 @@ Buffers:
         3, 0, 0,
 
 
-# Dispatch x=0 y=1 z=0 | thread x=0 y=0 z=0
+# Dispatch x=0 y=0 z=0 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         0, 0, 1,
 # GTID  X  Y  Z
@@ -204,7 +209,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=1 y=0 z=0
+# Dispatch x=0 y=0 z=0 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         1, 0, 1,
 # GTID  X  Y  Z
@@ -214,7 +219,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=0 y=1 z=0
+# Dispatch x=1 y=0 z=0 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         2, 0, 1,
 # GTID  X  Y  Z
@@ -224,7 +229,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=1 y=1 z=0
+# Dispatch x=1 y=0 z=0 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         3, 0, 1,
 # GTID  X  Y  Z
@@ -234,7 +239,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=0 y=0 z=1
+# Dispatch x=0 y=0 z=0 | thread x=0 y=1 z=1
 # DTID  X  Y  Z
         0, 1, 1,
 # GTID  X  Y  Z
@@ -244,7 +249,7 @@ Buffers:
 #  GI   X  0  0
         6, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=1 y=0 z=1
+# Dispatch x=0 y=0 z=0 | thread x=1 y=1 z=1
 # DTID  X  Y  Z
         1, 1, 1,
 # GTID  X  Y  Z
@@ -254,7 +259,7 @@ Buffers:
 #  GI   X  0  0
         7, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=0 y=1 z=1
+# Dispatch x=1 y=0 z=0 | thread x=0 y=1 z=1
 # DTID  X  Y  Z
         2, 1, 1,
 # GTID  X  Y  Z
@@ -264,7 +269,7 @@ Buffers:
 #  GI   X  0  0
         6, 0, 0,
 
-# Dispatch x=0 y=1 z=0 | thread x=1 y=1 z=1
+# Dispatch x=1 y=0 z=0 | thread x=1 y=1 z=1
 # DTID  X  Y  Z
         3, 1, 1,
 # GTID  X  Y  Z
@@ -275,7 +280,7 @@ Buffers:
         7, 0, 0,
 
 
-# Dispatch x=1 y=1 z=0 | thread x=0 y=0 z=0
+# Dispatch x=0 y=1 z=0 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         0, 2, 1,
 # GTID  X  Y  Z
@@ -285,7 +290,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=1 y=1 z=0 | thread x=1 y=0 z=0
+# Dispatch x=0 y=1 z=0 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         1, 2, 1,
 # GTID  X  Y  Z
@@ -295,7 +300,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=1 y=1 z=0 | thread x=0 y=1 z=0
+# Dispatch x=1 y=1 z=0 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         2, 2, 1,
 # GTID  X  Y  Z
@@ -305,7 +310,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=1 y=1 z=0 | thread x=1 y=1 z=0
+# Dispatch x=1 y=1 z=0 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         3, 2, 1,
 # GTID  X  Y  Z
@@ -315,7 +320,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=1 y=1 z=0 | thread x=0 y=0 z=1
+# Dispatch x=0 y=1 z=0 | thread x=0 y=1 z=1
 # DTID  X  Y  Z
         0, 3, 1,
 # GTID  X  Y  Z
@@ -325,7 +330,7 @@ Buffers:
 #  GI   X  0  0
         6, 0, 0,
 
-# Dispatch x=1 y=1 z=0 | thread x=1 y=0 z=1
+# Dispatch x=0 y=1 z=0 | thread x=1 y=1 z=1
 # DTID  X  Y  Z
         1, 3, 1,
 # GTID  X  Y  Z
@@ -376,7 +381,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=0 y=0 z=1 | thread x=0 y=1 z=0
+# Dispatch x=1 y=0 z=1 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         2, 0, 2,
 # GTID  X  Y  Z
@@ -386,7 +391,7 @@ Buffers:
 #  GI   X  0  0
         0, 0, 0,
 
-# Dispatch x=0 y=0 z=1 | thread x=1 y=1 z=0
+# Dispatch x=1 y=0 z=1 | thread x=1 y=0 z=0
 # DTID  X  Y  Z
         3, 0, 2,
 # GTID  X  Y  Z
@@ -396,7 +401,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=0 y=0 z=1 | thread x=0 y=0 z=1
+# Dispatch x=0 y=0 z=1 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         0, 1, 2,
 # GTID  X  Y  Z
@@ -406,7 +411,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=0 y=0 z=1 | thread x=1 y=0 z=1
+# Dispatch x=0 y=0 z=1 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         1, 1, 2,
 # GTID  X  Y  Z
@@ -416,7 +421,7 @@ Buffers:
 #  GI   X  0  0
         3, 0, 0,
 
-# Dispatch x=0 y=0 z=1 | thread x=0 y=1 z=1
+# Dispatch x=1 y=0 z=1 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         2, 1, 2,
 # GTID  X  Y  Z
@@ -426,7 +431,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=0 y=0 z=1 | thread x=1 y=1 z=1
+# Dispatch x=1 y=0 z=1 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         3, 1, 2,
 # GTID  X  Y  Z
@@ -437,7 +442,7 @@ Buffers:
         3, 0, 0,
 
 
-# Dispatch x=1 y=0 z=1 | thread x=0 y=0 z=0
+# Dispatch x=0 y=1 z=1 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         0, 2, 2,
 # GTID  X  Y  Z
@@ -447,7 +452,7 @@ Buffers:
 #  GI   X  0  0
         0, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=1 y=0 z=0
+# Dispatch x=0 y=1 z=1 | thread x=1 y=0 z=0
 # DTID  X  Y  Z
         1, 2, 2,
 # GTID  X  Y  Z
@@ -457,7 +462,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=0 y=1 z=0
+# Dispatch x=1 y=1 z=1 | thread x=0 y=0 z=0
 # DTID  X  Y  Z
         2, 2, 2,
 # GTID  X  Y  Z
@@ -467,7 +472,7 @@ Buffers:
 #  GI   X  0  0
         0, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=1 y=1 z=0
+# Dispatch x=1 y=1 z=1 | thread x=1 y=0 z=0
 # DTID  X  Y  Z
         3, 2, 2,
 # GTID  X  Y  Z
@@ -477,7 +482,7 @@ Buffers:
 #  GI   X  0  0
         1, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=0 y=0 z=1
+# Dispatch x=0 y=1 z=1 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         0, 3, 2,
 # GTID  X  Y  Z
@@ -487,7 +492,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=1 y=0 z=1
+# Dispatch x=0 y=1 z=1 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         1, 3, 2,
 # GTID  X  Y  Z
@@ -497,7 +502,7 @@ Buffers:
 #  GI   X  0  0
         3, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=0 y=1 z=1
+# Dispatch x=1 y=1 z=1 | thread x=0 y=1 z=0
 # DTID  X  Y  Z
         2, 3, 2,
 # GTID  X  Y  Z
@@ -507,7 +512,7 @@ Buffers:
 #  GI   X  0  0
         2, 0, 0,
 
-# Dispatch x=1 y=0 z=1 | thread x=1 y=1 z=1
+# Dispatch x=1 y=1 z=1 | thread x=1 y=1 z=0
 # DTID  X  Y  Z
         3, 3, 2,
 # GTID  X  Y  Z
@@ -518,7 +523,7 @@ Buffers:
         3, 0, 0,
 
 
-# Dispatch x=0 y=1 z=1 | thread x=0 y=0 z=0
+# Dispatch x=0 y=0 z=1 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         0, 0, 3,
 # GTID  X  Y  Z
@@ -528,7 +533,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=1 y=0 z=0
+# Dispatch x=0 y=0 z=1 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         1, 0, 3,
 # GTID  X  Y  Z
@@ -538,7 +543,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=0 y=1 z=0
+# Dispatch x=1 y=0 z=1 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         2, 0, 3,
 # GTID  X  Y  Z
@@ -548,7 +553,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=1 y=1 z=0
+# Dispatch x=1 y=0 z=1 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         3, 0, 3,
 # GTID  X  Y  Z
@@ -558,7 +563,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=0 y=0 z=1
+# Dispatch x=0 y=0 z=1 | thread x=0 y=1 z=1
 # DTID  X  Y  Z
         0, 1, 3,
 # GTID  X  Y  Z
@@ -568,7 +573,7 @@ Buffers:
 #  GI   X  0  0
         6, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=1 y=0 z=1
+# Dispatch x=0 y=0 z=1 | thread x=1 y=1 z=1
 # DTID  X  Y  Z
         1, 1, 3,
 # GTID  X  Y  Z
@@ -578,7 +583,7 @@ Buffers:
 #  GI   X  0  0
         7, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=0 y=1 z=1
+# Dispatch x=1 y=0 z=1 | thread x=0 y=1 z=1
 # DTID  X  Y  Z
         2, 1, 3,
 # GTID  X  Y  Z
@@ -588,7 +593,7 @@ Buffers:
 #  GI   X  0  0
         6, 0, 0,
 
-# Dispatch x=0 y=1 z=1 | thread x=1 y=1 z=1
+# Dispatch x=1 y=0 z=1 | thread x=1 y=1 z=1
 # DTID  X  Y  Z
         3, 1, 3,
 # GTID  X  Y  Z
@@ -599,7 +604,7 @@ Buffers:
         7, 0, 0,
 
 
-# Dispatch x=1 y=1 z=1 | thread x=0 y=0 z=0
+# Dispatch x=0 y=1 z=1 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         0, 2, 3,
 # GTID  X  Y  Z
@@ -609,7 +614,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=1 y=1 z=1 | thread x=1 y=0 z=0
+# Dispatch x=0 y=1 z=1 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         1, 2, 3,
 # GTID  X  Y  Z
@@ -619,7 +624,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=1 y=1 z=1 | thread x=0 y=1 z=0
+# Dispatch x=1 y=1 z=1 | thread x=0 y=0 z=1
 # DTID  X  Y  Z
         2, 2, 3,
 # GTID  X  Y  Z
@@ -629,7 +634,7 @@ Buffers:
 #  GI   X  0  0
         4, 0, 0,
 
-# Dispatch x=1 y=1 z=1 | thread x=1 y=1 z=0
+# Dispatch x=1 y=1 z=1 | thread x=1 y=0 z=1
 # DTID  X  Y  Z
         3, 2, 3,
 # GTID  X  Y  Z
@@ -639,7 +644,7 @@ Buffers:
 #  GI   X  0  0
         5, 0, 0,
 
-# Dispatch x=1 y=1 z=1 | thread x=0 y=0 z=1
+# Dispatch x=0 y=1 z=1 | thread x=0 y=1 z=1
 # DTID  X  Y  Z
         0, 3, 3,
 # GTID  X  Y  Z
@@ -649,7 +654,7 @@ Buffers:
 #  GI   X  0  0
         6, 0, 0,
 
-# Dispatch x=1 y=1 z=1 | thread x=1 y=0 z=1
+# Dispatch x=0 y=1 z=1 | thread x=1 y=1 z=1
 # DTID  X  Y  Z
         1, 3, 3,
 # GTID  X  Y  Z
@@ -677,7 +682,7 @@ Buffers:
 #  GID  X  Y  Z
         1, 1, 1,
 #  GI   X  0  0
-        7, 0, 0
+        7, 0, 0,
     ]
 Results:
   - Result: TestOUTPUT
