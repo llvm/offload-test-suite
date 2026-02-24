@@ -11,10 +11,9 @@ will generate test targets for `check-hlsl-warp-d3d12` and
 There are some useful CMake options to tweak the configuration to better utilize
 WARP:
 
-* **OFFLOADTEST_WARP_ONLY** - Skips generating d3d test configurations for
-  non-WARP configurations and removes dependency on Vulkan. This is useful
-  if you're running Windows in a VM and do not have a physical GPU nor a
-  working Vulkan driver.
+* **OFFLOADTEST_WARP_ONLY** - Skips generating non-WRAP test configurations
+  and backends. This is useful if you're running Windows in a VM and only
+  have a working WARP implementation.
 
 * **WARP_VERSION** - Defaults to `LKG` which uses a Known-Good version of WARP.
   This is the default version tested in the GitHub actions. Alternatively this
