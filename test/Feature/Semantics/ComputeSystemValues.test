@@ -710,3 +710,6 @@ DescriptorSets:
 # get 3 for the x dimension.
 # See https://github.com/llvm/offload-test-suite/issues/735
 # XFAIL: Metal
+#
+# See https://github.com/llvm/offload-test-suite/issues/764
+# XFAIL: Windows && AMD && DirectX
