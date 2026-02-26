@@ -41,8 +41,8 @@ Buffers:
     # 8, 2, 2.25, 2, 1, 7, NaN, inf, 0, 0.25, 7.387524, 0.00001, 8, 2, 2.25, 2
 Results:
   - Result: Test
-    Rule: BufferFloatULP
-    ULPT: 2
+    Rule: BufferFloatEpsilon 
+    Epsilon: 0.004
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
