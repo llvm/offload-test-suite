@@ -1,0 +1,715 @@
+#--- system_values.hlsl
+
+RWStructuredBuffer<uint3> OUTPUT : register(u0);
+
+[numthreads(2, 2, 2)]
+void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID : SV_GroupThreadID, uint GI : SV_GroupIndex) {
+  const uint3 DISPATCH_SIZE = uint3(2, 2, 2);
+  const uint3 NUMTHREADS    = uint3(2, 2, 2);
+
+  const uint THREAD_PER_LINE = NUMTHREADS.x * DISPATCH_SIZE.x;
+  const uint THREAD_PER_PLANE = THREAD_PER_LINE * NUMTHREADS.y * DISPATCH_SIZE.y;
+  const uint ID = DTID.x + DTID.y * THREAD_PER_LINE + DTID.z * THREAD_PER_PLANE;
+
+  OUTPUT[ID * 4 + 0] = DTID;
+  OUTPUT[ID * 4 + 1] = GTID;
+  OUTPUT[ID * 4 + 2] = GID;
+  OUTPUT[ID * 4 + 3] = uint3(GI, 0, 0);
+}
+//--- system_values.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [2, 2, 2]
+Buffers:
+  - Name: OUTPUT
+    Format: Int32
+    # 8 (dispatch) x 8 (numthreads) -> 64
+    # 64 * sizeof(uint3) * 4 = 3072
+    FillSize: 3072
+    FillValue: 0
+  - Name: OUTPUT_Expected
+    Format: Int32
+    Data: [
+
+# Each thread reports 4 lines: DTID, GTID, GID and GI
+# Dispatch: the dispatch coordinates in the 3D grid.
+# thread: the thread coordinates in the thread group.
+#
+# Dispatch x=0 y=0 z=0 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        0, 0, 0,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        1, 0, 0,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        2, 0, 0,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        3, 0, 0,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        0, 1, 0,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        1, 1, 0,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        3, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        2, 1, 0,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        3, 1, 0,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        3, 0, 0,
+
+
+# Dispatch x=0 y=1 z=0 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        0, 2, 0,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=0 y=1 z=0 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        1, 2, 0,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        2, 2, 0,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        3, 2, 0,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=0 y=1 z=0 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        0, 3, 0,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=0 y=1 z=0 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        1, 3, 0,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        3, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        2, 3, 0,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        3, 3, 0,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        3, 0, 0,
+
+
+# Dispatch x=0 y=0 z=0 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        0, 0, 1,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        1, 0, 1,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        2, 0, 1,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        3, 0, 1,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        0, 1, 1,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=0 y=0 z=0 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        1, 1, 1,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        0, 0, 0,
+#  GI   X  0  0
+        7, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        2, 1, 1,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=1 y=0 z=0 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        3, 1, 1,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        1, 0, 0,
+#  GI   X  0  0
+        7, 0, 0,
+
+
+# Dispatch x=0 y=1 z=0 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        0, 2, 1,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=0 y=1 z=0 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        1, 2, 1,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        2, 2, 1,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        3, 2, 1,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=0 y=1 z=0 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        0, 3, 1,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=0 y=1 z=0 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        1, 3, 1,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        0, 1, 0,
+#  GI   X  0  0
+        7, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        2, 3, 1,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=1 y=1 z=0 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        3, 3, 1,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        1, 1, 0,
+#  GI   X  0  0
+        7, 0, 0,
+
+
+# Dispatch x=0 y=0 z=1 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        0, 0, 2,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=0 y=0 z=1 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        1, 0, 2,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        2, 0, 2,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        3, 0, 2,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=0 y=0 z=1 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        0, 1, 2,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=0 y=0 z=1 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        1, 1, 2,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        3, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        2, 1, 2,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        3, 1, 2,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        3, 0, 0,
+
+
+# Dispatch x=0 y=1 z=1 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        0, 2, 2,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=0 y=1 z=1 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        1, 2, 2,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=0 y=0 z=0
+# DTID  X  Y  Z
+        2, 2, 2,
+# GTID  X  Y  Z
+        0, 0, 0,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        0, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=1 y=0 z=0
+# DTID  X  Y  Z
+        3, 2, 2,
+# GTID  X  Y  Z
+        1, 0, 0,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        1, 0, 0,
+
+# Dispatch x=0 y=1 z=1 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        0, 3, 2,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=0 y=1 z=1 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        1, 3, 2,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        3, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=0 y=1 z=0
+# DTID  X  Y  Z
+        2, 3, 2,
+# GTID  X  Y  Z
+        0, 1, 0,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        2, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=1 y=1 z=0
+# DTID  X  Y  Z
+        3, 3, 2,
+# GTID  X  Y  Z
+        1, 1, 0,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        3, 0, 0,
+
+
+# Dispatch x=0 y=0 z=1 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        0, 0, 3,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=0 y=0 z=1 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        1, 0, 3,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        2, 0, 3,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        3, 0, 3,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=0 y=0 z=1 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        0, 1, 3,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=0 y=0 z=1 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        1, 1, 3,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        0, 0, 1,
+#  GI   X  0  0
+        7, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        2, 1, 3,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=1 y=0 z=1 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        3, 1, 3,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        1, 0, 1,
+#  GI   X  0  0
+        7, 0, 0,
+
+
+# Dispatch x=0 y=1 z=1 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        0, 2, 3,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=0 y=1 z=1 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        1, 2, 3,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=0 y=0 z=1
+# DTID  X  Y  Z
+        2, 2, 3,
+# GTID  X  Y  Z
+        0, 0, 1,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        4, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=1 y=0 z=1
+# DTID  X  Y  Z
+        3, 2, 3,
+# GTID  X  Y  Z
+        1, 0, 1,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        5, 0, 0,
+
+# Dispatch x=0 y=1 z=1 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        0, 3, 3,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=0 y=1 z=1 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        1, 3, 3,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        0, 1, 1,
+#  GI   X  0  0
+        7, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=0 y=1 z=1
+# DTID  X  Y  Z
+        2, 3, 3,
+# GTID  X  Y  Z
+        0, 1, 1,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        6, 0, 0,
+
+# Dispatch x=1 y=1 z=1 | thread x=1 y=1 z=1
+# DTID  X  Y  Z
+        3, 3, 3,
+# GTID  X  Y  Z
+        1, 1, 1,
+#  GID  X  Y  Z
+        1, 1, 1,
+#  GI   X  0  0
+        7, 0, 0,
+    ]
+Results:
+  - Result: TestOUTPUT
+    Rule: BufferExact
+    Actual: OUTPUT
+    Expected: OUTPUT_Expected
+DescriptorSets:
+  - Resources:
+    - Name: OUTPUT
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/system_values.hlsl
+# RUN: %offloader %t/system_values.yaml %t.o
+
+# Metal is reporting DispatchThreadID value of 8 for the x dimension.
+# Since we have numthreads.x == 2 and dispatch.x == 2, we should at most
+# get 3 for the x dimension.
+# See https://github.com/llvm/offload-test-suite/issues/735
+# XFAIL: Metal
+#
+# See https://github.com/llvm/offload-test-suite/issues/764
+# XFAIL: Windows && AMD && DirectX
