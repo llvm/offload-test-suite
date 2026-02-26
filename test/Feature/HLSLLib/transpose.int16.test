@@ -1,0 +1,111 @@
+#--- source.hlsl
+
+StructuredBuffer<int16_t> In : register(t0);
+RWStructuredBuffer<int16_t> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // 2x3 matrix
+  int16_t2x3 m23 = int16_t2x3(In[0], In[1], In[2],
+                               In[3], In[4], In[5]); // ((17,29,31),(41,53,67))
+
+  // 3x4 matrix
+  int16_t3x4 m34 = int16_t3x4(In[6], In[7], In[8], In[9],
+                               In[10], In[11], In[12], In[13],
+                               In[14], In[15], In[16], In[17]); // ((11,23,37,43),(53,61,71,83),(97,101,113,127))
+
+  // 4x1 matrix
+  int16_t4x1 m41 = int16_t4x1(In[18], In[19], In[20], In[21]); // ((19),(47),(73),(89))
+
+  // 1x3 matrix
+  int16_t1x3 m13 = int16_t1x3(In[22], In[23], In[24]); // ((31,59,83))
+
+  // transpose(2x3) = 3x2
+  int16_t3x2 t32 = transpose(m23);
+  Out[0] = t32[0][0];                        // 17
+  Out[1] = t32[0][1];                        // 41
+  Out[2] = t32[1][0];                        // 29
+  Out[3] = t32[1][1];                        // 53
+  Out[4] = t32[2][0];                        // 31
+  Out[5] = t32[2][1];                        // 67
+
+  // transpose(3x4) = 4x3
+  int16_t4x3 t43 = transpose(m34);
+  Out[6] = t43[0][0];                        // 11
+  Out[7] = t43[0][1];                        // 53
+  Out[8] = t43[0][2];                        // 97
+  Out[9] = t43[1][0];                        // 23
+  Out[10] = t43[1][1];                       // 61
+  Out[11] = t43[1][2];                       // 101
+  Out[12] = t43[2][0];                       // 37
+  Out[13] = t43[2][1];                       // 71
+  Out[14] = t43[2][2];                       // 113
+  Out[15] = t43[3][0];                       // 43
+  Out[16] = t43[3][1];                       // 83
+  Out[17] = t43[3][2];                       // 127
+
+  // transpose(4x1) = 1x4
+  int16_t1x4 t14 = transpose(m41);
+  Out[18] = t14[0][0];                       // 19
+  Out[19] = t14[0][1];                       // 47
+  Out[20] = t14[0][2];                       // 73
+  Out[21] = t14[0][3];                       // 89
+
+  // transpose(1x3) = 3x1
+  int16_t3x1 t31 = transpose(m13);
+  Out[22] = t31[0][0];                       // 31
+  Out[23] = t31[1][0];                       // 59
+  Out[24] = t31[2][0];                       // 83
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int16
+    Stride: 2
+    Data: [ 17, 29, 31, 41, 53, 67, 11, 23, 37, 43, 53, 61, 71, 83, 97, 101, 113, 127, 19, 47, 73, 89, 31, 59, 83 ]
+  - Name: Out
+    Format: Int16
+    Stride: 2
+    FillSize: 50
+  - Name: Expected
+    Format: Int16
+    Stride: 2
+    Data: [ 17, 41, 29, 53, 31, 67, 11, 53, 97, 23, 61, 101, 37, 71, 113, 43, 83, 127, 19, 47, 73, 89, 31, 59, 83 ]
+Results:
+  - Result: Result
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Not implemented https://github.com/llvm/wg-hlsl/issues/238
+# XFAIL: Clang
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
