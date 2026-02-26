@@ -1,0 +1,65 @@
+#--- source.hlsl
+struct S {
+  min16float f16;
+  min16int i16;
+  min16uint u16;
+};
+
+[[vk::push_constant]] S buffer;
+
+RWStructuredBuffer<float> output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  output[0] = (float)buffer.f16;
+  output[1] = (float)buffer.i16;
+  output[2] = (float)buffer.u16;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: output
+    Format: Float32
+    Data: [ 0.0, 0.0, 0.0 ]
+PushConstants:
+  - Stage: Compute
+    Values:
+    - Format: Float32
+      Offset: 0
+      Data: [ 1.5 ]
+    - Format: Int32
+      Offset: 4
+      Data: [ -5 ]
+    - Format: Int32
+      Offset: 8
+      Data: [ 65000 ]
+DescriptorSets:
+  - Resources:
+    - Name: output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+# UNSUPPORTED: Metal || DirectX
+#
+# min16 not supported.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+
+# CHECK: Name: output
+# CHECK: Data: [
+# CHECK: 1.5,
+# CHECK: -5,
+# CHECK: 65000
+# CHECK: ]

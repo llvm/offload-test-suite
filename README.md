@@ -85,6 +85,19 @@ Buffers:
   - Name: In2
     Format: Hex16
     Data: [ 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8]
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+      MipLevels: 2
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Mip 0 (2x2)
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1x1)
   - Name: Out1 # Buffer where our output will go
     Format: Float32
     Stride: 4
