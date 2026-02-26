@@ -156,9 +156,16 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-static D3D12_RESOURCE_DESC getResourceDescription(const Resource &R) {
+static llvm::Expected<D3D12_RESOURCE_DESC>
+getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
   const offloadtest::Buffer &B = *R.BufferPtr;
+
+  if (B.OutputProps.MipLevels != 1)
+    return llvm::createStringError(std::errc::not_supported,
+                                   "Multiple mip levels are not yet supported "
+                                   "for DirectX textures.");
+
   const DXGI_FORMAT Format =
       R.isTexture() ? getDXFormat(B.Format, B.Channels) : DXGI_FORMAT_UNKNOWN;
   const uint32_t Width =
@@ -611,7 +618,10 @@ public:
   llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
     ResourceBundle Bundle;
 
-    const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
+    auto ResDescOrErr = getResourceDescription(R);
+    if (!ResDescOrErr)
+      return ResDescOrErr.takeError();
+    const D3D12_RESOURCE_DESC ResDesc = *ResDescOrErr;
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
     const D3D12_RESOURCE_DESC UploadResDesc =
@@ -708,7 +718,10 @@ public:
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
 
-    const D3D12_RESOURCE_DESC ResDesc = getResourceDescription(R);
+    auto ResDescOrErr = getResourceDescription(R);
+    if (!ResDescOrErr)
+      return ResDescOrErr.takeError();
+    const D3D12_RESOURCE_DESC ResDesc = *ResDescOrErr;
 
     const D3D12_HEAP_PROPERTIES ReadBackHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
@@ -1314,6 +1327,11 @@ public:
           std::errc::invalid_argument,
           "No render target bound for graphics pipeline.");
     const Buffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+    if (OutBuf.OutputProps.MipLevels != 1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Multiple mip levels are not yet supported for DirectX render "
+          "targets.");
     D3D12_RESOURCE_DESC Desc = {};
     Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     Desc.Width = OutBuf.OutputProps.Width;
@@ -1465,13 +1483,13 @@ public:
         IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
     Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
 
+    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
       IS.CmdList->SetDescriptorHeaps(1, Heaps);
       IS.CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
-    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     IS.CmdList->SetPipelineState(IS.PSO.Get());
 
     IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
@@ -1509,6 +1527,43 @@ public:
     const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT.Get(), 0);
 
     IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+
+    auto CopyBackResource = [&IS, this](ResourcePair &R) {
+      if (R.first->isTexture()) {
+        const offloadtest::Buffer &B = *R.first->BufferPtr;
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+            0, CD3DX12_SUBRESOURCE_FOOTPRINT(
+                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+                   B.OutputProps.Height, 1,
+                   B.OutputProps.Width * B.getElementSize())};
+        for (const ResourceSet &RS : R.second) {
+          if (RS.Readback == nullptr)
+            continue;
+          addReadbackBeginBarrier(IS, RS.Buffer);
+          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
+                                                     Footprint);
+          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
+          IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+          addReadbackEndBarrier(IS, RS.Buffer);
+        }
+        return;
+      }
+      for (const ResourceSet &RS : R.second) {
+        if (RS.Readback == nullptr)
+          continue;
+        addReadbackBeginBarrier(IS, RS.Buffer);
+        IS.CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
+        addReadbackEndBarrier(IS, RS.Buffer);
+      }
+    };
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        CopyBackResource(R);
+
+    for (auto &R : IS.RootResources)
+      CopyBackResource(R);
+
     return llvm::Error::success();
   }
 

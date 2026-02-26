@@ -43,7 +43,7 @@ endmacro()
 
 find_package(Vulkan)
 message(STATUS "Vulkan Include Dirs: ${Vulkan_INCLUDE_DIRS}")
-if (Vulkan_INCLUDE_DIRS)
+if (Vulkan_INCLUDE_DIRS AND NOT OFFLOADTEST_WARP_ONLY)
   set(OFFLOADTEST_ENABLE_VULKAN On)
 endif ()
 

@@ -33,27 +33,34 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float2 uv_min = BaseUV + offset * 2.0;
 
   // Only check the first thread in the quad where UV is exactly (0.5, 0.5).
+  // We expect:
+  // Samp0 (Mag=Nearest, Min=Linear):
+  //   Sample(uv_mag) -> Mag(Nearest) -> White
+  //   Sample(uv_min) -> Min(Linear)  -> Grey
+  float4 r0 = Tex.Sample(Samp0, uv_mag);
+  float4 r1 = Tex.Sample(Samp0, uv_min);
+
+  // Samp1 (Mag=Linear, Min=Nearest):
+  //   Sample(uv_mag) -> Mag(Linear)  -> Grey
+  //   Sample(uv_min) -> Min(Nearest) -> White
+  float4 r2 = Tex.Sample(Samp1, uv_mag);
+  float4 r3 = Tex.Sample(Samp1, uv_min);
+
+  // Overloads with Offset
+  // Offset (-1, -1) applied to (0.5001, 0.5001) effectively samples near (0,0) -> Red
+  float4 r4 = Tex.Sample(Samp0, uv_mag, int2(-1, -1));
+
+  // Overloads with Offset and Clamp
+  // Clamp 0.0f should behave normally (Red)
+  float4 r5 = Tex.Sample(Samp0, uv_mag, int2(-1, -1), 0.0f);
+
   if (all(GTid.xy == 0)) {
-    // We expect:
-    // Samp0 (Mag=Nearest, Min=Linear):
-    //   Sample(uv_mag) -> Mag(Nearest) -> White
-    //   Sample(uv_min) -> Min(Linear)  -> Grey
-    Out[0] = Tex.Sample(Samp0, uv_mag);
-    Out[1] = Tex.Sample(Samp0, uv_min);
-
-    // Samp1 (Mag=Linear, Min=Nearest):
-    //   Sample(uv_mag) -> Mag(Linear)  -> Grey
-    //   Sample(uv_min) -> Min(Nearest) -> White
-    Out[2] = Tex.Sample(Samp1, uv_mag);
-    Out[3] = Tex.Sample(Samp1, uv_min);
-
-    // Overloads with Offset
-    // Offset (-1, -1) applied to (0.5001, 0.5001) effectively samples near (0,0) -> Red
-    Out[4] = Tex.Sample(Samp0, uv_mag, int2(-1, -1));
-
-    // Overloads with Offset and Clamp
-    // Clamp 0.0f should behave normally (Red)
-    Out[5] = Tex.Sample(Samp0, uv_mag, int2(-1, -1), 0.0f);
+    Out[0] = r0;
+    Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+    Out[4] = r4;
+    Out[5] = r5;
   }
   return float4(0,0,0,0);
 }
@@ -70,11 +77,12 @@ Buffers:
   - Name: Tex
     Format: Float32
     Channels: 4
-    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
     Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
             0.0, 1.0, 0.0, 1.0,  # Green (1,0)
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
-            1.0, 1.0, 1.0, 1.0 ] # White (1,1)
+            1.0, 1.0, 1.0, 1.0,  # White (1,1)
+            0.5, 0.5, 0.5, 1.0 ] # Mip 1 (Average)
 
   - Name: Out
     Format: Float32
@@ -87,7 +95,7 @@ Buffers:
     Data: [ 1.0, 1.0, 1.0, 1.0,       # Samp0 Mag (Nearest) -> White
             0.5, 0.5, 0.5, 1.0,       # Samp0 Min (Linear)  -> Grey
             0.5, 0.5, 0.5, 1.0,       # Samp1 Mag (Linear)  -> Grey
-            1.0, 1.0, 1.0, 1.0,       # Samp1 Min (Nearest) -> White
+            0.5, 0.5, 0.5, 1.0,       # Samp1 Min (Nearest) -> Grey
             1.0, 0.0, 0.0, 1.0,       # Offset (-1,-1) -> Red
             1.0, 0.0, 0.0, 1.0 ]      # Offset (-1,-1) Clamp 0.0 -> Red
 
@@ -153,12 +161,8 @@ Results:
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
 # XFAIL: DirectX || Metal || Vulkan && Darwin
+# XFAIL: Clang && !Vulkan
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/175630
-# XFAIL: Clang
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/690
-# XFAIL: Vulkan && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
