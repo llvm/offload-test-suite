@@ -1,11 +1,11 @@
 #--- source.hlsl
 RWStructuredBuffer<uint> Out : register(u0);
 
-[numthreads(8,1,1)]
+[numthreads(64,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
-    for (uint i = 0; i < 8; i++) {
+    for (uint i = 0; i < 64; i++) {
         if (i == TID.x) {
-            Out[TID.x] = WaveActiveMax(TID.x);
+            Out[TID.x] = WaveActiveCountBits(true);
             break;
         }
     }
@@ -21,7 +21,19 @@ Shaders:
 Buffers:
   - Name: Out
     Format: UInt32
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0 ]
+    Stride: 4
+    FillSize: 256
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+
 DescriptorSets:
   - Resources:
     - Name: Out
@@ -34,25 +46,18 @@ DescriptorSets:
 ...
 
 #--- end
+
 # UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
-# BUG: https://github.com/llvm/offload-test-suite/issues/490
-# XFAIL: WARP && DirectX && Clang
+# Bug https://github.com/llvm/llvm-project/issues/165288
+# XFAIL: Clang && !Vulkan
 
-# BUG: https://github.com/llvm/llvm-project/issues/165288
-# XFAIL: !WARP && Clang && (DirectX || Metal)
-# XFAIL: Vulkan && Darwin
-
-# BUG: https://github.com/llvm/offload-test-suite/issues/520
+# Bug https://github.com/llvm/offload-test-suite/issues/520
 # XFAIL: QC
 
-# BUG: https://github.com/llvm/offload-test-suite/issues/521
+# Bug https://github.com/llvm/offload-test-suite/issues/521
 # XFAIL: NV && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
-
-# CHECK: Name: Out
-# CHECK: Format: UInt32
-# CHECK: Data: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+# RUN: %offloader %t/pipeline.yaml %t.o

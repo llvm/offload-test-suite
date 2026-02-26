@@ -1,0 +1,112 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp0 : register(s0); // Mag=Nearest, Min=Linear
+[[vk::binding(2, 0)]] SamplerState Samp1 : register(s1); // Mag=Linear, Min=Nearest
+[[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  float2 uv0 = float2(0.5, 0.5);
+  float2 uv1 = float2(0.25, 0.25);
+  
+  float2 ddx_mag = float2(0.0001, 0.0);
+  float2 ddy_mag = float2(0.0, 0.0001);
+  float2 ddx_min = float2(2.0, 0.0);
+  float2 ddy_min = float2(0.0, 2.0);
+
+  // 1. Samp0 at (0.5, 0.5)
+  // Mag -> Nearest(0.5) -> White
+  // Min -> Linear(0.5)  -> Grey
+  Out[0] = Tex.SampleGrad(Samp0, uv0, ddx_mag, ddy_mag);
+  Out[1] = Tex.SampleGrad(Samp0, uv0, ddx_min, ddy_min);
+
+  // 2. Samp1 at (0.25, 0.25)
+  // Mag -> Linear(0.25)  -> Red
+  // Min -> Nearest(0.25) -> Red
+  Out[2] = Tex.SampleGrad(Samp1, uv1, ddx_mag, ddy_mag);
+  Out[3] = Tex.SampleGrad(Samp1, uv1, ddx_min, ddy_min);
+
+  // 3. Mip Selection Test
+  // LOD = log2(1.0 * 2) = 1.0 -> Mip 1
+  float2 ddx_mip1 = float2(1.0, 0.0);
+  float2 ddy_mip1 = float2(0.0, 1.0);
+  Out[4] = Tex.SampleGrad(Samp0, uv0, ddx_mip1, ddy_mip1); // Yellow
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0,  # White (1,1)
+            1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1x1) - Yellow
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 80 # 5 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 1.0, 1.0, 1.0,  # Samp0, uv0, Mag -> White
+            1.0, 1.0, 0.0, 1.0,  # Samp0, uv0, Min -> Yellow (mip 1)
+            1.0, 0.0, 0.0, 1.0,  # Samp1, uv1, Mag -> Red
+            1.0, 1.0, 0.0, 1.0,  # Samp1, uv1, Min -> Yellow (mip 1)
+            1.0, 1.0, 0.0, 1.0 ] # Mip Selection -> Yellow (mip 1)
+
+Samplers:
+  - Name: Samp0
+    MinFilter: Linear
+    MagFilter: Nearest
+    Address: Clamp
+  - Name: Samp1
+    MinFilter: Nearest
+    MagFilter: Linear
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp0
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Samp1
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+
+Results:
+  - Result: SampleGradTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: DirectX || Metal
+# XFAIL: Clang && !Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
