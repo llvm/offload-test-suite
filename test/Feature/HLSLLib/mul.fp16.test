@@ -1,0 +1,122 @@
+#--- source.hlsl
+
+StructuredBuffer<half> In : register(t0);
+RWStructuredBuffer<half> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  half hs = In[0];    // 2.3
+  half4 hv = half4(In[1], In[2], In[3], In[4]); // (1.1,2.75,3.3,4.5)
+  half2x3 hm23 = half2x3(In[5], In[6], In[7],
+                         In[8], In[9], In[10]); // ((1.7,2.5,3.125),(4.1,5.5,6.75))
+  half3x2 hm32 = half3x2(In[11], In[12],
+                         In[13], In[14],
+                         In[15], In[16]); // ((1.25,2.9),(3.5,4.25),(5.75,6.3))
+
+  // Overload 1: scalar * scalar
+  Out[0] = mul(hs, half(3.7));              // 2.3*3.7 = 8.51
+
+  // Overload 2: scalar * vector
+  half4 r2 = mul(hs, hv);                   // 2.3*(1.1,2.75,3.3,4.5) = (2.53,6.325,7.59,10.35)
+  Out[1] = r2.x;
+  Out[2] = r2.y;
+  Out[3] = r2.z;
+  Out[4] = r2.w;
+
+  // Overload 3: scalar * matrix
+  half2x2 r3 = mul(hs, half2x2(1.25, 2.9, 3.5, 4.1));
+  Out[5] = r3[0][0];                        // 2.875
+  Out[6] = r3[0][1];                        // 6.67
+  Out[7] = r3[1][0];                        // 8.05
+  Out[8] = r3[1][1];                        // 9.43
+
+  // Overload 4: vector * scalar
+  half4 r4 = mul(hv, half(3.7));             // (1.1,2.75,3.3,4.5)*3.7 = (4.07,10.175,12.21,16.65)
+  Out[9] = r4.x;
+  Out[10] = r4.y;
+  Out[11] = r4.z;
+  Out[12] = r4.w;
+
+  // Overload 5: vector * vector (dot product)
+  Out[13] = mul(hv, hv);                    // 1.21+7.5625+10.89+20.25 = 39.9125
+
+  // Overload 6: vector * matrix (1x2 * 2x3 = 1x3)
+  half3 r6 = mul(half2(In[1], In[2]), hm23);
+  Out[14] = r6.x;                           // 1.1*1.7+2.75*4.1 = 13.145
+  Out[15] = r6.y;                           // 1.1*2.5+2.75*5.5 = 17.875
+  Out[16] = r6.z;                           // 1.1*3.125+2.75*6.75 = 22.0
+
+  // Overload 7: matrix * scalar
+  half2x2 r7 = mul(half2x2(1.25, 2.9, 3.5, 4.1), hs);
+  Out[17] = r7[0][0];                       // 2.875
+  Out[18] = r7[0][1];                       // 6.67
+  Out[19] = r7[1][0];                       // 8.05
+  Out[20] = r7[1][1];                       // 9.43
+
+  // Overload 8: matrix * vector (2x3 * 3x1 = 2x1)
+  half2 r8 = mul(hm23, half3(In[1], In[2], In[3]));
+  Out[21] = r8.x;                           // 1.7*1.1+2.5*2.75+3.125*3.3 = 19.0575
+  Out[22] = r8.y;                           // 4.1*1.1+5.5*2.75+6.75*3.3 = 41.91
+
+  // Overload 9: matrix * matrix (2x3 * 3x2 = 2x2)
+  half2x2 r9 = mul(hm23, hm32);
+  Out[23] = r9[0][0];                       // 1.7*1.25+2.5*3.5+3.125*5.75 = 28.84375
+  Out[24] = r9[0][1];                       // 1.7*2.9+2.5*4.25+3.125*6.3 = 35.2425
+  Out[25] = r9[1][0];                       // 4.1*1.25+5.5*3.5+6.75*5.75 = 63.1875
+  Out[26] = r9[1][1];                       // 4.1*2.9+5.5*4.25+6.75*6.3 = 77.79
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 2
+    Data: [ 0x409A, 0x3C66, 0x4180, 0x429A, 0x4480, 0x3ECD, 0x4100, 0x4240, 0x441A, 0x4580, 0x46C0, 0x3D00, 0x41CD, 0x4300, 0x4440, 0x45C0, 0x464D ]
+    # [ 2.3, 1.1, 2.75, 3.3, 4.5, 1.7, 2.5, 3.125, 4.1, 5.5, 6.75, 1.25, 2.9, 3.5, 4.25, 5.75, 6.3 ]
+  - Name: Out
+    Format: Float16
+    Stride: 2
+    FillSize: 54
+  - Name: Expected
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4841, 0x410F, 0x4654, 0x4798, 0x492D, 0x41C0, 0x46AC, 0x4807, 0x48B8, 0x4411, 0x4916, 0x4A1B, 0x4C29, 0x50FD, 0x4A93, 0x4C78, 0x4D80, 0x41C0, 0x46AC, 0x4807, 0x48B8, 0x4CC4, 0x513D, 0x4F36, 0x5068, 0x53E6, 0x54DD ]
+    # [ 8.508, 2.529, 6.328, 7.594, 10.35, 2.875, 6.672, 8.055, 9.438, 4.066, 10.17, 12.21, 16.64, 39.91, 13.15, 17.88, 22.0, 2.875, 6.672, 8.055, 9.438, 19.06, 41.91, 28.84, 35.25, 63.19, 77.81 ]
+Results:
+  - Result: Result
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Not implemented https://github.com/llvm/llvm-project/issues/99138
+# XFAIL: Clang
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

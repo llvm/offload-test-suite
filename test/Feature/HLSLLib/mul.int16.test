@@ -1,0 +1,119 @@
+#--- source.hlsl
+
+StructuredBuffer<int16_t> In : register(t0);
+RWStructuredBuffer<int16_t> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  int16_t s = In[0]; // 17
+  int16_t4 v = int16_t4(In[1], In[2], In[3], In[4]); // (13,29,37,43)
+  int16_t2x3 m23 = int16_t2x3(In[5], In[6], In[7],
+                              In[8], In[9], In[10]); // ((11,19,31),(41,53,67))
+  int16_t3x2 m32 = int16_t3x2(In[11], In[12],
+                              In[13], In[14],
+                              In[15], In[16]); // ((14,26),(38,47),(59,71))
+
+  // Overload 1: scalar * scalar
+  Out[0] = mul(s, int16_t(23));              // 17*23 = 391
+
+  // Overload 2: scalar * vector
+  int16_t4 r2 = mul(s, v);                   // 17*(13,29,37,43) = (221,493,629,731)
+  Out[1] = r2.x;
+  Out[2] = r2.y;
+  Out[3] = r2.z;
+  Out[4] = r2.w;
+
+  // Overload 3: scalar * matrix
+  int16_t2x2 r3 = mul(s, int16_t2x2(12, 34, 56, 78));
+  Out[5] = r3[0][0];                         // 204
+  Out[6] = r3[0][1];                         // 578
+  Out[7] = r3[1][0];                         // 952
+  Out[8] = r3[1][1];                         // 1326
+
+  // Overload 4: vector * scalar
+  int16_t4 r4 = mul(v, int16_t(23));          // (13,29,37,43)*23 = (299,667,851,989)
+  Out[9] = r4.x;
+  Out[10] = r4.y;
+  Out[11] = r4.z;
+  Out[12] = r4.w;
+
+  // Overload 5: vector * vector (dot product)
+  Out[13] = mul(v, v);                        // 169+841+1369+1849 = 4228
+
+  // Overload 6: vector * matrix (1x2 * 2x3 = 1x3)
+  int16_t3 r6 = mul(int16_t2(In[1], In[2]), m23);
+  Out[14] = r6.x;                            // 13*11+29*41 = 1332
+  Out[15] = r6.y;                            // 13*19+29*53 = 1784
+  Out[16] = r6.z;                            // 13*31+29*67 = 2346
+
+  // Overload 7: matrix * scalar
+  int16_t2x2 r7 = mul(int16_t2x2(12, 34, 56, 78), s);
+  Out[17] = r7[0][0];                        // 204
+  Out[18] = r7[0][1];                        // 578
+  Out[19] = r7[1][0];                        // 952
+  Out[20] = r7[1][1];                        // 1326
+
+  // Overload 8: matrix * vector (2x3 * 3x1 = 2x1)
+  int16_t2 r8 = mul(m23, int16_t3(In[1], In[2], In[3]));
+  Out[21] = r8.x;                            // 11*13+19*29+31*37 = 1841
+  Out[22] = r8.y;                            // 41*13+53*29+67*37 = 4549
+
+  // Overload 9: matrix * matrix (2x3 * 3x2 = 2x2)
+  int16_t2x2 r9 = mul(m23, m32);
+  Out[23] = r9[0][0];                        // 11*14+19*38+31*59 = 2705
+  Out[24] = r9[0][1];                        // 11*26+19*47+31*71 = 3380
+  Out[25] = r9[1][0];                        // 41*14+53*38+67*59 = 6541
+  Out[26] = r9[1][1];                        // 41*26+53*47+67*71 = 8314
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int16
+    Stride: 2
+    Data: [ 17, 13, 29, 37, 43, 11, 19, 31, 41, 53, 67, 14, 26, 38, 47, 59, 71 ]
+  - Name: Out
+    Format: Int16
+    Stride: 2
+    FillSize: 54
+  - Name: Expected
+    Format: Int16
+    Stride: 2
+    Data: [ 391, 221, 493, 629, 731, 204, 578, 952, 1326, 299, 667, 851, 989, 4228, 1332, 1784, 2346, 204, 578, 952, 1326, 1841, 4549, 2705, 3380, 6541, 8314 ]
+Results:
+  - Result: Result
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Not implemented https://github.com/llvm/llvm-project/issues/99138
+# XFAIL: Clang
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
