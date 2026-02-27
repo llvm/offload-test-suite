@@ -1,7 +1,7 @@
 #--- source.hlsl
 
 StructuredBuffer<double> In : register(t0);
-RWStructuredBuffer<double> Out : register(u0);
+RWStructuredBuffer<double> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
@@ -104,7 +104,7 @@ DescriptorSets:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 0
+        Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
