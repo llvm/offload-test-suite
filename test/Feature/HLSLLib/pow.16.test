@@ -42,7 +42,7 @@ Buffers:
 Results:
   - Result: Test
     Rule: BufferFloatEpsilon 
-    Epsilon: 0.05
+    Epsilon: 0.05 
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
