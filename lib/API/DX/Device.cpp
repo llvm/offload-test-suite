@@ -899,12 +899,9 @@ public:
       if (auto Err = HR::toError(UploadBuffer->Map(0, nullptr, &ResDataPtr),
                                  "Failed to acquire UAV data pointer."))
         return Err;
+      memset(ResDataPtr, 0, CBVSize);
       memcpy(ResDataPtr, ResData.get(), R.size());
-      // Zero any remaining bytes
-      if (R.size() < CBVSize) {
-        void *ExtraData = static_cast<char *>(ResDataPtr) + R.size();
-        memset(ExtraData, 0, CBVSize - R.size() - 1);
-      }
+
       UploadBuffer->Unmap(0, nullptr);
 
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
