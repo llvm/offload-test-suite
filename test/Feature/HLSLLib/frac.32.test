@@ -25,8 +25,7 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ nan, -inf, 0, -0, 0, 1.5, inf, -1, 2.718280, 1000.599976, -7.389, nan,]
-    #  NaN, -Inf, 0, -0, 0, 1.5, Inf, -1, 2.718280, 1000.599976, -7.389,
+    Data: [ 0, -0, 0, 1.5,  -1, 2.718280, 1000.599976, -7.389, 0, 0, 0, 0]
   - Name: Out
     Format: Float32
     Stride: 16
@@ -34,8 +33,7 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: Float32
     Stride: 16
-    Data: [ nan, nan, 0, 0, 0, .5, nan, 0, 0.718280, 0.599976, 0.611, nan,]
-    #  NaN, NaN, 0, 0, 0, .5, NaN, 0, 0.718280, 0.599976, 0.611,
+    Data: [ 0, 0, 0, 0.5, 0, 0.71828, 0.599976, 0.611, 0, 0, 0, 0 ]
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon

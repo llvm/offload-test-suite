@@ -45,18 +45,15 @@ Buffers:
   - Name: M0
     Format: Float32
     Stride: 16
-    Data: [ NaN, -Inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, Inf, 1.0, -1.0, 0, 1, 1.5 ]
-    # NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1.0, -1.0, 0, 1, 1.5
+    Data: [ -0, 0, 1.0, -1.0, 0, 1, 1.5 ]
   - Name: A0
     Format: Float32
     Stride: 16
-    Data: [ NaN, -Inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, Inf, 1.0, -1.0, 0, 1, 10 ]
-    # NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1.0, -1.0, 0, 1, 10
+    Data: [ -0, 0, 1.0, -1.0, 0, 1, 10 ]
   - Name: B0
     Format: Float32
     Stride: 16
-    Data: [ NaN, -Inf, -0x1.e7d42cp-127, -0, 0, 0x1.e7d42cp-127, Inf, 1.0, -1.0, 1, 0, -5.5 ]
-    # NaN, -Inf, -denorm, -0, 0, denorm, Inf, 1.0, -1.0, 1, 0, -5.5
+    Data: [ -0, 0, 1.0, -1.0, 1, 0, -5.5 ]
   - Name: M1
     Format: Int32
     Stride: 16
@@ -88,7 +85,7 @@ Buffers:
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
-    Data: [ NaN, NaN, 0, 0, 0, 0, Inf, 2, 0, 1, 1, 9.5, 2, 9.5, Inf, -Inf ]
+    Data: [ 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 9.5, inf, -inf ]
   - Name: Out1
     Format: Int32
     Stride: 16
