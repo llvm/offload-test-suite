@@ -1,0 +1,123 @@
+#--- source.hlsl
+RWStructuredBuffer<float2> Out0 : register(u0);
+RWStructuredBuffer<float2> Out1 : register(u1);
+RWStructuredBuffer<float2> Out2 : register(u2);
+RWStructuredBuffer<float2> Out3 : register(u3);
+
+cbuffer example : register(b4) {
+
+    float4x2 M1;
+};
+
+[numthreads(1,1,1)]
+void main() {
+    Out0[0] = M1[0];
+    Out1[0] = M1[1];
+    Out2[0] = M1[2];
+    Out3[0] = M1[3];
+   
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: cbuffer
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 ]
+  - Name: Out0
+    Format: Float32
+    FillSize: 8
+  - Name: ExpectedOut0
+    Format: Float32
+    Data: [ 1.1, 5.5]
+  - Name: Out1
+    Format: Float32
+    FillSize: 8
+  - Name: ExpectedOut1
+    Format: Float32
+    Data: [ 2.2, 6.6]
+  - Name: Out2
+    Format: Float32
+    FillSize: 8
+  - Name: ExpectedOut2
+    Format: Float32
+    Data: [ 3.3, 7.7]
+  - Name: Out3
+    Format: Float32
+    FillSize: 8
+  - Name: ExpectedOut3
+    Format: Float32
+    Data: [ 4.4, 8.8]
+Results:
+  - Result: Out
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Out1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Out2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: Out3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+DescriptorSets:
+  - Resources:
+    - Name: cbuffer
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out0
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+
+# Note: Nvidia crashes on both clang and DXC
+# XFAIL: NV && Vulkan
+
+# Note: clang Vulkan crashes
+# BUG https://github.com/llvm/llvm-project/issues/179879
+# XFAIL: Clang && Vulkan
+
+# Note: Metal and Vulkan KosmicKrisp and MoltenVK 
+# Are always empty
+# UNSUPPORTED: Darwin
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
