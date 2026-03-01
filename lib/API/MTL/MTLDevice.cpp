@@ -292,6 +292,8 @@ class MTLDevice : public offloadtest::Device {
       case ResourceKind::Sampler:
       case ResourceKind::SamplerComparison:
         llvm_unreachable("Not implemented yet.");
+      case ResourceKind::CombinedImageSampler:
+        llvm_unreachable("Combined image samplers aren't supported in Metal.");
       case ResourceKind::StructuredBuffer:
       case ResourceKind::RWStructuredBuffer:
       case ResourceKind::ByteAddressBuffer:
