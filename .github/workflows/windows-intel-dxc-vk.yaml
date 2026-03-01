@@ -22,5 +22,6 @@ jobs:
       SKU: windows-intel
       BuildType: Debug
       TestTarget: check-hlsl-vk
+      TestTargetReconvergence: check-hlsl-vk-reconvergence
       OffloadTest-branch: ${{ github.ref }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
