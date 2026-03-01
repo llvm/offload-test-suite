@@ -51,6 +51,10 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
     VKFormats(UINT, 64) break;
   case DataFormat::Float64:
     VKFormats(SFLOAT, 64) break;
+  case DataFormat::Depth32:
+    if (Channels != 1)
+      llvm_unreachable("Depth32 format only supports a single channel.");
+    return VK_FORMAT_D32_SFLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -712,6 +716,9 @@ public:
                                           BufferRef &Host,
                                           int UsageOverride = 0) {
     const offloadtest::Buffer &B = *R.BufferPtr;
+    if (B.Format == DataFormat::Depth32 && R.isReadWrite())
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -1186,8 +1193,9 @@ public:
         if (R.isSampler()) {
           IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
-            const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, 0,
-                                                     VK_IMAGE_LAYOUT_UNDEFINED};
+            const VkDescriptorImageInfo ImageInfo = {
+                ResRef.Image.Sampler, 0,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             ImageInfos.push_back(ImageInfo);
           }
         } else if (R.isTexture()) {
@@ -1200,7 +1208,9 @@ public:
               VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
           ViewCreateInfo.subresourceRange.aspectMask =
-              VK_IMAGE_ASPECT_COLOR_BIT;
+              R.BufferPtr->Format == DataFormat::Depth32
+                  ? VK_IMAGE_ASPECT_DEPTH_BIT
+                  : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
@@ -1729,7 +1739,9 @@ public:
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
         VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
+                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
         Region.imageSubresource.layerCount = 1;
@@ -1747,7 +1759,9 @@ public:
       }
 
       VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      SubRange.aspectMask = B.Format == DataFormat::Depth32
+                                ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
@@ -1775,7 +1789,8 @@ public:
 
       ImageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
       ImageBarrier.dstAccessMask =
-          VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+          VK_ACCESS_SHADER_READ_BIT |
+          (R.isReadWrite() ? VK_ACCESS_SHADER_WRITE_BIT : 0);
       ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
@@ -1808,7 +1823,9 @@ public:
     if (R.isImage()) {
       const offloadtest::Buffer &B = *R.BufferPtr;
       VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      SubRange.aspectMask = B.Format == DataFormat::Depth32
+                                ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
@@ -1834,7 +1851,9 @@ public:
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
         VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
+                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
         Region.imageSubresource.layerCount = 1;
