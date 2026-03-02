@@ -157,9 +157,10 @@ struct Buffer {
 
 struct CombinedImageSampler {
   std::string Name;
-  std::string Buffer;
+  std::string Texture;
+  ResourceKind TextureKind = ResourceKind::Texture2D;
   std::string Sampler;
-  offloadtest::Buffer *BufferPtr = nullptr;
+  offloadtest::Buffer *TexturePtr = nullptr;
   offloadtest::Sampler *SamplerPtr = nullptr;
 };
 
