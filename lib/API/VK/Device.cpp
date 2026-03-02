@@ -852,7 +852,7 @@ public:
 
   llvm::Error createResource(Resource &R, InvocationState &IS) {
     if (R.Kind == ResourceKind::CombinedImageSampler) {
-      auto *Buf = R.CombinedImageSamplerPtr->BufferPtr;
+      auto *Buf = R.CombinedImageSamplerPtr->TexturePtr;
       auto *Samp = R.CombinedImageSamplerPtr->SamplerPtr;
 
       Resource ReusedRes;
@@ -1293,7 +1293,7 @@ public:
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
           const auto *Buf = R.Kind == ResourceKind::CombinedImageSampler
-                                ? R.CombinedImageSamplerPtr->BufferPtr
+                                ? R.CombinedImageSamplerPtr->TexturePtr
                                 : R.BufferPtr;
 
           ViewCreateInfo.format = getVKFormat(Buf->Format, Buf->Channels);
@@ -1308,7 +1308,7 @@ public:
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
           ViewCreateInfo.subresourceRange.levelCount =
-              R.BufferPtr->OutputProps.MipLevels;
+              Buf->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;

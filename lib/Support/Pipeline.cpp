@@ -40,7 +40,26 @@ namespace yaml {
 void MappingTraits<offloadtest::CombinedImageSampler>::mapping(
     IO &I, offloadtest::CombinedImageSampler &C) {
   I.mapRequired("Name", C.Name);
-  I.mapRequired("Buffer", C.Buffer);
+
+  if (I.outputting()) {
+    I.mapRequired("Texture", C.Texture);
+    I.mapRequired("TextureKind", C.TextureKind);
+  } else {
+    I.mapOptional("Texture", C.Texture);
+    if (C.Texture.empty())
+      I.mapOptional("Buffer", C.Texture);
+    if (C.Texture.empty()) {
+      I.setError("CombinedImageSampler requires 'Texture' field");
+      return;
+    }
+    I.mapOptional("TextureKind", C.TextureKind, ResourceKind::Texture2D);
+    if (C.TextureKind != ResourceKind::Texture2D) {
+      I.setError("CombinedImageSampler currently only supports TextureKind: "
+                 "Texture2D");
+      return;
+    }
+  }
+
   I.mapRequired("Sampler", C.Sampler);
 }
 
@@ -60,9 +79,9 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
 
   if (!I.outputting()) {
     for (auto &CIS : P.CombinedImageSamplers) {
-      CIS.BufferPtr = P.getBuffer(CIS.Buffer);
-      if (!CIS.BufferPtr)
-        I.setError(Twine("Referenced buffer ") + CIS.Buffer + " not found!");
+      CIS.TexturePtr = P.getBuffer(CIS.Texture);
+      if (!CIS.TexturePtr)
+        I.setError(Twine("Referenced texture ") + CIS.Texture + " not found!");
       CIS.SamplerPtr = P.getSampler(CIS.Sampler);
       if (!CIS.SamplerPtr)
         I.setError(Twine("Referenced sampler ") + CIS.Sampler + " not found!");
