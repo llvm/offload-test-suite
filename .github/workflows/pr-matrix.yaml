@@ -12,7 +12,11 @@ on:
     - cron: '0 6 * * 1-5'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ 
+      github.event_name == 'pull_request' 
+      ? github.event.pull_request.number 
+      : github.run_id 
+  }}
   cancel-in-progress: true
 
 env:
@@ -109,4 +113,4 @@ jobs:
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
       OffloadTest-branch: ${{ env.OFFLOAD_REF }}
-      LLVM-ExtraCMakeArgs: ${{ env.EXTRA_GBV_ARG }}
+      
