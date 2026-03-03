@@ -108,7 +108,7 @@ void ReconvergenceTestGenerator::saveShader(const TestCase &Test) {
   const uint32_t ThreadgroupSizeY = Test.getThreadgroupSizeY();
   const uint32_t MaxNestingLevel = Test.getMaxNestingLevel();
   const uint32_t Seed = Test.getSeed();
-  const std::string Path = "shaders/" + std::to_string(WaveSize);
+  const std::string Path = OutputDir + "/shaders/" + std::to_string(WaveSize);
   std::filesystem::create_directories(Path);
   const std::string Filename =
       Path + "/test_" + std::to_string(MaxNestingLevel) + "_" +
@@ -125,7 +125,7 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   const uint32_t ThreadgroupSizeY = Test.getThreadgroupSizeY();
   const uint32_t MaxNestingLevel = Test.getMaxNestingLevel();
   const uint32_t Seed = Test.getSeed();
-  const std::string Path = "reconvergence-tests/" + std::to_string(WaveSize);
+  const std::string Path = OutputDir + "/tests/" + std::to_string(WaveSize);
   std::filesystem::create_directories(Path);
   const std::string Filename =
       Path + "/test_" + std::to_string(MaxNestingLevel) + "_" +
@@ -134,6 +134,11 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   std::ofstream Ofs(Filename);
 
   Ofs << "#--- source.hlsl\n" << std::endl;
+  // Add debugging info as comments at the top of the shader.
+  Ofs << "// --- Wave size: " << WaveSize << std::endl;
+  Ofs << "// --- Seed: " << Seed << std::endl;
+  Ofs << "// --- NestingLevel: " << MaxNestingLevel << std::endl;
+
   Ofs << Test.getShaderString() << std::endl;
   Ofs << "//--- pipeline.yaml\n" << std::endl;
   Ofs << "---\n" << std::endl;

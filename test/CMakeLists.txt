@@ -193,7 +193,7 @@ umbrella_lit_testsuite_end(check-hlsl)
 set_target_properties(check-hlsl PROPERTIES FOLDER "HLSL tests")
 
 # Location where tests are generated (defined by tool execution in its binary dir)
-set(RECONVERGENCE_TEST_DIR "${OFFLOADTEST_BINARY_DIR}/tools/TestGenerator/reconvergence/tests")
+set(RECONVERGENCE_TEST_DIR "${OFFLOADTEST_SOURCE_DIR}/reconvergence-tests/tests")
 
 # Initialize test flags based on enabled platforms
 set(TEST_SOURCE_ROOT "${RECONVERGENCE_TEST_DIR}")
