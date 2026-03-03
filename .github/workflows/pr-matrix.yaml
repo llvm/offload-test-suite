@@ -12,16 +12,12 @@ on:
     - cron: '0 6 * * 1-5'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ 
-      github.event_name == 'pull_request' 
-      ? github.event.pull_request.number 
-      : github.run_id 
-  }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 env:
   # Use PR head SHA if PR, otherwise scheduled run SHA
-  OFFLOAD_REF: ${{ github.event.pull_request.head.sha || github.sha }}
+    OFFLOAD_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
   # Shared base CMake args
   BASE_CMAKE_ARGS: >
@@ -30,8 +26,7 @@ env:
     -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   # Append GBV validation only for scheduled runs
-  EXTRA_GBV_ARG: ${{ github.event_name == 'schedule' && '-DOFFLOADTEST_ENABLE_VALIDATION=ON' || '' }}
-
+EXTRA_GBV_ARG: ${{ github.event_name == 'schedule' && '-DOFFLOADTEST_ENABLE_VALIDATION=ON' || '' }}
 jobs:
   Exec-Tests-Windows:
     permissions:
