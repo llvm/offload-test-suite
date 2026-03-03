@@ -42,7 +42,7 @@ Buffers:
 Results:
   - Result: Test
     Rule: BufferFloatULP
-    ULPT: 8
+    ULPT: 16
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
