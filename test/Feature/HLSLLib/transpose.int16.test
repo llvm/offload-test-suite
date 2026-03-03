@@ -105,6 +105,9 @@ DescriptorSets:
 # Not implemented https://github.com/llvm/wg-hlsl/issues/238
 # XFAIL: Clang
 
+# Bug https://github.com/llvm/offload-test-suite/issues/779
+# XFAIL: Intel && DirectX && DXC
+
 # REQUIRES: Int16
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
