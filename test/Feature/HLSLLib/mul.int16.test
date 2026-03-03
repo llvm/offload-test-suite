@@ -113,6 +113,9 @@ DescriptorSets:
 # Not implemented https://github.com/llvm/llvm-project/issues/99138
 # XFAIL: Clang
 
+# Bug https://github.com/llvm/offload-test-suite/issues/777
+# XFAIL: Intel && DirectX
+
 # REQUIRES: Int16
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
