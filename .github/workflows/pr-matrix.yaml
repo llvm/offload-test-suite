@@ -34,7 +34,6 @@ env:
 
 jobs:
   Exec-Tests-Windows:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     permissions:
       contents: read
       checks: write
@@ -54,7 +53,6 @@ jobs:
       LLVM-ExtraCMakeArgs: ${{ env.BASE_CMAKE_ARGS }} ${{ env.EXTRA_GBV_ARG }}
 
   Exec-Tests-Windows-Warp:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     permissions:
       contents: read
       checks: write
@@ -97,7 +95,6 @@ jobs:
       LLVM-ExtraCMakeArgs: ${{ env.BASE_CMAKE_ARGS }} ${{ env.EXTRA_GBV_ARG }}
 
   Exec-Tests-MacOS:
-    if: github.event_name == 'pull_request' || github.event_name == 'schedule'
     permissions:
       contents: read
       checks: write
@@ -113,4 +110,3 @@ jobs:
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
       OffloadTest-branch: ${{ env.OFFLOAD_REF }}
-      
