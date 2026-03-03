@@ -7,26 +7,11 @@ on:
   pull_request:
     branches:
       - main
-  schedule:
-    # 10PM Pacific = 06:00 UTC
-    - cron: '0 6 * * 1-5'
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
-env:
-  # Use PR head SHA if PR, otherwise scheduled run SHA
-    OFFLOAD_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-
-  # Shared base CMake args
-  BASE_CMAKE_ARGS: >
-    -DCMAKE_C_COMPILER=clang-cl
-    -DCMAKE_CXX_COMPILER=clang-cl
-    -DOFFLOADTEST_USE_CLANG_TIDY=On
-
-  # Append GBV validation only for scheduled runs
-EXTRA_GBV_ARG: ${{ github.event_name == 'schedule' && '-DOFFLOADTEST_ENABLE_VALIDATION=ON' || '' }}
 jobs:
   Exec-Tests-Windows:
     permissions:
@@ -36,16 +21,15 @@ jobs:
       fail-fast: false
       matrix:
         SKU: [windows-intel]
-        TestTarget:
-          [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ env.OFFLOAD_REF }}
-      LLVM-ExtraCMakeArgs: ${{ env.BASE_CMAKE_ARGS }} ${{ env.EXTRA_GBV_ARG }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-Windows-Warp:
     permissions:
@@ -55,39 +39,34 @@ jobs:
       fail-fast: false
       matrix:
         SKU: [windows-intel, windows-qc]
-        TestTarget:
-          [check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
+        TestTarget: [check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ env.OFFLOAD_REF }}
-      LLVM-ExtraCMakeArgs: ${{ env.BASE_CMAKE_ARGS }} ${{ env.EXTRA_GBV_ARG }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-Extra:
-    if: |
-      github.event_name == 'schedule' ||
-      (github.event_name == 'pull_request' &&
-       contains(github.event.pull_request.labels.*.name, 'test-all'))
     permissions:
       contents: read
       checks: write
+    if: contains( github.event.pull_request.labels.*.name, 'test-all')
     strategy:
       fail-fast: false
       matrix:
         SKU: [windows-nvidia, windows-amd, windows-qc]
-        TestTarget:
-          [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ env.OFFLOAD_REF }}
-      LLVM-ExtraCMakeArgs: ${{ env.BASE_CMAKE_ARGS }} ${{ env.EXTRA_GBV_ARG }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   Exec-Tests-MacOS:
     permissions:
@@ -104,4 +83,4 @@ jobs:
       OS: macOS
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ env.OFFLOAD_REF }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
