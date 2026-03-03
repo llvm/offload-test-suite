@@ -13,9 +13,7 @@ cbuffer example_f4x2 : register(b1) {
 void main(uint GI : SV_GroupIndex) {
   if(GI < 2)
     Out_f2x4[GI] = M_f2x4[GI];
-
   Out_f4x2[GI] = M_f4x2[GI];
-   
 }
 //--- pipeline.yaml
 
