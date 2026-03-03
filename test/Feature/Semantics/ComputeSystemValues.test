@@ -27,6 +27,7 @@ Buffers:
     Format: Int32
     # 8 (dispatch) x 8 (numthreads) -> 64
     # 64 * sizeof(uint3) * 4 = 3072
+    Stride: 12
     FillSize: 3072
     FillValue: 0
   - Name: OUTPUT_Expected
