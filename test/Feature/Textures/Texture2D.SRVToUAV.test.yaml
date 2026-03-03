@@ -26,7 +26,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
   - Name: Out
     Format: Float32
     Channels: 4
@@ -34,7 +34,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
   - Name: ExpectedOut
     Format: Float32
     Channels: 4
@@ -45,7 +45,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
 Results:
   - Result: Test1
     Rule: BufferExact
