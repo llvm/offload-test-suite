@@ -636,8 +636,8 @@ public:
     // this for subgroup_uniform_control_flow, since we only validate results
     // that must be fully reconverged.
     if (loopNesting > 0) {
-      css << "OutputB[gIndex][outLoc++] = "
-          << getPartitionBallotTextHlsl() << ".xy";
+      css << "OutputB[gIndex][outLoc++] = " << getPartitionBallotTextHlsl()
+          << ".xy";
     } else {
       css << "OutputB[gIndex][outLoc++] = "
              "WaveActiveBallot(true).xy";
@@ -969,13 +969,13 @@ public:
 
       switch (ops[i].type) {
       case OP_BALLOT:
-        simulateBallot(activeMask, primitiveID, i, outLoc, ref,
-                       prerequisites, logFailureCount,
-                       (i > 0 ? ops[i - 1].type : OP_BALLOT), cmp);
+        simulateBallot(activeMask, primitiveID, i, outLoc, ref, prerequisites,
+                       logFailureCount, (i > 0 ? ops[i - 1].type : OP_BALLOT),
+                       cmp);
         break;
       case OP_STORE:
-        simulateStore(stateStack[nesting].activeMask, primitiveID,
-                      ops[i].value, outLoc, ref, prerequisites, logFailureCount,
+        simulateStore(stateStack[nesting].activeMask, primitiveID, ops[i].value,
+                      outLoc, ref, prerequisites, logFailureCount,
                       (i > 0 ? ops[i - 1].type : OP_STORE), cmp);
         break;
       case OP_IF_MASK:
@@ -1152,8 +1152,8 @@ public:
         stateStack[nesting].continueMask = 0;
         if (stateStack[nesting].activeMask.any()) {
           // output expected OP_BALLOT values
-          simulateBallot(stateStack[nesting].activeMask, primitiveID,
-                         i, outLoc, ref, prerequisites, logFailureCount,
+          simulateBallot(stateStack[nesting].activeMask, primitiveID, i, outLoc,
+                         ref, prerequisites, logFailureCount,
                          (i > 0 ? ops[i - 1].type : OP_BALLOT), cmp);
 
           i = stateStack[nesting].header + 1;

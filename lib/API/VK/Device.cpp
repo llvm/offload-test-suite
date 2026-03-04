@@ -833,8 +833,10 @@ public:
     }
 
     const size_t LogicalSize = R.size();
-    const size_t BackingSize = std::max<size_t>(LogicalSize, R.getElementSize());
-    ResourceBundle Bundle{getDescriptorType(R.Kind), static_cast<uint32_t>(LogicalSize), R.BufferPtr};
+    const size_t BackingSize =
+        std::max<size_t>(LogicalSize, R.getElementSize());
+    ResourceBundle Bundle{getDescriptorType(R.Kind),
+                          static_cast<uint32_t>(LogicalSize), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
           IS,

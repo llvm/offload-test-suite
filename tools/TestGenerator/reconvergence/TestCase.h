@@ -27,7 +27,8 @@ public:
   std::stringstream &getShader() { return shader_; }
   std::string getShaderString() const { return shader_.str(); }
 
-  void setExpectedResult(const std::vector<std::vector<UVec4>> &expected_result) {
+  void
+  setExpectedResult(const std::vector<std::vector<UVec4>> &expected_result) {
     expected_result_ = expected_result;
   }
   const std::vector<std::vector<UVec4>> &getExpectedResult() const {
