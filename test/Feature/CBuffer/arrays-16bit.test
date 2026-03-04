@@ -42,8 +42,6 @@ Buffers:
     ]
   - Name: Out
     Format: Hex16
-    # Warp doesn't seem to like buffers with non-multiple of 4 strides, so we
-    # add a small amount of buffer at the end here.
     Stride: 26
     FillSize: 26
   - Name: ExpectedOut
