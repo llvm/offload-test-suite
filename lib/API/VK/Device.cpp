@@ -406,9 +406,33 @@ public:
   VKDevice(const VKDevice &) = default;
 
   ~VKDevice() override = default;
-
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+  uint32_t getSubgroupSize() const override {
+    VkPhysicalDeviceSubgroupProperties SubgroupProps = {};
+    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 SubgroupProperties2 = {};
+    SubgroupProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    SubgroupProperties2.pNext = &SubgroupProps;
+    vkGetPhysicalDeviceProperties2(Device, &SubgroupProperties2);
+    return SubgroupProps.subgroupSize;
+  }
+
+  std::pair<uint32_t, uint32_t> getMinMaxSubgroupSize() const override {
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT SubgroupSizeControlProps =
+        {};
+    SubgroupSizeControlProps.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT;
+
+    VkPhysicalDeviceProperties2 Props2 = {};
+    Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    Props2.pNext = &SubgroupSizeControlProps;
+
+    vkGetPhysicalDeviceProperties2(Device, &Props2);
+    return {SubgroupSizeControlProps.minSubgroupSize,
+            SubgroupSizeControlProps.maxSubgroupSize};
+  }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
@@ -445,6 +469,11 @@ public:
   }
 
   void printExtra(llvm::raw_ostream &OS) override {
+    OS << "  SubgroupSize: " << getSubgroupSize() << "\n";
+    auto MinMax = getMinMaxSubgroupSize();
+    OS << "  MinSubgroupSize: " << MinMax.first << "\n";
+    OS << "  MaxSubgroupSize: " << MinMax.second << "\n";
+
     OS << "  Layers:\n";
     for (auto Layer : getLayers()) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
