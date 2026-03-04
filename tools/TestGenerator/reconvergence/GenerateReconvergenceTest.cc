@@ -59,15 +59,9 @@ TestCase ReconvergenceTestGenerator::createSingleTest(
 
   Program.generateRandomProgram();
 
-  std::vector<UVec4> Ref;
   const uint32_t InvocationStride = ThreadgroupSizeX * ThreadgroupSizeY;
-  uint32_t MaxLoc =
-      Program.execute(/*countOnly=*/true, WaveSize, InvocationStride, Ref);
-  MaxLoc++;
-  MaxLoc *= InvocationStride;
-  Ref.resize(MaxLoc, UVec4(0u, 0u, 0u, 0u));
-
-  Program.execute(/*countOnly=*/false, WaveSize, InvocationStride, Ref);
+  std::vector<std::vector<UVec4>> Ref(InvocationStride);
+  Program.execute(WaveSize, InvocationStride, Ref);
   TestCase.setExpectedResult(Ref);
 
   std::stringstream Functions, Main;
@@ -79,13 +73,13 @@ TestCase ReconvergenceTestGenerator::createSingleTest(
   Header << "#define THREADS_Y " << ThreadgroupSizeY << "\n\n";
 
   Layout << "StructuredBuffer<uint> InputA : register(t0);\n";
-  Layout << "RWStructuredBuffer<uint4> OutputB : register(u1);\n\n";
+  Layout << "RWStructuredBuffer<uint4> OutputB[" << InvocationStride
+         << "] : register(u1);\n\n";
 
   Globals << "bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> "
              "(bit % 32)) & 1) != 0; }\n";
 
   Globals << "static int outLoc = 0;\n";
-  Globals << "static int invocationStride = " << InvocationStride << ";\n\n";
 
   std::stringstream &Shader = TestCase.getShader();
   Shader << Header.str();
@@ -158,35 +152,45 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   - Name: InputA
     Format: UInt32
     Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90 ]
-  - Name: OutputB
-    Format: UInt32
-    Stride: 16
-    FillSize: )"""";
+)"""";
+
+  const uint32_t InvocationStride = ThreadgroupSizeX * ThreadgroupSizeY;
   const auto &ExpectedResult = Test.getExpectedResult();
-  Buffers << ExpectedResult.size() * 16;
-  Buffers << R""""(
-  - Name: ExpectedOutputB
-    Format: UInt32
-    Stride: 16
-    Data: )"""";
-  Buffers << "[ ";
-  for (size_t I = 0; I < ExpectedResult.size(); ++I) {
-    const UVec4 &Vec = ExpectedResult[I];
-    Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", " << Vec.w();
-    if (I < ExpectedResult.size() - 1) {
-      Buffers << ",";
+
+  for (uint32_t i = 0; i < InvocationStride; ++i) {
+    const size_t NumElements = ExpectedResult[i].size();
+
+    Buffers << "  - Name: OutputB_" << i << "\n";
+    Buffers << "    Format: UInt32\n";
+    Buffers << "    Stride: 16\n";
+    if (NumElements == 0) {
+      Buffers << "    Data: [ ]\n";
+    } else {
+      Buffers << "    FillSize: " << NumElements * 16 << "\n";
     }
-    Buffers << " ";
+
+    Buffers << "  - Name: ExpectedOutputB_" << i << "\n";
+    Buffers << "    Format: UInt32\n";
+    Buffers << "    Stride: 16\n";
+    Buffers << "    Data: [ ";
+    for (size_t j = 0; j < NumElements; ++j) {
+      const UVec4 &Vec = ExpectedResult[i][j];
+      Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", " << Vec.w();
+      if (j < NumElements - 1) {
+        Buffers << ", ";
+      }
+    }
+    Buffers << " ]\n";
   }
-  Buffers << "]" << std::endl;
 
   std::stringstream Results;
-  Results << R"""(Results:
-  - Result: Test
-    Rule: BufferExact
-    Actual: OutputB
-    Expected: ExpectedOutputB
-)""";
+  Results << "Results:\n";
+  for (uint32_t i = 0; i < InvocationStride; ++i) {
+    Results << "  - Result: Test_" << i << "\n";
+    Results << "    Rule: BufferExact\n";
+    Results << "    Actual: OutputB_" << i << "\n";
+    Results << "    Expected: ExpectedOutputB_" << i << "\n";
+  }
 
   std::stringstream DescriptorSets;
   DescriptorSets << R"""(DescriptorSets:
@@ -198,14 +202,18 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: OutputB
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 1
-        Space: 0
-      VulkanBinding:
-        Binding: 1
 )""";
+
+  for (uint32_t i = 0; i < InvocationStride; ++i) {
+    DescriptorSets << "    - Name: OutputB_" << i << "\n";
+    DescriptorSets << "      Kind: RWStructuredBuffer\n";
+    DescriptorSets << "      DirectXBinding:\n";
+    DescriptorSets << "        Register: " << (1 + i) << "\n";
+    DescriptorSets << "        Space: 0\n";
+    DescriptorSets << "      VulkanBinding:\n";
+    DescriptorSets << "        Binding: " << (1 + i) << "\n";
+  }
+
 
   Ofs << Shaders.str() << Buffers.str() << Results.str() << DescriptorSets.str()
       << std::endl;

@@ -43,10 +43,10 @@ public:
     // this for subgroup_uniform_control_flow, since we only validate results
     // that must be fully reconverged.
     if (loopNesting > 0) {
-      css << "OutputB[(outLoc++)*invocationStride + gIndex] = "
+      css << "OutputB[gIndex][outLoc++] = "
           << getPartitionBallotTextHlsl();
     } else {
-      css << "OutputB[(outLoc++)*invocationStride + gIndex] = "
+      css << "OutputB[gIndex][outLoc++] = "
              "WaveActiveBallot(true)";
     }
     if (endWithSemicolon) {
@@ -56,10 +56,10 @@ public:
 
 protected:
   virtual void
-  simulateBallot(const bool countOnly, add_cref<Ballots> activeMask,
+  simulateBallot(add_cref<Ballots> activeMask,
                  const uint32_t /*unusedPrimitiveID*/, const int32_t opsIndex,
                  add_ref<std::vector<uint32_t>> outLoc,
-                 add_ref<std::vector<UVec4>> ref,
+                 add_ref<std::vector<std::vector<UVec4>>> ref,
                  std::shared_ptr<Prerequisites> prerequisites,
                  add_ref<uint32_t> /*logFailureCount*/, const OPType /*reason*/,
                  const UVec4 * /*cmp*/) override {
@@ -70,28 +70,24 @@ protected:
 
     for (uint32_t id = 0; id < invocationStride; ++id) {
       if (activeMask.test((Ballots::findBit(id, waveSize)))) {
-        if (countOnly) {
-          outLoc[id]++;
+        if (ops[opsIndex].caseValue) {
+          // Emit a magic value to indicate that we shouldn't validate this
+          // ballot
+          ref[id].push_back(
+              bitsetToBallot(0x12345678, waveCount, waveSize, id));
         } else {
-          if (ops[opsIndex].caseValue) {
-            // Emit a magic value to indicate that we shouldn't validate this
-            // ballot
-            ref[(outLoc[id]++) * invocationStride + id] =
-                bitsetToBallot(0x12345678, waveCount, waveSize, id);
-          } else {
-            ref[(outLoc[id]++) * invocationStride + id] =
-                bitsetToBallot(activeMask, waveSize, id);
-          }
+          ref[id].push_back(bitsetToBallot(activeMask, waveSize, id));
         }
+        outLoc[id]++;
       }
     }
   }
 
-  virtual void simulateStore(const bool countOnly, add_cref<Ballots> activeMask,
+  virtual void simulateStore(add_cref<Ballots> activeMask,
                              const uint32_t /*unusedPrimitiveID*/,
                              const uint64_t storeValue,
                              add_ref<std::vector<uint32_t>> outLoc,
-                             add_ref<std::vector<UVec4>> ref,
+                             add_ref<std::vector<std::vector<UVec4>>> ref,
                              std::shared_ptr<Prerequisites> prerequisites,
                              add_ref<uint32_t> /*logFailureCount*/,
                              const OPType /*reason*/,
@@ -101,11 +97,9 @@ protected:
             ->m_waveSize;
     for (uint32_t id = 0; id < invocationStride; ++id) {
       if (activeMask.test(Ballots::findBit(id, waveSize))) {
-        if (countOnly)
-          outLoc[id]++;
-        else
-          ref[(outLoc[id]++) * invocationStride + id] = Ballot(UVec4(
-              static_cast<uint32_t>(storeValue & 0xFFFFFFFF), 0u, 0u, 0u));
+        ref[id].push_back(Ballot(UVec4(
+            static_cast<uint32_t>(storeValue & 0xFFFFFFFF), 0u, 0u, 0u)));
+        outLoc[id]++;
       }
     }
   }

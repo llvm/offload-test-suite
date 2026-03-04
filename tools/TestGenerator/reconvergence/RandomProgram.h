@@ -623,7 +623,7 @@ public:
   virtual void printStoreHlsl(std::stringstream &css,
                               add_cref<FlowState> flow) {
     printIndent(css);
-    css << "OutputB[(outLoc++)*invocationStride + gIndex].x = 0x" << std::hex
+    css << "OutputB[gIndex][outLoc++].x = 0x" << std::hex
         << flow.ops[flow.opsIndex].value << ";\n";
   }
 
@@ -636,10 +636,10 @@ public:
     // this for subgroup_uniform_control_flow, since we only validate results
     // that must be fully reconverged.
     if (loopNesting > 0) {
-      css << "OutputB[(outLoc++)*invocationStride + gIndex] = "
+      css << "OutputB[gIndex][outLoc++] = "
           << getPartitionBallotTextHlsl() << ".xy";
     } else {
-      css << "OutputB[(outLoc++)*invocationStride + gIndex] = "
+      css << "OutputB[gIndex][outLoc++] = "
              "WaveActiveBallot(true).xy";
     }
     if (endWithSemicolon) {
@@ -929,9 +929,9 @@ public:
   virtual uint32_t simulate(bool countOnly, uint32_t waveSize,
                             add_ref<std::vector<uint64_t>> ref) = 0;
 
-  virtual uint32_t execute(bool countOnly, const uint32_t waveSize,
+  virtual uint32_t execute(const uint32_t waveSize,
                            const uint32_t primitiveStride,
-                           add_ref<std::vector<UVec4>> ref,
+                           add_ref<std::vector<std::vector<UVec4>>> ref,
                            add_cref<std::vector<uint32_t>> outputP = {},
                            const UVec4 *cmp = nullptr,
                            const uint32_t primitiveID = (~0u)) {
@@ -954,12 +954,12 @@ public:
 
       switch (ops[i].type) {
       case OP_BALLOT:
-        simulateBallot(countOnly, activeMask, primitiveID, i, outLoc, ref,
+        simulateBallot(activeMask, primitiveID, i, outLoc, ref,
                        prerequisites, logFailureCount,
                        (i > 0 ? ops[i - 1].type : OP_BALLOT), cmp);
         break;
       case OP_STORE:
-        simulateStore(countOnly, stateStack[nesting].activeMask, primitiveID,
+        simulateStore(stateStack[nesting].activeMask, primitiveID,
                       ops[i].value, outLoc, ref, prerequisites, logFailureCount,
                       (i > 0 ? ops[i - 1].type : OP_STORE), cmp);
         break;
@@ -1137,7 +1137,7 @@ public:
         stateStack[nesting].continueMask = 0;
         if (stateStack[nesting].activeMask.any()) {
           // output expected OP_BALLOT values
-          simulateBallot(countOnly, stateStack[nesting].activeMask, primitiveID,
+          simulateBallot(stateStack[nesting].activeMask, primitiveID,
                          i, outLoc, ref, prerequisites, logFailureCount,
                          (i > 0 ? ops[i - 1].type : OP_BALLOT), cmp);
 
@@ -1278,22 +1278,20 @@ protected:
     return std::make_shared<Prerequisites>();
   }
 
-  virtual void simulateBallot(const bool /*countOnly*/,
-                              add_cref<Ballots> /*activeMask*/,
+  virtual void simulateBallot(add_cref<Ballots> /*activeMask*/,
                               const uint32_t /*primitiveID*/,
                               const int32_t /*opsIndex*/,
                               add_ref<std::vector<uint32_t>> /*outLoc*/,
-                              add_ref<std::vector<UVec4>> /*ref*/,
+                              add_ref<std::vector<std::vector<UVec4>>> /*ref*/,
                               std::shared_ptr<Prerequisites> /*prerequisites*/,
                               add_ref<uint32_t> /*logFailureCount*/,
                               const OPType /*reason*/, const UVec4 * /*cmp*/) {}
 
-  virtual void simulateStore(const bool /*countOnly*/,
-                             add_cref<Ballots> /*activeMask*/,
+  virtual void simulateStore(add_cref<Ballots> /*activeMask*/,
                              const uint32_t /*primitiveID*/,
                              const uint64_t /*storeValue*/,
                              add_ref<std::vector<uint32_t>> /*outLoc*/,
-                             add_ref<std::vector<UVec4>> /*ref*/,
+                             add_ref<std::vector<std::vector<UVec4>>> /*ref*/,
                              std::shared_ptr<Prerequisites> /*prerequisites*/,
                              add_ref<uint32_t> /*logFailureCount*/,
                              const OPType /*reason*/, const UVec4 * /*cmp*/) {}

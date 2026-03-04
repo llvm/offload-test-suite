@@ -27,16 +27,16 @@ public:
   std::stringstream &getShader() { return shader_; }
   std::string getShaderString() const { return shader_.str(); }
 
-  void setExpectedResult(const std::vector<UVec4> &expected_result) {
-    expected_result_ = std::move(expected_result);
+  void setExpectedResult(const std::vector<std::vector<UVec4>> &expected_result) {
+    expected_result_ = expected_result;
   }
-  const std::vector<UVec4> &getExpectedResult() const {
+  const std::vector<std::vector<UVec4>> &getExpectedResult() const {
     return expected_result_;
   }
 
 private:
   std::stringstream shader_;
-  std::vector<UVec4> expected_result_;
+  std::vector<std::vector<UVec4>> expected_result_;
   uint32_t seed_;
   uint32_t max_nesting_level_;
   uint32_t wave_size_;
