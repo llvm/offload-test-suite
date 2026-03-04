@@ -92,13 +92,13 @@ DescriptorSets:
 # Are always empty
 # UNSUPPORTED: Darwin
 
-# Note: Crashes on Intel
-# BUG https://github.com/llvm/offload-test-suite/issues/226
-# XFAIL: Clang && Intel
-
 # Note: NV crashes AMD and Intel Output buffers are empty.
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8218
 # XFAIL: DXC && Vulkan
+
+
+# BUG https://github.com/llvm/offload-test-suite/issues/931
+# XFAIL: Clang && DirectX && AMD
 
 # Note: clang Vulkan crashes
 # BUG https://github.com/llvm/llvm-project/issues/179879
