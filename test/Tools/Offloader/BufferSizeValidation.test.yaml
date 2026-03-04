@@ -1,0 +1,32 @@
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: MismatchBuffer
+    Format: Float32
+    Channels: 4
+    # Expected size: 2x2x1 * 4 * 4 = 64 bytes
+    # Actual size: defined by FillSize = 16 bytes
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    FillSize: 16 
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources: []
+
+Results: []
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: not %offloader %t/pipeline.yaml 2>&1 | FileCheck %s
+
+# CHECK: Buffer 'MismatchBuffer' size (16) does not match OutputProps dimensions (64)

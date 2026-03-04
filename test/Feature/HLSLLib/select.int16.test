@@ -204,9 +204,6 @@ DescriptorSets:
         Binding: 8
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/615
-# XFAIL: Clang && Vulkan && Intel
-
 # REQUIRES: Int16
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

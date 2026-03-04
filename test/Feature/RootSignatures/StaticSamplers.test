@@ -52,7 +52,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
   - Name: DefaultOut
     Format: Float32
     Channels: 4
@@ -60,7 +60,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
   - Name: SpecifiedOut
     Format: Float32
     Channels: 4
@@ -68,7 +68,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
   - Name: ExpectedDefaultOut
     Format: Float32
     Channels: 4
@@ -79,7 +79,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
   ## Modifying the LOD parameters does not affect the output. However,
   ## the applied filter will output [0, 0, 1, 1, ... 0, 0, 1, 1] and then
   ## setting addressV to mirror outputs [0, 0, 1, 1, ..., 1, 0, 0, 1] as shown
@@ -94,7 +94,7 @@ Buffers:
     OutputProps:
       Height: 2
       Width: 2
-      Depth: 16
+      Depth: 1
 Results:
   - Result: DefaultTest
     Rule: BufferExact

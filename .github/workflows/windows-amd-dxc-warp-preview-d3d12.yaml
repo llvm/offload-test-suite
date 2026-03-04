@@ -22,4 +22,4 @@ jobs:
       TestTarget: check-hlsl-warp-d3d12
       TestTargetReconvergence: check-hlsl-warp-d3d12-reconvergence
       OffloadTest-branch: ${{ github.ref }}
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWARP_VERSION=1.0.17
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWARP_VERSION=1.0.19-preview
