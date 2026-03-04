@@ -186,8 +186,6 @@ jobs:
       - name: Run Maximal Reconvergence Tests
         if: always()
         continue-on-error: true
-        env:
-            OFFLOADTEST_SUPPRESS_DIFF: 1
         run: |
             cd llvm-project
             cd build

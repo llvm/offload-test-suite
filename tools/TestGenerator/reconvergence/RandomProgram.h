@@ -649,6 +649,8 @@ public:
 
   void printCodeHlsl(std::stringstream &functions, std::stringstream &main) {
     std::stringstream *css = &main;
+    std::vector<std::stringstream *> cssStack;
+    std::vector<int32_t> indentStack;
     indent = 4;
     loopNesting = 0;
     int funcNum = 0;
@@ -828,7 +830,11 @@ public:
             *css << ", ";
         }
         *css << ");\n";
+        cssStack.push_back(css);
+        indentStack.push_back(indent);
         css = &functions;
+        indent = 0;
+        *css << "\n";
         printIndent(*css);
         *css << "void func" << funcNum << "(uint gIndex";
         if (loopNesting > 0) {
@@ -847,7 +853,16 @@ public:
         indent -= 4;
         printIndent(*css);
         *css << "}\n";
-        css = &main;
+        if (!cssStack.empty()) {
+          css = cssStack.back();
+          cssStack.pop_back();
+        } else {
+          css = &main;
+        }
+        if (!indentStack.empty()) {
+          indent = indentStack.back();
+          indentStack.pop_back();
+        }
         break;
       case OP_NOISE:
         if (ops[i].value == 0) {
