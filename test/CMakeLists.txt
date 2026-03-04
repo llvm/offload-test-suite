@@ -116,6 +116,9 @@ endforeach()
 cmake_path(SET DXC_DIR NORMALIZE "${DXC_DIR}")
 
 function(add_offloadtest_lit_suite suite)
+  # Regular suites discover tests from the source tree under test/.
+  set(TEST_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+
   configure_lit_site_cfg(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
     ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.site.cfg.py
@@ -196,9 +199,10 @@ set_target_properties(check-hlsl PROPERTIES FOLDER "HLSL tests")
 set(RECONVERGENCE_TEST_DIR "${OFFLOADTEST_SOURCE_DIR}/reconvergence-tests/tests")
 
 # Initialize test flags based on enabled platforms
-set(TEST_SOURCE_ROOT "${RECONVERGENCE_TEST_DIR}")
-
 function(add_reconvergence_lit_suite suite)
+  # Reconvergence suites discover tests from generated reconvergence files.
+  set(TEST_SOURCE_ROOT "${RECONVERGENCE_TEST_DIR}")
+
   configure_lit_site_cfg(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
     ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.site.cfg.py
