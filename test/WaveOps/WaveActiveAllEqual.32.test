@@ -28,7 +28,7 @@ RWStructuredBuffer<bool> FOut : register(u14);
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID)
 {
-    int index = 0;
+    unsigned int index = 0;
     Out[index++] &= WaveActiveAllEqual(In[TID.x]);    
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
@@ -53,7 +53,7 @@ void main(uint3 TID : SV_GroupThreadID)
     Out[index++] &= ResultCF.z;
     Out[index++] &= ResultCF.w;
 
-    int uindex = 0;
+    unsigned int uindex = 0;
     UOut[uindex++] &= WaveActiveAllEqual(UIn[TID.x]);    
 
     bool2 UResult2 = WaveActiveAllEqual(UIn2[TID.x]);
@@ -78,7 +78,7 @@ void main(uint3 TID : SV_GroupThreadID)
     UOut[uindex++] &= UResultCF.z;
     UOut[uindex++] &= UResultCF.w;
 
-    int findex = 0;
+    unsigned int findex = 0;
     FOut[findex++] &= WaveActiveAllEqual(FIn[TID.x]);    
 
     bool2 FResult2 = WaveActiveAllEqual(FIn2[TID.x]);

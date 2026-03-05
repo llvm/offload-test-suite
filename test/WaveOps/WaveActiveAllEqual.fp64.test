@@ -16,7 +16,7 @@ RWStructuredBuffer<bool> Out : register(u4);
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID)
 {
-    int index = 0;
+    unsigned int index = 0;
     Out[index++] &= WaveActiveAllEqual(In[TID.x]);    
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
