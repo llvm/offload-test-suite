@@ -2,12 +2,12 @@
 
 cbuffer CBVectors : register(b0) {
   float16_t2 b1;
-  uint16_t3 b2;
+  uint16_t4 b2;
 }
 
 struct Vectors {
   float16_t2 b1;
-  uint16_t3 b2;
+  uint16_t4 b2;
 };
 
 RWStructuredBuffer<Vectors> Out : register(u1);
@@ -31,12 +31,10 @@ Buffers:
     Format: Hex16
     Data: [
       0x3c00, 0x3555,
-      0x0001, 0xffff, 0x1234
+      0x0001, 0xffff, 0x1234, 0x5678
     ]
   - Name: Out
     Format: Hex16
-    # Warp doesn't seem to be able to handle a stride of 10 so we use 12 here
-    Stride: 12
     FillSize: 12
 DescriptorSets:
   - Resources:
@@ -60,9 +58,6 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/llvm-project/issues/159602
 # XFAIL: Clang && Vulkan
 
-# Bug https://github.com/llvm/offload-test-suite/issues/575
-# XFAIL: QC && Vulkan
-
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t
@@ -81,6 +76,8 @@ DescriptorSets:
 
 # CHECK: 0x1,
 # CHECK: 0xFFFF,
-# CHECK: 0x1234
+# CHECK: 0x1234,
+# CHECK: 0x5678
+
 
 # CHECK:   ]
