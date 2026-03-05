@@ -53,7 +53,7 @@ void main(uint3 TID : SV_DispatchThreadID) {
   // Sixth and finally, test that identical vectors pass 
   // in the right conditions. Expect [true, true] for relevant threads.
   bool2 Result6 = false;
-  if (TID.x %2 == 0 && TID.x != 0)
+  if (TID.x != 0)
       Result6 = WaveActiveAllEqual(InVec2[TID.x]);
 
   Out6[TID.x] = Result6;
