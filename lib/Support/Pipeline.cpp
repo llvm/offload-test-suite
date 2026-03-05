@@ -310,6 +310,9 @@ void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
   case DF::Float32:
     setData<float>(I, B);
     break;
+  case DF::Depth32:
+    setData<float>(I, B);
+    break;
   case DF::Float64:
     setData<double>(I, B);
     break;
@@ -424,6 +427,8 @@ void MappingTraits<offloadtest::PushConstantValue>::mapping(
   case DF::Float16:
     return setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
   case DF::Float32:
+    return setData<float>(I, B);
+  case DF::Depth32:
     return setData<float>(I, B);
   case DF::Float64:
     return setData<double>(I, B);
