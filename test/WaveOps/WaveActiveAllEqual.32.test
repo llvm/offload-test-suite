@@ -1,107 +1,107 @@
 #--- source.hlsl
 StructuredBuffer<int> In  : register(t0);
-StructuredBuffer<int> In2  : register(t1);
-StructuredBuffer<int> In3  : register(t2);
-StructuredBuffer<int> In4  : register(t3);
+StructuredBuffer<int2> In2  : register(t1);
+StructuredBuffer<int3> In3  : register(t2);
+StructuredBuffer<int4> In4  : register(t3);
 
 StructuredBuffer<uint> UIn  : register(t4);
-StructuredBuffer<uint> UIn2  : register(t5);
-StructuredBuffer<uint> UIn3  : register(t6);
-StructuredBuffer<uint> UIn4  : register(t7);
+StructuredBuffer<uint2> UIn2  : register(t5);
+StructuredBuffer<uint3> UIn3  : register(t6);
+StructuredBuffer<uint4> UIn4  : register(t7);
 
 StructuredBuffer<float> FIn  : register(t8);
-StructuredBuffer<float> FIn2  : register(t9);
-StructuredBuffer<float> FIn3  : register(t10);
-StructuredBuffer<float> FIn4  : register(t11);
+StructuredBuffer<float2> FIn2  : register(t9);
+StructuredBuffer<float3> FIn3  : register(t10);
+StructuredBuffer<float4> FIn4  : register(t11);
 
-RWStructuredBuffer<bool> Out : register(u12);
-RWStructuredBuffer<bool> UOut : register(u13);
-RWStructuredBuffer<bool> FOut : register(u14);
+RWStructuredBuffer<int> Out : register(u12);
+RWStructuredBuffer<int> UOut : register(u13);
+RWStructuredBuffer<int> FOut : register(u14);
 
 // Expect all trues, all elements will be the same.
-// Output buffers start off as true, and each
-// lane writes its result value anded with the existing
-// result in the output buffer.
 // Since we expect all results to be true, output buffers
-// should remain all true at the end.
+// should result in 4 at the end, since there are 4 threads.
 
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID)
 {
     unsigned int index = 0;
-    Out[index++] &= WaveActiveAllEqual(In[TID.x]);    
+    bool Result = WaveActiveAllEqual(In[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result);
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
-    Out[index++] &= Result2.x;
-    Out[index++] &= Result2.y;
+    InterlockedAdd(Out[index++], (unsigned int)Result2.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result2.y);
 
     bool3 Result3 = WaveActiveAllEqual(In3[TID.x]);
-    Out[index++] &= Result3.x;
-    Out[index++] &= Result3.y;
-    Out[index++] &= Result3.z;
+    InterlockedAdd(Out[index++], (unsigned int)Result3.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.z);
 
     bool4 Result4 = WaveActiveAllEqual(In4[TID.x]);
-    Out[index++] &= Result4.x;
-    Out[index++] &= Result4.y;
-    Out[index++] &= Result4.z;
-    Out[index++] &= Result4.w;
+    InterlockedAdd(Out[index++], (unsigned int)Result4.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.z);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.w);
 
     // constant folding case
-    bool4 ResultCF = WaveActiveSum(int4(1,1,1,1));
-    Out[index++] &= ResultCF.x;
-    Out[index++] &= ResultCF.y;
-    Out[index++] &= ResultCF.z;
-    Out[index++] &= ResultCF.w;
+    bool4 ResultCF = WaveActiveAllEqual(int4(1,1,1,1));
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.x);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.y);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.z);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.w);
 
     unsigned int uindex = 0;
-    UOut[uindex++] &= WaveActiveAllEqual(UIn[TID.x]);    
-
+    bool UResult = WaveActiveAllEqual(UIn[TID.x]);    
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult);
+    
     bool2 UResult2 = WaveActiveAllEqual(UIn2[TID.x]);
-    UOut[uindex++] &= UResult2.x;
-    UOut[uindex++] &= UResult2.y;
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult2.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult2.y);
 
     bool3 UResult3 = WaveActiveAllEqual(UIn3[TID.x]);
-    UOut[uindex++] &= UResult3.x;
-    UOut[uindex++] &= UResult3.y;
-    UOut[uindex++] &= UResult3.z;
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.y);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.z);
 
     bool4 UResult4 = WaveActiveAllEqual(UIn4[TID.x]);
-    UOut[uindex++] &= UResult4.x;
-    UOut[uindex++] &= UResult4.y;
-    UOut[uindex++] &= UResult4.z;
-    UOut[uindex++] &= UResult4.w;
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.y);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.z);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.w);
 
     // constant folding case
-    bool4 UResultCF = WaveActiveSum(uint4(1,1,1,1));
-    UOut[uindex++] &= UResultCF.x;
-    UOut[uindex++] &= UResultCF.y;
-    UOut[uindex++] &= UResultCF.z;
-    UOut[uindex++] &= UResultCF.w;
+    bool4 UResultCF = WaveActiveAllEqual(uint4(1,1,1,1));
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.y);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.z);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.w);
 
     unsigned int findex = 0;
-    FOut[findex++] &= WaveActiveAllEqual(FIn[TID.x]);    
+    bool FResult = WaveActiveAllEqual(FIn[TID.x]);    
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult);
 
     bool2 FResult2 = WaveActiveAllEqual(FIn2[TID.x]);
-    FOut[findex++] &= FResult2.x;
-    FOut[findex++] &= FResult2.y;
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult2.x);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult2.y);
 
     bool3 FResult3 = WaveActiveAllEqual(FIn3[TID.x]);
-    FOut[findex++] &= FResult3.x;
-    FOut[findex++] &= FResult3.y;
-    FOut[findex++] &= FResult3.z;
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult3.x);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult3.y);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult3.z);
 
     bool4 FResult4 = WaveActiveAllEqual(FIn4[TID.x]);
-    FOut[findex++] &= FResult4.x;
-    FOut[findex++] &= FResult4.y;
-    FOut[findex++] &= FResult4.z;
-    FOut[findex++] &= FResult4.w;
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult4.x);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult4.y);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult4.z);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResult4.w);
 
     // constant folding case
-    bool4 FResultCF = WaveActiveSum(float4(1,1,1,1));
-    FOut[findex++] &= FResultCF.x;
-    FOut[findex++] &= FResultCF.y;
-    FOut[findex++] &= FResultCF.z;
-    FOut[findex++] &= FResultCF.w;
+    bool4 FResultCF = WaveActiveAllEqual(float4(1,1,1,1));
+    InterlockedAdd(FOut[findex++], (unsigned int)FResultCF.x);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResultCF.y);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResultCF.z);
+    InterlockedAdd(FOut[findex++], (unsigned int)FResultCF.w);
 }
 
 //--- pipeline.yaml
@@ -163,30 +163,30 @@ Buffers:
     Data: [ 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0 ]
 
   - Name: Out
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]  
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]  
   - Name: UOut
-    Format: Bool
-    Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Format: Int32
+    Stride: 0
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
   - Name: FOut
-    Format: Bool
-    Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Format: Int32
+    Stride: 0
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
   
   - Name: ExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   - Name: UExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   - Name: FExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   
 Results:
   - Result: ExpectedOut

@@ -4,7 +4,7 @@ StructuredBuffer<double2> In2  : register(t1);
 StructuredBuffer<double3> In3  : register(t2);
 StructuredBuffer<double4> In4  : register(t3);
 
-RWStructuredBuffer<bool> Out : register(u4);
+RWStructuredBuffer<int> Out : register(u4);
 
 // Expect all trues, all elements will be the same.
 // Output buffers start off as true, and each
@@ -17,29 +17,30 @@ RWStructuredBuffer<bool> Out : register(u4);
 void main(uint3 TID : SV_GroupThreadID)
 {
     unsigned int index = 0;
-    Out[index++] &= WaveActiveAllEqual(In[TID.x]);    
+    bool Result = WaveActiveAllEqual(In[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result);
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
-    Out[index++] &= Result2.x;
-    Out[index++] &= Result2.y;
+    InterlockedAdd(Out[index++], (unsigned int)Result2.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result2.y);
 
     bool3 Result3 = WaveActiveAllEqual(In3[TID.x]);
-    Out[index++] &= Result3.x;
-    Out[index++] &= Result3.y;
-    Out[index++] &= Result3.z;
+    InterlockedAdd(Out[index++], (unsigned int)Result3.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.z);
 
     bool4 Result4 = WaveActiveAllEqual(In4[TID.x]);
-    Out[index++] &= Result4.x;
-    Out[index++] &= Result4.y;
-    Out[index++] &= Result4.z;
-    Out[index++] &= Result4.w;
+    InterlockedAdd(Out[index++], (unsigned int)Result4.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.z);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.w);
 
     // constant folding case
-    bool4 ResultCF = WaveActiveSum(double4(1,1,1,1));
-    Out[index++] &= ResultCF.x;
-    Out[index++] &= ResultCF.y;
-    Out[index++] &= ResultCF.z;
-    Out[index++] &= ResultCF.w;
+    bool4 ResultCF = WaveActiveAllEqual(double4(1,1,1,1));
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.x);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.y);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.z);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.w);
 }
 
 //--- pipeline.yaml
@@ -68,22 +69,22 @@ Buffers:
     Data: [ -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
 
   - Name: Out
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]  
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]  
   - Name: UOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
   
   - Name: ExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   - Name: UExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   
 Results:
   - Result: ExpectedOut

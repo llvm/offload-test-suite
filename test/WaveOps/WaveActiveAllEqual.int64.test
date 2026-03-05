@@ -9,8 +9,8 @@ StructuredBuffer<uint64_t2> UIn2  : register(t5);
 StructuredBuffer<uint64_t3> UIn3  : register(t6);
 StructuredBuffer<uint64_t4> UIn4  : register(t7);
 
-RWStructuredBuffer<bool> Out : register(u8);
-RWStructuredBuffer<bool> UOut : register(u9);
+RWStructuredBuffer<int> Out : register(u8);
+RWStructuredBuffer<int> UOut : register(u9);
 
 // Expect all trues, all elements will be the same.
 // Output buffers start off as true, and each
@@ -23,54 +23,56 @@ RWStructuredBuffer<bool> UOut : register(u9);
 void main(uint3 TID : SV_GroupThreadID)
 {
     unsigned int index = 0;
-    Out[index++] &= WaveActiveAllEqual(In[TID.x]);    
+    bool Result = WaveActiveAllEqual(In[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result);
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
-    Out[index++] &= Result2.x;
-    Out[index++] &= Result2.y;
+    InterlockedAdd(Out[index++], (unsigned int)Result2.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result2.y);
 
     bool3 Result3 = WaveActiveAllEqual(In3[TID.x]);
-    Out[index++] &= Result3.x;
-    Out[index++] &= Result3.y;
-    Out[index++] &= Result3.z;
+    InterlockedAdd(Out[index++], (unsigned int)Result3.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.z);
 
     bool4 Result4 = WaveActiveAllEqual(In4[TID.x]);
-    Out[index++] &= Result4.x;
-    Out[index++] &= Result4.y;
-    Out[index++] &= Result4.z;
-    Out[index++] &= Result4.w;
+    InterlockedAdd(Out[index++], (unsigned int)Result4.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.z);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.w);
 
     // constant folding case
-    bool4 ResultCF = WaveActiveSum(int4(1,1,1,1));
-    Out[index++] &= ResultCF.x;
-    Out[index++] &= ResultCF.y;
-    Out[index++] &= ResultCF.z;
-    Out[index++] &= ResultCF.w;
+    bool4 ResultCF = WaveActiveAllEqual(int64_t4(1,1,1,1));
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.x);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.y);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.z);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.w);
 
     unsigned int uindex = 0;
-    UOut[uindex++] &= WaveActiveAllEqual(UIn[TID.x]);    
-
+    bool UResult = WaveActiveAllEqual(UIn[TID.x]);    
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult);
+    
     bool2 UResult2 = WaveActiveAllEqual(UIn2[TID.x]);
-    UOut[uindex++] &= UResult2.x;
-    UOut[uindex++] &= UResult2.y;
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult2.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult2.y);
 
     bool3 UResult3 = WaveActiveAllEqual(UIn3[TID.x]);
-    UOut[uindex++] &= UResult3.x;
-    UOut[uindex++] &= UResult3.y;
-    UOut[uindex++] &= UResult3.z;
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.y);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.z);
 
     bool4 UResult4 = WaveActiveAllEqual(UIn4[TID.x]);
-    UOut[uindex++] &= UResult4.x;
-    UOut[uindex++] &= UResult4.y;
-    UOut[uindex++] &= UResult4.z;
-    UOut[uindex++] &= UResult4.w;
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.y);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.z);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.w);
 
     // constant folding case
-    bool4 UResultCF = WaveActiveSum(uint4(1,1,1,1));
-    UOut[uindex++] &= UResultCF.x;
-    UOut[uindex++] &= UResultCF.y;
-    UOut[uindex++] &= UResultCF.z;
-    UOut[uindex++] &= UResultCF.w;
+    bool4 UResultCF = WaveActiveAllEqual(uint64_t4(1,1,1,1));
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.x);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.y);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.z);
+    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.w);
 }
 
 //--- pipeline.yaml
@@ -115,22 +117,22 @@ Buffers:
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
 
   - Name: Out
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]  
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]  
   - Name: UOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
   
   - Name: ExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   - Name: UExpectedOut
-    Format: Bool
+    Format: Int32
     Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
   
 Results:
   - Result: ExpectedOut
