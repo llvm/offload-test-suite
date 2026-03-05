@@ -1,0 +1,89 @@
+#--- source.hlsl
+
+StructuredBuffer<float> In : register(t0);
+
+RWStructuredBuffer<uint> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  for (uint i = 0; i < 7; i++)
+    Out[i] = f32tof16(In[i]);
+
+  float2 F2;
+  F2.x = In[7];
+  F2.y = In[8];
+  uint2 U2 = f32tof16(F2);
+  Out[7] = U2.x;
+  Out[8] = U2.y;
+
+  float3 F3;
+  F3.x = In[9];
+  F3.y = In[10];
+  F3.z = In[11];
+  uint3 U3 = f32tof16(F3);
+  Out[9] = U3.x;
+  Out[10] = U3.y;
+  Out[11] = U3.z;
+
+  float4 F4;
+  F4.x = In[12];
+  F4.y = In[13];
+  F4.z = In[14];
+  F4.w = In[15];
+  uint4 U4 = f32tof16(F4);
+  Out[12] = U4.x;
+  Out[13] = U4.y;
+  Out[14] = U4.z;
+  Out[15] = U4.w;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 4
+    Data: [ 0, 6.0e-08, 6.09756e-05, 6.10352e-05, 0.333252,
+            0.999512, 1, 1.00098, 65504, 3.14159, 1, -0, inf, -inf,
+            -0.824219, 42.0 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 64
+  - Name: ExpectedOut # The result we expect
+    Format: UInt32
+    Stride: 4
+    Data: [ 0x0, 0x0001, 0x03ff, 0x0400, 0x3555, 0x3bff, 0x3c00, 0x3c01, 0x7bff, 0x4248, 0x3c00, 0x8000, 0x7c00, 0xfc00, 0xba98, 0x5140]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
