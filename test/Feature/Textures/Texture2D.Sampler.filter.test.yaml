@@ -27,12 +27,17 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Linear sample at center (0.5, 0.5)
   // Should average all 4 pixels: (1+0+0+1)/4 = 0.5 for R, etc.
   // Expected: (0.5, 0.5, 0.5, 1.0)
-  Out[0] = Tex.SampleLevel(LinearSamp, float2(0.5, 0.5), 0);
+  float4 r0 = Tex.SampleLevel(LinearSamp, float2(0.5, 0.5), 0);
 
   // Point sample at top-left center (0.25, 0.25)
   // Should pick (0,0) -> Red
   // Expected: (1.0, 0.0, 0.0, 1.0)
-  Out[1] = Tex.SampleLevel(PointSamp, float2(0.25, 0.25), 0);
+  float4 r1 = Tex.SampleLevel(PointSamp, float2(0.25, 0.25), 0);
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+  }
   return float4(0,0,0,0);
 }
 
@@ -127,9 +132,6 @@ Results:
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
 # XFAIL: DirectX || Metal
-
-# Unimplemented: https://github.com/llvm/llvm-project/issues/175630
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl

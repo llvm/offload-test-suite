@@ -13,7 +13,7 @@ RWStructuredBuffer<double2> Out2 : register(u2); // test double2
 RWStructuredBuffer<double4> Out3 : register(u3); // test double3
 RWStructuredBuffer<double4> Out4 : register(u4); // test double4
 RWStructuredBuffer<double4> Out5 : register(u5); // constant folding
-StructuredBuffer<MaskStruct> Masks  : register(t6);
+StructuredBuffer<MaskStruct> Masks : register(t6);
 
 
 [numthreads(NUM_THREADS,1,1)]
@@ -32,7 +32,6 @@ void main(uint3 tid : SV_GroupThreadID)
             }
         }
     }
-
     // constant folding case
     Out5[0] = WaveActiveMax(double4(1.5,2.5,3.5,4.5));
 }
@@ -91,20 +90,20 @@ Buffers:
 
   - Name: Out1
     Format: Float64
-    Stride: 4
+    Stride: 8
     # 1 double is 8 bytes, * 4 halves for 4 threads, * 4 thread masks, * 2 value sets
     FillSize: 256  
   - Name: Out2
     Format: Float64
-    Stride: 8
+    Stride: 16
     FillSize: 512
   - Name: Out3
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 1024
   - Name: Out4
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 1024
   - Name: Out5
     Format: Float64
@@ -122,7 +121,7 @@ Buffers:
     0, 0, 0, 0, 1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 0]
   - Name: ExpectedOut1
     Format: Float64
-    Stride: 16
+    Stride: 8
     # 2 value sets, 4 masks per value set, 4 threads per mask, 1 result value per thread
     Data:  [ 0, 0, 0, 0, 
     14.5, 14.5, 14.5, 14.5,
@@ -154,7 +153,7 @@ Buffers:
     15.5, 14.5, 0, 0 ]
   - Name: ExpectedOut3
     Format: Float64
-    Stride: 16
+    Stride: 32
     # 2 value sets.5, 4 masks per value set, 4 threads per mask, 4 result values per thread
     # Note, vecs of 3 must be aligned.5, so the 3 result values are placed doubleo a 4 element vec
     Data: [ 0, 0, 0, 0, 
@@ -191,7 +190,7 @@ Buffers:
             0, 0, 0, 0 ]
   - Name: ExpectedOut4
     Format: Float64
-    Stride: 16
+    Stride: 32
     Data: [ 0, 0, 0, 0,
             0, 0, 0, 0,
             0, 0, 0, 0,
@@ -226,7 +225,7 @@ Buffers:
             0, 0, 0, 0 ]
   - Name: ExpectedOut5
     Format: Float64
-    Stride: 8
+    Stride: 32
     Data: [ 1.5, 2.5, 3.5, 4.5 ]
 Results:
   - Result: ExpectedOut1
