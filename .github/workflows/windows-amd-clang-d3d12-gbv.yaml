@@ -5,7 +5,7 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 6 * * 1-5' # Run daily at 10pm, Mon-Fri
+    - cron: '0 6 * * 2-6' # Run daily at 10pm PST, Mon-Fri (6am UTC, Tue-Sat)
 
 jobs:
   Windows-D3D12-AMD-Clang-GBV:
