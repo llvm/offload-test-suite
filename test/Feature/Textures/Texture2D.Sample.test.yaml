@@ -160,7 +160,7 @@ Results:
 #--- end
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
-# XFAIL: DirectX || Metal || Vulkan && Darwin
+# XFAIL: DirectX || Metal || (Vulkan && Darwin && Clang)
 # XFAIL: Clang && !Vulkan
 
 
