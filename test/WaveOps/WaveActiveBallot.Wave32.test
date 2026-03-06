@@ -4,12 +4,12 @@ RWStructuredBuffer<uint4> Out : register(u1);
 [WaveSize(32)]
 [numthreads(32, 1, 1)]
 void main(uint3 threadID : SV_DispatchThreadID) {
-  // We expect the first resulting uint's bitmask to be 
+  // We expect the first resulting uint's bitmask to be
   // 0xBFFFFFFF
   Out[0] = WaveActiveBallot(threadID.x != 30);
 
-  // We expect the first resulting uint's bitmask to be 
-  // 0x0000FFFF  
+  // We expect the first resulting uint's bitmask to be
+  // 0x0000FFFF
   Out[1] = WaveActiveBallot(threadID.x < 16);
 
   // We expect the resulting uint4 to be 4 0x00000000's
@@ -23,10 +23,10 @@ Shaders:
   - Stage: Compute
     Entry: main
     DispatchSize: [1, 1, 1]
-Buffers:  
+Buffers:
   - Name: Out
     Format: UInt32
-    Stride: 4
+    Stride: 16
     FillSize: 48
   - Name: ExpectedOut
     Format: UInt32
@@ -38,7 +38,7 @@ Results:
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
-  - Resources:    
+  - Resources:
     - Name: Out
       Kind: RWStructuredBuffer
       DirectXBinding:
@@ -50,9 +50,6 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: WaveSize_32
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/688
-# XFAIL: AMD && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
