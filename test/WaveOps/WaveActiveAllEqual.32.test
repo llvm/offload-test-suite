@@ -18,9 +18,7 @@ RWStructuredBuffer<int> Out : register(u12);
 RWStructuredBuffer<int> UOut : register(u13);
 RWStructuredBuffer<int> FOut : register(u14);
 
-// Expect all trues, all elements will be the same.
-// Since we expect all results to be true, output buffers
-// should result in 4 at the end, since there are 4 threads.
+// Expect all 4s, all elements will be the same.
 
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID)
@@ -311,6 +309,9 @@ DescriptorSets:
         Binding: 14
 ...
 #--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/943
+# XFAIL: Intel && Vulkan
 
 # Unsupported: InterlockedAdd isn't supported in clang yet
 # https://github.com/llvm/llvm-project/issues/99122

@@ -219,9 +219,9 @@ DescriptorSets:
 ...
 #--- end
 
-# Unsupported: InterlockedAdd isn't supported in clang yet
+# InterlockedAdd isn't supported in clang yet
 # https://github.com/llvm/llvm-project/issues/99122
-# XFAIL: Clang
+# UNSUPPORTED: Clang
 
 # REQUIRES Int16
 # RUN: split-file %s %t

@@ -6,12 +6,7 @@ StructuredBuffer<double4> In4  : register(t3);
 
 RWStructuredBuffer<int> Out : register(u4);
 
-// Expect all trues, all elements will be the same.
-// Output buffers start off as true, and each
-// lane writes its result value anded with the existing
-// result in the output buffer.
-// Since we expect all results to be true, output buffers
-// should remain all true at the end.
+// Expect all 4s, all elements will be the same.
 
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID)
@@ -132,6 +127,12 @@ DescriptorSets:
 
 ...
 #--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/944
+# XFAIL: Intel && DirectX
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/943
+# XFAIL: Intel && Vulkan
 
 # Unsupported: InterlockedAdd isn't supported in clang yet
 # https://github.com/llvm/llvm-project/issues/99122
