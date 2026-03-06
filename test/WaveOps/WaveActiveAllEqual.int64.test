@@ -219,6 +219,14 @@ DescriptorSets:
 ...
 #--- end
 
+# Unsupported: InterlockedAdd isn't supported in clang yet
+# https://github.com/llvm/llvm-project/issues/99122
+# XFAIL: Clang
+
+# Metal doesn't support 64-bit wave operations
+# Bug: https://github.com/llvm/offload-test-suite/issues/355
+# XFAIL: Metal
+
 # REQUIRES Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
