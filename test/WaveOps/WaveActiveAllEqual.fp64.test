@@ -1,0 +1,148 @@
+#--- source.hlsl
+StructuredBuffer<double> In  : register(t0);
+StructuredBuffer<double2> In2  : register(t1);
+StructuredBuffer<double3> In3  : register(t2);
+StructuredBuffer<double4> In4  : register(t3);
+
+RWStructuredBuffer<int> Out : register(u4);
+
+// Expect all 4s, all elements will be the same.
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID)
+{
+    unsigned int index = 0;
+    bool Result = WaveActiveAllEqual(In[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result);
+
+    bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result2.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result2.y);
+
+    bool3 Result3 = WaveActiveAllEqual(In3[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result3.z);
+
+    bool4 Result4 = WaveActiveAllEqual(In4[TID.x]);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.x);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.y);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.z);
+    InterlockedAdd(Out[index++], (unsigned int)Result4.w);
+
+    // constant folding case
+    bool4 ResultCF = WaveActiveAllEqual(double4(1,1,1,1));
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.x);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.y);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.z);
+    InterlockedAdd(Out[index++], (unsigned int)ResultCF.w);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:  
+  - Name: In
+    Format: Float64
+    Stride: 8
+    Data: [ -1.0, -1.0, -1.0, -1.0]
+  - Name: In2
+    Format: Float64
+    Stride: 16
+    Data: [ -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+  - Name: In3
+    Format: Float64
+    Stride: 24
+    Data: [ -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+  - Name: In4
+    Format: Float64
+    Stride: 32
+    Data: [ -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]  
+  - Name: UOut
+    Format: Int32
+    Stride: 4
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+  
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
+  - Name: UExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
+  
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+  
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: In4
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/944
+# XFAIL: Intel && DirectX
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/943
+# XFAIL: Intel && Vulkan
+
+# Unsupported: InterlockedAdd isn't supported in clang yet
+# https://github.com/llvm/llvm-project/issues/99122
+# XFAIL: Clang
+
+# Metal doesn't support 64-bit wave operations
+# Bug: https://github.com/llvm/offload-test-suite/issues/355
+# XFAIL: Metal
+
+# REQUIRES double
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o 
