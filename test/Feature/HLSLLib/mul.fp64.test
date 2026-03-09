@@ -24,7 +24,7 @@ void main() {
   Out[4] = r2.w;
 
   // Overload 3: scalar * matrix
-  double2x2 r3 = mul(ds, double2x2(1.25, 2.9, 3.5, 4.1));
+  double2x2 r3 = mul(ds, double2x2(1.25L, 2.9L, 3.5L, 4.1L));
   Out[5] = r3[0][0];                        // 2.875
   Out[6] = r3[0][1];                        // 6.67
   Out[7] = r3[1][0];                        // 8.05
@@ -47,7 +47,7 @@ void main() {
   Out[16] = r6.z;                           // 1.1*3.125+2.75*6.75 = 22.0
 
   // Overload 7: matrix * scalar
-  double2x2 r7 = mul(double2x2(1.25, 2.9, 3.5, 4.1), ds);
+  double2x2 r7 = mul(double2x2(1.25L, 2.9L, 3.5L, 4.1L), ds);
   Out[17] = r7[0][0];                       // 2.875
   Out[18] = r7[0][1];                       // 6.67
   Out[19] = r7[1][0];                       // 8.05
@@ -110,9 +110,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# Not implemented https://github.com/llvm/llvm-project/issues/99138
-# XFAIL: Clang
 
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8208
 # XFAIL: DXC && DirectX
