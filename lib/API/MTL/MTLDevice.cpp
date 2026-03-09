@@ -371,24 +371,28 @@ class MTLDevice : public offloadtest::Device {
             std::errc::invalid_argument,
             "Shader reflection must be a JSON object.");
       auto StateIt = ReflectionObj->find("state");
-      if (StateIt != ReflectionObj->end()) {
-        llvm::json::Object *State = StateIt->second.getAsObject();
-        auto TGSize = State->find("tg_size");
-        if (TGSize != State->end()) {
-          llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
-          if (TGSizeArr->size() != 3)
-            return llvm::createStringError(
-                std::errc::invalid_argument,
-                "Threadgroup size in reflection must have three components.");
-          for (size_t I = 0; I < 3; ++I) {
-            auto OpVal = (*TGSizeArr)[I].getAsUINT64();
-            if (!OpVal)
-              return llvm::createStringError(std::errc::invalid_argument,
-                                             "Threadgroup size components in "
-                                             "reflection must be integers.");
-            TGS[I] = *OpVal;
-          }
-        }
+      if (StateIt == ReflectionObj->end())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Key 'state' not found in shader reflection.");
+      llvm::json::Object *State = StateIt->second.getAsObject();
+      auto TGSize = State->find("tg_size");
+      if (TGSize == State->end())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Key 'tg_size' not found in shader reflection.");
+      llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
+      if (TGSizeArr->size() != 3)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Threadgroup size in reflection must have three components.");
+      for (size_t I = 0; I < 3; ++I) {
+        auto OpVal = (*TGSizeArr)[I].getAsUINT64();
+        if (!OpVal)
+          return llvm::createStringError(std::errc::invalid_argument,
+                                         "Threadgroup size components in "
+                                         "reflection must be integers.");
+        TGS[I] = *OpVal;
       }
     }
 
