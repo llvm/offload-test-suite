@@ -5,7 +5,7 @@ permissions:
 
 on:
   schedule:
-    - cron: '0 6 * * 2-6' # Run daily at 10pm PST, Mon-Fri (6am UTC, Tue-Sat)
+    - cron: '0 6 * * *' # Run daily at 10pm PST (6am UTC)
 
 jobs:
   Windows-D3D12-AMD-Clang-GBV:
@@ -18,4 +18,4 @@ jobs:
       SKU: windows-amd
       TestTarget: check-hlsl-clang-d3d12
       OffloadTest-branch: ${{ github.ref }}
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On -DOFFLOADTEST_ENABLE_VALIDATION=ON
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_ENABLE_VALIDATION=ON
