@@ -104,4 +104,4 @@ DescriptorSets:
 # RUN: %offloader %t/pipeline.yaml %t.o
 
 # Bug https://github.com/llvm/llvm-project/issues/185518
-# XFAIL: Clang && Vulkan && Intel
+# XFAIL: Clang && Vulkan
