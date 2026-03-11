@@ -1,0 +1,162 @@
+#--- source.hlsl
+
+StructuredBuffer<double4> A : register(t0);
+StructuredBuffer<double4> B : register(t1);
+StructuredBuffer<double4> C : register(t2);
+
+RWStructuredBuffer<double> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = fma(A[0].x, B[0].x, C[0].x);
+
+  double2 v2 = fma(A[1].zw, B[1].zw, C[1].zw);
+  Out[8] = v2.x;
+  Out[9] = v2.y;
+
+  double3 v3 = fma(A[1].xyz, B[1].xyz, C[1].xyz);
+  Out[5] = v3.x;
+  Out[6] = v3.y;
+  Out[7] = v3.z;
+
+  double4 v4 = fma(A[0], B[0], C[0]);
+  Out[1] = v4.x;
+  Out[2] = v4.y;
+  Out[3] = v4.z;
+  Out[4] = v4.w;
+
+  double2x2 m22a = double2x2(A[2].x, A[2].y, A[2].z, A[2].w);
+  double2x2 m22b = double2x2(B[2].x, B[2].y, B[2].z, B[2].w);
+  double2x2 m22c = double2x2(C[2].x, C[2].y, C[2].z, C[2].w);
+  double2x2 r22 = fma(m22a, m22b, m22c);
+  Out[10] = r22[0][0];
+  Out[11] = r22[0][1];
+  Out[12] = r22[1][0];
+  Out[13] = r22[1][1];
+
+  double4x4 m44a = double4x4(A[3].x, A[3].y, A[3].z, A[3].w,
+                             A[4].x, A[4].y, A[4].z, A[4].w,
+                             A[5].x, A[5].y, A[5].z, A[5].w,
+                             A[6].x, A[6].y, A[6].z, A[6].w);
+  double4x4 m44b = double4x4(B[3].x, B[3].y, B[3].z, B[3].w,
+                             B[4].x, B[4].y, B[4].z, B[4].w,
+                             B[5].x, B[5].y, B[5].z, B[5].w,
+                             B[6].x, B[6].y, B[6].z, B[6].w);
+  double4x4 m44c = double4x4(C[3].x, C[3].y, C[3].z, C[3].w,
+                             C[4].x, C[4].y, C[4].z, C[4].w,
+                             C[5].x, C[5].y, C[5].z, C[5].w,
+                             C[6].x, C[6].y, C[6].z, C[6].w);
+  double4x4 r44 = fma(m44a, m44b, m44c);
+  Out[14] = r44[0][0];
+  Out[15] = r44[0][1];
+  Out[16] = r44[0][2];
+  Out[17] = r44[0][3];
+  Out[18] = r44[1][0];
+  Out[19] = r44[1][1];
+  Out[20] = r44[1][2];
+  Out[21] = r44[1][3];
+  Out[22] = r44[2][0];
+  Out[23] = r44[2][1];
+  Out[24] = r44[2][2];
+  Out[25] = r44[2][3];
+  Out[26] = r44[3][0];
+  Out[27] = r44[3][1];
+  Out[28] = r44[3][2];
+  Out[29] = r44[3][3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: A
+    Format: Float64
+    Stride: 32
+    Data: [ 2, 3, 4, 5,
+            1, 2, 3, 4,
+            1, 2, 3, 4,
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+            9, 10, 11, 12,
+            13, 14, 15, 16 ]
+  - Name: B
+    Format: Float64
+    Stride: 32
+    Data: [ 10, 20, 30, 40,
+            2, 3, 4, 5,
+            10, 20, 30, 40,
+            2, 2, 2, 2,
+            2, 2, 2, 2,
+            2, 2, 2, 2,
+            2, 2, 2, 2 ]
+  - Name: C
+    Format: Float64
+    Stride: 32
+    Data: [ 1, 2, 3, 4,
+            -1, -2, -3, -4,
+            -1, -2, -3, -4,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            1, 1, 1, 1 ]
+  - Name: Out
+    Format: Float64
+    Stride: 8
+    FillSize: 240
+  - Name: Expected
+    Format: Float64
+    Stride: 8
+    Data: [ 21,
+            21, 62, 123, 204,
+            1, 4, 9,
+            9, 16,
+            9, 38, 87, 156,
+            3, 5, 7, 9,
+            11, 13, 15, 17,
+            19, 21, 23, 25,
+            27, 29, 31, 33 ]
+Results:
+  - Result: Result
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: C
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
