@@ -1,0 +1,130 @@
+#--- source.hlsl
+StructuredBuffer<double4> In: register(t0);
+RWStructuredBuffer<double4> Out1 : register(u1); // test scalar
+RWStructuredBuffer<double4> Out2 : register(u2); // test double2
+RWStructuredBuffer<double4> Out3 : register(u3); // test double3
+RWStructuredBuffer<double4> Out4 : register(u4); // test double4
+
+[numthreads(2,2,1)]
+void main(uint3 dtid : SV_DispatchThreadID) {
+  uint index = dtid.y * 2 + dtid.x;
+  double4 v = In[index];
+
+  double scalar = QuadReadAcrossX(v.x);
+  double2 vec2 = QuadReadAcrossX(v.xy);
+  double3 vec3 = QuadReadAcrossX(v.xyz);
+  double4 vec4 = QuadReadAcrossX(v);
+
+  Out1[index].x = scalar;
+  Out2[index].xy = vec2;
+  Out3[index].xyz = vec3;
+  Out4[index] = vec4;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [ 1, 1, 1 ]
+Buffers:
+  - Name: In
+    Format: Float64
+    Stride: 32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0 ]
+  - Name: Out1
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: Out2
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: Out3
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: Out4
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: ExpectedOut1
+    Format: Float64
+    Stride: 32
+    Data: [ 5.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0 ]
+  - Name: ExpectedOut2
+    Format: Float64
+    Stride: 32
+    Data: [ 5.0, 6.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 13.0, 14.0, 0.0, 0.0, 9.0, 10.0, 0.0, 0.0 ]
+  - Name: ExpectedOut3
+    Format: Float64
+    Stride: 32
+    Data: [ 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0, 0.0, 13.0, 14.0, 15.0, 0.0, 9.0, 10.0, 11.0, 0.0 ]
+  - Name: ExpectedOut4
+    Format: Float64
+    Stride: 32
+    Data: [ 5.0, 6.0, 7.0, 8.0, 1.0, 2.0, 3.0, 4.0, 13.0, 14.0, 15.0, 16.0, 9.0, 10.0, 11.0, 12.0 ]
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+
+...
+#--- end
+
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
