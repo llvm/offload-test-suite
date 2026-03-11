@@ -194,9 +194,9 @@ DescriptorSets:
 # Are always empty
 # UNSUPPORTED: Darwin
 
-# Note: Not implemented yet
-# Issue https://github.com/llvm/llvm-project/issues/184877
-# XFAIL: Clang
+# Note: clang Vulkan crashes
+# BUG https://github.com/llvm/llvm-project/issues/179879
+# XFAIL: Clang && Vulkan
 
 # Note: NV crashes AMD and Intel Output buffers are empty.
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8218
