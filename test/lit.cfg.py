@@ -160,7 +160,7 @@ tools.append(
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
-    ExtraCompilerArgs = ["-spirv", "-fspv-target-env=vulkan1.3"]
+    ExtraCompilerArgs = ["-spirv", "-fspv-target-env=vulkan1.5"]
     if config.offloadtest_test_clang:
         ExtraCompilerArgs.append("-fspv-extension=DXC")
 if config.offloadtest_enable_metal:
