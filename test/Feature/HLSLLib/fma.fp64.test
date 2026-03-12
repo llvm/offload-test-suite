@@ -34,7 +34,7 @@ void main() {
                              C[5].x, C[5].y, C[5].z, C[5].w,
                              C[6].x, C[6].y, C[6].z, C[6].w);
   double4x4 r44 = fma(m44a, m44b, m44c);
-  double4 precise = fma(A[7], B[7], C[7]);
+  double4 v4p = fma(A[7], B[7], C[7]);
   uint idx = 0;
 
   Out[idx++] = s;
@@ -67,10 +67,10 @@ void main() {
   Out[idx++] = r44[3][1];
   Out[idx++] = r44[3][2];
   Out[idx++] = r44[3][3];
-  Out[idx++] = precise.x;
-  Out[idx++] = precise.y;
-  Out[idx++] = precise.z;
-  Out[idx++] = precise.w;
+  Out[idx++] = v4p.x;
+  Out[idx++] = v4p.y;
+  Out[idx++] = v4p.z;
+  Out[idx++] = v4p.w;
 }
 
 //--- pipeline.yaml
