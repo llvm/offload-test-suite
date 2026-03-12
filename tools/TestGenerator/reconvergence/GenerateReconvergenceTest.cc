@@ -86,7 +86,7 @@ TestCase ReconvergenceTestGenerator::createSingleTest(
   Globals << "bool testBit(uint4 mask, uint bit) { return ((mask[bit / 32] >> "
              "(bit % 32)) & 1) != 0; }\n";
 
-  Globals << "static int outLoc = 0;\n";
+  Globals << "static uint outLoc = 0u;\n";
 
   std::stringstream &Shader = TestCase.getShader();
   Shader << Header.str();
