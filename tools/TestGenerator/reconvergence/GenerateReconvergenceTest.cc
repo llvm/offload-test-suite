@@ -168,28 +168,33 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
        ++InvocationIndex) {
     const size_t NumElements = ExpectedResult[InvocationIndex].size();
+    const size_t AllocatedElements = NumElements == 0 ? 1 : NumElements;
 
     Buffers << "  - Name: OutputB_" << InvocationIndex << "\n";
     Buffers << "    Format: UInt32\n";
     Buffers << "    Stride: 16\n";
-    if (NumElements == 0) {
-      Buffers << "    Data: [ ]\n";
-    } else {
-      Buffers << "    FillSize: " << NumElements * 16 << "\n";
-    }
+    Buffers << "    FillSize: " << AllocatedElements * 16 << "\n";
 
     Buffers << "  - Name: ExpectedOutputB_" << InvocationIndex << "\n";
     Buffers << "    Format: UInt32\n";
     Buffers << "    Stride: 16\n";
-    Buffers << "    Data: [ ";
-    for (size_t ElementIndex = 0; ElementIndex < NumElements; ++ElementIndex) {
-      const UVec4 &Vec = ExpectedResult[InvocationIndex][ElementIndex];
-      Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", " << Vec.w();
-      if (ElementIndex < NumElements - 1) {
-        Buffers << ", ";
+    if (NumElements == 0) {
+      // Allocate one zero element so descriptor bindings are valid for all
+      // UAVs.
+      Buffers << "    Data: [ 0, 0, 0, 0 ]\n";
+    } else {
+      Buffers << "    Data: [ ";
+      for (size_t ElementIndex = 0; ElementIndex < NumElements;
+           ++ElementIndex) {
+        const UVec4 &Vec = ExpectedResult[InvocationIndex][ElementIndex];
+        Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", "
+                << Vec.w();
+        if (ElementIndex < NumElements - 1) {
+          Buffers << ", ";
+        }
       }
+      Buffers << " ]\n";
     }
-    Buffers << " ]\n";
   }
 
   std::stringstream Results;
@@ -255,7 +260,7 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   Command << R"""(
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o)""";
+# RUN: %offloader --no-diff-report %t/pipeline.yaml %t.o)""";
   Ofs << Command.str() << std::endl;
   Ofs.close();
 }

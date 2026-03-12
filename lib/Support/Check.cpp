@@ -370,7 +370,7 @@ static const std::string getBufferStr(offloadtest::Buffer *B,
   }
 }
 
-llvm::Error verifyResult(offloadtest::Result R) {
+llvm::Error verifyResult(offloadtest::Result R, bool EmitDetailedReport) {
   llvm::SmallString<256> Str;
   llvm::raw_svector_ostream OS(Str);
   OS << "Test failed: " << R.Name << "\n";
@@ -379,24 +379,49 @@ llvm::Error verifyResult(offloadtest::Result R) {
   case offloadtest::Rule::BufferExact: {
     if (testBufferExact(R.ActualPtr, R.ExpectedPtr))
       return llvm::Error::success();
-    OS << "Comparison Rule: BufferExact\n";
+    if (EmitDetailedReport)
+      OS << "Comparison Rule: BufferExact\n";
     break;
   }
   case offloadtest::Rule::BufferFloatULP: {
     if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
       return llvm::Error::success();
-    OS << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
+    if (EmitDetailedReport)
+      OS << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
     break;
   }
   case offloadtest::Rule::BufferFloatEpsilon: {
     if (testBufferFloatEpsilon(R.ActualPtr, R.ExpectedPtr, R.Epsilon, R.DM))
       return llvm::Error::success();
 
-    std::ostringstream Oss;
-    Oss << std::defaultfloat << R.Epsilon;
-    OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str() << "\n";
+    if (EmitDetailedReport) {
+      std::ostringstream Oss;
+      Oss << std::defaultfloat << R.Epsilon;
+      OS << "Comparison Rule: BufferFloatEpsilon\nEpsilon: " << Oss.str()
+         << "\n";
+    }
     break;
   }
+  }
+
+  if (EmitDetailedReport) {
+    OS << "Expected:\n";
+    llvm::yaml::Output YAMLOS(OS);
+    YAMLOS << *R.ExpectedPtr;
+    OS << "Got:\n";
+    YAMLOS << *R.ActualPtr;
+
+    // Print exact hex64 representations of each element of the actual and
+    // expected buffers.
+    const std::string ExpectedBufferStr =
+        getBufferStr(R.ExpectedPtr, R.ComparisonRule);
+    const std::string ActualBufferStr =
+        getBufferStr(R.ActualPtr, R.ComparisonRule);
+
+    OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
+       << ExpectedBufferStr << "\n";
+    OS << "Full Hex 64bit representation of Actual Buffer Values:\n"
+       << ActualBufferStr << "\n";
   }
 
   return llvm::createStringError(Str.c_str());
