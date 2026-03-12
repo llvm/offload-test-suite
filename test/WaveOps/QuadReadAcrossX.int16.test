@@ -1,15 +1,24 @@
 #--- source.hlsl
+// ints
 StructuredBuffer<int16_t4> In: register(t0);
 RWStructuredBuffer<int16_t4> Out1 : register(u1); // test scalar
 RWStructuredBuffer<int16_t4> Out2 : register(u2); // test int16_t2
 RWStructuredBuffer<int16_t4> Out3 : register(u3); // test int16_t3
 RWStructuredBuffer<int16_t4> Out4 : register(u4); // test int16_t4
 
+// uints
+StructuredBuffer<uint16_t4> UIn: register(t5);
+RWStructuredBuffer<uint16_t4> UOut1 : register(u6); // test scalar
+RWStructuredBuffer<uint16_t4> UOut2 : register(u7); // test uint16_t2
+RWStructuredBuffer<uint16_t4> UOut3 : register(u8); // test uint16_t3
+RWStructuredBuffer<uint16_t4> UOut4 : register(u9); // test uint16_t4
+
 [numthreads(2,2,1)]
 void main(uint3 dtid : SV_DispatchThreadID) {
   uint index = dtid.y * 2 + dtid.x;
-  int16_t4 v = In[index];
 
+  // int case
+  int16_t4 v = In[index];
   int16_t scalar = QuadReadAcrossX(v.x);
   int16_t2 vec2 = QuadReadAcrossX(v.xy);
   int16_t3 vec3 = QuadReadAcrossX(v.xyz);
@@ -19,6 +28,18 @@ void main(uint3 dtid : SV_DispatchThreadID) {
   Out2[index].xy = vec2;
   Out3[index].xyz = vec3;
   Out4[index] = vec4;
+
+  // uint case
+  uint16_t4 uv = UIn[index];
+  uint16_t uscalar = QuadReadAcrossX(uv.x);
+  uint16_t2 uvec2 = QuadReadAcrossX(uv.xy);
+  uint16_t3 uvec3 = QuadReadAcrossX(uv.xyz);
+  uint16_t4 uvec4 = QuadReadAcrossX(uv);
+
+  UOut1[index].x = uscalar;
+  UOut2[index].xy = uvec2;
+  UOut3[index].xyz = uvec3;
+  UOut4[index] = uvec4;
 }
 
 //--- pipeline.yaml
@@ -65,6 +86,42 @@ Buffers:
     Format: Int16
     Stride: 8
     Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+  - Name: UIn
+    Format: UInt16
+    Stride: 8
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+  - Name: UOut1
+    Format: UInt16
+    Stride: 8
+    FillSize: 32
+  - Name: UOut2
+    Format: UInt16
+    Stride: 8
+    FillSize: 32
+  - Name: UOut3
+    Format: UInt16
+    Stride: 8
+    FillSize: 32
+  - Name: UOut4
+    Format: UInt16
+    Stride: 8
+    FillSize: 32
+  - Name: UExpectedOut1
+    Format: UInt16
+    Stride: 8
+    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+  - Name: UExpectedOut2
+    Format: UInt16
+    Stride: 8
+    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+  - Name: UExpectedOut3
+    Format: UInt16
+    Stride: 8
+    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+  - Name: UExpectedOut4
+    Format: UInt16
+    Stride: 8
+    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
 Results:
   - Result: ExpectedOut1
     Rule: BufferExact
@@ -82,6 +139,22 @@ Results:
     Rule: BufferExact
     Actual: Out4
     Expected: ExpectedOut4
+  - Result: UExpectedOut1
+    Rule: BufferExact
+    Actual: UOut1
+    Expected: UExpectedOut1
+  - Result: UExpectedOut2
+    Rule: BufferExact
+    Actual: UOut2
+    Expected: UExpectedOut2
+  - Result: UExpectedOut3
+    Rule: BufferExact
+    Actual: UOut3
+    Expected: UExpectedOut3
+  - Result: UExpectedOut4
+    Rule: BufferExact
+    Actual: UOut4
+    Expected: UExpectedOut4
 DescriptorSets:
   - Resources:
     - Name: In
@@ -119,6 +192,41 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 4
+    - Name: UIn
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: UOut1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: UOut2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: UOut3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: UOut4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
 
 ...
 #--- end
