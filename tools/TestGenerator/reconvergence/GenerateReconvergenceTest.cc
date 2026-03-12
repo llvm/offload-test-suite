@@ -260,7 +260,7 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   Command << R"""(
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
-# RUN: %offloader --no-diff-report %t/pipeline.yaml %t.o)""";
+# RUN: %offloader --quiet --no-diff-report %t/pipeline.yaml %t.o)""";
   Ofs << Command.str() << std::endl;
   Ofs.close();
 }
