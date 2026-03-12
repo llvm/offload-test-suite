@@ -164,10 +164,11 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   const uint32_t InvocationStride = ThreadgroupSizeX * ThreadgroupSizeY;
   const auto &ExpectedResult = Test.getExpectedResult();
 
-  for (uint32_t i = 0; i < InvocationStride; ++i) {
-    const size_t NumElements = ExpectedResult[i].size();
+  for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
+       ++InvocationIndex) {
+    const size_t NumElements = ExpectedResult[InvocationIndex].size();
 
-    Buffers << "  - Name: OutputB_" << i << "\n";
+    Buffers << "  - Name: OutputB_" << InvocationIndex << "\n";
     Buffers << "    Format: UInt32\n";
     Buffers << "    Stride: 16\n";
     if (NumElements == 0) {
@@ -176,14 +177,14 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
       Buffers << "    FillSize: " << NumElements * 16 << "\n";
     }
 
-    Buffers << "  - Name: ExpectedOutputB_" << i << "\n";
+    Buffers << "  - Name: ExpectedOutputB_" << InvocationIndex << "\n";
     Buffers << "    Format: UInt32\n";
     Buffers << "    Stride: 16\n";
     Buffers << "    Data: [ ";
-    for (size_t j = 0; j < NumElements; ++j) {
-      const UVec4 &Vec = ExpectedResult[i][j];
+    for (size_t ElementIndex = 0; ElementIndex < NumElements; ++ElementIndex) {
+      const UVec4 &Vec = ExpectedResult[InvocationIndex][ElementIndex];
       Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", " << Vec.w();
-      if (j < NumElements - 1) {
+      if (ElementIndex < NumElements - 1) {
         Buffers << ", ";
       }
     }
@@ -192,11 +193,12 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
 
   std::stringstream Results;
   Results << "Results:\n";
-  for (uint32_t i = 0; i < InvocationStride; ++i) {
-    Results << "  - Result: Test_" << i << "\n";
+  for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
+       ++InvocationIndex) {
+    Results << "  - Result: Test_" << InvocationIndex << "\n";
     Results << "    Rule: BufferExact\n";
-    Results << "    Actual: OutputB_" << i << "\n";
-    Results << "    Expected: ExpectedOutputB_" << i << "\n";
+    Results << "    Actual: OutputB_" << InvocationIndex << "\n";
+    Results << "    Expected: ExpectedOutputB_" << InvocationIndex << "\n";
   }
 
   std::stringstream DescriptorSets;
@@ -211,16 +213,16 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
         Binding: 0
 )""";
 
-  for (uint32_t i = 0; i < InvocationStride; ++i) {
-    DescriptorSets << "    - Name: OutputB_" << i << "\n";
+  for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
+       ++InvocationIndex) {
+    DescriptorSets << "    - Name: OutputB_" << InvocationIndex << "\n";
     DescriptorSets << "      Kind: RWStructuredBuffer\n";
     DescriptorSets << "      DirectXBinding:\n";
-    DescriptorSets << "        Register: " << (1 + i) << "\n";
+    DescriptorSets << "        Register: " << (1 + InvocationIndex) << "\n";
     DescriptorSets << "        Space: 0\n";
     DescriptorSets << "      VulkanBinding:\n";
-    DescriptorSets << "        Binding: " << (1 + i) << "\n";
+    DescriptorSets << "        Binding: " << (1 + InvocationIndex) << "\n";
   }
-
 
   Ofs << Shaders.str() << Buffers.str() << Results.str() << DescriptorSets.str()
       << std::endl;

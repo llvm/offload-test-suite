@@ -44,27 +44,28 @@ int main(int argc, char *argv[]) {
   }
 
   std::vector<uint32_t> Counts;
-  std::stringstream ss(CountsPerLevel);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
-    Counts.push_back(std::stoi(item));
+  std::stringstream CountsStream(CountsPerLevel);
+  std::string CountItem;
+  while (std::getline(CountsStream, CountItem, ',')) {
+    Counts.push_back(std::stoi(CountItem));
   }
 
   std::map<uint32_t, uint32_t> NestingLevelToTestsCount;
   if (Counts.size() == 1) {
-    for (uint32_t i = 2; i <= MaxNestingLevel; ++i) {
-      NestingLevelToTestsCount[i] = Counts[0];
+    for (uint32_t Level = 2; Level <= MaxNestingLevel; ++Level) {
+      NestingLevelToTestsCount[Level] = Counts[0];
     }
   } else {
     // Expect one count per level from 2 to MaxNestingLevel
-    size_t expected = MaxNestingLevel - 1;
-    if (Counts.size() != expected) {
-      std::cerr << "Error: Expected " << expected << " counts (for levels 2.."
+    const size_t Expected = MaxNestingLevel - 1;
+    if (Counts.size() != Expected) {
+      std::cerr << "Error: Expected " << Expected << " counts (for levels 2.."
                 << MaxNestingLevel << "), got " << Counts.size() << std::endl;
       return 1;
     }
-    for (uint32_t i = 0; i < Counts.size(); ++i) {
-      NestingLevelToTestsCount[i + 2] = Counts[i];
+    for (size_t CountIndex = 0; CountIndex < Counts.size(); ++CountIndex) {
+      NestingLevelToTestsCount[static_cast<uint32_t>(CountIndex) + 2] =
+          Counts[CountIndex];
     }
   }
 

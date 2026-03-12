@@ -4,7 +4,11 @@ project(maximal_reconvergence_test_generator)
 
 set(CMAKE_CXX_STANDARD 17)
 if(NOT LLVM_ENABLE_RTTI)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-rtti")
+  if(MSVC)
+    add_compile_options(/GR-)
+  else()
+    add_compile_options(-fno-rtti)
+  endif()
 endif()
 
 add_executable(build_reconvergence_test main.cc GenerateReconvergenceTest.cc GenerateReconvergenceTest.h Ballot.h Ballots.h MaskUtils.h Op.h TestCase.h RandomProgram.h RandomUtils.h RandomUtils.cc VectorUtils.h MathUtils.h)
