@@ -65,9 +65,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/445
 # XFAIL: DirectX && Intel
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/452
-# XFAIL: Metal
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
