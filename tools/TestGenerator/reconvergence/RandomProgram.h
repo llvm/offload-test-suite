@@ -228,7 +228,7 @@ public:
 
   void genContinue() {
     // continues are allowed if we're in a loop and the loop is not infinite,
-    // or if it is infinite and we've already done a subgroupElect+break.
+    // or if it is infinite and we've already done a WaveIsFirstLane()+break.
     // However, adding more continues seems to reduce the failure rate, so
     // disable it for now
     if (loopNestingThisFunction > 0 &&
@@ -247,7 +247,7 @@ public:
     }
   }
 
-  // doBreak is used to generate "if (subgroupElect()) { ... break; }" inside
+  // doBreak is used to generate "if (WaveIsFirstLane()) { ... break; }" inside
   // infinite loops
   void genElect(bool doBreak) {
     ops.push_back({OP_ELECT, 0});
@@ -339,7 +339,7 @@ public:
     nesting--;
   }
 
-  // switch (gl_SubgroupInvocationID & 3) with four unique targets
+  // switch (WaveGetLaneIndex() & 3) with four unique targets
   void genSwitchVar() {
     ops.push_back({OP_SWITCH_VAR_BEGIN, 0});
     nesting++;
@@ -368,7 +368,7 @@ public:
     nesting--;
   }
 
-  // switch (gl_SubgroupInvocationID & 3) with two shared targets.
+  // switch (WaveGetLaneIndex() & 3) with two shared targets.
   // XXX TODO: The test considers these two targets to remain converged,
   // though we haven't agreed to that behavior yet.
   void genSwitchMulticase() {
@@ -572,24 +572,6 @@ public:
     const int32_t opsIndex;
     const int32_t loopNesting;
     const int funcNum;
-  };
-
-  // State of the subgroup at each level of nesting
-  struct SubgroupState {
-    // Currently executing
-    bitset_inv_t activeMask;
-    // Have executed a continue instruction in this loop
-    bitset_inv_t continueMask;
-    // index of the current if test or loop header
-    uint32_t header;
-    // number of loop iterations performed
-    uint32_t tripCount;
-    // is this nesting a loop?
-    uint32_t isLoop;
-    // is this nesting a function call?
-    uint32_t isCall;
-    // is this nesting a switch?
-    uint32_t isSwitch;
   };
 
   struct WaveState {

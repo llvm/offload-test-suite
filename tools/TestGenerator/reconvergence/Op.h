@@ -13,7 +13,7 @@
 
 namespace reconvergence {
 enum OPType {
-  // store subgroupBallot().
+  // store WaveActiveBallot(true).
   // For OP_BALLOT, OP::caseValue is initialized to zero, and then
   // set to 1 by simulate if the ballot is not threadgroup- (or wave-_uniform.
   // Only threadgroup-uniform ballots are validated for correctness in
@@ -23,18 +23,18 @@ enum OPType {
   // store literal constant
   OP_STORE,
 
-  // if ((1ULL << gl_SubgroupInvocationID) & mask).
+  // if ((1ULL << WaveGetLaneIndex()) & mask).
   // Special case if mask = ~0ULL, converted into "if (inputA[idx] == idx)"
   OP_IF_MASK,
   OP_ELSE_MASK,
   OP_ENDIF,
 
-  // if (gl_SubgroupInvocationID == loopIdxN) (where N is most nested loop
+  // if (WaveGetLaneIndex() == loopIdxN) (where N is most nested loop
   // counter)
   OP_IF_LOOPCOUNT,
   OP_ELSE_LOOPCOUNT,
 
-  // if (gl_LocalInvocationIndex >= inputA[N]) (where N is most nested loop
+  // if (SV_GroupIndex >= inputA[N]) (where N is most nested loop
   // counter)
   OP_IF_LOCAL_INVOCATION_INDEX,
   OP_ELSE_LOCAL_INVOCATION_INDEX,
@@ -43,19 +43,19 @@ enum OPType {
   OP_BREAK,
   OP_CONTINUE,
 
-  // if (subgroupElect())
+  // if (WaveIsFirstLane())
   OP_ELECT,
 
   // Loop with uniform number of iterations (read from a buffer)
   OP_BEGIN_FOR_UNIF,
   OP_END_FOR_UNIF,
 
-  // for (int loopIdxN = 0; loopIdxN < gl_SubgroupInvocationID + 1; ++loopIdxN)
+  // for (int loopIdxN = 0; loopIdxN < WaveGetLaneIndex() + 1; ++loopIdxN)
   OP_BEGIN_FOR_VAR,
   OP_END_FOR_VAR,
 
   // for (int loopIdxN = 0;; ++loopIdxN, OP_BALLOT)
-  // Always has an "if (subgroupElect()) break;" inside.
+  // Always has an "if (WaveIsFirstLane()) break;" inside.
   // Does the equivalent of OP_BALLOT in the continue construct
   OP_BEGIN_FOR_INF,
   OP_END_FOR_INF,
@@ -65,7 +65,7 @@ enum OPType {
   OP_END_DO_WHILE_UNIF,
 
   // do { ... } while (true);
-  // Always has an "if (subgroupElect()) break;" inside
+  // Always has an "if (WaveIsFirstLane()) break;" inside
   OP_BEGIN_DO_WHILE_INF,
   OP_END_DO_WHILE_INF,
 
@@ -79,7 +79,7 @@ enum OPType {
 
   // switch statement on uniform value
   OP_SWITCH_UNIF_BEGIN,
-  // switch statement on gl_SubgroupInvocationID & 3 value
+  // switch statement on WaveGetLaneIndex() & 3 value
   OP_SWITCH_VAR_BEGIN,
   // switch statement on loopIdx value
   OP_SWITCH_LOOP_COUNT_BEGIN,
@@ -95,7 +95,7 @@ enum OPType {
   OP_CASE_END,
 
   // Extra code with no functional effect. Currently inculdes:
-  // - value 0: while (!subgroupElect()) {}
+  // - value 0: while (!WaveIsFirstLane()) {}
   // - value 1: if (condition_that_is_false) { infinite loop }
   OP_NOISE,
 
