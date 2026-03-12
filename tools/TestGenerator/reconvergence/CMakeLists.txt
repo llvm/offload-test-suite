@@ -16,7 +16,7 @@ add_executable(build_reconvergence_test main.cc GenerateReconvergenceTest.cc Gen
 target_link_libraries(build_reconvergence_test PRIVATE LLVMCore LLVMSupport)
 
 add_custom_target(generate-reconvergence-tests ALL
-  COMMAND $<TARGET_FILE:build_reconvergence_test> -output_dir "${OFFLOADTEST_SOURCE_DIR}/reconvergence-tests" -counts_per_level "1" -max_nesting_level "6" -total_seed_group "8"
+  COMMAND $<TARGET_FILE:build_reconvergence_test> -output_dir "${OFFLOADTEST_SOURCE_DIR}/reconvergence-tests" -counts_per_level "1" -max_nesting_level "6" -total_seed_group "8" -failed_tests_yaml "${CMAKE_CURRENT_SOURCE_DIR}/FailedTests.yaml"
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
   DEPENDS build_reconvergence_test
   COMMENT "Generating reconvergence tests"

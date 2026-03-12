@@ -9,15 +9,30 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <vector>
 
 #include "TestCase.h"
 
 namespace reconvergence {
 
+enum class TestExpectation {
+  PASS,
+  FAIL,
+};
+
+struct TestExpectationConfig {
+  TestExpectation Expectation;
+  std::string Condition;
+  std::string Comment;
+};
+
 class ReconvergenceTestGenerator {
 public:
-  ReconvergenceTestGenerator(const std::string &OutputDir)
-      : OutputDir(OutputDir) {}
+  ReconvergenceTestGenerator(
+      const std::string &OutputDir,
+      const std::map<std::string, std::vector<TestExpectationConfig>>
+          &TestExpectations = {})
+      : OutputDir(OutputDir), TestExpectations(TestExpectations) {}
   void createRandomizedTests(
       uint32_t TotalMaxNestingLevel, uint32_t TotalSeedGroup,
       const std::map<uint32_t, uint32_t> &NestingLevelToTestsCount,
@@ -27,6 +42,7 @@ public:
 
 private:
   std::string OutputDir;
+  std::map<std::string, std::vector<TestExpectationConfig>> TestExpectations;
   TestCase createSingleTest(uint32_t Seed, uint32_t MaxNestingLevel,
                             uint32_t WaveSize, uint32_t ThreadgroupSizeX,
                             uint32_t ThreadgroupSizeY);

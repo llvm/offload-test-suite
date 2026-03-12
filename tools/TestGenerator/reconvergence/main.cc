@@ -14,8 +14,87 @@
 
 #include "GenerateReconvergenceTest.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/YAMLTraits.h"
 
 using namespace llvm;
+
+namespace {
+
+struct FailedTestYamlEntry {
+  std::string Name;
+  std::string Expectation;
+  std::string Condition;
+  std::string Comment;
+};
+
+struct FailedTestsYamlDocument {
+  std::vector<FailedTestYamlEntry> Tests;
+};
+
+} // namespace
+
+LLVM_YAML_IS_SEQUENCE_VECTOR(FailedTestYamlEntry)
+
+namespace llvm::yaml {
+
+template <> struct MappingTraits<FailedTestYamlEntry> {
+  static void mapping(IO &Io, FailedTestYamlEntry &Entry) {
+    Io.mapRequired("name", Entry.Name);
+    Io.mapRequired("expectation", Entry.Expectation);
+    Io.mapOptional("condition", Entry.Condition, std::string());
+    Io.mapOptional("comment", Entry.Comment, std::string());
+  }
+};
+
+template <> struct MappingTraits<FailedTestsYamlDocument> {
+  static void mapping(IO &Io, FailedTestsYamlDocument &Document) {
+    Io.mapRequired("tests", Document.Tests);
+  }
+};
+
+} // namespace llvm::yaml
+
+static std::map<std::string, std::vector<reconvergence::TestExpectationConfig>>
+loadFailedTestsYaml(const std::string &FailedTestsYamlPath) {
+  std::map<std::string, std::vector<reconvergence::TestExpectationConfig>>
+      ParsedTests;
+  if (FailedTestsYamlPath.empty()) {
+    return ParsedTests;
+  }
+
+  auto BufferOrError = MemoryBuffer::getFile(FailedTestsYamlPath);
+  if (!BufferOrError) {
+    errs() << "Error: Could not read failed-tests YAML file at '"
+           << FailedTestsYamlPath << "'.\n";
+    return ParsedTests;
+  }
+
+  yaml::Input Yin(BufferOrError.get()->getBuffer());
+  FailedTestsYamlDocument Document;
+  Yin >> Document;
+  if (Yin.error()) {
+    errs() << "Error: Failed to parse failed-tests YAML file at '"
+           << FailedTestsYamlPath << "'.\n";
+    return ParsedTests;
+  }
+
+  for (const auto &Entry : Document.Tests) {
+    if (Entry.Name.empty()) {
+      continue;
+    }
+
+    const std::string UpperExpectation = StringRef(Entry.Expectation).upper();
+    const reconvergence::TestExpectation ParsedExpectation =
+        UpperExpectation == "PASS" ? reconvergence::TestExpectation::PASS
+                                   : reconvergence::TestExpectation::FAIL;
+
+    ParsedTests[Entry.Name].push_back(reconvergence::TestExpectationConfig{
+        ParsedExpectation, Entry.Condition, Entry.Comment});
+  }
+
+  return ParsedTests;
+}
 
 static cl::opt<std::string>
     OutputDir("output_dir", cl::desc("Output directory for generated tests"),
@@ -34,6 +113,11 @@ static cl::opt<unsigned> MaxNestingLevel("max_nesting_level",
 static cl::opt<unsigned> TotalSeedGroup("total_seed_group",
                                         cl::desc("Total seed group count"),
                                         cl::init(8));
+
+static cl::opt<std::string>
+    FailedTestsYamlPath("failed_tests_yaml",
+                        cl::desc("Path to failed-tests YAML metadata"),
+                        cl::init(""));
 
 int main(int argc, char *argv[]) {
   cl::ParseCommandLineOptions(argc, argv, "Reconvergence Test Generator\n");
@@ -71,7 +155,9 @@ int main(int argc, char *argv[]) {
 
   std::cout << "Starting test generation into " << OutputDir.getValue() << "..."
             << std::endl;
-  reconvergence::ReconvergenceTestGenerator TestGenerator(OutputDir);
+  const auto TestExpectations = loadFailedTestsYaml(FailedTestsYamlPath);
+  reconvergence::ReconvergenceTestGenerator TestGenerator(OutputDir,
+                                                          TestExpectations);
 
   // Wave size must be less than or equal to 128 with current ballot
   // implementation.

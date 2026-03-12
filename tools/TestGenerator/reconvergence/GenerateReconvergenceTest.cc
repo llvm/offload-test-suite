@@ -128,10 +128,11 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   const uint32_t Seed = Test.getSeed();
   const std::string Path = OutputDir + "/tests/" + std::to_string(WaveSize);
   std::filesystem::create_directories(Path);
-  const std::string Filename =
-      Path + "/test_" + std::to_string(MaxNestingLevel) + "_" +
+  const std::string TestName =
+      "test_" + std::to_string(MaxNestingLevel) + "_" +
       std::to_string(WaveSize) + "_" + std::to_string(ThreadgroupSizeX) + "_" +
       std::to_string(ThreadgroupSizeY) + "_" + std::to_string(Seed) + ".test";
+  const std::string Filename = Path + "/" + TestName;
   std::ofstream Ofs(Filename);
 
   Ofs << "#--- source.hlsl\n" << std::endl;
@@ -233,10 +234,25 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   Command << "# UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence"
           << std::endl;
   Command << "# UNSUPPORTED: !WaveSize_" << WaveSize << std::endl;
-  Command << R"""(
-# Bug: Some wave operations are not yet implemented.
-# XFAIL: Clang
+  Command << "\n\n# BUG: Some wave operations are not yet implemented."
+          << "\n# XFAIL: Clang" << std::endl;
 
+  // Add test expectation comments if this test is listed in the YAML.
+  const auto TestExpectationsIt = TestExpectations.find(TestName);
+  if (TestExpectationsIt != TestExpectations.end()) {
+    for (const auto &ExpectationConfig : TestExpectationsIt->second) {
+      Command << "\n\n";
+      if (!ExpectationConfig.Comment.empty()) {
+        Command << "# " << ExpectationConfig.Comment << std::endl;
+      }
+      if (ExpectationConfig.Expectation == TestExpectation::FAIL &&
+          !ExpectationConfig.Condition.empty()) {
+        Command << "# XFAIL: " << ExpectationConfig.Condition << std::endl;
+      }
+    }
+  }
+
+  Command << R"""(
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fspv-enable-maximal-reconvergence -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o)""";
