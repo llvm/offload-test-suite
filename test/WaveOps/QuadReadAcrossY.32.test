@@ -1,0 +1,342 @@
+#--- source.hlsl
+// ints
+StructuredBuffer<int4> In : register(t0);
+RWStructuredBuffer<int4> Out1 : register(u1);
+RWStructuredBuffer<int4> Out2 : register(u2);
+RWStructuredBuffer<int4> Out3 : register(u3);
+RWStructuredBuffer<int4> Out4 : register(u4);
+
+// uints
+StructuredBuffer<uint4> UIn : register(t5);
+RWStructuredBuffer<uint4> UOut1 : register(u6);
+RWStructuredBuffer<uint4> UOut2 : register(u7);
+RWStructuredBuffer<uint4> UOut3 : register(u8);
+RWStructuredBuffer<uint4> UOut4 : register(u9);
+
+// floats
+StructuredBuffer<float4> FIn : register(t10);
+RWStructuredBuffer<float4> FOut1 : register(u11);
+RWStructuredBuffer<float4> FOut2 : register(u12);
+RWStructuredBuffer<float4> FOut3 : register(u13);
+RWStructuredBuffer<float4> FOut4 : register(u14);
+
+[numthreads(2,2,1)]
+void main(uint3 dtid : SV_DispatchThreadID) {
+  uint index = dtid.y * 2 + dtid.x;
+
+  // int case
+  int4 v = In[index];
+  int scalar = QuadReadAcrossY(v.x);
+  int2 vec2 = QuadReadAcrossY(v.xy);
+  int3 vec3 = QuadReadAcrossY(v.xyz);
+  int4 vec4 = QuadReadAcrossY(v);
+
+  Out1[index].x = scalar;
+  Out2[index].xy = vec2;
+  Out3[index].xyz = vec3;
+  Out4[index] = vec4;
+
+  // uint case
+  uint4 uv = UIn[index];
+  uint uscalar = QuadReadAcrossY(uv.x);
+  uint2 uvec2 = QuadReadAcrossY(uv.xy);
+  uint3 uvec3 = QuadReadAcrossY(uv.xyz);
+  uint4 uvec4 = QuadReadAcrossY(uv);
+
+  UOut1[index].x = uscalar;
+  UOut2[index].xy = uvec2;
+  UOut3[index].xyz = uvec3;
+  UOut4[index] = uvec4;
+
+  // float case
+  float4 fv = FIn[index];
+  float fscalar = QuadReadAcrossY(fv.x);
+  float2 fvec2 = QuadReadAcrossY(fv.xy);
+  float3 fvec3 = QuadReadAcrossY(fv.xyz);
+  float4 fvec4 = QuadReadAcrossY(fv);
+
+  FOut1[index].x = fscalar;
+  FOut2[index].xy = fvec2;
+  FOut3[index].xyz = fvec3;
+  FOut4[index] = fvec4;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [ 1, 1, 1 ]
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 16
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+  - Name: Out1
+    Format: Int32
+    Stride: 16
+    FillSize: 64  
+  - Name: Out2
+    Format: Int32
+    Stride: 16
+    FillSize: 64
+  - Name: Out3
+    Format: Int32
+    Stride: 16
+    FillSize: 64
+  - Name: Out4
+    Format: Int32
+    Stride: 16
+    FillSize: 64
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 16
+    Data: [ 9, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0 ]
+  - Name: ExpectedOut2
+    Format: Int32
+    Stride: 16
+    Data: [ 9, 10, 0, 0, 13, 14, 0, 0, 1, 2, 0, 0, 5, 6, 0, 0 ]
+  - Name: ExpectedOut3
+    Format: Int32
+    Stride: 16
+    Data: [ 9, 10, 11, 0, 13, 14, 15, 0, 1, 2, 3, 0, 5, 6, 7, 0 ]
+  - Name: ExpectedOut4
+    Format: Int32
+    Stride: 16
+    Data: [ 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8 ]
+  - Name: UIn
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+  - Name: UOut1
+    Format: UInt32
+    Stride: 16
+    FillSize: 64 
+  - Name: UOut2
+    Format: UInt32
+    Stride: 16
+    FillSize: 64
+  - Name: UOut3
+    Format: UInt32
+    Stride: 16
+    FillSize: 64
+  - Name: UOut4
+    Format: UInt32
+    Stride: 16
+    FillSize: 64
+  - Name: UExpectedOut1
+    Format: UInt32
+    Stride: 16
+    Data: [ 9, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0 ]
+  - Name: UExpectedOut2
+    Format: UInt32
+    Stride: 16
+    Data: [ 9, 10, 0, 0, 13, 14, 0, 0, 1, 2, 0, 0, 5, 6, 0, 0 ]
+  - Name: UExpectedOut3
+    Format: UInt32
+    Stride: 16
+    Data: [ 9, 10, 11, 0, 13, 14, 15, 0, 1, 2, 3, 0, 5, 6, 7, 0 ]
+  - Name: UExpectedOut4
+    Format: UInt32
+    Stride: 16
+    Data: [ 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8 ]
+  - Name: FIn
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0 ]
+  - Name: FOut1
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: FOut2
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: FOut3
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: FOut4
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: FExpectedOut1
+    Format: Float32
+    Stride: 16
+    Data: [ 9.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0 ]
+  - Name: FExpectedOut2
+    Format: Float32
+    Stride: 16
+    Data: [ 9.0, 10.0, 0.0, 0.0, 13.0, 14.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 5.0, 6.0, 0.0, 0.0 ]
+  - Name: FExpectedOut3
+    Format: Float32
+    Stride: 16
+    Data: [ 9.0, 10.0, 11.0, 0.0, 13.0, 14.0, 15.0, 0.0, 1.0, 2.0, 3.0, 0.0, 5.0, 6.0, 7.0, 0.0 ]
+  - Name: FExpectedOut4
+    Format: Float32
+    Stride: 16
+    Data: [ 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ]
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: UExpectedOut1
+    Rule: BufferExact
+    Actual: UOut1
+    Expected: UExpectedOut1
+  - Result: UExpectedOut2
+    Rule: BufferExact
+    Actual: UOut2
+    Expected: UExpectedOut2
+  - Result: UExpectedOut3
+    Rule: BufferExact
+    Actual: UOut3
+    Expected: UExpectedOut3
+  - Result: UExpectedOut4
+    Rule: BufferExact
+    Actual: UOut4
+    Expected: UExpectedOut4
+  - Result: FExpectedOut1
+    Rule: BufferExact
+    Actual: FOut1
+    Expected: FExpectedOut1
+  - Result: FExpectedOut2
+    Rule: BufferExact
+    Actual: FOut2
+    Expected: FExpectedOut2
+  - Result: FExpectedOut3
+    Rule: BufferExact
+    Actual: FOut3
+    Expected: FExpectedOut3
+  - Result: FExpectedOut4
+    Rule: BufferExact
+    Actual: FOut4
+    Expected: FExpectedOut4
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: UIn
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: UOut1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: UOut2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: UOut3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: UOut4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
+    - Name: FIn
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 10
+        Space: 0
+      VulkanBinding:
+        Binding: 10
+    - Name: FOut1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 11
+        Space: 0
+      VulkanBinding:
+        Binding: 11
+    - Name: FOut2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 12
+        Space: 0
+      VulkanBinding:
+        Binding: 12
+    - Name: FOut3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 13
+        Space: 0
+      VulkanBinding:
+        Binding: 13
+    - Name: FOut4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 14
+        Space: 0
+      VulkanBinding:
+        Binding: 14
+
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o 
