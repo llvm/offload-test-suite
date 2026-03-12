@@ -1,0 +1,145 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerComparisonState Samp : register(s0); // Less
+[[vk::binding(3, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
+[[vk::binding(4, 0)]] SamplerComparisonState SampRepeat : register(s2); // Less, Repeat
+[[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  float2 uv = float2(0.5, 0.5);
+
+  // 0: ref=0.5, Op=Less (ref < texel)
+  // R values: (0,1)=0.2, (1,1)=0.8, (1,0)=0.8, (0,0)=0.2
+  // Results: (0.5<0.2)=0, (0.5<0.8)=1, (0.5<0.8)=1, (0.5<0.2)=0
+  Out[0] = Tex.GatherCmp(Samp, uv, 0.5);
+  
+  // 1: ref=0.1, Op=Less (ref < texel)
+  // Results: (0.1<0.2)=1, (0.1<0.8)=1, (0.1<0.8)=1, (0.1<0.2)=1
+  Out[1] = Tex.GatherCmp(Samp, uv, 0.1);
+
+  // 2: ref=0.5, Op=Greater (ref > texel)
+  // Results: (0.5>0.2)=1, (0.5>0.8)=0, (0.5>0.8)=0, (0.5>0.2)=1
+  Out[2] = Tex.GatherCmp(SampGreater, uv, 0.5);
+
+  // 3: ref=0.5, Op=Less, Address=Clamp, uv=(1.5, 1.5)
+  // Clamps to (1.0, 1.0). All texels effectively (1,1) with R=0.8.
+  // Results: (0.5<0.8)=1, (0.5<0.8)=1, (0.5<0.8)=1, (0.5<0.8)=1
+  Out[3] = Tex.GatherCmp(Samp, float2(1.5, 1.5), 0.5);
+
+  // 4: ref=0.5, Op=Less, Address=Repeat, uv=(1.5, 1.5)
+  // Wraps to (0.5, 0.5). Same as Out[0].
+  // Results: [0, 1, 1, 0]
+  Out[4] = Tex.GatherCmp(SampRepeat, float2(1.5, 1.5), 0.5);
+
+  // 5: ref=0.5, Op=Less, offset=(0, -1)
+  // Starts with UV=(0.5, 0.5) unnormalized.
+  // Normalized coordinates: (0,1), (1,1), (1,0), (0,0)
+  // Apply the offset: (0,0), (1,0), (1,-1), (0,-1)
+  // Clamp: (0,0), (1,0), (1,0), (0,0)
+  // R values: (0,0)=0.2, (1,0)=0.8, (1,0)=0.8, (0,0)=0.2
+  // Results: (0.5<0.2)=0, (0.5<0.8)=1, (0.5<0.8)=1, (0.5<0.2)=0
+  Out[5] = Tex.GatherCmp(Samp, uv, 0.5, int2(0, -1));
+
+  // 6: ref=0.5, Op=Less, offset=(1, 0)
+  // Starts with UV=(0.5, 0.5) unnormalized.
+  // Normalized coordinates: (0,1), (1,1), (1,0), (0,0)
+  // Apply the offset: (1,1), (2,1), (2,0), (1,0)
+  // Clamp: (1,1), (1,1), (1,0), (1,0)
+  // R values: (1,1)=0.8, (1,1)=0.8, (1,0)=0.8, (1,0)=0.8
+  // Results: (0.5<0.8)=1, (0.5<0.8)=1, (0.5<0.8)=1, (0.5<0.8)=1
+  Out[6] = Tex.GatherCmp(Samp, uv, 0.5, int2(1, 0));
+
+  // 7: ref=0.5, Op=Less, offset=(-1, -1)
+  // Starts with UV=(0.5, 0.5) unnormalized.
+  // Normalized coordinates: (0,1), (1,1), (1,0), (0,0)
+  // Apply the offset: (-1,0), (0,0), (0,-1), (-1,-1)
+  // Clamp: (0,0), (0,0), (0,0), (0,0)
+  // R values: (0,0)=0.2, (0,0)=0.2, (0,0)=0.2, (0,0)=0.2
+  // Results: (0.5<0.2)=0, (0.5<0.2)=0, (0.5<0.2)=0, (0.5<0.2)=0
+  Out[7] = Tex.GatherCmp(Samp, uv, 0.5, int2(-1, -1));
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0.2,  # (0,0) R=0.2
+            0.8,  # (1,0) R=0.8
+            0.2,  # (0,1) R=0.2
+            0.8 ] # (1,1) R=0.8
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 128 # 8 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.0, 1.0, 1.0, 0.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 1.0, 0.0,
+            0.0, 1.0, 1.0, 0.0,
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 0.0, 0.0, 0.0 ]
+
+Samplers:
+  - Name: Samp
+    Address: Clamp
+    ComparisonOp: Less
+  - Name: SampGreater
+    Address: Clamp
+    ComparisonOp: Greater
+  - Name: SampRepeat
+    Address: Repeat
+    ComparisonOp: Less
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: SampGreater
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: SampRepeat
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+
+Results:
+  - Result: GatherCmpTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
+# Unimplemented: Clang + VK: https://github.com/llvm/llvm-project/issues/175630
+# XFAIL: DirectX || Metal || Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
