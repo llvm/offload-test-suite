@@ -31,7 +31,7 @@ public:
   virtual ~ComputeRandomProgram() = default;
 
   virtual uint32_t simulate(bool /*countOnly*/, uint32_t /*waveSize*/,
-                            add_ref<std::vector<uint64_t>> /*ref*/) override {
+                            std::vector<uint64_t> & /*ref*/) override {
     return 0;
   }
 
@@ -40,8 +40,7 @@ public:
     ComputePrerequisites(uint32_t waveSize) : m_waveSize(waveSize) {}
   };
 
-  virtual void printBallotHlsl(add_ref<std::stringstream> css,
-                               add_cref<FlowState>,
+  virtual void printBallotHlsl(std::stringstream &css, const FlowState &,
                                bool endWithSemicolon = false) override {
     printIndent(css);
 
@@ -61,13 +60,13 @@ public:
   }
 
 protected:
-  virtual void simulateBallot(add_cref<Ballots> activeMask,
+  virtual void simulateBallot(const Ballots &activeMask,
                               const uint32_t /*unusedPrimitiveID*/,
                               const int32_t opsIndex,
-                              add_ref<std::vector<uint32_t>> outLoc,
-                              add_ref<std::vector<std::vector<UVec4>>> ref,
+                              std::vector<uint32_t> &outLoc,
+                              std::vector<std::vector<UVec4>> &ref,
                               std::shared_ptr<Prerequisites> prerequisites,
-                              add_ref<uint32_t> /*logFailureCount*/,
+                              uint32_t & /*logFailureCount*/,
                               const OPType /*reason*/,
                               const UVec4 * /*cmp*/) override {
     const uint32_t waveCount = activeMask.waveCount();
@@ -90,15 +89,13 @@ protected:
     }
   }
 
-  virtual void simulateStore(add_cref<Ballots> activeMask,
-                             const uint32_t /*unusedPrimitiveID*/,
-                             const uint64_t storeValue,
-                             add_ref<std::vector<uint32_t>> outLoc,
-                             add_ref<std::vector<std::vector<UVec4>>> ref,
-                             std::shared_ptr<Prerequisites> prerequisites,
-                             add_ref<uint32_t> /*logFailureCount*/,
-                             const OPType /*reason*/,
-                             const UVec4 * /*cmp*/) override {
+  virtual void
+  simulateStore(const Ballots &activeMask, const uint32_t /*unusedPrimitiveID*/,
+                const uint64_t storeValue, std::vector<uint32_t> &outLoc,
+                std::vector<std::vector<UVec4>> &ref,
+                std::shared_ptr<Prerequisites> prerequisites,
+                uint32_t & /*logFailureCount*/, const OPType /*reason*/,
+                const UVec4 * /*cmp*/) override {
     const uint32_t waveSize =
         std::static_pointer_cast<ComputePrerequisites>(prerequisites)
             ->m_waveSize;
@@ -112,16 +109,16 @@ protected:
   }
 
   virtual std::shared_ptr<Prerequisites> /*outputP*/
-  makePrerequisites(add_cref<std::vector<uint32_t>> outputP,
+  makePrerequisites(const std::vector<uint32_t> & /*outputP*/,
                     const uint32_t waveSize, const uint32_t primitiveStride,
-                    add_ref<std::vector<WaveState>> stateStack,
-                    add_ref<std::vector<uint32_t>> outLoc,
-                    add_ref<uint32_t> waveCount) override {
+                    std::vector<WaveState> &stateStack,
+                    std::vector<uint32_t> &outLoc,
+                    uint32_t &waveCount) override {
     auto prerequisites = std::make_shared<ComputePrerequisites>(waveSize);
     waveCount = ROUNDUP(invocationStride, waveSize) / waveSize;
     stateStack.resize(10u, WaveState(waveCount));
     outLoc.resize(primitiveStride, 0u);
-    add_ref<Ballots> activeMask(stateStack.at(0).activeMask);
+    Ballots &activeMask(stateStack.at(0).activeMask);
     for (uint32_t id = 0; id < invocationStride; ++id) {
       activeMask.set(Ballots::findBit(id, waveSize));
     }

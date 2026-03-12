@@ -568,7 +568,7 @@ public:
   }
 
   struct FlowState {
-    add_cref<std::vector<OP>> ops;
+    const std::vector<OP> &ops;
     const int32_t opsIndex;
     const int32_t loopNesting;
     const int funcNum;
@@ -621,20 +621,19 @@ public:
   }
 
   virtual void printIfLocalInvocationIndexHlsl(std::stringstream &css,
-                                               add_cref<FlowState> flow) {
+                                               const FlowState &flow) {
     printIndent(css);
     css << "if (gIndex >= InputA[0x" << std::hex
         << flow.ops[flow.opsIndex].value << "]) {\n";
   }
 
-  virtual void printStoreHlsl(std::stringstream &css,
-                              add_cref<FlowState> flow) {
+  virtual void printStoreHlsl(std::stringstream &css, const FlowState &flow) {
     printIndent(css);
     css << "OutputB[gIndex][outLoc++].x = 0x" << std::hex
         << flow.ops[flow.opsIndex].value << ";\n";
   }
 
-  virtual void printBallotHlsl(std::stringstream &css, add_cref<FlowState>,
+  virtual void printBallotHlsl(std::stringstream &css, const FlowState &,
                                bool endWithSemicolon = false) {
     printIndent(css);
 
@@ -949,12 +948,12 @@ public:
   // the max number of outputs written. If it's false, store out the result
   // values to ref.
   virtual uint32_t simulate(bool countOnly, uint32_t waveSize,
-                            add_ref<std::vector<uint64_t>> ref) = 0;
+                            std::vector<uint64_t> &ref) = 0;
 
   virtual uint32_t execute(const uint32_t waveSize,
                            const uint32_t primitiveStride,
-                           add_ref<std::vector<std::vector<UVec4>>> ref,
-                           add_cref<std::vector<uint32_t>> outputP = {},
+                           std::vector<std::vector<UVec4>> &ref,
+                           const std::vector<uint32_t> &outputP = {},
                            const UVec4 *cmp = nullptr,
                            const uint32_t primitiveID = (~0u)) {
     // Per-invocation output location counters
@@ -972,7 +971,7 @@ public:
     int32_t i = 0;
 
     while (i < (int32_t)ops.size()) {
-      add_cref<Ballots> activeMask = stateStack[nesting].activeMask;
+      const Ballots &activeMask = stateStack[nesting].activeMask;
 
       switch (ops[i].type) {
       case OP_BALLOT:
@@ -1290,32 +1289,30 @@ public:
   }
 
 protected:
-  virtual std::shared_ptr<Prerequisites>
-  makePrerequisites(add_cref<std::vector<uint32_t>> /*outputP*/,
-                    const uint32_t /*waveSize*/,
-                    const uint32_t /*primitiveStride*/,
-                    add_ref<std::vector<WaveState>> /*stateStack*/,
-                    add_ref<std::vector<uint32_t>> /*outLoc*/,
-                    add_ref<uint32_t> /*waveCount*/) {
+  virtual std::shared_ptr<Prerequisites> makePrerequisites(
+      const std::vector<uint32_t> & /*outputP*/, const uint32_t /*waveSize*/,
+      const uint32_t /*primitiveStride*/,
+      std::vector<WaveState> & /*stateStack*/,
+      std::vector<uint32_t> & /*outLoc*/, uint32_t & /*waveCount*/) {
     return std::make_shared<Prerequisites>();
   }
 
-  virtual void simulateBallot(add_cref<Ballots> /*activeMask*/,
+  virtual void simulateBallot(const Ballots & /*activeMask*/,
                               const uint32_t /*primitiveID*/,
                               const int32_t /*opsIndex*/,
-                              add_ref<std::vector<uint32_t>> /*outLoc*/,
-                              add_ref<std::vector<std::vector<UVec4>>> /*ref*/,
+                              std::vector<uint32_t> & /*outLoc*/,
+                              std::vector<std::vector<UVec4>> & /*ref*/,
                               std::shared_ptr<Prerequisites> /*prerequisites*/,
-                              add_ref<uint32_t> /*logFailureCount*/,
+                              uint32_t & /*logFailureCount*/,
                               const OPType /*reason*/, const UVec4 * /*cmp*/) {}
 
-  virtual void simulateStore(add_cref<Ballots> /*activeMask*/,
+  virtual void simulateStore(const Ballots & /*activeMask*/,
                              const uint32_t /*primitiveID*/,
                              const uint64_t /*storeValue*/,
-                             add_ref<std::vector<uint32_t>> /*outLoc*/,
-                             add_ref<std::vector<std::vector<UVec4>>> /*ref*/,
+                             std::vector<uint32_t> & /*outLoc*/,
+                             std::vector<std::vector<UVec4>> & /*ref*/,
                              std::shared_ptr<Prerequisites> /*prerequisites*/,
-                             add_ref<uint32_t> /*logFailureCount*/,
+                             uint32_t & /*logFailureCount*/,
                              const OPType /*reason*/, const UVec4 * /*cmp*/) {}
 };
 } // namespace reconvergence

@@ -21,10 +21,10 @@ struct Ballot : public std::bitset<128> {
 
   Ballot() : super() {}
 
-  Ballot(add_cref<super> ballot, uint32_t printbits = 128u)
+  Ballot(const super &ballot, uint32_t printbits = 128u)
       : super(ballot), m_bits(printbits) {}
 
-  Ballot(add_cref<UVec4> ballot, uint32_t printbits = 128u)
+  Ballot(const UVec4 &ballot, uint32_t printbits = 128u)
       : super(), m_bits(printbits) {
     *this = ballot;
   }
@@ -53,7 +53,7 @@ struct Ballot : public std::bitset<128> {
     return result;
   }
 
-  add_ref<Ballot> operator=(add_cref<UVec4> vec) {
+  Ballot &operator=(const UVec4 &vec) {
     for (uint32_t k = 0; k < 4u; ++k) {
       (*this) <<= 32;
       (*this) |= vec[3 - k];

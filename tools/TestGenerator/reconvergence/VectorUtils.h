@@ -9,15 +9,8 @@
 #define VECTORUTILS_H_
 
 #include <cstdint>
-#include <type_traits>
 
 namespace reconvergence {
-
-template <class R> using add_ref = typename std::add_lvalue_reference<R>::type;
-
-template <class R>
-using add_cref =
-    typename std::add_lvalue_reference<typename std::add_const<R>::type>::type;
 
 template <typename T, int Size> class Vector {
 public:
