@@ -44,6 +44,7 @@ enum class DataFormat {
   Float16,
   Float32,
   Float64,
+  Depth32,
   Bool,
 };
 
@@ -117,6 +118,7 @@ static inline uint32_t getFormatSize(DataFormat Format) {
   case DataFormat::UInt32:
   case DataFormat::Int32:
   case DataFormat::Float32:
+  case DataFormat::Depth32:
   case DataFormat::Bool:
     return 4;
   case DataFormat::Hex64:
@@ -389,6 +391,7 @@ struct Shader {
   Stages Stage;
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
+  std::unique_ptr<llvm::MemoryBuffer> Reflection;
   int DispatchSize[3];
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
@@ -604,6 +607,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
     ENUM_CASE(Float16);
     ENUM_CASE(Float32);
     ENUM_CASE(Float64);
+    ENUM_CASE(Depth32);
     ENUM_CASE(Bool);
 #undef ENUM_CASE
   }

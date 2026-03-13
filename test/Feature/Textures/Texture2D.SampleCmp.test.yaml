@@ -1,0 +1,199 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerComparisonState Samp : register(s0); // Less
+[[vk::binding(3, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
+[[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // TODO: Add extra testing when we add multiple mip levels.
+
+  float2 uv = float2(0.5, 0.5);
+  
+  // 1. Ref = 0.5. Samp (Less: Ref < Sample).
+  // 0.5 < (0,0)=0.2 -> 0.0
+  // 0.5 < (1,0)=0.8 -> 1.0
+  // 0.5 < (0,1)=0.2 -> 0.0
+  // 0.5 < (1,1)=0.8 -> 1.0
+  // Linear Filter blends (0+1+0+1)/4 = 0.5
+  float r0 = Tex.SampleCmp(Samp, uv, 0.5);
+
+  // 2. Ref = 0.1. (Less: Ref < Sample).
+  // 0.1 < 0.2 -> 1.0
+  // 0.1 < 0.8 -> 1.0
+  // Result 1.0.
+  float r1 = Tex.SampleCmp(Samp, uv, 0.1);
+
+  // 3. Ref = 0.9. (Less: Ref < Sample).
+  // 0.9 < 0.2 -> 0.0
+  // 0.9 < 0.8 -> 0.0
+  // Result 0.0.
+  float r2 = Tex.SampleCmp(Samp, uv, 0.9);
+
+  // 4. Ref = 0.5. SampGreater (Greater: Ref > Sample).
+  // 0.5 > 0.2 -> 1.0
+  // 0.5 > 0.8 -> 0.0
+  // Linear Filter blends (1+0+1+0)/4 = 0.5
+  float r3 = Tex.SampleCmp(SampGreater, uv, 0.5);
+
+  // 5. Ref = 0.5. Offset (-1, -1). Samp (Less: Ref < Sample).
+  float r4 = Tex.SampleCmp(Samp, uv, 0.5, int2(-1, -1));
+
+  // 6. Ref = 0.5. Clamp 0.0. Samp (Less: Ref < Sample).
+  float r5 = Tex.SampleCmp(Samp, uv, 0.5, int2(0, 0), 0.0);
+
+  // 7. Ref = 0.5. Location (0.25, 0.25). Samp (Less: Ref < Sample).
+  // Center of Texel (0,0) is 0.2.
+  // 0.5 < 0.2 is FALSE -> 0.0.
+  float r6 = Tex.SampleCmp(Samp, float2(0.25, 0.25), 0.5);
+
+  // 8. SampleCmpLevelZero (LOD 0 explicit) Ref = 0.5
+  float r7 = Tex.SampleCmpLevelZero(Samp, uv, 0.5);
+
+  // 9. SampleCmpLevelZero Ref = 0.1
+  float r8 = Tex.SampleCmpLevelZero(Samp, uv, 0.1);
+
+  // 10. SampleCmpLevelZero Ref = 0.9
+  float r9 = Tex.SampleCmpLevelZero(Samp, uv, 0.9);
+
+  // 11. SampleCmpLevelZero Offset (-1, -1)
+  float r10 = Tex.SampleCmpLevelZero(Samp, uv, 0.5, int2(-1, -1));
+
+  // 12. SampleCmpLevelZero SampGreater
+  float r11 = Tex.SampleCmpLevelZero(SampGreater, uv, 0.5);
+
+  // 13. SampleCmpLevelZero Location
+  float r12 = Tex.SampleCmpLevelZero(Samp, float2(0.25, 0.25), 0.5);
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+    Out[4] = r4;
+    Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
+    Out[12] = r12;
+  }
+  return float4(0,0,0,0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: Tex
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0.2,  # (0,0) -> 0.2
+            0.8,  # (1,0) -> 0.8
+            0.2,  # (0,1) -> 0.2
+            0.8 ] # (1,1) -> 0.8
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 52 # 13 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 0.5, 1.0, 0.0, 0.5, 
+            0.0, 0.5, 0.0, 0.5, 
+            1.0, 0.0, 0.0, 0.5, 
+            0.0 ]
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps: { Width: 1, Height: 1, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+    ComparisonOp: Less
+  - Name: SampGreater
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+    ComparisonOp: Greater
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: SampGreater
+      Kind: SamplerComparison
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+
+Results:
+  - Result: SampleCmpTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
+# XFAIL: DirectX || Metal || Vulkan && Darwin
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

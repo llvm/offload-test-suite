@@ -5,9 +5,10 @@ permissions:
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-     - .github/workflows/windows-amd-dxc-warp-preview-d3d12.yaml
+  ## Note: This workflow is intentionally made to NOT run on schedule or when
+  ## modified by a PR due to a known issue where this workflow causes the
+  ## machine to stall indefinitely.
+  ## Issue link: https://github.com/llvm/offload-test-suite/issues/772
 
 jobs:
   Windows-D3D12-Warp-DXC:

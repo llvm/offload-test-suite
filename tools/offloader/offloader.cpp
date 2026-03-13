@@ -73,6 +73,11 @@ static cl::opt<std::string> AdapterRegex(
         "Case-insensitive regular expression to match GPU adapter description"),
     cl::value_desc("<regex>"), cl::init(""));
 
+static cl::list<std::string> Reflection(
+    "reflection",
+    cl::desc("Filenames for shader reflection metadata (Metal only)"),
+    cl::value_desc("filename"));
+
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
@@ -113,8 +118,12 @@ int run() {
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
   // Read in the shaders
-  for (size_t I = 0; I < InputShader.size(); ++I)
+  for (size_t I = 0; I < InputShader.size(); ++I) {
     PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+    if (I < Reflection.size()) {
+      PipelineDesc.Shaders[I].Reflection = readFile(Reflection[I]);
+    }
+  }
 
   if (InputShader.size() != PipelineDesc.Shaders.size())
     ExitOnErr(createStringError(
