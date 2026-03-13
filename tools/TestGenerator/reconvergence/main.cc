@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include <iostream>
-#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -134,10 +133,11 @@ int main(int argc, char *argv[]) {
     Counts.push_back(std::stoi(CountItem));
   }
 
-  std::map<uint32_t, uint32_t> NestingLevelToTestsCount;
+  // Index by nesting level. Levels 0 and 1 are intentionally unused.
+  std::vector<uint32_t> TestsCountPerLevel(MaxNestingLevel + 1, 0);
   if (Counts.size() == 1) {
     for (uint32_t Level = 2; Level <= MaxNestingLevel; ++Level) {
-      NestingLevelToTestsCount[Level] = Counts[0];
+      TestsCountPerLevel[Level] = Counts[0];
     }
   } else {
     // Expect one count per level from 2 to MaxNestingLevel
@@ -148,7 +148,7 @@ int main(int argc, char *argv[]) {
       return 1;
     }
     for (size_t CountIndex = 0; CountIndex < Counts.size(); ++CountIndex) {
-      NestingLevelToTestsCount[static_cast<uint32_t>(CountIndex) + 2] =
+      TestsCountPerLevel[static_cast<uint32_t>(CountIndex) + 2] =
           Counts[CountIndex];
     }
   }
@@ -169,8 +169,8 @@ int main(int argc, char *argv[]) {
   // Llvmpipe: 8
   const std::vector<uint32_t> WaveSizes = {4, 8, 16, 32, 64};
   for (const uint32_t WaveSize : WaveSizes) {
-    TestGenerator.createRandomizedTests(MaxNestingLevel, TotalSeedGroup,
-                                        NestingLevelToTestsCount, WaveSize,
+    TestGenerator.createRandomizedTests(TotalSeedGroup, TestsCountPerLevel,
+                                        WaveSize,
                                         /*ThreadgroupSizeX=*/7,
                                         /*ThreadgroupSizeY=*/13);
   }

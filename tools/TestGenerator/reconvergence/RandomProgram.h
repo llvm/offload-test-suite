@@ -74,10 +74,6 @@ public:
     uint32_t maskIdx = Random_getUint32(&rnd) % numMasks;
     uint64_t mask = masks[maskIdx];
     Ballot bmask = ballotMasks[maskIdx];
-    if (ifType == IF_UNIFORM) {
-      mask = ~0ULL;
-      bmask.set();
-    }
 
     uint32_t localIndexCmp =
         Random_getUint32(&rnd) %
@@ -87,6 +83,10 @@ public:
     } else if (ifType == IF_LOOPCOUNT) {
       ops.push_back({OP_IF_LOOPCOUNT, 0});
     } else {
+      if (ifType == IF_UNIFORM) {
+        mask = ~0ULL;
+        bmask.set();
+      }
       ops.push_back({OP_IF_MASK, mask});
       ops.back().bvalue = bmask;
     }

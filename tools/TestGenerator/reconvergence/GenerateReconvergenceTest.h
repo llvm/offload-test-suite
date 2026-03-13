@@ -33,10 +33,10 @@ public:
       const std::map<std::string, std::vector<TestExpectationConfig>>
           &TestExpectations = {})
       : OutputDir(OutputDir), TestExpectations(TestExpectations) {}
-  void createRandomizedTests(
-      uint32_t TotalMaxNestingLevel, uint32_t TotalSeedGroup,
-      const std::map<uint32_t, uint32_t> &NestingLevelToTestsCount,
-      uint32_t WaveSize, uint32_t ThreadgroupSizeX, uint32_t ThreadgroupSizeY);
+  void createRandomizedTests(uint32_t TotalSeedGroup,
+                             const std::vector<uint32_t> &TestsCountPerLevel,
+                             uint32_t WaveSize, uint32_t ThreadgroupSizeX,
+                             uint32_t ThreadgroupSizeY);
 
   bool SaveShader = false;
 

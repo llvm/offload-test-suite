@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <numeric>
 #include <string>
 #include <vector>
 
@@ -22,22 +23,22 @@
 
 namespace reconvergence {
 void ReconvergenceTestGenerator::createRandomizedTests(
-    uint32_t TotalMaxNestingLevel, uint32_t TotalSeedGroup,
-    const std::map<uint32_t, uint32_t> &NestingLevelToTestsCount,
+    uint32_t TotalSeedGroup, const std::vector<uint32_t> &TestsCountPerLevel,
     uint32_t WaveSize, uint32_t ThreadgroupSizeX, uint32_t ThreadgroupSizeY) {
-  uint32_t TotalTestsCount = 0;
-  for (uint32_t MaxNestingLevel = 2; MaxNestingLevel <= TotalMaxNestingLevel;
-       ++MaxNestingLevel) {
-    const uint32_t TestsCount = NestingLevelToTestsCount.at(MaxNestingLevel);
-    TotalTestsCount += TestsCount * TotalSeedGroup;
+  if (TestsCountPerLevel.size() <= 2) {
+    return;
   }
 
+  const uint32_t TotalTestsCount =
+      TotalSeedGroup * std::accumulate(TestsCountPerLevel.begin() + 2,
+                                       TestsCountPerLevel.end(), uint32_t{0});
+
   uint32_t TestId = 0;
-  for (uint32_t MaxNestingLevel = 2; MaxNestingLevel <= TotalMaxNestingLevel;
-       ++MaxNestingLevel) {
+  for (uint32_t MaxNestingLevel = 2;
+       MaxNestingLevel < TestsCountPerLevel.size(); ++MaxNestingLevel) {
     uint32_t Seed = 0;
     for (uint32_t SeedGroup = 0; SeedGroup < TotalSeedGroup; ++SeedGroup) {
-      const uint32_t TestsCount = NestingLevelToTestsCount.at(MaxNestingLevel);
+      const uint32_t TestsCount = TestsCountPerLevel[MaxNestingLevel];
       for (uint32_t _ = 0; _ < TestsCount; ++_) {
         const TestCase &Test =
             createSingleTest(Seed, MaxNestingLevel, WaveSize, ThreadgroupSizeX,
