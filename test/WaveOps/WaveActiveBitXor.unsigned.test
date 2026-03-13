@@ -111,19 +111,10 @@ Buffers:
     Format: UInt64
     Stride: 32
     FillSize: 32
-
-# Expected results
-# XOR across lanes:
-# lane values:
-# 1 ^ 16 ^ 256 ^ 4096 = 4369
-# 2 ^ 32 ^ 512 ^ 8192 = 8738
-# 4 ^ 64 ^ 1024 ^ 16384 = 17476
-# 8 ^ 128 ^ 2048 ^ 32768 = 34952
-
   - Name: ExpectedOut1
     Format: UInt32
     Stride: 4
-    Data: [4369,4369,4369,4369]
+    Data: [4369, 4369, 4369, 4369]
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 8
@@ -154,7 +145,7 @@ Buffers:
   - Name: ExpectedOut5
     Format: UInt64
     Stride: 8
-    Data: [4369,4369,4369,4369]
+    Data: [4369, 4369, 4369, 4369]
   - Name: ExpectedOut6
     Format: UInt64
     Stride: 16
