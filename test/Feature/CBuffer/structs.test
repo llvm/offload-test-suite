@@ -98,6 +98,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Unimplemented https://github.com/llvm/llvm-project/issues/186465
+# XFAIL: Clang && Vulkan
+
 # Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2595
 # XFAIL: Vulkan && MoltenVK
 
