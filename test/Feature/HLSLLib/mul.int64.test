@@ -113,6 +113,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/778
 # XFAIL: QC && DirectX
 
+# Bug https://github.com/llvm/offload-test-suite/issues/968
+# XFAIL: QC && Vulkan && Clang
+
 # REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
