@@ -42,10 +42,10 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [
-      1,0,0,0,
-      2,0,0,0,
-      4,0,0,0,
-      8,0,0,0
+      3,0,0,0,
+      5,0,0,0,
+      6,0,0,0,
+      9,0,0,0
     ]
   - Name: Out1
     Format: UInt32
@@ -66,19 +66,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: UInt32
     Stride: 4
-    Data: [3,3,0,0]
+    Data: [6, 6, 0, 0]
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 4
-    Data: [0,0,12,12]
+    Data: [0, 0, 15, 15]
   - Name: ExpectedOut3
     Format: UInt32
     Stride: 4
-    Data: [15,15,15,15]
+    Data: [9, 9, 9, 9]
   - Name: ExpectedOut4
     Format: UInt32
     Stride: 4
-    Data: [0,0,0,0]
+    Data: [0, 0, 0, 0]
 
 
 Results:
