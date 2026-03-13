@@ -165,47 +165,52 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
   const uint32_t InvocationStride = ThreadgroupSizeX * ThreadgroupSizeY;
   const auto &ExpectedResult = Test.getExpectedResult();
 
+  // Resource arrays require a uniform per-element size. Use the largest
+  // expected element count across invocations and zero-pad shorter rows.
+  size_t MaxElementsPerInvocation = 1;
   for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
        ++InvocationIndex) {
     const size_t NumElements = ExpectedResult[InvocationIndex].size();
-    const size_t AllocatedElements = NumElements == 0 ? 1 : NumElements;
+    if (NumElements > MaxElementsPerInvocation)
+      MaxElementsPerInvocation = NumElements;
+  }
 
-    Buffers << "  - Name: OutputB_" << InvocationIndex << "\n";
-    Buffers << "    Format: UInt32\n";
-    Buffers << "    Stride: 16\n";
-    Buffers << "    FillSize: " << AllocatedElements * 16 << "\n";
+  Buffers << "  - Name: OutputB\n";
+  Buffers << "    Format: UInt32\n";
+  Buffers << "    Stride: 16\n";
+  Buffers << "    FillSize: " << MaxElementsPerInvocation * 16 << "\n";
+  Buffers << "    ArraySize: " << InvocationStride << "\n";
 
-    Buffers << "  - Name: ExpectedOutputB_" << InvocationIndex << "\n";
-    Buffers << "    Format: UInt32\n";
-    Buffers << "    Stride: 16\n";
-    if (NumElements == 0) {
-      // Allocate one zero element so descriptor bindings are valid for all
-      // UAVs.
-      Buffers << "    Data: [ 0, 0, 0, 0 ]\n";
-    } else {
-      Buffers << "    Data: [ ";
-      for (size_t ElementIndex = 0; ElementIndex < NumElements;
-           ++ElementIndex) {
+  Buffers << "  - Name: ExpectedOutputB\n";
+  Buffers << "    Format: UInt32\n";
+  Buffers << "    Stride: 16\n";
+  Buffers << "    ArraySize: " << InvocationStride << "\n";
+  Buffers << "    Data:\n";
+  for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
+       ++InvocationIndex) {
+    const size_t NumElements = ExpectedResult[InvocationIndex].size();
+    Buffers << "      - [ ";
+    for (size_t ElementIndex = 0; ElementIndex < MaxElementsPerInvocation;
+         ++ElementIndex) {
+      if (ElementIndex < NumElements) {
         const UVec4 &Vec = ExpectedResult[InvocationIndex][ElementIndex];
         Buffers << Vec.x() << ", " << Vec.y() << ", " << Vec.z() << ", "
                 << Vec.w();
-        if (ElementIndex < NumElements - 1) {
-          Buffers << ", ";
-        }
+      } else {
+        Buffers << "0, 0, 0, 0";
       }
-      Buffers << " ]\n";
+      if (ElementIndex + 1 < MaxElementsPerInvocation)
+        Buffers << ", ";
     }
+    Buffers << " ]\n";
   }
 
   std::stringstream Results;
   Results << "Results:\n";
-  for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
-       ++InvocationIndex) {
-    Results << "  - Result: Test_" << InvocationIndex << "\n";
-    Results << "    Rule: BufferExact\n";
-    Results << "    Actual: OutputB_" << InvocationIndex << "\n";
-    Results << "    Expected: ExpectedOutputB_" << InvocationIndex << "\n";
-  }
+  Results << "  - Result: Test_OutputB\n";
+  Results << "    Rule: BufferExact\n";
+  Results << "    Actual: OutputB\n";
+  Results << "    Expected: ExpectedOutputB\n";
 
   std::stringstream DescriptorSets;
   DescriptorSets << R"""(DescriptorSets:
@@ -219,16 +224,13 @@ void ReconvergenceTestGenerator::saveTestConfig(const TestCase &Test) {
         Binding: 0
 )""";
 
-  for (uint32_t InvocationIndex = 0; InvocationIndex < InvocationStride;
-       ++InvocationIndex) {
-    DescriptorSets << "    - Name: OutputB_" << InvocationIndex << "\n";
-    DescriptorSets << "      Kind: RWStructuredBuffer\n";
-    DescriptorSets << "      DirectXBinding:\n";
-    DescriptorSets << "        Register: " << (1 + InvocationIndex) << "\n";
-    DescriptorSets << "        Space: 0\n";
-    DescriptorSets << "      VulkanBinding:\n";
-    DescriptorSets << "        Binding: " << (1 + InvocationIndex) << "\n";
-  }
+  DescriptorSets << "    - Name: OutputB\n";
+  DescriptorSets << "      Kind: RWStructuredBuffer\n";
+  DescriptorSets << "      DirectXBinding:\n";
+  DescriptorSets << "        Register: 1\n";
+  DescriptorSets << "        Space: 0\n";
+  DescriptorSets << "      VulkanBinding:\n";
+  DescriptorSets << "        Binding: 1\n";
 
   Ofs << Shaders.str() << Buffers.str() << Results.str() << DescriptorSets.str()
       << std::endl;
