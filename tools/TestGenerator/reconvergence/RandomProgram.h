@@ -18,11 +18,13 @@
 #include "MaskUtils.h"
 #include "MathUtils.h"
 #include "Op.h"
+#include "RandomProgramProbabilities.h"
 #include "RandomUtils.h"
 #include "TestCase.h"
 #include "VectorUtils.h"
 
 namespace reconvergence {
+namespace probabilities = random_program_probabilities;
 
 class RandomProgram {
 public:
@@ -97,8 +99,9 @@ public:
     pickOP(2);
     size_t thenEnd = ops.size();
 
-    uint32_t randElse = (Random_getUint32(&rnd) % 100);
-    if (randElse < 50) {
+    uint32_t randElse =
+        (Random_getUint32(&rnd) % probabilities::kPercentDenominator);
+    if (randElse < probabilities::kGenerateElsePercent) {
       if (ifType == IF_LOCAL_INVOCATION_INDEX)
         ops.push_back({OP_ELSE_LOCAL_INVOCATION_INDEX, localIndexCmp});
       else if (ifType == IF_LOOPCOUNT)
@@ -106,7 +109,7 @@ public:
       else
         ops.push_back({OP_ELSE_MASK, 0});
 
-      if (randElse < 10) {
+      if (randElse < probabilities::kReuseThenBlockForElsePercent) {
         // Sometimes make the else block identical to the then block
         for (size_t i = thenBegin; i < thenEnd; ++i)
           ops.push_back(ops[i]);
@@ -214,7 +217,8 @@ public:
   void genBreak() {
     if (loopNestingThisFunction > 0) {
       // Sometimes put the break in a divergent if
-      if ((Random_getUint32(&rnd) % 100) < 10) {
+      if ((Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+          probabilities::kDivergentBreakPercent) {
         ops.push_back({OP_IF_MASK, masks[0]});
         ops.back().bvalue = ballotMasks[0];
         ops.push_back({OP_BREAK, 0});
@@ -235,7 +239,8 @@ public:
     if (loopNestingThisFunction > 0 &&
         !(isLoopInf[loopNesting] /*&& !doneInfLoopBreak[loopNesting]*/)) {
       // Sometimes put the continue in a divergent if
-      if ((Random_getUint32(&rnd) % 100) < 10) {
+      if ((Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+          probabilities::kDivergentContinuePercent) {
         ops.push_back({OP_IF_MASK, masks[0]});
         ops.back().bvalue = ballotMasks[0];
         ops.push_back({OP_CONTINUE, 0});
@@ -257,11 +262,14 @@ public:
       // Put something interesting before the break
       genBallot();
       genBallot();
-      if ((Random_getUint32(&rnd) % 100) < 10)
+      if ((Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+          probabilities::kElectExtraOpPercent)
         pickOP(1);
 
       // if we're in a function, sometimes  use return instead
-      if (callNesting > 0 && (Random_getUint32(&rnd) % 100) < 30)
+      if (callNesting > 0 &&
+          (Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+              probabilities::kElectReturnPercent)
         ops.push_back({OP_RETURN, 0});
       else
         genBreak();
@@ -274,15 +282,19 @@ public:
   }
 
   void genReturn() {
-    uint32_t r = Random_getUint32(&rnd) % 100;
+    uint32_t r = Random_getUint32(&rnd) % probabilities::kPercentDenominator;
     if (nesting > 0 &&
         // Use return rarely in main, 20% of the time in a singly nested loop in
         // a function and 50% of the time in a multiply nested loop in a
         // function
-        (r < 5 || (callNesting > 0 && loopNestingThisFunction > 0 && r < 20) ||
-         (callNesting > 0 && loopNestingThisFunction > 1 && r < 50))) {
+        (r < probabilities::kReturnInMainPercent ||
+         (callNesting > 0 && loopNestingThisFunction > 0 &&
+          r < probabilities::kReturnInFunctionLoopPercent) ||
+         (callNesting > 0 && loopNestingThisFunction > 1 &&
+          r < probabilities::kReturnInNestedFunctionLoopPercent))) {
       genBallot();
-      if ((Random_getUint32(&rnd) % 100) < 10) {
+      if ((Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+          probabilities::kDivergentReturnPercent) {
         ops.push_back({OP_IF_MASK, masks[0]});
         ops.back().bvalue = ballotMasks[0];
         ops.push_back({OP_RETURN, 0});
@@ -428,7 +440,7 @@ public:
     for (uint32_t i = 0; i < count; ++i) {
       genBallot();
       if (nesting < maxNesting) {
-        uint32_t r = Random_getUint32(&rnd) % 11;
+        uint32_t r = Random_getUint32(&rnd) % probabilities::kTopLevelOpChoices;
         switch (r) {
         case 0:
           genIf(IF_MASK);
@@ -447,7 +459,8 @@ public:
           // don't nest loops too deeply, to avoid extreme memory usage or
           // timeouts
           if (loopNesting <= 3) {
-            uint32_t r2 = Random_getUint32(&rnd) % 3;
+            uint32_t r2 =
+                Random_getUint32(&rnd) % probabilities::kLoopKindChoices;
             switch (r2) {
             default:
             case 0:
@@ -472,8 +485,10 @@ public:
           genElect(false);
           break;
         case 7: {
-          uint32_t r2 = Random_getUint32(&rnd) % 5;
-          if (r2 == 0 && callNesting == 0 && nesting < maxNesting - 2)
+          uint32_t r2 =
+              Random_getUint32(&rnd) % probabilities::kCallOrReturnChoices;
+          if (r2 == probabilities::kCallChoice && callNesting == 0 &&
+              nesting < maxNesting - 2)
             genCall();
           else
             genReturn();
@@ -483,7 +498,8 @@ public:
           // don't nest loops too deeply, to avoid extreme memory usage or
           // timeouts
           if (loopNesting <= 3) {
-            uint32_t r2 = Random_getUint32(&rnd) % 2;
+            uint32_t r2 =
+                Random_getUint32(&rnd) % probabilities::kDoWhileKindChoices;
             switch (r2) {
             default:
             case 0:
@@ -496,7 +512,8 @@ public:
           }
         } break;
         case 9: {
-          uint32_t r2 = Random_getUint32(&rnd) % 4;
+          uint32_t r2 =
+              Random_getUint32(&rnd) % probabilities::kSwitchKindChoices;
           switch (r2) {
           default:
           case 0:
@@ -531,7 +548,8 @@ public:
   void genBallot() {
     // optionally insert ballots, stores, and noise. Ballots and stores are used
     // to determine correctness.
-    if ((Random_getUint32(&rnd) % 100) < 20) {
+    if ((Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+        probabilities::kInsertBallotPercent) {
       if (ops.size() < 2 || !(ops[ops.size() - 1].type == OP_BALLOT ||
                               (ops[ops.size() - 1].type == OP_STORE &&
                                ops[ops.size() - 2].type == OP_BALLOT))) {
@@ -539,7 +557,8 @@ public:
       }
     }
 
-    if ((Random_getUint32(&rnd) % 100) < 10) {
+    if ((Random_getUint32(&rnd) % probabilities::kPercentDenominator) <
+        probabilities::kInsertStorePercent) {
       if (ops.size() < 2 || !(ops[ops.size() - 1].type == OP_STORE ||
                               (ops[ops.size() - 1].type == OP_BALLOT &&
                                ops[ops.size() - 2].type == OP_STORE))) {
@@ -547,10 +566,10 @@ public:
       }
     }
 
-    uint32_t r = Random_getUint32(&rnd) % 10000;
-    if (r < 3)
+    uint32_t r = Random_getUint32(&rnd) % probabilities::kNoiseDenominator;
+    if (r < probabilities::kEmptyLoopNoisePerTenThousand)
       ops.push_back({OP_NOISE, 0});
-    else if (r < 10)
+    else if (r < probabilities::kInfiniteLoopNoisePerTenThousand)
       ops.push_back({OP_NOISE, 1});
   }
 

@@ -11,7 +11,7 @@ if(NOT LLVM_ENABLE_RTTI)
   endif()
 endif()
 
-add_executable(build_reconvergence_test main.cc GenerateReconvergenceTest.cc GenerateReconvergenceTest.h Ballot.h Ballots.h MaskUtils.h Op.h TestCase.h RandomProgram.h RandomUtils.h RandomUtils.cc VectorUtils.h MathUtils.h)
+add_executable(build_reconvergence_test main.cc GenerateReconvergenceTest.cc GenerateReconvergenceTest.h Ballot.h Ballots.h MaskUtils.h Op.h TestCase.h RandomProgram.h RandomProgramProbabilities.h RandomProgramProbabilities.cc RandomUtils.h RandomUtils.cc VectorUtils.h MathUtils.h)
 
 target_link_libraries(build_reconvergence_test PRIVATE LLVMCore LLVMSupport)
 
