@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "Ballot.h"
@@ -60,7 +61,7 @@ public:
   int32_t loopNesting;
   int32_t loopNestingThisFunction;
   int32_t callNesting;
-  int32_t minCount;
+  size_t minCount;
   int32_t indent;
   std::vector<bool> isLoopInf;
   std::vector<bool> doneInfLoopBreak;
@@ -429,24 +430,18 @@ public:
       if (nesting < maxNesting) {
         uint32_t r = Random_getUint32(&rnd) % 11;
         switch (r) {
-        default:
-          [[fallthrough]];
-          // fallthrough
-        case 2:
-          if (loopNesting) {
-            genIf(IF_LOOPCOUNT);
-            break;
-          }
-          [[fallthrough]];
-          // fallthrough
-        case 10:
-          genIf(IF_LOCAL_INVOCATION_INDEX);
-          break;
         case 0:
           genIf(IF_MASK);
           break;
         case 1:
           genIf(IF_UNIFORM);
+          break;
+        case 2:
+          if (loopNesting) {
+            genIf(IF_LOOPCOUNT);
+            break;
+          }
+          genIf(IF_LOCAL_INVOCATION_INDEX);
           break;
         case 3: {
           // don't nest loops too deeply, to avoid extreme memory usage or
@@ -522,6 +517,11 @@ public:
             break;
           }
         } break;
+        case 10:
+          genIf(IF_LOCAL_INVOCATION_INDEX);
+          break;
+        default:
+          break;
         }
       }
       genBallot();
@@ -558,13 +558,13 @@ public:
     std::vector<UVec4> ref;
 
     ops.clear();
-    while ((int32_t)ops.size() < minCount)
+    while (ops.size() < minCount)
       pickOP(1);
   }
 
   void printIndent(std::stringstream &css) {
-    for (int32_t i = 0; i < indent; ++i)
-      css << " ";
+    if (indent > 0)
+      css << std::string(static_cast<size_t>(indent), '\t');
   }
 
   struct FlowState {
