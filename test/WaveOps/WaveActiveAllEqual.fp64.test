@@ -13,29 +13,44 @@ void main(uint3 TID : SV_GroupThreadID)
 {
     unsigned int index = 0;
     bool Result = WaveActiveAllEqual(In[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result);
+    Out[index + TID.x] = Result;
+    index += 4;
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result2.x);
-    InterlockedAdd(Out[index++], (unsigned int)Result2.y);
+    Out[index + TID.x] = Result2.x;
+    index += 4;
+    Out[index + TID.x] = Result2.y;
+    index += 4;
 
     bool3 Result3 = WaveActiveAllEqual(In3[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result3.x);
-    InterlockedAdd(Out[index++], (unsigned int)Result3.y);
-    InterlockedAdd(Out[index++], (unsigned int)Result3.z);
+    Out[index + TID.x] = Result3.x;
+    index += 4;
+    Out[index + TID.x] = Result3.y;
+    index += 4;
+    Out[index + TID.x] = Result3.z;
+    index += 4;
 
     bool4 Result4 = WaveActiveAllEqual(In4[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.x);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.y);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.z);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.w);
+    Out[index + TID.x] = Result4.x;
+    index += 4;
+    Out[index + TID.x] = Result4.y;
+    index += 4;
+    Out[index + TID.x] = Result4.z;
+    index += 4;
+    Out[index + TID.x] = Result4.w;
+    index += 4;
+
 
     // constant folding case
     bool4 ResultCF = WaveActiveAllEqual(double4(1,1,1,1));
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.x);
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.y);
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.z);
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.w);
+    Out[index + TID.x] = ResultCF.x;
+    index += 4;
+    Out[index + TID.x] = ResultCF.y;
+    index += 4;
+    Out[index + TID.x] = ResultCF.z;
+    index += 4;
+    Out[index + TID.x] = ResultCF.w;
+    index += 4;
 }
 
 //--- pipeline.yaml
@@ -65,21 +80,27 @@ Buffers:
 
   - Name: Out
     Format: Int32
-    Stride: 4
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]  
+    Stride: 8
+    FillSize: 224
   - Name: UOut
     Format: Int32
-    Stride: 4
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+    Stride: 8
+    FillSize: 224
   
   - Name: ExpectedOut
     Format: Int32
-    Stride: 4
-    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
+    Stride: 8
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: UExpectedOut
     Format: Int32
-    Stride: 4
-    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
+    Stride: 8
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   
 Results:
   - Result: ExpectedOut
@@ -134,8 +155,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/943
 # XFAIL: Intel && Vulkan
 
-# Unsupported: InterlockedAdd isn't supported in clang yet
-# https://github.com/llvm/llvm-project/issues/99122
+# Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang
 
 # Metal doesn't support 64-bit wave operations

@@ -19,55 +19,87 @@ void main(uint3 TID : SV_GroupThreadID)
 {
     unsigned int index = 0;
     bool Result = WaveActiveAllEqual(In[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result);
+    Out[index + TID.x] = Result;
+    index += 4;
 
     bool2 Result2 = WaveActiveAllEqual(In2[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result2.x);
-    InterlockedAdd(Out[index++], (unsigned int)Result2.y);
+    Out[index + TID.x] = Result2.x;
+    index += 4;
+    Out[index + TID.x] = Result2.y;
+    index += 4;
 
     bool3 Result3 = WaveActiveAllEqual(In3[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result3.x);
-    InterlockedAdd(Out[index++], (unsigned int)Result3.y);
-    InterlockedAdd(Out[index++], (unsigned int)Result3.z);
+    Out[index + TID.x] = Result3.x;
+    index += 4;
+    Out[index + TID.x] = Result3.y;
+    index += 4;
+    Out[index + TID.x] = Result3.z;
+    index += 4;
 
     bool4 Result4 = WaveActiveAllEqual(In4[TID.x]);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.x);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.y);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.z);
-    InterlockedAdd(Out[index++], (unsigned int)Result4.w);
+    Out[index + TID.x] = Result4.x;
+    index += 4;
+    Out[index + TID.x] = Result4.y;
+    index += 4;
+    Out[index + TID.x] = Result4.z;
+    index += 4;
+    Out[index + TID.x] = Result4.w;
+    index += 4;
+
 
     // constant folding case
     bool4 ResultCF = WaveActiveAllEqual(int64_t4(1,1,1,1));
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.x);
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.y);
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.z);
-    InterlockedAdd(Out[index++], (unsigned int)ResultCF.w);
+    Out[index + TID.x] = ResultCF.x;
+    index += 4;
+    Out[index + TID.x] = ResultCF.y;
+    index += 4;
+    Out[index + TID.x] = ResultCF.z;
+    index += 4;
+    Out[index + TID.x] = ResultCF.w;
+    index += 4;
+
+
 
     unsigned int uindex = 0;
-    bool UResult = WaveActiveAllEqual(UIn[TID.x]);    
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult);
-    
+    bool UResult = WaveActiveAllEqual(UIn[TID.x]);
+    UOut[uindex + TID.x] = UResult;
+    uindex += 4;
+
     bool2 UResult2 = WaveActiveAllEqual(UIn2[TID.x]);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult2.x);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult2.y);
+    UOut[uindex + TID.x] = UResult2.x;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResult2.y;
+    uindex += 4;
 
     bool3 UResult3 = WaveActiveAllEqual(UIn3[TID.x]);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.x);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.y);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult3.z);
+    UOut[uindex + TID.x] = UResult3.x;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResult3.y;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResult3.z;
+    uindex += 4;
 
     bool4 UResult4 = WaveActiveAllEqual(UIn4[TID.x]);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.x);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.y);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.z);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResult4.w);
+    UOut[uindex + TID.x] = UResult4.x;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResult4.y;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResult4.z;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResult4.w;
+    uindex += 4;
+
 
     // constant folding case
     bool4 UResultCF = WaveActiveAllEqual(uint64_t4(1,1,1,1));
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.x);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.y);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.z);
-    InterlockedAdd(UOut[uindex++], (unsigned int)UResultCF.w);
+    UOut[uindex + TID.x] = UResultCF.x;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResultCF.y;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResultCF.z;
+    uindex += 4;
+    UOut[uindex + TID.x] = UResultCF.w;
+    uindex += 4;
 }
 
 //--- pipeline.yaml
@@ -113,21 +145,27 @@ Buffers:
 
   - Name: Out
     Format: Int32
-    Stride: 4
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]  
+    Stride: 8
+    FillSize: 224
   - Name: UOut
     Format: Int32
-    Stride: 4
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+    Stride: 8
+    FillSize: 224
   
   - Name: ExpectedOut
     Format: Int32
     Stride: 4
-    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: UExpectedOut
     Format: Int32
     Stride: 4
-    Data: [ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4 ]
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   
 Results:
   - Result: ExpectedOut
@@ -220,8 +258,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/943
 # XFAIL: Intel && Vulkan
 
-# Unsupported: InterlockedAdd isn't supported in clang yet
-# https://github.com/llvm/llvm-project/issues/99122
+# Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang
 
 # Metal doesn't support 64-bit wave operations
