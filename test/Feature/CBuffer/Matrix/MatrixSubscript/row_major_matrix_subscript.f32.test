@@ -1,22 +1,22 @@
 #--- source.hlsl
-RWStructuredBuffer<float> Out_f4x1 : register(u0);
-RWStructuredBuffer<float> Out_f4x2 : register(u1);
-RWStructuredBuffer<float> Out_f2x3 : register(u2);
-RWStructuredBuffer<float> Out_f2x4 : register(u3);
+RWStructuredBuffer<float> Out_f4x1 : register(u4);
+RWStructuredBuffer<float> Out_f4x2 : register(u5);
+RWStructuredBuffer<float> Out_f2x3 : register(u6);
+RWStructuredBuffer<float> Out_f2x4 : register(u7);
 
-cbuffer example_f4x1 : register(b1) {
+cbuffer example_f4x1 : register(b0) {
     row_major float4x1 M_f4x1;
 };
 
-cbuffer example_f4x2 : register(b2) {
+cbuffer example_f4x2 : register(b1) {
     row_major float4x2 M_f4x2;
 };
 
-cbuffer example_f3x2 : register(b3) {
+cbuffer example_f3x2 : register(b2) {
     row_major float2x3 M_f2x3;
 };
 
-cbuffer example_f2x4 : register(b4) {
+cbuffer example_f2x4 : register(b3) {
     row_major float2x4 M_f2x4;
 };
 
@@ -136,56 +136,56 @@ DescriptorSets:
     - Name: cbuffer_f4x1
       Kind: ConstantBuffer
       DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: cbuffer_f2x4
+      Kind: ConstantBuffer
+      DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: cbuffer_f2x4
+    - Name: cbuffer_f3x2
       Kind: ConstantBuffer
       DirectXBinding:
         Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
-    - Name: cbuffer_f3x2
+    - Name: cbuffer_f4x2
       Kind: ConstantBuffer
       DirectXBinding:
         Register: 3
         Space: 0
       VulkanBinding:
         Binding: 3
-    - Name: cbuffer_f4x2
-      Kind: ConstantBuffer
+    - Name: Out_f4x1
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 4
         Space: 0
       VulkanBinding:
         Binding: 4
-    - Name: Out_f4x1
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 0
-        Space: 0
-      VulkanBinding:
-        Binding: 0
     - Name: Out_f4x2
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 1
+        Register: 5
         Space: 0
       VulkanBinding:
         Binding: 5
     - Name: Out_f2x3
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 2
+        Register: 6
         Space: 0
       VulkanBinding:
         Binding: 6
     - Name: Out_f2x4
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 3
+        Register: 7
         Space: 0
       VulkanBinding:
         Binding: 7
@@ -197,10 +197,6 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/llvm-project/issues/185049
 # XFAIL: Clang
 
-# Note: NV crashes AMD and Intel Output buffers are empty.
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8218
-# XFAIL: DXC && Vulkan
-
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
