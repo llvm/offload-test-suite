@@ -6,9 +6,17 @@ RWStructuredBuffer<float> Out : register(u1);
 void main(uint3 dtid : SV_DispatchThreadID) {
   uint index = dtid.y * 2 + dtid.x;
   float value = In[index];
-  float value_quad_x = QuadReadAcrossX(value);
-  float value_dx = value - value_quad_x;
-  Out[index] = value_dx;
+  // Tests control flow across the quad, but making sure neighboring lanes are active to avoid UB.
+
+  if(index < 2) {
+    // This reads (0, 0) and (1, 0)
+    float value_quad_x = QuadReadAcrossX(value);
+    Out[index] = value - value_quad_x;
+  } else {
+    // This reads (1, 0) and (1, 1)
+    float value_quad_x = QuadReadAcrossX(value);
+    Out[index] = value + value_quad_x;
+  }
 }
 
 //--- pipeline.yaml
@@ -30,7 +38,7 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 4
-    Data: [ -9.0, 9.0, -18.0, 18.0 ]
+    Data: [ -9.0, 9.0, 22.0, 22.0 ]
 Results:
   - Result: ExpectedOut
     Rule: BufferExact
