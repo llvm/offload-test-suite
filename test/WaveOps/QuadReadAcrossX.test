@@ -9,7 +9,7 @@ void main(uint3 dtid : SV_DispatchThreadID) {
   // Tests control flow across the quad, but making sure neighboring lanes are active to avoid UB.
 
   if(index < 2) {
-    // This reads (0, 0) and (1, 0)
+    // This reads (0, 0) and (0, 1)
     float value_quad_x = QuadReadAcrossX(value);
     Out[index] = value - value_quad_x;
   } else {
