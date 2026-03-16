@@ -37,8 +37,8 @@ struct DeviceConfig {
 
 enum class MemoryLocation {
   GpuOnly,
-  CpuToGpu, // Upload
-  GpuToCpu, // Readback
+  CpuToGpu,
+  GpuToCpu,
 };
 
 enum class BufferUsage {
