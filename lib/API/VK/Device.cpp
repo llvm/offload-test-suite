@@ -394,8 +394,7 @@ public:
     FloatControlProp.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     FloatControlProp.pNext = nullptr;
-    SubgroupProps.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
     SubgroupProps.pNext = &FloatControlProp;
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     DriverProps.pNext = &SubgroupProps;
@@ -557,12 +556,12 @@ private:
       MinSize = Vulkan13Props.minSubgroupSize;
       MaxSize = Vulkan13Props.maxSubgroupSize;
     }
-    Caps.insert(std::make_pair(
-        "minSubgroupSize",
-        make_capability<uint32_t>("minSubgroupSize", MinSize)));
-    Caps.insert(std::make_pair(
-        "maxSubgroupSize",
-        make_capability<uint32_t>("maxSubgroupSize", MaxSize)));
+    Caps.insert(
+        std::make_pair("minSubgroupSize",
+                       make_capability<uint32_t>("minSubgroupSize", MinSize)));
+    Caps.insert(
+        std::make_pair("maxSubgroupSize",
+                       make_capability<uint32_t>("maxSubgroupSize", MaxSize)));
   }
 
   void queryLayers() {
