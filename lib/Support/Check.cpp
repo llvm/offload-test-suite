@@ -156,7 +156,8 @@ static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
   return AbsDiff <= ULPTolerance;
 }
 
-static bool testBufferExact(offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
+static bool testBufferExact(offloadtest::CPUBuffer *B1,
+                            offloadtest::CPUBuffer *B2) {
   if (B1->ArraySize != B2->ArraySize || B1->size() != B2->size())
     return false;
 
@@ -186,7 +187,8 @@ static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
 
 template <typename T>
 static bool testAllArray(std::function<bool(const T &, const T &)> ComparisonFn,
-                         offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
+                         offloadtest::CPUBuffer *B1,
+                         offloadtest::CPUBuffer *B2) {
   if (B1->ArraySize != B2->ArraySize || B1->size() != B2->size())
     return false;
 
@@ -206,7 +208,7 @@ static bool testAllArray(std::function<bool(const T &, const T &)> ComparisonFn,
 template <typename T>
 static bool
 testBufferFloat(std::function<bool(const T &, const T &)> ComparisonFn,
-                offloadtest::Buffer *B1, offloadtest::Buffer *B2) {
+                offloadtest::CPUBuffer *B1, offloadtest::CPUBuffer *B2) {
   assert(B1->Format == B2->Format && "Buffer types must be the same");
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64:
@@ -223,8 +225,8 @@ testBufferFloat(std::function<bool(const T &, const T &)> ComparisonFn,
   return false;
 }
 
-static bool testBufferFloatEpsilon(offloadtest::Buffer *B1,
-                                   offloadtest::Buffer *B2, double Epsilon,
+static bool testBufferFloatEpsilon(offloadtest::CPUBuffer *B1,
+                                   offloadtest::CPUBuffer *B2, double Epsilon,
                                    offloadtest::DenormMode DM) {
 
   switch (B1->Format) {
@@ -253,8 +255,9 @@ static bool testBufferFloatEpsilon(offloadtest::Buffer *B1,
   return false;
 }
 
-static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
-                               unsigned ULPT, offloadtest::DenormMode DM) {
+static bool testBufferFloatULP(offloadtest::CPUBuffer *B1,
+                               offloadtest::CPUBuffer *B2, unsigned ULPT,
+                               offloadtest::DenormMode DM) {
 
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64: {
@@ -308,7 +311,7 @@ static void formatBuffer(llvm::ArrayRef<T> Arr,
 }
 
 template <typename T>
-static void formatBufferArray(offloadtest::Buffer *B,
+static void formatBufferArray(offloadtest::CPUBuffer *B,
                               llvm::raw_svector_ostream &Result) {
   assert(B->ArraySize > 1 && "Buffer must be an array to format as array");
   for (const auto &DataPtr : B->Data) {
@@ -321,7 +324,7 @@ static void formatBufferArray(offloadtest::Buffer *B,
   }
 }
 
-template <typename T> static std::string formatBuffer(offloadtest::Buffer *B) {
+template <typename T> static std::string formatBuffer(offloadtest::CPUBuffer *B) {
   llvm::SmallString<256> Str;
   llvm::raw_svector_ostream Result(Str);
 
@@ -335,7 +338,7 @@ template <typename T> static std::string formatBuffer(offloadtest::Buffer *B) {
   return std::string(Result.str());
 }
 
-static const std::string getBufferStr(offloadtest::Buffer *B) {
+static const std::string getBufferStr(offloadtest::CPUBuffer *B) {
   using DF = offloadtest::DataFormat;
   switch (B->Format) {
   case DF::Hex8:

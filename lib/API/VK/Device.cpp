@@ -336,6 +336,26 @@ static bool isExtensionSupported(
 
 namespace {
 
+class VulkanBuffer : public offloadtest::Buffer {
+public:
+  VkDevice Dev; // Needed for clean-up
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
+      : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
+
+  ~VulkanBuffer() override {
+    vkDestroyBuffer(Dev, Buffer, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
 class VulkanQueue : public offloadtest::Queue {
 public:
   VkQueue Queue = VK_NULL_HANDLE;
@@ -381,7 +401,7 @@ private:
 
   struct ResourceBundle {
     ResourceBundle(VkDescriptorType DescriptorType, uint64_t Size,
-                   Buffer *BufferPtr)
+                   CPUBuffer *BufferPtr)
         : DescriptorType(DescriptorType), Size(Size), BufferPtr(BufferPtr) {}
 
     bool isImage() const {
@@ -411,7 +431,7 @@ private:
 
     VkDescriptorType DescriptorType;
     uint64_t Size;
-    Buffer *BufferPtr;
+    CPUBuffer *BufferPtr;
     VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     llvm::SmallVector<ResourceRef> ResourceRefs;
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
@@ -592,6 +612,60 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    VkMemoryPropertyFlags MemFlags = 0;
+    switch (Desc.location) {
+    case MemoryLocation::GpuOnly:
+      MemFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+      break;
+    case MemoryLocation::CpuToGpu:
+      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      break;
+    case MemoryLocation::GpuToCpu:
+      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                 VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+      break;
+    }
+
+    VkBufferCreateInfo BufInfo = {};
+    BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size = SizeInBytes;
+    BufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer DeviceBuffer;
+    if (vkCreateBuffer(LogicalDevice, &BufInfo, nullptr, &DeviceBuffer))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create device buffer.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(LogicalDevice, DeviceBuffer, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(Device, MemReqs.memoryTypeBits, MemFlags);
+    if (!MemIdx)
+      return MemIdx.takeError();
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(LogicalDevice, &AllocInfo, nullptr, &DeviceMemory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate device memory.");
+    if (vkBindBufferMemory(LogicalDevice, DeviceBuffer, DeviceMemory, 0))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind device buffer memory.");
+
+    return std::make_shared<VulkanBuffer>(
+        LogicalDevice, DeviceBuffer, DeviceMemory, Name, Desc, SizeInBytes);
+  }
+
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
       queryCapabilities();
@@ -679,7 +753,9 @@ private:
   }
 
 public:
-  llvm::Error createDevice(InvocationState &IS) {
+  llvm::Error initializeLogicalDevice() {
+    if (LogicalDevice != VK_NULL_HANDLE)
+      return llvm::Error::success();
 
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -766,7 +842,7 @@ public:
 
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
-    const offloadtest::Buffer &B = *R.BufferPtr;
+    const offloadtest::CPUBuffer &B = *R.BufferPtr;
     if (B.Format == DataFormat::Depth32 && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
@@ -1775,7 +1851,7 @@ public:
     if (R.isSampler())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -1862,7 +1938,7 @@ public:
     if (!R.isReadWrite())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = B.Format == DataFormat::Depth32
                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
@@ -2113,7 +2189,7 @@ public:
       Range.memory = ResRef.Host.Memory;
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      const Buffer &B = *P.Bindings.RTargetBufferPtr;
+      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
       vkUnmapMemory(Device, ResRef.Host.Memory);
     }
@@ -2188,6 +2264,10 @@ public:
 
     vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
 
+<<<<<<< HEAD
+    == == == = vkDestroyCommandPool(IS.Device, IS.CmdPool, nullptr);
+
+>>>>>>> 0a8c670 (Introduce a new Buffer type with DX,VK,MTL implementations.)
     return llvm::Error::success();
   }
 
@@ -2262,8 +2342,12 @@ public:
   }
 
   void cleanup() {
+<<<<<<< HEAD
     // Free devices before destroying the instance
-    Devices.clear();
+    == == == =
+                 // Free devices before the instance.
+>>>>>>> 0a8c670 (Introduce a new Buffer type with DX,VK,MTL implementations.)
+        Devices.clear();
 
 #ifndef NDEBUG
     auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
