@@ -369,17 +369,37 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+
+    D3D12_HEAP_TYPE HeapType = 0;
+    switch (Desc.Location) {
+    case MemoryLocation::GpuOnly:
+      HeapType = D3D12_HEAP_TYPE_DEFAULT;
+      break;
+    case MemoryLocation::CpuToGpu:
+      HeapType = D3D12_HEAP_TYPE_UPLOAD;
+      break;
+    case MemoryLocation::GpuToCpu:
+      HeapType = D3D12_HEAP_TYPE_READBACK;
+      break;
+    default:
+      assert(false && "MemoryLocation variant not handled");
+      break;
+    }
+
+    const D3D12_RESOURCE_FLAGS Flags =
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    const D3D12_RESOURCE_DESC CPUBuffer =
-        CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes);
+    const D3D12_RESOURCE_DESC BufferDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
 
     ComPtr<ID3D12Resource> DeviceBuffer;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &CPUBuffer,
-                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
-                                   IID_PPV_ARGS(&DeviceBuffer)),
-                               "Failed to create device buffer."))
+                                   &HeapProps, D3D12_HEAP_FLAG_NONE,
+                                   &BufferDesc, D3D12_RESOURCE_STATE_COMMON,
+                                   nullptr, IID_PPV_ARGS(&DeviceBuffer)),
+                               "Failed to create buffer."))
       return Err;
 
     return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
