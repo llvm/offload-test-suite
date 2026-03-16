@@ -96,9 +96,6 @@ DescriptorSets:
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/7819
 # XFAIL: Vulkan && DXC
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/186465
-# XFAIL: Clang && Vulkan
-
 # REQUIRES: Double, Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl

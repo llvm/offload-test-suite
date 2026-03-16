@@ -105,9 +105,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Not implemented https://github.com/llvm/wg-hlsl/issues/238
-# XFAIL: Clang
-
 # Bug https://github.com/llvm/offload-test-suite/issues/779
 # XFAIL: Intel && DirectX && DXC
 
