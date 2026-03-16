@@ -594,7 +594,7 @@ public:
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     VkMemoryPropertyFlags MemFlags = 0;
-    switch (Desc.location) {
+    switch (Desc.Location) {
     case MemoryLocation::GpuOnly:
       MemFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
       break;
@@ -605,6 +605,9 @@ public:
     case MemoryLocation::GpuToCpu:
       MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                  VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+      break;
+    default:
+      assert(false && "MemoryLocation variant not handled");
       break;
     }
 
