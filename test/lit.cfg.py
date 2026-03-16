@@ -61,9 +61,9 @@ def getHighestShaderModel(features):
     return int(major), int(minor)
 
 
-def setWaveSizeFeaturesDirectX(config, device):
-    MinSize = device["Features"]["WaveLaneCountMin"]
-    MaxSize = device["Features"]["WaveLaneCountMax"]
+def setWaveSizeFeatures(config, device, minFeature, maxFeature):
+    MinSize = device["Features"][minFeature]
+    MaxSize = device["Features"][maxFeature]
     if not MinSize or not MaxSize:
         return
 
@@ -75,6 +75,14 @@ def setWaveSizeFeaturesDirectX(config, device):
     while MinSizeInt <= MaxSizeInt:
         config.available_features.add(Wave_Prefix + str(MinSizeInt))
         MinSizeInt *= 2
+
+
+def setWaveSizeFeaturesDirectX(config, device):
+    setWaveSizeFeatures(config, device, "WaveLaneCountMin", "WaveLaneCountMax")
+
+
+def setWaveSizeFeaturesVulkan(config, device):
+    setWaveSizeFeatures(config, device, "minSubgroupSize", "maxSubgroupSize")
 
 
 def setDeviceFeatures(config, device, compiler):
@@ -139,6 +147,7 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
+        setWaveSizeFeaturesVulkan(config, device)
 
         # Add supported extensions.
         for Extension in device["Extensions"]:

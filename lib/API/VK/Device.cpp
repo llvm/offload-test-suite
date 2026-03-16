@@ -277,6 +277,8 @@ private:
   VkPhysicalDeviceProperties2 Props2;
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
   VkPhysicalDeviceDriverProperties DriverProps;
+  VkPhysicalDeviceSubgroupProperties SubgroupProps;
+  VkPhysicalDeviceVulkan13Properties Vulkan13Props;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
   LayerVector Layers;
@@ -392,11 +394,26 @@ public:
     FloatControlProp.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     FloatControlProp.pNext = nullptr;
+    SubgroupProps.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    SubgroupProps.pNext = &FloatControlProp;
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
-    DriverProps.pNext = &FloatControlProp;
+    DriverProps.pNext = &SubgroupProps;
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     Props2.pNext = &DriverProps;
     vkGetPhysicalDeviceProperties2(Device, &Props2);
+
+    // Query Vulkan 1.3 properties for subgroup size control range.
+    memset(&Vulkan13Props, 0, sizeof(Vulkan13Props));
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
+      Vulkan13Props.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+      Vulkan13Props.pNext = nullptr;
+      VkPhysicalDeviceProperties2 Props2ForVk13{};
+      Props2ForVk13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+      Props2ForVk13.pNext = &Vulkan13Props;
+      vkGetPhysicalDeviceProperties2(Device, &Props2ForVk13);
+    }
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
@@ -526,6 +543,26 @@ private:
       std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
 #endif
 #include "VKFeatures.def"
+
+    // Expose subgroup size capabilities using Vulkan property names.
+    // If Vulkan 1.3+ with subgroupSizeControl, use min/maxSubgroupSize.
+    // Otherwise, use the fixed subgroupSize from Vulkan 1.1 properties.
+    Caps.insert(std::make_pair(
+        "subgroupSize",
+        make_capability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
+    uint32_t MinSize = SubgroupProps.subgroupSize;
+    uint32_t MaxSize = SubgroupProps.subgroupSize;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0) &&
+        Features13.subgroupSizeControl) {
+      MinSize = Vulkan13Props.minSubgroupSize;
+      MaxSize = Vulkan13Props.maxSubgroupSize;
+    }
+    Caps.insert(std::make_pair(
+        "minSubgroupSize",
+        make_capability<uint32_t>("minSubgroupSize", MinSize)));
+    Caps.insert(std::make_pair(
+        "maxSubgroupSize",
+        make_capability<uint32_t>("maxSubgroupSize", MaxSize)));
   }
 
   void queryLayers() {
