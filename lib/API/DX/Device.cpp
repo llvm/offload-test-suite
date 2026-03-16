@@ -162,7 +162,7 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
 static llvm::Expected<D3D12_RESOURCE_DESC>
 getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
-  const offloadtest::Buffer &B = *R.BufferPtr;
+  const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
   if (B.OutputProps.MipLevels != 1)
     return llvm::createStringError(std::errc::not_supported,
@@ -270,6 +270,18 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
 
 namespace {
 
+class DXBuffer : public offloadtest::Buffer {
+public:
+  ComPtr<ID3D12Resource> Buffer;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
+           BufferCreateDesc Desc, size_t SizeInBytes)
+      : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+};
+
 class DXQueue : public offloadtest::Queue {
 public:
   ComPtr<ID3D12CommandQueue> Queue;
@@ -353,6 +365,25 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
   std::shared_ptr<Queue> getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    const D3D12_HEAP_PROPERTIES HeapProps =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const D3D12_RESOURCE_DESC CPUBuffer =
+        CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes);
+
+    ComPtr<ID3D12Resource> DeviceBuffer;
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &CPUBuffer,
+                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                   IID_PPV_ARGS(&DeviceBuffer)),
+                               "Failed to create device buffer."))
+      return Err;
+
+    return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+  }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
                                          const DeviceConfig &Config) {
@@ -568,7 +599,7 @@ public:
                                  ComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
     if (R.isTexture()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
           0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                  getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
@@ -1226,7 +1257,7 @@ public:
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
-        const offloadtest::Buffer &B = *R.first->BufferPtr;
+        const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
             0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                    getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
@@ -1308,7 +1339,7 @@ public:
     // Map readback and copy into host buffer, accounting for row pitch and
     // flipping vertical orientation. DirectX render target origin is top-left,
     // while our image writer expects bottom-left.
-    const Buffer &B = *P.Bindings.RTargetBufferPtr;
+    const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
     if (auto Err = HR::toError(IS.RTReadback->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
@@ -1350,7 +1381,7 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No render target bound for graphics pipeline.");
-    const Buffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
     if (OutBuf.OutputProps.MipLevels != 1)
       return llvm::createStringError(
           std::errc::not_supported,
@@ -1404,7 +1435,7 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No vertex buffer bound for graphics pipeline.");
-    const Buffer &VB = *P.Bindings.VertexBufferPtr;
+    const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
     const uint64_t VBSize = VB.size();
     D3D12_RESOURCE_DESC const Desc = CD3DX12_RESOURCE_DESC::Buffer(VBSize);
     CD3DX12_HEAP_PROPERTIES HeapProps =
@@ -1541,7 +1572,7 @@ public:
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CmdList->ResourceBarrier(1, &Barrier);
 
-    const Buffer &B = *P.Bindings.RTargetBufferPtr;
+    const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
         0,
         CD3DX12_SUBRESOURCE_FOOTPRINT(
@@ -1554,7 +1585,7 @@ public:
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
-        const offloadtest::Buffer &B = *R.first->BufferPtr;
+        const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
             0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                    getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
