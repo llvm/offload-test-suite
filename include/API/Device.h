@@ -35,19 +35,19 @@ struct DeviceConfig {
   bool EnableValidationLayer = false;
 };
 
-enum MemoryLocation {
+enum class MemoryLocation {
   GpuOnly,
   CpuToGpu, // Upload
   GpuToCpu, // Readback
 };
 
-enum BufferUsage {
+enum class BufferUsage {
   Storage,
 };
 
 struct BufferCreateDesc {
-  MemoryLocation location;
-  BufferUsage usage;
+  MemoryLocation Location;
+  BufferUsage Usage;
 };
 
 class Buffer {
