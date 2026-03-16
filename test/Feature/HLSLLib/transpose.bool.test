@@ -102,8 +102,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Not implemented https://github.com/llvm/wg-hlsl/issues/238
-# XFAIL: Clang
+# Bug https://github.com/llvm/llvm-project/issues/186864
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
