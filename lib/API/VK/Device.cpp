@@ -543,9 +543,7 @@ private:
 #endif
 #include "VKFeatures.def"
 
-    // Expose subgroup size capabilities using Vulkan property names.
-    // If Vulkan 1.3+ with subgroupSizeControl, use min/maxSubgroupSize.
-    // Otherwise, use the fixed subgroupSize from Vulkan 1.1 properties.
+    // Subgroup capabilities
     Caps.insert(std::make_pair(
         "subgroupSize",
         make_capability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
