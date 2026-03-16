@@ -85,7 +85,7 @@ public:
     assert(Data.size() == size() && "Data size does not match properties");
   }
 
-  ImageRef(const Buffer &B)
+  ImageRef(const CPUBuffer &B)
       : ImageRef(B.OutputProps.Height, B.OutputProps.Width,
                  B.getSingleElementSize(), B.Channels,
                  B.Format == DataFormat::Float32 ||

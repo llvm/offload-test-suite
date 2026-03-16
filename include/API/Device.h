@@ -35,6 +35,32 @@ struct DeviceConfig {
   bool EnableValidationLayer = false;
 };
 
+enum MemoryLocation {
+  GpuOnly,
+  CpuToGpu, // Upload
+  GpuToCpu, // Readback
+};
+
+enum BufferUsage {
+  Storage,
+};
+
+struct BufferCreateDesc {
+  MemoryLocation location;
+  BufferUsage usage;
+};
+
+class Buffer {
+public:
+  virtual ~Buffer() = default;
+
+  Buffer(const Buffer &) = delete;
+  Buffer &operator=(const Buffer &) = delete;
+
+protected:
+  Buffer() = default;
+};
+
 class Queue {
 public:
   virtual ~Queue() {}
@@ -56,6 +82,9 @@ public:
 
   virtual std::shared_ptr<Queue> getGraphicsQueue() = 0;
 
+  virtual llvm::Expected<std::shared_ptr<Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual ~Device() = 0;
