@@ -63,19 +63,8 @@ def getHighestShaderModel(features):
 
 
 def setWaveSizeFeaturesDirectX(config, device):
-    MinSize = device["Features"]["WaveLaneCountMin"]
-    MaxSize = device["Features"]["WaveLaneCountMax"]
-    if not MinSize or not MaxSize:
-        return
-
-    MinSizeInt = int(MinSize)
-    MaxSizeInt = int(MaxSize)
-
-    Wave_Prefix = "WaveSize_"
-
-    while MinSizeInt <= MaxSizeInt:
-        config.available_features.add(Wave_Prefix + str(MinSizeInt))
-        MinSizeInt *= 2
+    if "SubgroupSize" in device:
+        config.available_features.add("WaveSize_" + str(device["SubgroupSize"]))
 
 
 def setDeviceFeatures(config, device, compiler):
