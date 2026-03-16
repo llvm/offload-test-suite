@@ -2,7 +2,55 @@ tests:
 ################################
 # check-hlsl-mtl-reconvergence #
 ################################
+  - name: test_2_32_7_13_0.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_2_32_7_13_1.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_2_32_7_13_2.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_2_32_7_13_3.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
   - name: test_2_32_7_13_4.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_2_32_7_13_5.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_2_32_7_13_6.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_2_32_7_13_7.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_0.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_1.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_2.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_3.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_4.test
     expectation: FAIL
     condition: "Metal && DXC"
     comment: "TODO: File a bug to fix this test."
@@ -10,7 +58,31 @@ tests:
     expectation: FAIL
     condition: "Metal && DXC"
     comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_6.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_3_32_7_13_7.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_4_32_7_13_0.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_4_32_7_13_1.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_4_32_7_13_2.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
   - name: test_4_32_7_13_3.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_4_32_7_13_4.test
     expectation: FAIL
     condition: "Metal && DXC"
     comment: "TODO: File a bug to fix this test."
@@ -22,11 +94,67 @@ tests:
     expectation: FAIL
     condition: "Metal && DXC"
     comment: "TODO: File a bug to fix this test."
+  - name: test_4_32_7_13_7.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_0.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_1.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_2.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
   - name: test_5_32_7_13_3.test
     expectation: FAIL
     condition: "Metal && DXC"
     comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_4.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_5.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_6.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_5_32_7_13_7.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_6_32_7_13_0.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_6_32_7_13_1.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_6_32_7_13_2.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
   - name: test_6_32_7_13_3.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_6_32_7_13_4.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_6_32_7_13_5.test
+    expectation: FAIL
+    condition: "Metal && DXC"
+    comment: "TODO: File a bug to fix this test."
+  - name: test_6_32_7_13_6.test
     expectation: FAIL
     condition: "Metal && DXC"
     comment: "TODO: File a bug to fix this test."
