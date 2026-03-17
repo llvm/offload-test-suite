@@ -2,18 +2,18 @@
 StructuredBuffer<uint4> In  : register(t0);
 StructuredBuffer<uint64_t4> In2 : register(t1);
 
-RWStructuredBuffer<uint> Out1 : register(u1);
-RWStructuredBuffer<uint2> Out2 : register(u2);
-RWStructuredBuffer<uint4> Out3 : register(u3);
-RWStructuredBuffer<uint4> Out4 : register(u4);
+RWStructuredBuffer<uint> Out1 : register(u2);
+RWStructuredBuffer<uint2> Out2 : register(u3);
+RWStructuredBuffer<uint4> Out3 : register(u4);
+RWStructuredBuffer<uint4> Out4 : register(u5);
 
-RWStructuredBuffer<uint64_t> Out5 : register(u5);
-RWStructuredBuffer<uint64_t2> Out6 : register(u6);
-RWStructuredBuffer<uint64_t4> Out7 : register(u7);
-RWStructuredBuffer<uint64_t4> Out8 : register(u8);
+RWStructuredBuffer<uint64_t> Out5 : register(u6);
+RWStructuredBuffer<uint64_t2> Out6 : register(u7);
+RWStructuredBuffer<uint64_t4> Out7 : register(u8);
+RWStructuredBuffer<uint64_t4> Out8 : register(u9);
 
-RWStructuredBuffer<uint4> Out9 : register(u9);
-RWStructuredBuffer<uint64_t4> Out10 : register(u10);
+RWStructuredBuffer<uint4> Out9 : register(u10);
+RWStructuredBuffer<uint64_t4> Out10 : register(u11);
 
 [numthreads(4,1,1)]
 void main(uint3 tid : SV_GroupThreadID)
@@ -243,70 +243,70 @@ DescriptorSets:
     - Name: Out1
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 1
+        Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
     - Name: Out2
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 2
+        Register: 3
         Space: 0
       VulkanBinding:
         Binding: 3
     - Name: Out3
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 3
+        Register: 4
         Space: 0
       VulkanBinding:
         Binding: 4
     - Name: Out4
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 4
+        Register: 5
         Space: 0
       VulkanBinding:
         Binding: 5
     - Name: Out5
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 5
+        Register: 6
         Space: 0
       VulkanBinding:
         Binding: 6
     - Name: Out6
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 6
+        Register: 7
         Space: 0
       VulkanBinding:
         Binding: 7
     - Name: Out7
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 7
+        Register: 8
         Space: 0
       VulkanBinding:
         Binding: 8
     - Name: Out8
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 8
+        Register: 9
         Space: 0
       VulkanBinding:
         Binding: 9
     - Name: Out9
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 9
+        Register: 10
         Space: 0
       VulkanBinding:
         Binding: 10
     - Name: Out10
       Kind: RWStructuredBuffer
       DirectXBinding:
-        Register: 10
+        Register: 11
         Space: 0
       VulkanBinding:
         Binding: 11
