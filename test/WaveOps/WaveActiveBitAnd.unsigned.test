@@ -304,6 +304,9 @@ DescriptorSets:
 #--- end
 
 
+# Not implemented: https://github.com/llvm/llvm-project/issues/99166
+# UNSUPPORTED: Clang
+
 # 64 bit wave ops are not supported on metal.
 # https://github.com/llvm/offload-test-suite/issues/355
 # UNSUPPORTED: Metal
