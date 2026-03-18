@@ -528,30 +528,38 @@ private:
 #include "VKFeatures.def"
 
     // Query subgroup properties
+    const bool SupportsSubgroupSizeControl = Features13.subgroupSizeControl;
+
+    VkPhysicalDeviceVulkan13Properties Vulkan13Props{};
+    Vulkan13Props.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+    Vulkan13Props.pNext = nullptr;
+
     VkPhysicalDeviceSubgroupProperties SubgroupProps{};
     SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    VkPhysicalDeviceVulkan13Properties Vulkan13Props{};
+    SubgroupProps.pNext =
+        SupportsSubgroupSizeControl ? &Vulkan13Props : nullptr;
+
     VkPhysicalDeviceProperties2 SubgroupProps2{};
     SubgroupProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     SubgroupProps2.pNext = &SubgroupProps;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
-      Vulkan13Props.sType =
-          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
-      Vulkan13Props.pNext = &SubgroupProps;
-      SubgroupProps2.pNext = &Vulkan13Props;
-    }
+
     vkGetPhysicalDeviceProperties2(Device, &SubgroupProps2);
 
     Caps.insert(std::make_pair(
         "subgroupSize",
         make_capability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
-    uint32_t MinSize = SubgroupProps.subgroupSize;
-    uint32_t MaxSize = SubgroupProps.subgroupSize;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0) &&
-        Features13.subgroupSizeControl) {
+
+    uint32_t MinSize;
+    uint32_t MaxSize;
+    if (SupportsSubgroupSizeControl) {
       MinSize = Vulkan13Props.minSubgroupSize;
       MaxSize = Vulkan13Props.maxSubgroupSize;
+    } else {
+      MinSize = SubgroupProps.subgroupSize;
+      MaxSize = SubgroupProps.subgroupSize;
     }
+
     Caps.insert(
         std::make_pair("minSubgroupSize",
                        make_capability<uint32_t>("minSubgroupSize", MinSize)));
