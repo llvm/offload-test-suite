@@ -277,8 +277,6 @@ private:
   VkPhysicalDeviceProperties2 Props2;
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
   VkPhysicalDeviceDriverProperties DriverProps;
-  VkPhysicalDeviceSubgroupProperties SubgroupProps;
-  VkPhysicalDeviceVulkan13Properties Vulkan13Props;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
   LayerVector Layers;
@@ -394,25 +392,11 @@ public:
     FloatControlProp.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     FloatControlProp.pNext = nullptr;
-    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
-    SubgroupProps.pNext = &FloatControlProp;
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
-    DriverProps.pNext = &SubgroupProps;
+    DriverProps.pNext = &FloatControlProp;
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     Props2.pNext = &DriverProps;
     vkGetPhysicalDeviceProperties2(Device, &Props2);
-
-    // Query Vulkan 1.3 properties for subgroup size control range.
-    memset(&Vulkan13Props, 0, sizeof(Vulkan13Props));
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
-      Vulkan13Props.sType =
-          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
-      Vulkan13Props.pNext = nullptr;
-      VkPhysicalDeviceProperties2 Props2ForVk13{};
-      Props2ForVk13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-      Props2ForVk13.pNext = &Vulkan13Props;
-      vkGetPhysicalDeviceProperties2(Device, &Props2ForVk13);
-    }
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
@@ -543,7 +527,21 @@ private:
 #endif
 #include "VKFeatures.def"
 
-    // Subgroup capabilities
+    // Query subgroup properties
+    VkPhysicalDeviceSubgroupProperties SubgroupProps{};
+    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    VkPhysicalDeviceVulkan13Properties Vulkan13Props{};
+    VkPhysicalDeviceProperties2 SubgroupProps2{};
+    SubgroupProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    SubgroupProps2.pNext = &SubgroupProps;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0)) {
+      Vulkan13Props.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+      Vulkan13Props.pNext = &SubgroupProps;
+      SubgroupProps2.pNext = &Vulkan13Props;
+    }
+    vkGetPhysicalDeviceProperties2(Device, &SubgroupProps2);
+
     Caps.insert(std::make_pair(
         "subgroupSize",
         make_capability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
