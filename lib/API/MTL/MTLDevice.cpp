@@ -579,9 +579,6 @@ public:
     case MemoryLocation::GpuToCpu:
       StorageMode = MTL::ResourceStorageModeManaged;
       break;
-    default:
-      assert(false && "MemoryLocation variant not handled");
-      break;
     }
 
     MTL::Buffer *Buf = Device->newBuffer(SizeInBytes, StorageMode);

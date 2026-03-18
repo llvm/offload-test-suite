@@ -630,9 +630,6 @@ public:
       MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                  VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
       break;
-    default:
-      assert(false && "MemoryLocation variant not handled");
-      break;
     }
 
     VkBufferCreateInfo BufInfo = {};
