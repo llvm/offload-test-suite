@@ -1,0 +1,98 @@
+#--- source.hlsl
+
+StructuredBuffer<double4> A : register(t0);
+StructuredBuffer<double4> B : register(t1);
+StructuredBuffer<double4> C : register(t2);
+
+RWStructuredBuffer<double4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = fma(A[0], B[0], C[0]);
+  Out[1] = double4(fma(A[1].xyz, B[1].xyz, C[1].xyz), fma(A[1].w, B[1].w, C[1].w));
+  Out[2] = double4(fma(A[2].xy, B[2].xy, C[2].xy), fma(A[2].zw, B[2].zw, C[2].zw));
+  Out[3] = fma(double4(0.25, -0.25, 10.4, -10.6), double4(1.0, 1.0, 1.0, 1.0), double4(0.0, 0.0, 0.0, 0.0));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: A
+    Format: Float64
+    Stride: 32
+    Data: [ 0.25, -0.25, 10.4, -10.6,
+            1.5, -2.5, 0.5, -0.5,
+            0.0, 10.0, -10.0, 10.5 ]
+  - Name: B
+    Format: Float64
+    Stride: 32
+    Data: [ 1.0, 1.0, 1.0, 1.0,
+            2.0, -1.0, 4.0, 4.0,
+            1.0, 2.0, -1.0, 1.0 ]
+  - Name: C
+    Format: Float64
+    Stride: 32
+    Data: [ 0.0, 0.0, 0.0, 0.0,
+            0.25, 0.75, -1.5, 1.5,
+            0.0, 0.5, 0.5, 0.0 ]
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: Expected
+    Format: Float64
+    Stride: 32
+    Data: [ 0.25, -0.25, 10.4, -10.6,
+            3.25, 3.25, 0.5, -0.5,
+            0.0, 20.5, 10.5, 10.5,
+            0.25, -0.25, 10.399999618530273, -10.600000381469727 ]
+Results:
+  - Result: Result
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: C
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99117
+# XFAIL: Clang
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
