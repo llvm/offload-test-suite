@@ -60,7 +60,7 @@ DescriptorSets:
         Register: 1
         Space: 0
       VulkanBinding:
-        Binding: 2
+        Binding: 1
     - Name: Out2
       Kind: RWStructuredBuffer
       DirectXBinding:
