@@ -25,7 +25,7 @@
 
 namespace llvm {
 class raw_ostream;
-}
+} // namespace llvm
 namespace offloadtest {
 
 class ImageComparatorBase {
@@ -53,7 +53,7 @@ public:
 
 template <typename T, typename... ArgTs>
 std::enable_if_t<std::is_base_of_v<ImageComparatorBase, T>, ImageComparatorRef>
-make_comparator(ArgTs &&...Args) {
+makeComparator(ArgTs &&...Args) {
   return ImageComparatorRef(std::make_unique<T>(Args...));
 }
 
@@ -112,8 +112,8 @@ class Image : public ImageRef {
 
   Image(uint32_t H, uint32_t W, uint8_t D, uint8_t C, bool F)
       : ImageRef(H, W, D, C, F) {
-    uint64_t Sz = static_cast<uint64_t>(H) * static_cast<uint64_t>(W) *
-                  static_cast<uint64_t>(D) * static_cast<uint64_t>(C);
+    const uint64_t Sz = static_cast<uint64_t>(H) * static_cast<uint64_t>(W) *
+                        static_cast<uint64_t>(D) * static_cast<uint64_t>(C);
     OwnedData = std::make_unique<char[]>(Sz);
     Data = llvm::StringRef(OwnedData.get(), Sz);
   }
@@ -121,8 +121,8 @@ class Image : public ImageRef {
   Image(uint32_t H, uint32_t W, uint8_t D, uint8_t C, bool F,
         std::unique_ptr<char[]> &&Ptr)
       : ImageRef(H, W, D, C, F), OwnedData(std::move(Ptr)) {
-    uint64_t Sz = static_cast<uint64_t>(H) * static_cast<uint64_t>(W) *
-                  static_cast<uint64_t>(D) * static_cast<uint64_t>(C);
+    const uint64_t Sz = static_cast<uint64_t>(H) * static_cast<uint64_t>(W) *
+                        static_cast<uint64_t>(D) * static_cast<uint64_t>(C);
     Data = llvm::StringRef(OwnedData.get(), Sz);
   }
 

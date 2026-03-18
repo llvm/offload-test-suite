@@ -134,13 +134,13 @@ public:
 
 template <typename T>
 std::enable_if_t<std::is_enum_v<T>, Capability>
-make_capability(llvm::StringRef N, T Value) {
+makeCapability(llvm::StringRef N, T Value) {
   return Capability(N, std::make_shared<CapabilityValueEnum<T>>(Value));
 }
 
 template <typename T>
 std::enable_if_t<!std::is_enum_v<T>, Capability>
-make_capability(llvm::StringRef N, T Value) {
+makeCapability(llvm::StringRef N, T Value) {
   return Capability(N, std::make_shared<CapabilityType<T>>(Value));
 }
 

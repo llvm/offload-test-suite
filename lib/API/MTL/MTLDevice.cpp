@@ -321,7 +321,7 @@ class MTLDevice : public offloadtest::Device {
     if (TableSize > 0) {
       IS.ArgBuffer =
           Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      uint32_t HeapIndex = 0;
+      const uint32_t HeapIndex = 0;
       for (auto &D : P.Sets) {
         for (auto &R : D.Resources) {
           if (auto Err = createDescriptor(R, IS, HeapIndex++))
@@ -365,7 +365,7 @@ class MTLDevice : public offloadtest::Device {
         return E.takeError();
       llvm::json::Value Reflection = *E;
 
-      llvm::json::Object *ReflectionObj = Reflection.getAsObject();
+      const llvm::json::Object *ReflectionObj = Reflection.getAsObject();
       if (!ReflectionObj)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -474,8 +474,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    uint32_t TextureIndex = 0;
-    uint32_t BufferIndex = 0;
+    const uint32_t TextureIndex = 0;
+    const uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         assert(R.BufferPtr->ArraySize == 1 &&
@@ -515,7 +515,7 @@ class MTLDevice : public offloadtest::Device {
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
         const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        unsigned char *Dst = Buf + R * RowBytes;
+        const unsigned char *Dst = Buf + R * RowBytes;
         IS.FrameBufferTexture->getBytes(
             Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
       }

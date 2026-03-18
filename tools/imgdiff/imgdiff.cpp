@@ -74,12 +74,12 @@ int main(int ArgC, char **ArgV) {
       yaml::Input YIn((*RulesFile)->getBuffer());
       YIn >> Rules;
       ExitOnErr(llvm::errorCodeToError(YIn.error()));
-      Cmps.push_back(make_comparator<ImageComparatorDistance>(Rules));
+      Cmps.push_back(makeComparator<ImageComparatorDistance>(Rules));
     } else {
-      Cmps.push_back(make_comparator<ImageComparatorDistance>());
+      Cmps.push_back(makeComparator<ImageComparatorDistance>());
     }
     if (!OutputFilename.empty())
-      Cmps.push_back(make_comparator<ImageComparatorDiffImage>(
+      Cmps.push_back(makeComparator<ImageComparatorDiffImage>(
           ExpectedImage.getHeight(), ExpectedImage.getWidth(), OutputFilename));
 
     ExitOnErr(Image::compareImages(ExpectedImage, ActualImage, Cmps));
