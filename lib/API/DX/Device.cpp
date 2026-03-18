@@ -371,7 +371,7 @@ public:
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
 
-    D3D12_HEAP_TYPE HeapType = 0;
+    D3D12_HEAP_TYPE HeapType = D3D12_HEAP_TYPE_DEFAULT;
     switch (Desc.Location) {
     case MemoryLocation::GpuOnly:
       HeapType = D3D12_HEAP_TYPE_DEFAULT;
@@ -382,16 +382,12 @@ public:
     case MemoryLocation::GpuToCpu:
       HeapType = D3D12_HEAP_TYPE_READBACK;
       break;
-    default:
-      assert(false && "MemoryLocation variant not handled");
-      break;
     }
 
     const D3D12_RESOURCE_FLAGS Flags =
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-    const D3D12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
 
