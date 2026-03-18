@@ -641,31 +641,32 @@ public:
     BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer DeviceBuffer;
-    if (vkCreateBuffer(LogicalDevice, &BufInfo, nullptr, &DeviceBuffer))
+    if (vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create device buffer.");
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(LogicalDevice, DeviceBuffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
 
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
-    auto MemIdx = getMemoryIndex(Device, MemReqs.memoryTypeBits, MemFlags);
+    auto MemIdx =
+        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemFlags);
     if (!MemIdx)
       return MemIdx.takeError();
     AllocInfo.memoryTypeIndex = *MemIdx;
 
     VkDeviceMemory DeviceMemory;
-    if (vkAllocateMemory(LogicalDevice, &AllocInfo, nullptr, &DeviceMemory))
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to allocate device memory.");
-    if (vkBindBufferMemory(LogicalDevice, DeviceBuffer, DeviceMemory, 0))
+    if (vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0))
       return llvm::createStringError(std::errc::io_error,
                                      "Failed to bind device buffer memory.");
 
-    return std::make_shared<VulkanBuffer>(
-        LogicalDevice, DeviceBuffer, DeviceMemory, Name, Desc, SizeInBytes);
+    return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
+                                          Name, Desc, SizeInBytes);
   }
 
   const Capabilities &getCapabilities() override {
@@ -755,10 +756,7 @@ private:
   }
 
 public:
-  llvm::Error initializeLogicalDevice() {
-    if (LogicalDevice != VK_NULL_HANDLE)
-      return llvm::Error::success();
-
+  llvm::Error createDevice(InvocationState &IS) {
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     CmdPoolInfo.queueFamilyIndex = GraphicsQueue->QueueFamilyIdx;
@@ -2266,10 +2264,6 @@ public:
 
     vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
 
-<<<<<<< HEAD
-    == == == = vkDestroyCommandPool(IS.Device, IS.CmdPool, nullptr);
-
->>>>>>> 0a8c670 (Introduce a new Buffer type with DX,VK,MTL implementations.)
     return llvm::Error::success();
   }
 
@@ -2344,12 +2338,8 @@ public:
   }
 
   void cleanup() {
-<<<<<<< HEAD
     // Free devices before destroying the instance
-    == == == =
-                 // Free devices before the instance.
->>>>>>> 0a8c670 (Introduce a new Buffer type with DX,VK,MTL implementations.)
-        Devices.clear();
+    Devices.clear();
 
 #ifndef NDEBUG
     auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
