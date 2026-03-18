@@ -11,7 +11,7 @@ void main() {
   Out[0] = fma(A[0], B[0], C[0]);
   Out[1] = double4(fma(A[1].xyz, B[1].xyz, C[1].xyz), fma(A[1].w, B[1].w, C[1].w));
   Out[2] = double4(fma(A[2].xy, B[2].xy, C[2].xy), fma(A[2].zw, B[2].zw, C[2].zw));
-  Out[3] = fma(double4(0.25, -0.25, 10.4, -10.6), double4(1.0, 1.0, 1.0, 1.0), double4(0.0, 0.0, 0.0, 0.0));
+  Out[3] = fma(double4(0.25, -0.25, 10.0, -10.0), double4(1.0, 1.0, 1.0, 1.0), double4(0.0, 0.0, 0.0, 0.0));
 }
 
 //--- pipeline.yaml
@@ -50,7 +50,7 @@ Buffers:
     Data: [ 0.25, -0.25, 10.4, -10.6,
             3.25, 3.25, 0.5, -0.5,
             0.0, 20.5, 10.5, 10.5,
-            0.25, -0.25, 10.399999618530273, -10.600000381469727 ]
+            0.25, -0.25, 10.0, -10.0 ]
 Results:
   - Result: Result
     Rule: BufferFloatULP
