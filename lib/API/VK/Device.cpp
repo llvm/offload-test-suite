@@ -497,33 +497,33 @@ private:
 
     Caps.insert(std::make_pair(
         "APIMajorVersion",
-        make_capability<uint32_t>("APIMajorVersion",
-                                  VK_API_VERSION_MAJOR(Props.apiVersion))));
+        makeCapability<uint32_t>("APIMajorVersion",
+                                 VK_API_VERSION_MAJOR(Props.apiVersion))));
 
     Caps.insert(std::make_pair(
         "APIMinorVersion",
-        make_capability<uint32_t>("APIMinorVersion",
-                                  VK_API_VERSION_MINOR(Props.apiVersion))));
+        makeCapability<uint32_t>("APIMinorVersion",
+                                 VK_API_VERSION_MINOR(Props.apiVersion))));
 
 #define VULKAN_FLOAT_CONTROLS_FEATURE_BOOL(Name)                               \
   Caps.insert(std::make_pair(                                                  \
-      #Name, make_capability<bool>(#Name, FloatControlProp.Name)));
+      #Name, makeCapability<bool>(#Name, FloatControlProp.Name)));
 #define VULKAN_FEATURE_BOOL(Name)                                              \
   Caps.insert(std::make_pair(                                                  \
-      #Name, make_capability<bool>(#Name, Features.features.Name)));
+      #Name, makeCapability<bool>(#Name, Features.features.Name)));
 #define VULKAN11_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
-      std::make_pair(#Name, make_capability<bool>(#Name, Features11.Name)));
+      std::make_pair(#Name, makeCapability<bool>(#Name, Features11.Name)));
 #define VULKAN12_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
-      std::make_pair(#Name, make_capability<bool>(#Name, Features12.Name)));
+      std::make_pair(#Name, makeCapability<bool>(#Name, Features12.Name)));
 #define VULKAN13_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
-      std::make_pair(#Name, make_capability<bool>(#Name, Features13.Name)));
+      std::make_pair(#Name, makeCapability<bool>(#Name, Features13.Name)));
 #ifdef VK_VERSION_1_4
 #define VULKAN14_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
-      std::make_pair(#Name, make_capability<bool>(#Name, Features14.Name)));
+      std::make_pair(#Name, makeCapability<bool>(#Name, Features14.Name)));
 #endif
 #include "VKFeatures.def"
   }

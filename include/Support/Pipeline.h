@@ -375,7 +375,7 @@ struct PushConstantBlock {
   bool empty() const { return size() == 0; }
 
   // Layout the push constant content in output.
-  void getContent(llvm::SmallVectorImpl<uint8_t> &output) const;
+  void getContent(llvm::SmallVectorImpl<uint8_t> &Output) const;
 
   // Returns the size in bytes of the whole push constant once laid out.
   uint32_t size() const;
@@ -652,27 +652,27 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
-  static size_t size(IO &io, SmallVector<SmallVector<T>> &seq) {
-    return seq.size();
+  static size_t size(IO &Io, SmallVector<SmallVector<T>> &Seq) {
+    return Seq.size();
   }
 
-  static SmallVector<T> &element(IO &io, SmallVector<SmallVector<T>> &seq,
-                                 size_t index) {
-    if (index >= seq.size())
-      seq.resize(index + 1);
-    return seq[index];
+  static SmallVector<T> &element(IO &Io, SmallVector<SmallVector<T>> &Seq,
+                                 size_t Index) {
+    if (Index >= Seq.size())
+      Seq.resize(Index + 1);
+    return Seq[Index];
   }
 };
 
 template <typename T> struct SequenceTraits<SmallVector<MutableArrayRef<T>>> {
-  static size_t size(IO &io, SmallVector<MutableArrayRef<T>> &seq) {
-    return seq.size();
+  static size_t size(IO &Io, SmallVector<MutableArrayRef<T>> &Seq) {
+    return Seq.size();
   }
 
   static MutableArrayRef<T> &
-  element(IO &io, SmallVector<MutableArrayRef<T>> &seq, size_t index) {
-    assert(index < seq.size());
-    return seq[index];
+  element(IO &Io, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
+    assert(Index < Seq.size());
+    return Seq[Index];
   }
 };
 
