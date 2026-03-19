@@ -145,7 +145,7 @@ void MappingTraits<offloadtest::DescriptorSet>::mapping(
 //     - [0, 1, 2, 3]
 //     - [4, 5, 6, 7]
 //     - [8, 9, 10, 11]
-template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
+template <typename T> static void setData(IO &I, offloadtest::CPUBuffer &B) {
   if (I.outputting()) {
     if (B.ArraySize == 1) {
       // single buffer output
@@ -233,7 +233,7 @@ template <typename T> static void setData(IO &I, offloadtest::Buffer &B) {
 //
 //   Counters: [5, 4, 3]
 //
-static void setCounters(IO &I, offloadtest::Buffer &B) {
+static void setCounters(IO &I, offloadtest::CPUBuffer &B) {
   // counters are printed only if they exist and only on output
   if (!I.outputting() || B.Counters.empty())
     return;
@@ -261,8 +261,8 @@ void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
   I.mapOptional("ComparisonOp", S.ComparisonOp);
 }
 
-void MappingTraits<offloadtest::Buffer>::mapping(IO &I,
-                                                 offloadtest::Buffer &B) {
+void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
+                                                    offloadtest::CPUBuffer &B) {
   I.mapRequired("Name", B.Name);
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);

@@ -73,9 +73,39 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
 }
 
 namespace {
+
+class MTLQueue : public offloattest::Queue {
+public:
+  MTL::CommandQueue *Queue;
+  MTLQueue(MTL::CommandQueue *Queue) : Queue(Queue) {}
+  ~MTLQueue() {
+    if (Queue) {
+      Queue->release();
+    }
+  }
+};
+
+class MTLBuffer : public offloadtest::Buffer {
+public:
+  MTL::Buffer *Buf;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
+            size_t SizeInBytes)
+      : Buf(Buf), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  ~MTLBuffer() override {
+    if (Buf)
+      Buf->release();
+  }
+};
+
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
+  std::shared_ptr<MTLQueue> GraphicsQueue;
 
   struct InvocationState {
     InvocationState() { Pool = NS::AutoreleasePool::alloc()->init(); }
@@ -95,7 +125,6 @@ class MTLDevice : public offloadtest::Device {
     }
 
     NS::AutoreleasePool *Pool = nullptr;
-    MTL::CommandQueue *Queue = nullptr;
     MTL::ComputePipelineState *ComputePipeline = nullptr;
     MTL::RenderPipelineState *RenderPipeline = nullptr;
     MTL::Buffer *ArgBuffer;
@@ -321,7 +350,7 @@ class MTLDevice : public offloadtest::Device {
     if (TableSize > 0) {
       IS.ArgBuffer =
           Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      uint32_t HeapIndex = 0;
+      const uint32_t HeapIndex = 0;
       for (auto &D : P.Sets) {
         for (auto &R : D.Resources) {
           if (auto Err = createDescriptor(R, IS, HeapIndex++))
@@ -342,7 +371,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = IS.Queue->commandBuffer();
+    IS.CmdBuffer = GraphicsQueue->Queue->commandBuffer();
 
     MTL::ComputeCommandEncoder *CmdEncoder =
         IS.CmdBuffer->computeCommandEncoder();
@@ -410,13 +439,13 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = IS.Queue->commandBuffer();
+    IS.CmdBuffer = GraphicsQueue->Queue->commandBuffer();
 
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
     // Setup the render target texture.
-    Buffer *RTarget = P.Bindings.RTargetBufferPtr;
+    CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
 
     const MTL::PixelFormat Format =
         getMTLFormat(RTarget->Format, RTarget->Channels);
@@ -474,8 +503,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    uint32_t TextureIndex = 0;
-    uint32_t BufferIndex = 0;
+    const uint32_t TextureIndex = 0;
+    const uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         assert(R.BufferPtr->ArraySize == 1 &&
@@ -502,7 +531,7 @@ class MTLDevice : public offloadtest::Device {
       }
     }
     if (P.isGraphics()) {
-      Buffer *RTarget = P.Bindings.RTargetBufferPtr;
+      CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
       const uint64_t Width = RTarget->OutputProps.Width;
       const uint64_t Height = RTarget->OutputProps.Height;
       const size_t ElemSize = RTarget->getElementSize();
@@ -524,7 +553,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
 public:
-  MTLDevice(MTL::Device *D) : Device(D) {
+  MTLDevice(MTL::Device *D, MTL::Queue *Q)
+      : Device(D), GraphicsQueue(std::make_shared<MTLQueue>(Q)) {
     Description = Device->name()->utf8String();
   }
   const Capabilities &getCapabilities() override {
@@ -536,9 +566,33 @@ public:
   llvm::StringRef getAPIName() const override { return "Metal"; };
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
+  std::shared_ptr<Queue> getGraphicsQueue() override {
+    return std::static_pointer_cast<Queue>(GraphicsQueue);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    MTL::ResourceOptions StorageMode;
+    switch (Desc.location) {
+    case MemoryLocation::GpuOnly:
+      StorageMode = MTL::ResourceStorageModePrivate;
+      break;
+    case MemoryLocation::CpuToGpu:
+    case MemoryLocation::GpuToCpu:
+      StorageMode = MTL::ResourceStorageModeManaged;
+      break;
+    }
+
+    MTL::Buffer *Buf = Device->newBuffer(SizeInBytes, StorageMode);
+    if (!Buf)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal buffer.");
+    return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
-    IS.Queue = Device->newCommandQueue();
 
     if (auto Err = createBuffers(P, IS))
       return Err;
@@ -584,8 +638,10 @@ public:
   }
 
   llvm::Error initialize() {
-    auto DefaultDev =
-        std::make_shared<MTLDevice>(MTL::CreateSystemDefaultDevice());
+    MTL::Device *MetalDevice = MTL::CreateSystemDefaultDevice();
+    MTL::Queue *MetalQueue = MetalDevice->newCommandQueue();
+
+    auto DefaultDev = std::make_shared<MTLDevice>(MetalDevice, MetalQueue);
     Devices.push_back(DefaultDev);
     Device::registerDevice(std::static_pointer_cast<Device>(DefaultDev));
     return llvm::Error::success();
