@@ -210,6 +210,7 @@ testBufferFloat(std::function<bool(const T &, const T &)> ComparisonFn,
   case offloadtest::DataFormat::Float64:
     return testAllArray<double>(ComparisonFn, B1, B2);
   case offloadtest::DataFormat::Float32:
+  case offloadtest::DataFormat::Depth32:
     return testAllArray<float>(ComparisonFn, B1, B2);
   case offloadtest::DataFormat::Float16: {
     return testAllArray<uint16_t>(ComparisonFn, B1, B2);
@@ -231,7 +232,8 @@ static bool testBufferFloatEpsilon(offloadtest::Buffer *B1,
     };
     return testBufferFloat<double>(Fn, B1, B2);
   }
-  case offloadtest::DataFormat::Float32: {
+  case offloadtest::DataFormat::Float32:
+  case offloadtest::DataFormat::Depth32: {
     auto Fn = [Epsilon, DM](const float &FS, const float &FR) {
       return compareFloatEpsilon(FS, FR, (float)Epsilon, DM);
     };
@@ -259,7 +261,8 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
     };
     return testBufferFloat<double>(Fn, B1, B2);
   }
-  case offloadtest::DataFormat::Float32: {
+  case offloadtest::DataFormat::Float32:
+  case offloadtest::DataFormat::Depth32: {
     auto Fn = [ULPT, DM](const float &FS, const float &FR) {
       return compareFloatULP(FS, FR, ULPT, DM);
     };
@@ -360,6 +363,7 @@ static const std::string getBufferStr(offloadtest::Buffer *B,
     return formatBuffer<llvm::yaml::Hex16>(B,
                                            Rule); // assuming no native float16
   case DF::Float32:
+  case DF::Depth32:
     return formatBuffer<float>(B, Rule);
   case DF::Float64:
     return formatBuffer<double>(B, Rule);

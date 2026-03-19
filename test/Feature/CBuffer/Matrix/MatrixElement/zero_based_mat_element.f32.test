@@ -1,0 +1,192 @@
+#--- source.hlsl
+RWStructuredBuffer<float4> Out_f1x4 : register(u4);
+RWStructuredBuffer<float4> Out_f2x4 : register(u5);
+RWStructuredBuffer<float2> Out_f3x2 : register(u6);
+RWStructuredBuffer<float2> Out_f4x2 : register(u7);
+
+cbuffer example_f1x4 : register(b0) {
+    float1x4 M_f1x4;
+};
+
+cbuffer example_f2x4 : register(b1) {
+    float2x4 M_f2x4;
+};
+
+cbuffer example_f3x2 : register(b2) {
+    float3x2 M_f3x2;
+};
+
+cbuffer example_f4x2 : register(b3) {
+    float4x2 M_f4x2;
+};
+
+[numthreads(1,1,1)]
+void main() {
+    Out_f1x4[0] = M_f1x4._m00_m01_m02_m03;
+    // Test dupes
+    Out_f1x4[1] = M_f1x4._m00_m02_m02_m00;
+
+    Out_f2x4[0] = M_f2x4._m00_m01_m02_m03;
+    Out_f2x4[1] = M_f2x4._m10_m11_m12_m13;
+
+    Out_f3x2[0] = M_f3x2._m00_m01;
+    Out_f3x2[1] = M_f3x2._m10_m11;
+    Out_f3x2[2] = M_f3x2._m20_m21;
+
+    Out_f4x2[0] = M_f4x2._m00_m01;
+    Out_f4x2[1] = M_f4x2._m10_m11;
+    Out_f4x2[2] = M_f4x2._m20_m21;
+    Out_f4x2[3] = M_f4x2._m30_m31;
+
+    // Test nonsequential order
+    Out_f4x2[4] = M_f4x2._m10_m31;
+    Out_f4x2[5] = M_f4x2._m00_m21;
+    Out_f4x2[6] = M_f4x2._m20_m30;
+    Out_f4x2[7] = M_f4x2._m01_m11;
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: cbuffer_f1x4
+    Format: Float32
+    Data: [ 1.1, 0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a,
+            2.2, 0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.3, 0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a,
+            4.4 ]
+  - Name: cbuffer_f2x4
+    Format: Float32
+    Data: [ 1.1, 5.5, 0x5a5a5a5a, 0x5a5a5a5a,
+            2.2, 6.6, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.3, 7.7, 0x5a5a5a5a, 0x5a5a5a5a,
+            4.4, 8.8 ]
+  - Name: cbuffer_f3x2
+    Format: Float32
+    Data: [ 1.1, 3.3, 5.5, 0x5a5a5a5a,
+            2.2, 4.4, 6.6, 0x5a5a5a5a ]
+  - Name: cbuffer_f4x2
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4,
+            5.5, 6.6, 7.7, 8.8 ]
+  - Name: Out_f1x4
+    Format: Float32
+    Stride: 16
+    FillSize: 32
+  - Name: Out_f2x4
+    Format: Float32
+    Stride: 16
+    FillSize: 32
+  - Name: Out_f3x2
+    Format: Float32
+    Stride: 8
+    FillSize: 24
+  - Name: Out_f4x2
+    Format: Float32
+    Stride: 8
+    FillSize: 64
+  - Name: ExpectedOut_f1x4
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4,
+            1.1, 3.3, 3.3, 1.1 ]
+  - Name: ExpectedOut_f2x4
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 ]
+  - Name: ExpectedOut_f3x2
+    Format: Float32
+    Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6 ]
+  - Name: ExpectedOut_f4x2
+    Format: Float32
+    Data: [ 1.1, 5.5, 2.2, 6.6, 3.3, 7.7, 4.4, 8.8,
+            2.2, 8.8, 1.1, 7.7, 3.3, 4.4, 5.5, 6.6 ]
+Results:
+  - Result: Out_f1x4
+    Rule: BufferExact
+    Actual: Out_f1x4
+    Expected: ExpectedOut_f1x4
+  - Result: Out_f2x4
+    Rule: BufferExact
+    Actual: Out_f2x4
+    Expected: ExpectedOut_f2x4
+  - Result: Out_f3x2
+    Rule: BufferExact
+    Actual: Out_f3x2
+    Expected: ExpectedOut_f3x2
+  - Result: Out_f4x2
+    Rule: BufferExact
+    Actual: Out_f4x2
+    Expected: ExpectedOut_f4x2
+DescriptorSets:
+  - Resources:
+    - Name: cbuffer_f1x4
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: cbuffer_f2x4
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: cbuffer_f3x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: cbuffer_f4x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out_f1x4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out_f2x4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Out_f3x2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Out_f4x2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+
+# Note: Metal and Vulkan KosmicKrisp and MoltenVK
+# Are always empty
+# UNSUPPORTED: Darwin
+
+# Note: clang Vulkan crashes
+# BUG https://github.com/llvm/llvm-project/issues/176995
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

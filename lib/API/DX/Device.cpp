@@ -67,6 +67,9 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
     DXFormats(SINT) break;
   case DataFormat::Float32:
     DXFormats(FLOAT) break;
+  case DataFormat::Depth32:
+    llvm_unreachable(
+        "Depth32 format is not yet supported in the DirectX backend.");
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -363,16 +366,16 @@ public:
 
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
-      std::make_pair(#Name, make_capability<bool>(#Name, Features.Name())));
+      std::make_pair(#Name, makeCapability<bool>(#Name, Features.Name())));
 
 #define D3D_FEATURE_UINT(Name)                                                 \
   Caps.insert(std::make_pair(                                                  \
-      #Name, make_capability<uint32_t>(#Name, Features.Name())));
+      #Name, makeCapability<uint32_t>(#Name, Features.Name())));
 
 #define D3D_FEATURE_ENUM(NewEnum, Name)                                        \
   Caps.insert(std::make_pair(                                                  \
-      #Name, make_capability<NewEnum>(                                         \
-                 #Name, static_cast<NewEnum>(Features.Name()))));
+      #Name,                                                                   \
+      makeCapability<NewEnum>(#Name, static_cast<NewEnum>(Features.Name()))));
 
 #include "DXFeatures.def"
   }

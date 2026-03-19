@@ -42,10 +42,8 @@ Buffers:
     ]
   - Name: Out
     Format: Hex16
-    # Warp doesn't seem to like buffers with non-multiple of 4 strides, so we
-    # add a small amount of buffer at the end here.
-    Stride: 28
-    FillSize: 28
+    Stride: 26
+    FillSize: 26
   - Name: ExpectedOut
     Format: Hex16
     Stride: 26
@@ -56,8 +54,7 @@ Buffers:
       0x0002,
       0x3c00,
       0x0001, 0x0002, 0x0003, 0x0004,
-      0x0005, 0x0006, 0x0007, 0x0008,
-      0x0,
+      0x0005, 0x0006, 0x0007, 0x0008
     ]
 Results:
   - Result: Test1
@@ -84,6 +81,9 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Half, Int16
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/933
+# XFAIL: Intel && DirectX
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/159602
 # XFAIL: Clang && Vulkan

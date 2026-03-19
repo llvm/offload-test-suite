@@ -1,0 +1,101 @@
+#--- source.hlsl
+RWStructuredBuffer<float4> Out_f2x4 : register(u2); 
+RWStructuredBuffer<float2> Out_f4x2 : register(u3);
+
+cbuffer example_f2x4 : register(b0) {
+    float2x4 M_f2x4;
+};
+cbuffer example_f4x2 : register(b1) {
+    float4x2 M_f4x2;
+};
+
+[numthreads(4,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  if(GI < 2)
+    Out_f2x4[GI] = M_f2x4[GI];
+  Out_f4x2[GI] = M_f4x2[GI];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [4, 1, 1]
+Buffers:
+- Name: cbuffer_f2x4
+  Format: Float32
+  Data: [ 1.1, 5.5, 0x5a5a5a5a, 0x5a5a5a5a,
+          2.2, 6.6, 0x5a5a5a5a, 0x5a5a5a5a,
+          3.3, 7.7, 0x5a5a5a5a, 0x5a5a5a5a,
+          4.4, 8.8 ]
+- Name: cbuffer_f4x2
+  Format: Float32
+  Data: [ 1.1, 2.2, 3.3, 4.4,
+          5.5, 6.6, 7.7, 8.8 ]
+- Name: Out_f2x4
+  Format: Float32
+  Stride: 16
+  FillSize: 32
+- Name: Out_f4x2
+  Format: Float32
+  Stride: 8
+  FillSize: 32
+- Name: ExpectedOut_f2x4
+  Format: Float32
+  Data: [ 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 ]
+- Name: ExpectedOut_f4x2
+  Format: Float32
+  Data: [ 1.1, 5.5, 2.2, 6.6, 3.3, 7.7, 4.4, 8.8 ]
+Results:
+  - Result: Out_f2x4
+    Rule: BufferExact
+    Actual: Out_f2x4
+    Expected: ExpectedOut_f2x4
+  - Result: Out_f4x2
+    Rule: BufferExact
+    Actual: Out_f4x2
+    Expected: ExpectedOut_f4x2
+DescriptorSets:
+  - Resources:
+    - Name: cbuffer_f2x4
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: cbuffer_f4x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out_f2x4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out_f4x2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+
+
+# Note: Metal and Vulkan KosmicKrisp and MoltenVK 
+# Are always empty
+# UNSUPPORTED: Darwin
+
+# BUG https://github.com/llvm/offload-test-suite/issues/931
+# XFAIL: Clang && DirectX && AMD
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
