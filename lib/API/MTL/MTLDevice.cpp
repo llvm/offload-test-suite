@@ -365,7 +365,7 @@ class MTLDevice : public offloadtest::Device {
         return E.takeError();
       llvm::json::Value Reflection = *E;
 
-      llvm::json::Object *ReflectionObj = Reflection.getAsObject();
+      const llvm::json::Object *ReflectionObj = Reflection.getAsObject();
       if (!ReflectionObj)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -375,13 +375,13 @@ class MTLDevice : public offloadtest::Device {
         return llvm::createStringError(
             std::errc::invalid_argument,
             "Key 'state' not found in shader reflection.");
-      llvm::json::Object *State = StateIt->second.getAsObject();
+      const llvm::json::Object *State = StateIt->second.getAsObject();
       auto TGSize = State->find("tg_size");
       if (TGSize == State->end())
         return llvm::createStringError(
             std::errc::invalid_argument,
             "Key 'tg_size' not found in shader reflection.");
-      llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
+      const llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
       if (TGSizeArr->size() != 3)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -515,7 +515,7 @@ class MTLDevice : public offloadtest::Device {
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
         const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        unsigned char *Dst = Buf + R * RowBytes;
+        const unsigned char *Dst = Buf + R * RowBytes;
         IS.FrameBufferTexture->getBytes(
             Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
       }

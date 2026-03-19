@@ -17,7 +17,7 @@
 
 namespace llvm {
 template <typename T> struct EnumEntry;
-}
+} // namespace llvm
 
 namespace offloadtest {
 namespace directx {

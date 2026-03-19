@@ -13,12 +13,19 @@
 #ifndef OFFLOADTEST_SUPPORT_WINERROR_H
 #define OFFLOADTEST_SUPPORT_WINERROR_H
 
+#include <wrl/client.h>
+
+// The windows headers define these macros which conflict with the C++ standard
+// library. Undefining them before including any LLVM C++ code prevents errors.
+#undef max
+#undef min
+
 #include "llvm/Support/Error.h"
 
 namespace HR {
 inline llvm::Error toError(HRESULT HR, llvm::StringRef Msg) {
   if (FAILED(HR)) {
-    std::error_code EC =
+    const std::error_code EC =
         std::error_code(static_cast<int>(HR), std::system_category());
     return llvm::createStringError(EC, Msg);
   }
@@ -26,4 +33,4 @@ inline llvm::Error toError(HRESULT HR, llvm::StringRef Msg) {
 }
 } // namespace HR
 
-#endif // #ifndef OFFLOADTEST_SUPPORT_WINERROR_H
+#endif // OFFLOADTEST_SUPPORT_WINERROR_H
