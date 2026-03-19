@@ -338,7 +338,7 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/986
-# XFAIL: Intel && Vulkan
+# XFAIL: Intel && Vulkan && !Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/989
 # XFAIL: Metal
