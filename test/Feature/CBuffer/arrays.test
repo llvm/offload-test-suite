@@ -50,11 +50,11 @@ Buffers:
     ]
   - Name: Out
     Format: Hex32
-    Stride: 128
-    FillSize: 128
+    Stride: 144
+    FillSize: 144
   - Name: ExpectedOut
     Format: Hex32
-    Stride: 128
+    Stride: 144
     Data: [
       0x3f800000,
       0x40800000,
@@ -67,7 +67,7 @@ Buffers:
       0x00000010, 0x00000011, 0x00000012,
       0x00000013, 0x00000014, 0x00000015,
       0x00000016, 0x00000017, 0x00000018,
-      0x00000019, 0x0000001A, 0x0000001B,
+      0x00000019, 0x0000001A, 0x0000001B, 0x0, 0x0, 0x0, 0x0
     ]
 Results:
   - Result: Test1

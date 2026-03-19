@@ -11,7 +11,7 @@ void main(uint32_t3 TID : SV_GroupThreadID) {
   // Float
   OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
   float64_t4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
-  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);
   OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
 }
 
@@ -25,15 +25,15 @@ Shaders:
 Buffers:
   - Name: InFloat
     Format: Float64
-    Stride: 16
+    Stride: 32
     Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
   - Name: OutFloat
     Format: Float64
-    Stride: 16
+    Stride: 32
     FillSize: 288
   - Name: ExpectedOutFloat # The result we expect
     Format: Float64
-    Stride: 16
+    Stride: 32
     Data: [ 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 0, 0, 4, 5, 6, 7, 4, 5, 6, 7, 4, 5, 0, 0, 8, 9, 10, 11, 8, 9, 10, 11, 8, 9, 0, 0 ]
 Results:
   - Result: TestFloat
@@ -58,9 +58,6 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/533
-# XFAIL: DirectX && AMD
 
 # REQUIRES: Double
 

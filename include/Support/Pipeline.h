@@ -44,6 +44,7 @@ enum class DataFormat {
   Float16,
   Float32,
   Float64,
+  Depth32,
   Bool,
 };
 
@@ -117,6 +118,7 @@ static inline uint32_t getFormatSize(DataFormat Format) {
   case DataFormat::UInt32:
   case DataFormat::Int32:
   case DataFormat::Float32:
+  case DataFormat::Depth32:
   case DataFormat::Bool:
     return 4;
   case DataFormat::Hex64:
@@ -373,7 +375,7 @@ struct PushConstantBlock {
   bool empty() const { return size() == 0; }
 
   // Layout the push constant content in output.
-  void getContent(llvm::SmallVectorImpl<uint8_t> &output) const;
+  void getContent(llvm::SmallVectorImpl<uint8_t> &Output) const;
 
   // Returns the size in bytes of the whole push constant once laid out.
   uint32_t size() const;
@@ -389,6 +391,7 @@ struct Shader {
   Stages Stage;
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
+  std::unique_ptr<llvm::MemoryBuffer> Reflection;
   int DispatchSize[3];
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
@@ -604,6 +607,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
     ENUM_CASE(Float16);
     ENUM_CASE(Float32);
     ENUM_CASE(Float64);
+    ENUM_CASE(Depth32);
     ENUM_CASE(Bool);
 #undef ENUM_CASE
   }
@@ -648,27 +652,27 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
-  static size_t size(IO &io, SmallVector<SmallVector<T>> &seq) {
-    return seq.size();
+  static size_t size(IO &Io, SmallVector<SmallVector<T>> &Seq) {
+    return Seq.size();
   }
 
-  static SmallVector<T> &element(IO &io, SmallVector<SmallVector<T>> &seq,
-                                 size_t index) {
-    if (index >= seq.size())
-      seq.resize(index + 1);
-    return seq[index];
+  static SmallVector<T> &element(IO &Io, SmallVector<SmallVector<T>> &Seq,
+                                 size_t Index) {
+    if (Index >= Seq.size())
+      Seq.resize(Index + 1);
+    return Seq[Index];
   }
 };
 
 template <typename T> struct SequenceTraits<SmallVector<MutableArrayRef<T>>> {
-  static size_t size(IO &io, SmallVector<MutableArrayRef<T>> &seq) {
-    return seq.size();
+  static size_t size(IO &Io, SmallVector<MutableArrayRef<T>> &Seq) {
+    return Seq.size();
   }
 
   static MutableArrayRef<T> &
-  element(IO &io, SmallVector<MutableArrayRef<T>> &seq, size_t index) {
-    assert(index < seq.size());
-    return seq[index];
+  element(IO &Io, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
+    assert(Index < Seq.size());
+    return Seq[Index];
   }
 };
 

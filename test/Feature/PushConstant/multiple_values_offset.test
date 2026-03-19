@@ -47,8 +47,8 @@ DescriptorSets:
 #--- end
 # UNSUPPORTED: Metal || DirectX
 
-# Clang adds a 4-byte padding between `a` and `b`.
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/186465
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
