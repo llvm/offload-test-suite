@@ -321,7 +321,7 @@ class MTLDevice : public offloadtest::Device {
     if (TableSize > 0) {
       IS.ArgBuffer =
           Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      const uint32_t HeapIndex = 0;
+      uint32_t HeapIndex = 0;
       for (auto &D : P.Sets) {
         for (auto &R : D.Resources) {
           if (auto Err = createDescriptor(R, IS, HeapIndex++))
@@ -375,13 +375,13 @@ class MTLDevice : public offloadtest::Device {
         return llvm::createStringError(
             std::errc::invalid_argument,
             "Key 'state' not found in shader reflection.");
-      llvm::json::Object *State = StateIt->second.getAsObject();
+      const llvm::json::Object *State = StateIt->second.getAsObject();
       auto TGSize = State->find("tg_size");
       if (TGSize == State->end())
         return llvm::createStringError(
             std::errc::invalid_argument,
             "Key 'tg_size' not found in shader reflection.");
-      llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
+      const llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
       if (TGSizeArr->size() != 3)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -474,8 +474,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    const uint32_t TextureIndex = 0;
-    const uint32_t BufferIndex = 0;
+    uint32_t TextureIndex = 0;
+    uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         assert(R.BufferPtr->ArraySize == 1 &&
