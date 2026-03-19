@@ -19,7 +19,8 @@
 /// Calls the test, corresponding to the Rule specified in the Result,
 /// On the Actual and Expected Buffers
 /// \param R Result to verify
+/// \param EmitDetailedReport If false, suppress detailed diff/report output
 /// \returns Success if the test passes according to the specified Rule
-llvm::Error verifyResult(offloadtest::Result R);
+llvm::Error verifyResult(offloadtest::Result R, bool EmitDetailedReport = true);
 
 #endif // OFFLOADTEST_SUPPORT_CHECK_H

@@ -55,6 +55,10 @@ static cl::opt<std::string>
 static cl::opt<bool>
     Quiet("quiet", cl::desc("Suppress printing the pipeline as output"));
 
+static cl::opt<bool> NoDiffReport(
+    "no-diff-report",
+    cl::desc("Suppress detailed diff reporting for failed result checks"));
+
 static cl::opt<bool> Debug("debug-layer",
                            cl::desc("Enable runtime debug layers"));
 
@@ -170,7 +174,8 @@ int run() {
     // check the results
     llvm::Error ResultErr = Error::success();
     for (const auto &R : PipelineDesc.Results)
-      ResultErr = llvm::joinErrors(std::move(ResultErr), verifyResult(R));
+      ResultErr = llvm::joinErrors(std::move(ResultErr),
+                                   verifyResult(R, !NoDiffReport));
 
     if (ResultErr) {
       logAllUnhandledErrors(std::move(ResultErr), errs());
