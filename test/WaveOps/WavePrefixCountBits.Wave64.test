@@ -60,7 +60,7 @@ DescriptorSets:
         Register: 1
         Space: 0
       VulkanBinding:
-        Binding: 2
+        Binding: 1
     - Name: Out2
       Kind: RWStructuredBuffer
       DirectXBinding:
@@ -72,6 +72,9 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: WaveSize_64
+
+# Bug: https://github.com/llvm/llvm-project/issues/187188
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
