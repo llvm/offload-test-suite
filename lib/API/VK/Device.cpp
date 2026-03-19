@@ -548,7 +548,7 @@ private:
 
     Caps.insert(std::make_pair(
         "subgroupSize",
-        make_capability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
+        makeCapability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
 
     uint32_t MinSize;
     uint32_t MaxSize;
@@ -562,10 +562,10 @@ private:
 
     Caps.insert(
         std::make_pair("minSubgroupSize",
-                       make_capability<uint32_t>("minSubgroupSize", MinSize)));
+                       makeCapability<uint32_t>("minSubgroupSize", MinSize)));
     Caps.insert(
         std::make_pair("maxSubgroupSize",
-                       make_capability<uint32_t>("maxSubgroupSize", MaxSize)));
+                       makeCapability<uint32_t>("maxSubgroupSize", MaxSize)));
   }
 
   void queryLayers() {
