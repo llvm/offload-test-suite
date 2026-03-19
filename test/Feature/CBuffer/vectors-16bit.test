@@ -35,6 +35,7 @@ Buffers:
     ]
   - Name: Out
     Format: Hex16
+    Stride: 12
     FillSize: 12
 DescriptorSets:
   - Resources:
