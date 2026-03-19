@@ -106,7 +106,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/779
-# XFAIL: Intel && DirectX && DXC
+# XFAIL: Intel && DirectX
 
 # REQUIRES: Half
 # RUN: split-file %s %t
