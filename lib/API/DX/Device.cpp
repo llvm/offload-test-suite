@@ -289,6 +289,50 @@ public:
       : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
 };
 
+class DXFence : public offloadtest::Fence {
+public:
+  std::string Name;
+  ComPtr<ID3D12Fence> Fence;
+  HANDLE Event;
+
+  uint64_t getFenceValue() override { return Fence->GetCompletedValue(); }
+
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+
+    if (Fence->GetCompletedValue() >= SignalValue) {
+      return llvm::Error::success();
+    }
+
+    if (auto Err = HR::toError(Fence->SetEventOnCompletion(SignalValue, Event),
+                               "Failed to register end event."))
+      return Err;
+
+#ifdef _WIN32
+    WaitForSingleObject(Event, INFINITE);
+#else // WSL
+    pollfd PollEvent;
+    PollEvent.fd = (int)Event;
+    PollEvent.events = POLLIN;
+    PollEvent.revents = 0;
+    if (poll(&PollEvent, 1, -1) == -1)
+      return llvm::createStringError(
+          std::error_code(errno, std::system_category()), strerror(errno));
+#endif
+    return llvm::Error::success();
+  }
+
+  DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
+      : Fence(Fence), Event(Event), Name(Name) {}
+
+  ~DXFence() {
+#ifdef _WIN32
+    CloseHandle(Event);
+#else // WSL
+    close((int)Event);
+#endif
+  }
+};
+
 class DXQueue : public offloadtest::Queue {
 public:
   ComPtr<ID3D12CommandQueue> Queue;
@@ -373,6 +417,27 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    ComPtr<ID3D12Fence> Fence;
+    if (auto Err = HR::toError(
+            Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)),
+            "Failed to create Fence."))
+      return Err;
+
+#ifdef _WIN32
+    HANDLE Event = CreateEventA(nullptr, false, false, nullptr);
+    if (!Event)
+#else // WSL
+    int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (Event == -1)
+#endif
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create event.");
+
+    return std::make_shared<DXFence>(Fence, Event, Name);
+  }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
