@@ -72,6 +72,78 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
   return MTL::VertexFormatInvalid;
 }
 
+template <> struct llvm::DenseMapInfo<DirectXBinding> {
+  static DirectXBinding getEmptyKey() {
+    return {std::numeric_limits<uint32_t>::max(),
+            std::numeric_limits<uint32_t>::max()};
+  }
+  static DirectXBinding getTombstoneKey() {
+    return {std::numeric_limits<uint32_t>::max() - 1,
+            std::numeric_limits<uint32_t>::max() - 1};
+  }
+  static unsigned getHashValue(const DirectXBinding &K) {
+    return llvm::hash_combine(K.Register, K.Space);
+  }
+  static bool isEqual(const DirectXBinding &LHS, const DirectXBinding &RHS) {
+    return LHS.Register == RHS.Register && LHS.Space == RHS.Space;
+  }
+};
+
+// TLAB index map is a mapping from (register, space) pairs to the index of the
+// corresponding top-level argument buffer in the shader reflection. This is
+// used to create resource descriptors in the correct argument buffer entry.
+llvm::Expected<llvm::DenseMap<DirectXBinding, uint32_t>>
+computeTLABIndexMap(llvm::MemoryBuffer *ReflectionJSON) {
+  if (!ReflectionJSON)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "Reflection buffer is null.");
+
+  llvm::Expected<llvm::json::Value> E =
+      llvm::json::parse(llvm::StringRef(ReflectionJSON->getBuffer()));
+  if (!E)
+    return E.takeError();
+  llvm::json::Value Reflection = *E;
+
+  const llvm::json::Object *ReflectionObj = Reflection.getAsObject();
+  if (!ReflectionObj)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "Shader reflection must be a JSON object.");
+  auto TLABIt = ReflectionObj->find("TopLevelArgumentBuffer");
+  if (TLABIt == ReflectionObj->end())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Key 'TopLevelArgumentBuffer' not found in shader reflection.");
+
+  const llvm::json::Array *TLAB = TLABIt->second.getAsArray();
+  llvm::DenseMap<DirectXBinding, uint32_t> TLABIndexMap;
+  TLABIndexMap.reserve(TLAB->size());
+  for (uint32_t I = 0; I < static_cast<uint32_t>(TLAB->size()); ++I) {
+    const llvm::json::Object *ArgObj = (*TLAB)[I].getAsObject();
+    if (!ArgObj)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Top-level argument buffer entries in shader reflection must be JSON "
+          "objects.");
+    auto SlotIt = ArgObj->find("Slot");
+    auto SpaceIt = ArgObj->find("Space");
+    if (SlotIt == ArgObj->end() || SpaceIt == ArgObj->end())
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Top-level argument buffer entries in shader reflection must have "
+          "'Slot' and 'Space' fields.");
+    auto SlotVal = SlotIt->second.getAsUINT64();
+    auto SpaceVal = SpaceIt->second.getAsUINT64();
+    if (!SlotVal || !SpaceVal)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Slot and Space fields in shader reflection must be integers.");
+    DirectXBinding Binding{static_cast<uint32_t>(*SlotVal),
+                           static_cast<uint32_t>(*SpaceVal)};
+    TLABIndexMap.insert({Binding, I});
+  }
+  return TLABIndexMap;
+}
+
 namespace {
 class MTLQueue : public offloadtest::Queue {
 public:
@@ -346,13 +418,36 @@ class MTLDevice : public offloadtest::Device {
     if (TableSize > 0) {
       IS.ArgBuffer =
           Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      uint32_t HeapIndex = 0;
-      for (auto &D : P.Sets) {
-        for (auto &R : D.Resources) {
-          if (auto Err = createDescriptor(R, IS, HeapIndex++))
-            return Err;
+
+      if (P.isCompute()) {
+        auto TLABIndexMap = computeTLABIndexMap(P.Shaders[0].Reflection.get());
+        if (!TLABIndexMap)
+          return TLABIndexMap.takeError();
+
+        for (auto &D : P.Sets) {
+          for (auto &R : D.Resources) {
+            auto BindingIt = TLABIndexMap->find(R.DXBinding);
+            if (BindingIt == TLABIndexMap->end())
+              return llvm::createStringError(
+                  std::errc::invalid_argument,
+                  "Resource with register %u and space %u not found in shader "
+                  "reflection.",
+                  R.DXBinding.Register, R.DXBinding.Space);
+
+            if (auto Err = createDescriptor(R, IS, BindingIt->second))
+              return Err;
+          }
+        }
+      } else {
+        uint32_t HeapIndex = 0;
+        for (auto &D : P.Sets) {
+          for (auto &R : D.Resources) {
+            if (auto Err = createDescriptor(R, IS, HeapIndex++))
+              return Err;
+          }
         }
       }
+
       IS.ArgBuffer->didModifyRange(NS::Range::Make(0, IS.ArgBuffer->length()));
     }
     if (P.isGraphics()) {
