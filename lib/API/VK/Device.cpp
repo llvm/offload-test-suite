@@ -540,6 +540,11 @@ public:
 
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     DriverProps.pNext = &FloatControlProp;
+
+    Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    Props2.pNext = &DriverProps;
+    vkGetPhysicalDeviceProperties2(PhysicalDevice, &Props2);
+
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
@@ -549,10 +554,6 @@ public:
     // adapter-regex matching.
     Description += " (" + DriverName + ")";
 #endif
-
-    Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    Props2.pNext = &DriverProps;
-    vkGetPhysicalDeviceProperties2(PhysicalDevice, &Props2);
   }
   VulkanDevice(const VulkanDevice &) = default;
 
