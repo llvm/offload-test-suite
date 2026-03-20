@@ -13,6 +13,7 @@
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
@@ -72,27 +73,69 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
   return MTL::VertexFormatInvalid;
 }
 
-template <> struct llvm::DenseMapInfo<DirectXBinding> {
-  static DirectXBinding getEmptyKey() {
-    return {std::numeric_limits<uint32_t>::max(),
+// From metal_irconverter.h which is not part of the third-party
+enum IRResourceType {
+  IRResourceTypeTable,
+  IRResourceTypeConstant,
+  IRResourceTypeCBV,
+  IRResourceTypeSRV,
+  IRResourceTypeUAV,
+  IRResourceTypeSampler,
+  IRResourceTypeInvalid
+};
+
+struct IRResourceLocation {
+  IRResourceType resourceType;
+  uint32_t space;
+  uint32_t slot;
+};
+
+static IRResourceType getIRResourceTypeFromString(llvm::StringRef S) {
+  return llvm::StringSwitch<IRResourceType>(S)
+      .Case("Table", IRResourceTypeTable)
+      .Case("Constant", IRResourceTypeConstant)
+      .Case("CBV", IRResourceTypeCBV)
+      .Case("SRV", IRResourceTypeSRV)
+      .Case("UAV", IRResourceTypeUAV)
+      .Case("Sampler", IRResourceTypeSampler)
+      .Default(IRResourceTypeInvalid);
+}
+
+static IRResourceType inferIRResourceTypeFromResource(const Resource &R) {
+  if (R.isConstantBuffer())
+    return IRResourceTypeCBV;
+  if (R.isReadOnly())
+    return IRResourceTypeSRV;
+  if (R.isReadWrite())
+    return IRResourceTypeUAV;
+  if (R.isSampler())
+    return IRResourceTypeSampler;
+  llvm_unreachable("Unable to infer resource type for resource!");
+}
+
+template <> struct llvm::DenseMapInfo<IRResourceLocation> {
+  static IRResourceLocation getEmptyKey() {
+    return {IRResourceTypeInvalid, std::numeric_limits<uint32_t>::max(),
             std::numeric_limits<uint32_t>::max()};
   }
-  static DirectXBinding getTombstoneKey() {
-    return {std::numeric_limits<uint32_t>::max() - 1,
+  static IRResourceLocation getTombstoneKey() {
+    return {IRResourceTypeInvalid, std::numeric_limits<uint32_t>::max() - 1,
             std::numeric_limits<uint32_t>::max() - 1};
   }
-  static unsigned getHashValue(const DirectXBinding &K) {
-    return llvm::hash_combine(K.Register, K.Space);
+  static unsigned getHashValue(const IRResourceLocation &K) {
+    return llvm::hash_combine(K.resourceType, K.slot, K.space);
   }
-  static bool isEqual(const DirectXBinding &LHS, const DirectXBinding &RHS) {
-    return LHS.Register == RHS.Register && LHS.Space == RHS.Space;
+  static bool isEqual(const IRResourceLocation &LHS,
+                      const IRResourceLocation &RHS) {
+    return LHS.resourceType == RHS.resourceType && LHS.slot == RHS.slot &&
+           LHS.space == RHS.space;
   }
 };
 
 // TLAB index map is a mapping from (register, space) pairs to the index of the
 // corresponding top-level argument buffer in the shader reflection. This is
 // used to create resource descriptors in the correct argument buffer entry.
-llvm::Expected<llvm::DenseMap<DirectXBinding, uint32_t>>
+llvm::Expected<llvm::DenseMap<IRResourceLocation, uint32_t>>
 computeTLABIndexMap(llvm::MemoryBuffer *ReflectionJSON) {
   if (!ReflectionJSON)
     return llvm::createStringError(std::errc::invalid_argument,
@@ -115,7 +158,7 @@ computeTLABIndexMap(llvm::MemoryBuffer *ReflectionJSON) {
         "Key 'TopLevelArgumentBuffer' not found in shader reflection.");
 
   const llvm::json::Array *TLAB = TLABIt->second.getAsArray();
-  llvm::DenseMap<DirectXBinding, uint32_t> TLABIndexMap;
+  llvm::DenseMap<IRResourceLocation, uint32_t> TLABIndexMap;
   TLABIndexMap.reserve(TLAB->size());
   for (uint32_t I = 0; I < static_cast<uint32_t>(TLAB->size()); ++I) {
     const llvm::json::Object *ArgObj = (*TLAB)[I].getAsObject();
@@ -126,20 +169,25 @@ computeTLABIndexMap(llvm::MemoryBuffer *ReflectionJSON) {
           "objects.");
     auto SlotIt = ArgObj->find("Slot");
     auto SpaceIt = ArgObj->find("Space");
-    if (SlotIt == ArgObj->end() || SpaceIt == ArgObj->end())
+    auto TypeIt = ArgObj->find("Type");
+    if (SlotIt == ArgObj->end() || SpaceIt == ArgObj->end() ||
+        TypeIt == ArgObj->end())
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Top-level argument buffer entries in shader reflection must have "
-          "'Slot' and 'Space' fields.");
+          "'Slot', 'Space', and 'Type' fields.");
     auto SlotVal = SlotIt->second.getAsUINT64();
     auto SpaceVal = SpaceIt->second.getAsUINT64();
-    if (!SlotVal || !SpaceVal)
+    auto TypeVal = TypeIt->second.getAsString();
+    if (!SlotVal || !SpaceVal || !TypeVal)
       return llvm::createStringError(
           std::errc::invalid_argument,
-          "Slot and Space fields in shader reflection must be integers.");
-    DirectXBinding Binding{static_cast<uint32_t>(*SlotVal),
-                           static_cast<uint32_t>(*SpaceVal)};
-    TLABIndexMap.insert({Binding, I});
+          "Slot, Space, and Type fields in shader reflection must be valid.");
+    IRResourceLocation Location = {.resourceType =
+                                       getIRResourceTypeFromString(*TypeVal),
+                                   .slot = static_cast<uint32_t>(*SlotVal),
+                                   .space = static_cast<uint32_t>(*SpaceVal)};
+    TLABIndexMap.insert({Location, I});
   }
   return TLABIndexMap;
 }
@@ -401,7 +449,12 @@ class MTLDevice : public offloadtest::Device {
 
         for (auto &D : P.Sets) {
           for (auto &R : D.Resources) {
-            auto BindingIt = TLABIndexMap->find(R.DXBinding);
+            IRResourceLocation Location = {
+                .resourceType = inferIRResourceTypeFromResource(R),
+                .slot = R.DXBinding.Register,
+                .space = R.DXBinding.Space,
+            };
+            auto BindingIt = TLABIndexMap->find(Location);
             if (BindingIt == TLABIndexMap->end())
               return llvm::createStringError(
                   std::errc::invalid_argument,
