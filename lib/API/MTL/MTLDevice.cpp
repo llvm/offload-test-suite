@@ -73,7 +73,7 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
 }
 
 namespace {
-class MTLQueue : public offloattest::Queue {
+class MTLQueue : public offloadtest::Queue {
 public:
   MTL::CommandQueue *Queue;
   MTLQueue(MTL::CommandQueue *Queue) : Queue(Queue) {}
@@ -82,7 +82,7 @@ public:
       Queue->release();
     }
   }
-}
+};
 
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
@@ -100,8 +100,6 @@ class MTLDevice : public offloadtest::Device {
         ComputePipeline->release();
       if (RenderPipeline)
         RenderPipeline->release();
-      if (Queue)
-        Queue->release();
 
       Pool->release();
     }
@@ -535,7 +533,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
 public:
-  MTLDevice(MTL::Device *D, MTL::Queue *Q)
+  MTLDevice(MTL::Device *D, MTL::CommandQueue *Q)
       : Device(D), GraphicsQueue(std::make_shared<MTLQueue>(Q)) {
     Description = Device->name()->utf8String();
   }
@@ -600,7 +598,7 @@ public:
 
   llvm::Error initialize() {
     MTL::Device *MetalDevice = MTL::CreateSystemDefaultDevice();
-    MTL::Queue *MetalQueue = MetalDevice->newCommandQueue();
+    MTL::CommandQueue *MetalQueue = MetalDevice->newCommandQueue();
 
     auto DefaultDev = std::make_shared<MTLDevice>(MetalDevice, MetalQueue);
     Devices.push_back(DefaultDev);
