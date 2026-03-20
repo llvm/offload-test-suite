@@ -24,7 +24,7 @@
 
 namespace llvm {
 class raw_ostream;
-}
+} // namespace llvm
 
 namespace offloadtest {
 
