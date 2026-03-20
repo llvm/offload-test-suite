@@ -355,6 +355,47 @@ public:
   }
 };
 
+class VulkanFence : public offloadtest::Fence {
+public:
+  std::string Name;
+  VkDevice Device;
+  VkSemaphore Semaphore;
+
+  uint64_t getFenceValue() override {
+    uint64_t Value = 0;
+    const VkResult Result =
+        vkGetSemaphoreCounterValue(Device, Semaphore, &Value);
+    assert(Result == VK_SUCCESS);
+    return Value;
+  }
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+    VkSemaphoreWaitInfo WaitInfo = {};
+    WaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    WaitInfo.semaphoreCount = 1;
+    WaitInfo.pSemaphores = &Semaphore;
+    WaitInfo.pValues = &SignalValue;
+
+    const VkResult Result = vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX);
+
+    if (Result == VK_ERROR_DEVICE_LOST)
+      return llvm::createStringError(std::errc::no_such_device, "Device Lost.");
+    if (Result == VK_ERROR_OUT_OF_DEVICE_MEMORY)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Out of Device Memory.");
+    if (Result == VK_ERROR_OUT_OF_HOST_MEMORY)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Out of Host Memory.");
+    if (Result != VK_SUCCESS)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to wait on Semaphore.");
+
+    return llvm::Error::success();
+  }
+
+  VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
+      : Device(Device), Semaphore(Semaphore), Name(Name) {}
+};
+
 class VulkanQueue : public offloadtest::Queue {
 public:
   VkQueue Queue = VK_NULL_HANDLE;
@@ -612,6 +653,29 @@ public:
 
   std::shared_ptr<Queue> getGraphicsQueue() override {
     return std::static_pointer_cast<Queue>(GraphicsQueue);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    VkSemaphoreTypeCreateInfo TypeCreateInfo = {};
+    TypeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    TypeCreateInfo.pNext = nullptr;
+    TypeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    TypeCreateInfo.initialValue = 0;
+
+    VkSemaphoreCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    CreateInfo.pNext = &TypeCreateInfo;
+
+    VkSemaphore Semaphore = VK_NULL_HANDLE;
+    const VkResult Result =
+        vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore);
+    if (Result != VK_SUCCESS) {
+      return llvm::createStringError(std::errc::invalid_argument /*todo*/,
+                                     "Failed to create Semaphore");
+    }
+
+    return std::make_shared<VulkanFence>(Device, Semaphore, Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>

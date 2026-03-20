@@ -61,6 +61,13 @@ protected:
   Buffer() = default;
 };
 
+class Fence {
+public:
+  virtual ~Fence() {}
+  virtual uint64_t getFenceValue() = 0;
+  virtual llvm::Error waitForCompletion(uint64_t SignalValue) = 0;
+};
+
 class Queue {
 public:
   virtual ~Queue() {}
@@ -81,6 +88,9 @@ public:
   virtual llvm::Error executeProgram(Pipeline &P) = 0;
 
   virtual std::shared_ptr<Queue> getGraphicsQueue() = 0;
+
+  virtual llvm::Expected<std::shared_ptr<Fence>>
+  createFence(llvm::StringRef Name) = 0;
 
   virtual llvm::Expected<std::shared_ptr<Buffer>>
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
