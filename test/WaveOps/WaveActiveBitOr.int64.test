@@ -1,0 +1,197 @@
+#--- source.hlsl
+StructuredBuffer<uint64_t4> In  : register(t0);
+RWStructuredBuffer<uint64_t4> Out1 : register(u1);
+RWStructuredBuffer<uint64_t4> Out2 : register(u2);
+RWStructuredBuffer<uint64_t4> Out3 : register(u3);
+RWStructuredBuffer<uint64_t4> Out4 : register(u4);
+RWStructuredBuffer<uint64_t4> Out5 : register(u5);
+
+[numthreads(4,1,1)]
+void main(uint3 tid : SV_GroupThreadID)
+{
+    uint64_t4 uv = In[tid.x];
+
+    // Mask per "active lane set": only <=N lanes contribute
+    uint64_t us1 = tid.x <= 0 ? WaveActiveBitOr( uv.x ) : 0;
+    uint64_t us2 = tid.x <= 1 ? WaveActiveBitOr( uv.x ) : 0;
+    uint64_t us3 = tid.x <= 2 ? WaveActiveBitOr( uv.x ) : 0;
+    uint64_t us4 = tid.x <= 3 ? WaveActiveBitOr( uv.x ) : 0;
+
+    uint64_t2 uv2_1 = tid.x <= 0 ? WaveActiveBitOr( uv.xy ) : uint64_t2(0,0);
+    uint64_t2 uv2_2 = tid.x <= 1 ? WaveActiveBitOr( uv.xy ) : uint64_t2(0,0);
+    uint64_t2 uv2_3 = tid.x <= 2 ? WaveActiveBitOr( uv.xy ) : uint64_t2(0,0);
+    uint64_t2 uv2_4 = tid.x <= 3 ? WaveActiveBitOr( uv.xy ) : uint64_t2(0,0);
+
+    uint64_t3 uv3_1 = tid.x <= 0 ? WaveActiveBitOr( uv.xyz ) : uint64_t3(0,0,0);
+    uint64_t3 uv3_2 = tid.x <= 1 ? WaveActiveBitOr( uv.xyz ) : uint64_t3(0,0,0);
+    uint64_t3 uv3_3 = tid.x <= 2 ? WaveActiveBitOr( uv.xyz ) : uint64_t3(0,0,0);
+    uint64_t3 uv3_4 = tid.x <= 3 ? WaveActiveBitOr( uv.xyz ) : uint64_t3(0,0,0);
+
+    uint64_t4 uv4_1 = tid.x <= 0 ? WaveActiveBitOr( uv ) : uint64_t4(0,0,0,0);
+    uint64_t4 uv4_2 = tid.x <= 1 ? WaveActiveBitOr( uv ) : uint64_t4(0,0,0,0);
+    uint64_t4 uv4_3 = tid.x <= 2 ? WaveActiveBitOr( uv ) : uint64_t4(0,0,0,0);
+    uint64_t4 uv4_4 = tid.x <= 3 ? WaveActiveBitOr( uv ) : uint64_t4(0,0,0,0);
+
+    uint64_t uscalars[4] = { us1, us2, us3, us4 };
+    uint64_t2 uvec2s [4] = { uv2_1, uv2_2, uv2_3, uv2_4 };
+    uint64_t3 uvec3s [4] = { uv3_1, uv3_2, uv3_3, uv3_4 };
+    uint64_t4 uvec4s [4] = { uv4_1, uv4_2, uv4_3, uv4_4 };
+
+    Out1[tid.x].x   = uscalars[tid.x];
+    Out2[tid.x].xy  = uvec2s[tid.x];
+    Out3[tid.x].xyz = uvec3s[tid.x];
+    Out4[tid.x]     = uvec4s[tid.x];
+
+    // constant folding case
+    Out5[0] = WaveActiveBitOr(uint64_t4(1,2,4,8));
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int64
+    Stride: 32
+    Data: [ 0x000F000F000F000F, 0x000A000A000A000A, 0x0005000500050005, 0x0001000100010001,
+            0x00F000F000F000F0, 0x00A000A000A000A0, 0x0050005000500050, 0x0010001000100010,
+            0x0F000F000F000F00, 0x0A000A000A000A00, 0x0500050005000500, 0x0100010001000100,
+            0xF000F000F000F000, 0xA000A000A000A000, 0x5000500050005000, 0x1000100010001000]
+  - Name: Out1
+    Format: Int64
+    Stride: 32
+    FillSize: 32
+  - Name: Out2
+    Format: Int64
+    Stride: 32
+    FillSize: 32
+  - Name: Out3
+    Format: Int64
+    Stride: 32
+    FillSize: 32
+  - Name: Out4
+    Format: Int64
+    Stride: 32
+    FillSize: 32
+  - Name: Out5
+    Format: Int64
+    Stride: 32
+    FillSize: 8
+  - Name: ExpectedOut1
+    Format: Int64
+    Stride: 32
+    Data: [ 0x000F000F000F000F, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000,
+            0x00FF00FF00FF00FF, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000,
+            0x0FFF0FFF0FFF0FFF, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000,
+            0xFFFFFFFFFFFFFFFF, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000]
+  - Name: ExpectedOut2
+    Format: Int64
+    Stride: 32
+    Data: [ 0x000F000F000F000F, 0x000A000A000A000A, 0x0000000000000000, 0x0000000000000000,
+            0x00FF00FF00FF00FF, 0x00AA00AA00AA00AA, 0x0000000000000000, 0x0000000000000000,
+            0x0FFF0FFF0FFF0FFF, 0x0AAA0AAA0AAA0AAA, 0x0000000000000000, 0x0000000000000000,
+            0xFFFFFFFFFFFFFFFF, 0xAAAAAAAAAAAAAAAA, 0x0000000000000000, 0x0000000000000000]
+  - Name: ExpectedOut3
+    Format: Int64
+    Stride: 32
+    Data: [ 0x000F000F000F000F, 0x000A000A000A000A, 0x0005000500050005, 0x0000000000000000,
+            0x00FF00FF00FF00FF, 0x00AA00AA00AA00AA, 0x0055005500550055, 0x0000000000000000,
+            0x0FFF0FFF0FFF0FFF, 0x0AAA0AAA0AAA0AAA, 0x0555055505550555, 0x0000000000000000,
+            0xFFFFFFFFFFFFFFFF, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555, 0x0000000000000000]
+  - Name: ExpectedOut4
+    Format: Int64
+    Stride: 32
+    Data: [ 0x000F000F000F000F, 0x000A000A000A000A, 0x0005000500050005, 0x0001000100010001,
+            0x00FF00FF00FF00FF, 0x00AA00AA00AA00AA, 0x0055005500550055, 0x0011001100110011,
+            0x0FFF0FFF0FFF0FFF, 0x0AAA0AAA0AAA0AAA, 0x0555055505550555, 0x0111011101110111,
+            0xFFFFFFFFFFFFFFFF, 0xAAAAAAAAAAAAAAAA, 0x5555555555555555, 0x1111111111111111]
+  - Name: ExpectedOut5
+    Format: Int64
+    Stride: 32
+    Data: [ 0x0000000000000001, 0x0000000000000002, 0x0000000000000004, 0x0000000000000008]
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+
+...
+#--- end
+
+
+
+# Bug https://github.com/llvm/llvm-project/issues/156775
+# XFAIL: Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/393
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+
