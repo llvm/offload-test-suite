@@ -136,9 +136,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/351
-# XFAIL: Metal
-
 # Bug https://github.com/llvm/offload-test-suite/issues/532
 # XFAIL: DirectX && QC
 
