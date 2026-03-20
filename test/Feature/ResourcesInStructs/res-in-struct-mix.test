@@ -122,9 +122,6 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/367
 # XFAIL: Clang
 
-# Bug https://github.com/llvm/offload-test-suite/issues/642
-# XFAIL: Metal
-
 # Vulkan does not support global structures with buffers or structures
 # containing both resources and non-resources.
 # UNSUPPORTED: Vulkan

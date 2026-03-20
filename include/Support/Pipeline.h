@@ -255,6 +255,8 @@ struct Resource {
     }
   }
 
+  bool isConstantBuffer() const { return Kind == ResourceKind::ConstantBuffer; }
+
   uint32_t getElementSize() const {
     assert(!isSampler() && "Samplers do not have element size");
     // ByteAddressBuffers are treated as 4-byte elements to match their memory
