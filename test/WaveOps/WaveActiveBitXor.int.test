@@ -65,7 +65,7 @@ Buffers:
   - Name: Out5
     Format: UInt32
     Stride: 16
-    FillSize: 128
+    FillSize: 64
   
   - Name: ExpectedOut1
     Format: UInt32
@@ -101,8 +101,7 @@ Buffers:
   - Name: ExpectedOut5
     Format: UInt32
     Stride: 16
-    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
   
 
 Results:
