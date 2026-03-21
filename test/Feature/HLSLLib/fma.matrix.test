@@ -136,6 +136,9 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/llvm-project/issues/99117
 # XFAIL: Clang
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1000
+# XFAIL: WARP && DXC && QC
+
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
