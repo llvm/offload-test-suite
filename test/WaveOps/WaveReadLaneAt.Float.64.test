@@ -11,7 +11,7 @@ void main(uint32_t3 TID : SV_GroupThreadID) {
   // Float
   OutFloat[OutIdx] = WaveReadLaneAt(InFloat[TID.x], TID.x);
   float64_t4 ThreadInFloat = {InFloat[TID.x].xyz, InFloat[TID.x].w};
-  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);;
+  OutFloat[OutIdx + 1] =  WaveReadLaneAt(ThreadInFloat, TID.x);
   OutFloat[OutIdx + 2].xy = WaveReadLaneAt(InFloat[TID.x].xy, TID.x);
 }
 
@@ -58,9 +58,6 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/533
-# XFAIL: DirectX && AMD
 
 # REQUIRES: Double
 

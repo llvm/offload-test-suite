@@ -98,9 +98,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Clang trips on 2-element vectors in structs:
-# Bug https://github.com/llvm/llvm-project/issues/123968
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/186465
+# XFAIL: Clang && Vulkan
 
 # Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2595
 # XFAIL: Vulkan && MoltenVK

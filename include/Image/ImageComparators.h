@@ -9,6 +9,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef OFFLOADTEST_IMAGE_IMAGECOMPARATOR_H
+#define OFFLOADTEST_IMAGE_IMAGECOMPARATOR_H
+
 #include "Image/Color.h"
 #include "Image/Image.h"
 
@@ -16,9 +19,6 @@
 #include "llvm/Support/raw_ostream.h"
 
 #include <algorithm>
-
-#ifndef OFFLOADTEST_IMAGE_IMAGECOMPARATOR_H
-#define OFFLOADTEST_IMAGE_IMAGECOMPARATOR_H
 
 namespace offloadtest {
 
@@ -58,13 +58,14 @@ public:
   }
   ImageComparatorDistance(llvm::ArrayRef<CompareCheck> C) : Checks(C) {}
   void processPixel(Color L, Color R) override {
-    double Distance = Color::CIE75Distance(L, R);
+    const double Distance = Color::cie75Distance(L, R);
     if (Distance > VisibleDiff) {
       VisibleDiffs += 1;
       DiffRMS += Distance;
 
       // A difference >10 is a more than 10% off in the L*a*b color space.
-      int Idx = static_cast<int>(std::clamp(Distance - VisibleDiff, 0.0, 9.0));
+      const int Idx =
+          static_cast<int>(std::clamp(Distance - VisibleDiff, 0.0, 9.0));
       Histogram[Idx] += 1;
     }
 
@@ -74,7 +75,7 @@ public:
   }
 
   void print(llvm::raw_ostream &OS) override {
-    double CountDbl = static_cast<double>(Count);
+    const double CountDbl = static_cast<double>(Count);
     OS << "RMS Difference: " << RMS << "\n";
     OS << "Furthest Pixel Difference: " << Furthest << "\n";
     OS << "Pixels with visible differences: " << VisibleDiffs << " "

@@ -103,9 +103,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Not implemented https://github.com/llvm/wg-hlsl/issues/238
-# XFAIL: Clang
-
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

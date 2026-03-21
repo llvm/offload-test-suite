@@ -1,0 +1,57 @@
+#--- source.hlsl
+RWBuffer<int> value;
+
+[numthreads(4, 1, 1)]
+void main(uint3 threadID : SV_DispatchThreadID) {
+  // Lane | switch status | WavePrefixSum(1) | WavePrefixSum(10) | Final
+  // -----|---------------|------------------|-------------------|----------------
+  // 0    | active        | 0                | 0                 | 0
+  // 1    | active        | 0 + 1            | 0 + 10            | 1 + 10 = 11
+  // 2    | inactive      | n/a              | 0 + 10 + 10       | 10 + 10 = 20
+  // 3    | inactive      | n/a              | 0 + 10 + 10 + 10  | 10 + 10 + 10 = 30
+  uint sum = 0;
+  switch (value[threadID.x]) {
+    case 0:
+      sum += WavePrefixSum(1);
+      break;
+    default:
+      break;
+  }
+  sum += WavePrefixSum(10);
+  value[threadID.x] = sum;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [ 1, 1, 1 ]
+Buffers:
+  - Name: value
+    Format: Int32
+    Data: [ 0, 0, 1, 2 ]
+  - Name: Expected
+    Format: Int32
+    Data: [ 0, 11, 20, 30 ]
+Results:
+  - Result: Expected
+    Rule: BufferExact
+    Actual: value
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: value
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
