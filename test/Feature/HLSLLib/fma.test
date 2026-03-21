@@ -1,0 +1,109 @@
+#--- source.hlsl
+
+StructuredBuffer<double4> A : register(t0);
+StructuredBuffer<double4> B : register(t1);
+StructuredBuffer<double4> C : register(t2);
+
+RWStructuredBuffer<double4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = fma(A[0], B[0], C[0]);
+  Out[1] = double4(fma(A[1].xyz, B[1].xyz, C[1].xyz), fma(A[1].w, B[1].w, C[1].w));
+  Out[2] = double4(fma(A[2].xy, B[2].xy, C[2].xy), fma(A[2].zw, B[2].zw, C[2].zw));
+  // Had to add `l` literals at the end because otherwise we lose precision before numbers are converted to `double4`
+  Out[3] = fma(double4(1.0000000149011612l, -1.0000000149011612l, 1.0000000000000002l, 0.5l), double4(67108865.0l, 67108865.0l, -0.9999999999999998l, -8.0l), double4(-67108866.0l, 67108866.0l, 1.0l, 1.0l));
+  // (1 + 2^-26), -(1 + 2^-26), (1 + 2^-52), 0.5
+  // (2^26 + 1), (2^26 + 1), -(1 - 2^-52), -8
+  // -(2^26 + 2), (2^26 + 2), 1, 1
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: A
+    Format: Float64
+    Stride: 32
+    Data: [ 1.5, -2.0, 0.75, -3.25,
+            2.5, -4.0, 1.25, 3.5,
+            0x1.0000000000001p+0, -0x1.0000000000001p+0, 0x1.0000002000000p+0, -0x1.0000002000000p+0 ]
+    # last row: (1 + 2^-52), -(1 + 2^-52), (1 + 2^-27), -(1 + 2^-27)
+  - Name: B
+    Format: Float64
+    Stride: 32
+    Data: [ 2.25, 4.5, -8.0, -2.0,
+            -1.5, -2.0, 8.0, -2.0,
+            0x1.ffffffffffffep-1, 0x1.ffffffffffffep-1, 134217729.0, 134217729.0 ]
+    # last row: (1 - 2^-52), (1 - 2^-52), (2^27 + 1), (2^27 + 1)
+  - Name: C
+    Format: Float64
+    Stride: 32
+    Data: [ 0.125, 1.25, 2.5, -0.5,
+            0.25, -1.5, -0.75, 0.5,
+            -1.0, 1.0, -134217730.0, 134217730.0 ]
+    # last row: -1, 1, -(2^27 + 2), (2^27 + 2)
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    FillSize: 128
+  - Name: Expected
+    Format: Float64
+    Stride: 32
+    Data: [ 3.5, -7.75, -3.5, 6.0,
+            -3.5, 6.5, 9.25, -6.5,
+            -0x1.0000000000000p-104, 0x1.0000000000000p-104, 0x1.0000000000000p-27, -0x1.0000000000000p-27,
+            0x1.0000000000000p-26, -0x1.0000000000000p-26, 0x1.0000000000000p-104, -3.0 ]
+    # last two rows: -(2^-104), 2^-104, 2^-27, -(2^-27), 2^-26, -(2^-26), 2^-104, -3
+Results:
+  - Result: Result
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: C
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99117
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1000
+# XFAIL: WARP && DXC && QC
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
