@@ -526,6 +526,46 @@ private:
       std::make_pair(#Name, makeCapability<bool>(#Name, Features14.Name)));
 #endif
 #include "VKFeatures.def"
+
+    // Query subgroup properties
+    const bool SupportsSubgroupSizeControl = Features13.subgroupSizeControl;
+
+    VkPhysicalDeviceVulkan13Properties Vulkan13Props{};
+    Vulkan13Props.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES;
+    Vulkan13Props.pNext = nullptr;
+
+    VkPhysicalDeviceSubgroupProperties SubgroupProps{};
+    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+    SubgroupProps.pNext =
+        SupportsSubgroupSizeControl ? &Vulkan13Props : nullptr;
+
+    VkPhysicalDeviceProperties2 SubgroupProps2{};
+    SubgroupProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    SubgroupProps2.pNext = &SubgroupProps;
+
+    vkGetPhysicalDeviceProperties2(Device, &SubgroupProps2);
+
+    Caps.insert(std::make_pair(
+        "subgroupSize",
+        makeCapability<uint32_t>("subgroupSize", SubgroupProps.subgroupSize)));
+
+    uint32_t MinSize;
+    uint32_t MaxSize;
+    if (SupportsSubgroupSizeControl) {
+      MinSize = Vulkan13Props.minSubgroupSize;
+      MaxSize = Vulkan13Props.maxSubgroupSize;
+    } else {
+      MinSize = SubgroupProps.subgroupSize;
+      MaxSize = SubgroupProps.subgroupSize;
+    }
+
+    Caps.insert(
+        std::make_pair("minSubgroupSize",
+                       makeCapability<uint32_t>("minSubgroupSize", MinSize)));
+    Caps.insert(
+        std::make_pair("maxSubgroupSize",
+                       makeCapability<uint32_t>("maxSubgroupSize", MaxSize)));
   }
 
   void queryLayers() {
