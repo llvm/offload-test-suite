@@ -134,9 +134,10 @@ static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
     return llvm::createStringError(std::errc::io_error,
                                    "Failed writing PNG info");
 
-  F = fopen(OutputPath.data(), "wb");
-  if (!F)
-    return llvm::createStringError(std::errc::io_error, "Failed openiong file");
+  const errno_t Error = fopen_s(&F, OutputPath.data(), "wb");
+  if (Error != 0)
+    return llvm::createStringError(std::errc::io_error, "Failed opening file");
+
   const unsigned ImgFormat =
       Img.getChannels() == 4 ? PNG_COLOR_TYPE_RGB_ALPHA : PNG_COLOR_TYPE_RGB;
   assert((Img.getChannels() == 3 || Img.getChannels() == 4) &&
