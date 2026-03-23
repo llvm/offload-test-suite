@@ -9,6 +9,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#define _CRT_SECURE_NO_WARNINGS // Disable warnings about using _s functions
+                                // that are Windows only.
+
 #include "Image/Image.h"
 #include "Image/Color.h"
 
@@ -134,8 +137,8 @@ static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
     return llvm::createStringError(std::errc::io_error,
                                    "Failed writing PNG info");
 
-  const errno_t Error = fopen_s(&F, OutputPath.data(), "wb");
-  if (Error != 0)
+  F = fopen(OutputPath.data(), "wb");
+  if (!F)
     return llvm::createStringError(std::errc::io_error, "Failed opening file");
 
   const unsigned ImgFormat =
