@@ -2278,13 +2278,15 @@ public:
   }
 
   llvm::Error initialize(const DeviceConfig Config) {
-    // Create a Vulkan 1.1 instance to determine the API version
+
+    // Request the highest supported API version
+    uint32_t ApiVersion = 0;
+    vkEnumerateInstanceVersion(&ApiVersion);
+
     VkApplicationInfo AppInfo = {};
     AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     AppInfo.pApplicationName = "OffloadTest";
-    // TODO: We should set this based on a command line flag, and simplify the
-    // code below to error if the requested version isn't supported.
-    AppInfo.apiVersion = VK_API_VERSION_1_1;
+    AppInfo.apiVersion = ApiVersion;
 
     VkInstanceCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
