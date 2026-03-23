@@ -354,9 +354,9 @@ private:
   std::shared_ptr<VulkanQueue> GraphicsQueue;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
-  LayerVector Layers;
+  LayerVector InstanceLayers;
   using ExtensionVector = std::vector<VkExtensionProperties>;
-  ExtensionVector Extensions;
+  ExtensionVector DeviceExtensions;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -458,7 +458,8 @@ private:
 
 public:
   static llvm::Expected<std::shared_ptr<VulkanDevice>>
-  create(VkPhysicalDevice PhysicalDevice) {
+  create(VkPhysicalDevice PhysicalDevice,
+         std::vector<VkLayerProperties> InstanceLayers) {
     VkPhysicalDeviceProperties Props;
     vkGetPhysicalDeviceProperties(PhysicalDevice, &Props);
 
@@ -541,12 +542,15 @@ public:
         std::make_shared<VulkanQueue>(DeviceQueue, QueueFamilyIdx);
 
     return std::make_shared<VulkanDevice>(PhysicalDevice, Props, Device,
-                                          GraphicsQueue);
+                                          GraphicsQueue,
+                                          std::move(InstanceLayers));
   }
 
   VulkanDevice(VkPhysicalDevice P, VkPhysicalDeviceProperties Props, VkDevice D,
-               std::shared_ptr<VulkanQueue> Q)
-      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(Q) {
+               std::shared_ptr<VulkanQueue> Q,
+               std::vector<VkLayerProperties> InstanceLayers)
+      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(Q),
+        InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -571,6 +575,8 @@ public:
     // adapter-regex matching.
     Description += " (" + DriverName + ")";
 #endif
+
+    DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
   }
   VulkanDevice(const VulkanDevice &) = default;
 
@@ -595,11 +601,6 @@ public:
   }
 
   void printExtra(llvm::raw_ostream &OS) override {
-    // TODO(manon): Store layers and extensions somewhere so we don't have to
-    // query them again
-    const auto InstanceLayers = queryInstanceLayers();
-    const auto DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
-
     OS << "  Layers:\n";
     for (auto Layer : InstanceLayers) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
@@ -2346,7 +2347,8 @@ public:
       return llvm::createStringError(std::errc::no_such_device,
                                      "Failed to enumerate devices");
     for (const auto &PDev : PhysicalDevices) {
-      auto DeviceOrErr = VulkanDevice::create(PDev);
+      auto DeviceOrErr =
+          VulkanDevice::create(PDev, std::move(AvailableInstanceLayers));
       if (!DeviceOrErr) {
         return DeviceOrErr.takeError();
       }
