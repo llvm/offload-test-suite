@@ -306,6 +306,23 @@ queryInstanceExtensions(const char *InstanceLayer) {
   return Extensions;
 }
 
+static std::vector<VkExtensionProperties>
+queryDeviceExtensions(VkPhysicalDevice PhysicalDevice) {
+  uint32_t ExtCount;
+  vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
+                                       nullptr);
+
+  std::vector<VkExtensionProperties> Extensions;
+  if (ExtCount == 0)
+    return Extensions;
+
+  Extensions.resize(ExtCount);
+  vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
+                                       Extensions.data());
+
+  return Extensions;
+}
+
 static bool
 isExtensionSupported(const std::vector<VkExtensionProperties> &Extensions,
                      llvm::StringRef QueryName) {
@@ -581,7 +598,7 @@ public:
     // TODO(manon): Store layers and extensions somewhere so we don't have to
     // query them again
     const auto InstanceLayers = queryInstanceLayers();
-    const auto InstanceExtensions = queryInstanceExtensions(nullptr);
+    const auto DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
 
     OS << "  Layers:\n";
     for (auto Layer : InstanceLayers) {
@@ -594,7 +611,7 @@ public:
     }
 
     OS << "  Extensions:\n";
-    for (const auto &Ext : InstanceExtensions) {
+    for (const auto &Ext : DeviceExtensions) {
       OS << "  - ExtensionName: " << llvm::StringRef(Ext.extensionName) << "\n";
       OS << "    SpecVersion: " << Ext.specVersion << "\n";
     }
