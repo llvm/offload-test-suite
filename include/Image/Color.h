@@ -98,10 +98,10 @@ public:
     return Color(abs(R - C.R), abs(G - C.G), abs(B - C.B), Space);
   }
 
-  static double CIE75Distance(Color L, Color R) {
-    Color LCol = L.translateSpace(ColorSpace::LAB);
-    Color RCol = R.translateSpace(ColorSpace::LAB);
-    Color Res = LCol - RCol;
+  static double cie75Distance(Color L, Color R) {
+    const Color LCol = L.translateSpace(ColorSpace::LAB);
+    const Color RCol = R.translateSpace(ColorSpace::LAB);
+    const Color Res = LCol - RCol;
     return sqrt((Res.R * Res.R) + (Res.G * Res.G) + (Res.B * Res.B));
   }
 

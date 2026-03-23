@@ -705,6 +705,3 @@ DescriptorSets:
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/system_values.hlsl
 # RUN: %offloader %t/system_values.yaml %t.o
-
-# See https://github.com/llvm/offload-test-suite/issues/764
-# XFAIL: Windows && AMD && DirectX
