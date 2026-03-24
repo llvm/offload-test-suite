@@ -16,7 +16,6 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/InitLLVM.h"
 
-
 using namespace llvm;
 using namespace offloadtest;
 

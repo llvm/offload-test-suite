@@ -394,6 +394,8 @@ public:
 
   VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
       : Device(Device), Semaphore(Semaphore), Name(Name) {}
+
+  ~VulkanFence() { vkDestroySemaphore(Device, Semaphore, nullptr); }
 };
 
 class VulkanQueue : public offloadtest::Queue {
@@ -490,6 +492,8 @@ private:
     VkDescriptorPool Pool = nullptr;
     VkPipelineCache PipelineCache;
     VkPipeline Pipeline;
+
+    std::shared_ptr<Fence> Fence;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer;
@@ -1174,32 +1178,41 @@ public:
 
   llvm::Error executeCommandBuffer(InvocationState &IS,
                                    VkPipelineStageFlags WaitMask = 0) {
+    // This is a hack but it works since this is all single threaded code.
+    static uint64_t FenceCounter = 0;
+    const uint64_t CurrentCounter = FenceCounter + 1;
+
     if (vkEndCommandBuffer(IS.CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
 
+    auto *F = static_cast<VulkanFence *>(IS.Fence.get());
+
+    VkTimelineSemaphoreSubmitInfo TimelineSubmitInfo = {};
+    TimelineSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    TimelineSubmitInfo.signalSemaphoreValueCount = 1;
+    TimelineSubmitInfo.pSignalSemaphoreValues = &CurrentCounter;
+
     VkSubmitInfo SubmitInfo = {};
     SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.pNext = &TimelineSubmitInfo;
     SubmitInfo.commandBufferCount = 1;
     SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
     SubmitInfo.pWaitDstStageMask = &WaitMask;
-    VkFenceCreateInfo FenceInfo = {};
-    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence Fence;
-    if (vkCreateFence(Device, &FenceInfo, nullptr, &Fence))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create fence.");
+    SubmitInfo.signalSemaphoreCount = 1;
+    SubmitInfo.pSignalSemaphores = &F->Semaphore;
 
     // Submit to the queue
-    if (vkQueueSubmit(GraphicsQueue->Queue, 1, &SubmitInfo, Fence))
+    if (vkQueueSubmit(GraphicsQueue->Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to submit to queue.");
-    if (vkWaitForFences(Device, 1, &Fence, VK_TRUE, UINT64_MAX))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed waiting for fence.");
 
-    vkDestroyFence(Device, Fence, nullptr);
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
+
     vkFreeCommandBuffers(Device, IS.CmdPool, 1, &IS.CmdBuffer);
+
+    FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
 
@@ -2335,6 +2348,12 @@ public:
     InvocationState State;
     if (auto Err = createDevice(State))
       return Err;
+
+    auto FenceOrErr = this->createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    State.Fence = *FenceOrErr;
+
     llvm::outs() << "Physical device created.\n";
     if (auto Err = createShaderModules(P, State))
       return Err;
