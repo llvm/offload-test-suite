@@ -568,7 +568,7 @@ public:
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     MTL::ResourceOptions StorageMode;
-    switch (Desc.location) {
+    switch (Desc.Location) {
     case MemoryLocation::GpuOnly:
       StorageMode = MTL::ResourceStorageModePrivate;
       break;
