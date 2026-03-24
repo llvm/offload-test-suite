@@ -386,12 +386,7 @@ private:
     ComPtr<ID3D12PipelineState> PSO;
     ComPtr<ID3D12CommandAllocator> Allocator;
     ComPtr<ID3D12GraphicsCommandList> CmdList;
-    ComPtr<ID3D12Fence> Fence;
-#ifdef _WIN32
-    HANDLE Event;
-#else // WSL
-    int Event;
-#endif
+    std::shared_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
     ComPtr<ID3D12Resource> RT;
@@ -1197,56 +1192,20 @@ public:
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  llvm::Error createEvent(InvocationState &IS) {
-    if (auto Err = HR::toError(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                                                   IID_PPV_ARGS(&IS.Fence)),
-                               "Failed to create fence."))
-      return Err;
-#ifdef _WIN32
-    IS.Event = CreateEventA(nullptr, false, false, nullptr);
-    if (!IS.Event)
-#else // WSL
-    IS.Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    if (IS.Event == -1)
-#endif
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create event.");
-    return llvm::Error::success();
-  }
-
   llvm::Error waitForSignal(InvocationState &IS) {
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
+    auto *F = static_cast<DXFence *>(IS.Fence.get());
 
     if (auto Err = HR::toError(
-            GraphicsQueue.Queue->Signal(IS.Fence.Get(), CurrentCounter),
+            GraphicsQueue.Queue->Signal(F->Fence.Get(), CurrentCounter),
             "Failed to add signal."))
       return Err;
 
-    if (IS.Fence->GetCompletedValue() < CurrentCounter) {
-#ifdef _WIN32
-      HANDLE Event = IS.Event;
-#else // WSL
-      HANDLE Event = reinterpret_cast<HANDLE>(IS.Event);
-#endif
-      if (auto Err =
-              HR::toError(IS.Fence->SetEventOnCompletion(CurrentCounter, Event),
-                          "Failed to register end event."))
-        return Err;
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
 
-#ifdef _WIN32
-      WaitForSingleObject(IS.Event, INFINITE);
-#else // WSL
-      pollfd PollEvent;
-      PollEvent.fd = IS.Event;
-      PollEvent.events = POLLIN;
-      PollEvent.revents = 0;
-      if (poll(&PollEvent, 1, -1) == -1)
-        return llvm::createStringError(
-            std::error_code(errno, std::system_category()), strerror(errno));
-#endif
-    }
     FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
@@ -1751,9 +1710,10 @@ public:
       return Err;
     llvm::outs() << "Command structures created.\n";
 
-    if (auto Err = createEvent(State))
-      return Err;
-    llvm::outs() << "Event prepared.\n";
+    auto FenceOrErr = this->createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    State.Fence = *FenceOrErr;
 
     if (auto Err = createBuffers(P, State))
       return Err;
