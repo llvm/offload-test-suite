@@ -84,6 +84,29 @@ public:
   }
 };
 
+class MTLFence : public offloadtest::Fence {
+public:
+  std::string Name;
+  MTL::SharedEvent *Event;
+
+  uint64_t getFenceValue() override { return Event->signaledValue(); }
+
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+    if (!Event->waitUntilSignaledValue(SignalValue, UINT64_MAX))
+      return llvm::createStringError(std::errc::timed_out,
+                                     "Timed out waiting on shared event.");
+    return llvm::Error::success();
+  }
+
+  MTLFence(MTL::SharedEvent *Event, llvm::StringRef Name)
+      : Name(Name), Event(Event) {}
+
+  ~MTLFence() {
+    if (Event)
+      Event->release();
+  }
+};
+
 class MTLBuffer : public offloadtest::Buffer {
 public:
   MTL::Buffer *Buf;
@@ -131,6 +154,7 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Buffer *> Buffers;
     MTL::Texture *FrameBufferTexture = nullptr;
     MTL::CommandBuffer *CmdBuffer = nullptr;
+    std::shared_ptr<offloadtest::Fence> Fence;
   };
 
   llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
@@ -488,14 +512,23 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error executeCommands(InvocationState &IS) {
+    // This is a hack but it works since this is all single threaded code.
+    static uint64_t FenceCounter = 0;
+    const uint64_t CurrentCounter = FenceCounter + 1;
+    auto *F = static_cast<MTLFence *>(IS.Fence.get());
+
+    IS.CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
     IS.CmdBuffer->commit();
-    IS.CmdBuffer->waitUntilCompleted();
+
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
 
     // Check and surface any errors that occurred during execution.
     NS::Error *CBErr = IS.CmdBuffer->error();
     if (CBErr)
       return toError(CBErr);
 
+    FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
 
@@ -567,6 +600,15 @@ public:
     return std::static_pointer_cast<Queue>(GraphicsQueue);
   }
 
+  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    MTL::SharedEvent *Event = Device->newSharedEvent();
+    if (!Event)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create shared event.");
+    return std::make_shared<MTLFence>(Event, Name);
+  }
+
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
@@ -590,6 +632,11 @@ public:
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
+
+    auto FenceOrErr = this->createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    IS.Fence = *FenceOrErr;
 
     if (auto Err = createBuffers(P, IS))
       return Err;
