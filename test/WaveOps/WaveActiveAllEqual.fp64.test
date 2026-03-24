@@ -78,12 +78,12 @@ Buffers:
 
   - Name: Out
     Format: Int32
-    Stride: 8
-    FillSize: 448
+    Stride: 4
+    FillSize: 224
   - Name: UOut
     Format: Int32
-    Stride: 8
-    FillSize: 448
+    Stride: 4
+    FillSize: 224
   
   - Name: ExpectedOut
     Format: Int32
