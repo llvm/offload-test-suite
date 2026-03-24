@@ -175,12 +175,12 @@ DescriptorSets:
 # REQUIRES: Int64
 
 # Bug: https://github.com/llvm/llvm-project/issues/186465
-# XFAIL: Vulkan
+# XFAIL: DirectX && Vulkan
 
 # 64 bit wave ops are not supported on metal.
 # https://github.com/llvm/offload-test-suite/issues/355
 # UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
