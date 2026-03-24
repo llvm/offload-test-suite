@@ -59,7 +59,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     # f32tof16 represents f16 in the lower half of resulting uint
-    Data: [ 0, 12288, 13312, 1024, 13653, 15359, 15360, 15361, 31743, 16968, 15360, 32768, 22080, 54848, 47768, 20800 ]
+    Data: [0x0, 0x3000, 0x3400, 0x400, 0x3555, 0x3BFF, 0x3C00, 0x3C01, 0x7BFF, 0x4248, 0x3C00, 0x8000, 0x5640, 0xD640, 0xBA98, 0x5140]
 Results:
   - Result: Test1
     Rule: BufferExact
