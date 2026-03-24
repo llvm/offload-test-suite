@@ -19,10 +19,10 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // int case
   int16_t4 v = In[index];
-  int16_t scalar = QuadReadAcrossX(v.x);
-  int16_t2 vec2 = QuadReadAcrossX(v.xy);
-  int16_t3 vec3 = QuadReadAcrossX(v.xyz);
-  int16_t4 vec4 = QuadReadAcrossX(v);
+  int16_t scalar = QuadReadAcrossY(v.x);
+  int16_t2 vec2 = QuadReadAcrossY(v.xy);
+  int16_t3 vec3 = QuadReadAcrossY(v.xyz);
+  int16_t4 vec4 = QuadReadAcrossY(v);
 
   Out1[index].x = scalar;
   Out2[index].xy = vec2;
@@ -31,10 +31,10 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // uint case
   uint16_t4 uv = UIn[index];
-  uint16_t uscalar = QuadReadAcrossX(uv.x);
-  uint16_t2 uvec2 = QuadReadAcrossX(uv.xy);
-  uint16_t3 uvec3 = QuadReadAcrossX(uv.xyz);
-  uint16_t4 uvec4 = QuadReadAcrossX(uv);
+  uint16_t uscalar = QuadReadAcrossY(uv.x);
+  uint16_t2 uvec2 = QuadReadAcrossY(uv.xy);
+  uint16_t3 uvec3 = QuadReadAcrossY(uv.xyz);
+  uint16_t4 uvec4 = QuadReadAcrossY(uv);
 
   UOut1[index].x = uscalar;
   UOut2[index].xy = uvec2;
@@ -73,19 +73,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: Int16
     Stride: 8
-    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+    Data: [ 9, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0 ]
   - Name: ExpectedOut2
     Format: Int16
     Stride: 8
-    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+    Data: [ 9, 10, 0, 0, 13, 14, 0, 0, 1, 2, 0, 0, 5, 6, 0, 0 ]
   - Name: ExpectedOut3
     Format: Int16
     Stride: 8
-    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+    Data: [ 9, 10, 11, 0, 13, 14, 15, 0, 1, 2, 3, 0, 5, 6, 7, 0 ]
   - Name: ExpectedOut4
     Format: Int16
     Stride: 8
-    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+    Data: [ 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8 ]
   - Name: UIn
     Format: UInt16
     Stride: 8
@@ -109,19 +109,19 @@ Buffers:
   - Name: UExpectedOut1
     Format: UInt16
     Stride: 8
-    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+    Data: [ 9, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0 ]
   - Name: UExpectedOut2
     Format: UInt16
     Stride: 8
-    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+    Data: [ 9, 10, 0, 0, 13, 14, 0, 0, 1, 2, 0, 0, 5, 6, 0, 0 ]
   - Name: UExpectedOut3
     Format: UInt16
     Stride: 8
-    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+    Data: [ 9, 10, 11, 0, 13, 14, 15, 0, 1, 2, 3, 0, 5, 6, 7, 0 ]
   - Name: UExpectedOut4
     Format: UInt16
     Stride: 8
-    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+    Data: [ 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8 ]
 Results:
   - Result: ExpectedOut1
     Rule: BufferExact
@@ -232,6 +232,9 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int16
+
+# WIP PR: https://github.com/llvm/llvm-project/pull/187440
+# XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/986
 # XFAIL: Intel && Vulkan && DXC

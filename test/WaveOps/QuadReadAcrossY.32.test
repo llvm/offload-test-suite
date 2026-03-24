@@ -26,10 +26,10 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // int case
   int4 v = In[index];
-  int scalar = QuadReadAcrossX(v.x);
-  int2 vec2 = QuadReadAcrossX(v.xy);
-  int3 vec3 = QuadReadAcrossX(v.xyz);
-  int4 vec4 = QuadReadAcrossX(v);
+  int scalar = QuadReadAcrossY(v.x);
+  int2 vec2 = QuadReadAcrossY(v.xy);
+  int3 vec3 = QuadReadAcrossY(v.xyz);
+  int4 vec4 = QuadReadAcrossY(v);
 
   Out1[index].x = scalar;
   Out2[index].xy = vec2;
@@ -38,10 +38,10 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // uint case
   uint4 uv = UIn[index];
-  uint uscalar = QuadReadAcrossX(uv.x);
-  uint2 uvec2 = QuadReadAcrossX(uv.xy);
-  uint3 uvec3 = QuadReadAcrossX(uv.xyz);
-  uint4 uvec4 = QuadReadAcrossX(uv);
+  uint uscalar = QuadReadAcrossY(uv.x);
+  uint2 uvec2 = QuadReadAcrossY(uv.xy);
+  uint3 uvec3 = QuadReadAcrossY(uv.xyz);
+  uint4 uvec4 = QuadReadAcrossY(uv);
 
   UOut1[index].x = uscalar;
   UOut2[index].xy = uvec2;
@@ -50,10 +50,10 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // float case
   float4 fv = FIn[index];
-  float fscalar = QuadReadAcrossX(fv.x);
-  float2 fvec2 = QuadReadAcrossX(fv.xy);
-  float3 fvec3 = QuadReadAcrossX(fv.xyz);
-  float4 fvec4 = QuadReadAcrossX(fv);
+  float fscalar = QuadReadAcrossY(fv.x);
+  float2 fvec2 = QuadReadAcrossY(fv.xy);
+  float3 fvec3 = QuadReadAcrossY(fv.xyz);
+  float4 fvec4 = QuadReadAcrossY(fv);
 
   FOut1[index].x = fscalar;
   FOut2[index].xy = fvec2;
@@ -92,19 +92,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: Int32
     Stride: 16
-    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+    Data: [ 9, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0 ]
   - Name: ExpectedOut2
     Format: Int32
     Stride: 16
-    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+    Data: [ 9, 10, 0, 0, 13, 14, 0, 0, 1, 2, 0, 0, 5, 6, 0, 0 ]
   - Name: ExpectedOut3
     Format: Int32
     Stride: 16
-    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+    Data: [ 9, 10, 11, 0, 13, 14, 15, 0, 1, 2, 3, 0, 5, 6, 7, 0 ]
   - Name: ExpectedOut4
     Format: Int32
     Stride: 16
-    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+    Data: [ 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8 ]
   - Name: UIn
     Format: UInt32
     Stride: 16
@@ -128,19 +128,19 @@ Buffers:
   - Name: UExpectedOut1
     Format: UInt32
     Stride: 16
-    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+    Data: [ 9, 0, 0, 0, 13, 0, 0, 0, 1, 0, 0, 0, 5, 0, 0, 0 ]
   - Name: UExpectedOut2
     Format: UInt32
     Stride: 16
-    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+    Data: [ 9, 10, 0, 0, 13, 14, 0, 0, 1, 2, 0, 0, 5, 6, 0, 0 ]
   - Name: UExpectedOut3
     Format: UInt32
     Stride: 16
-    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+    Data: [ 9, 10, 11, 0, 13, 14, 15, 0, 1, 2, 3, 0, 5, 6, 7, 0 ]
   - Name: UExpectedOut4
     Format: UInt32
     Stride: 16
-    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+    Data: [ 9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8 ]
   - Name: FIn
     Format: Float32
     Stride: 16
@@ -164,19 +164,19 @@ Buffers:
   - Name: FExpectedOut1
     Format: Float32
     Stride: 16
-    Data: [ 5.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0 ]
+    Data: [ 9.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0 ]
   - Name: FExpectedOut2
     Format: Float32
     Stride: 16
-    Data: [ 5.0, 6.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 13.0, 14.0, 0.0, 0.0, 9.0, 10.0, 0.0, 0.0 ]
+    Data: [ 9.0, 10.0, 0.0, 0.0, 13.0, 14.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 5.0, 6.0, 0.0, 0.0 ]
   - Name: FExpectedOut3
     Format: Float32
     Stride: 16
-    Data: [ 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0, 0.0, 13.0, 14.0, 15.0, 0.0, 9.0, 10.0, 11.0, 0.0 ]
+    Data: [ 9.0, 10.0, 11.0, 0.0, 13.0, 14.0, 15.0, 0.0, 1.0, 2.0, 3.0, 0.0, 5.0, 6.0, 7.0, 0.0 ]
   - Name: FExpectedOut4
     Format: Float32
     Stride: 16
-    Data: [ 5.0, 6.0, 7.0, 8.0, 1.0, 2.0, 3.0, 4.0, 13.0, 14.0, 15.0, 16.0, 9.0, 10.0, 11.0, 12.0 ]
+    Data: [ 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ]
 Results:
   - Result: ExpectedOut1
     Rule: BufferExact
@@ -336,6 +336,9 @@ DescriptorSets:
 
 ...
 #--- end
+
+# WIP PR: https://github.com/llvm/llvm-project/pull/187440
+# XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/986
 # XFAIL: Intel && Vulkan && DXC

@@ -10,10 +10,10 @@ void main(uint3 dtid : SV_DispatchThreadID) {
   uint index = dtid.y * 2 + dtid.x;
   double4 v = In[index];
 
-  double scalar = QuadReadAcrossX(v.x);
-  double2 vec2 = QuadReadAcrossX(v.xy);
-  double3 vec3 = QuadReadAcrossX(v.xyz);
-  double4 vec4 = QuadReadAcrossX(v);
+  double scalar = QuadReadAcrossY(v.x);
+  double2 vec2 = QuadReadAcrossY(v.xy);
+  double3 vec3 = QuadReadAcrossY(v.xyz);
+  double4 vec4 = QuadReadAcrossY(v);
 
   Out1[index].x = scalar;
   Out2[index].xy = vec2;
@@ -52,19 +52,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: Float64
     Stride: 32
-    Data: [ 5.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 9.0, 0.0, 0.0, 0.0 ]
+    Data: [ 9.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 5.0, 0.0, 0.0, 0.0 ]
   - Name: ExpectedOut2
     Format: Float64
     Stride: 32
-    Data: [ 5.0, 6.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 13.0, 14.0, 0.0, 0.0, 9.0, 10.0, 0.0, 0.0 ]
+    Data: [ 9.0, 10.0, 0.0, 0.0, 13.0, 14.0, 0.0, 0.0, 1.0, 2.0, 0.0, 0.0, 5.0, 6.0, 0.0, 0.0 ]
   - Name: ExpectedOut3
     Format: Float64
     Stride: 32
-    Data: [ 5.0, 6.0, 7.0, 0.0, 1.0, 2.0, 3.0, 0.0, 13.0, 14.0, 15.0, 0.0, 9.0, 10.0, 11.0, 0.0 ]
+    Data: [ 9.0, 10.0, 11.0, 0.0, 13.0, 14.0, 15.0, 0.0, 1.0, 2.0, 3.0, 0.0, 5.0, 6.0, 7.0, 0.0 ]
   - Name: ExpectedOut4
     Format: Float64
     Stride: 32
-    Data: [ 5.0, 6.0, 7.0, 8.0, 1.0, 2.0, 3.0, 4.0, 13.0, 14.0, 15.0, 16.0, 9.0, 10.0, 11.0, 12.0 ]
+    Data: [ 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0 ]
 Results:
   - Result: ExpectedOut1
     Rule: BufferExact
@@ -125,9 +125,12 @@ DescriptorSets:
 
 # REQUIRES: Double
 
+# WIP PR: https://github.com/llvm/llvm-project/pull/187440
+# XFAIL: Clang
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/986
 # XFAIL: Intel && Vulkan && DXC
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
