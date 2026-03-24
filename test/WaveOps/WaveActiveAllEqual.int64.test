@@ -144,22 +144,22 @@ Buffers:
   - Name: Out
     Format: Int32
     Stride: 8
-    FillSize: 224
+    FillSize: 448
   - Name: UOut
     Format: Int32
     Stride: 8
-    FillSize: 224
+    FillSize: 448
   
   - Name: ExpectedOut
     Format: Int32
-    Stride: 4
+    Stride: 8
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: UExpectedOut
     Format: Int32
-    Stride: 4
+    Stride: 8
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,

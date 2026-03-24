@@ -144,11 +144,11 @@ Buffers:
   - Name: Out
     Format: Int32
     Stride: 2
-    FillSize: 224
+    FillSize: 112
   - Name: UOut
     Format: Int32
     Stride: 2
-    FillSize: 224
+    FillSize: 112
   
   - Name: ExpectedOut
     Format: Int32
