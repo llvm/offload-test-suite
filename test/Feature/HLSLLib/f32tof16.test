@@ -21,7 +21,7 @@ void main() {
   F3.y = In[10];
   F3.z = In[11];
   uint3 U3 = f32tof16(F3);
-  Out[9]  = U3.x;
+  Out[9] = U3.x;
   Out[10] = U3.y;
   Out[11] = U3.z;
 
@@ -45,25 +45,26 @@ Shaders:
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-- Name: In
-  Format: Float32
-  Stride: 4
-  Data: [ 0, 0.125, 0.25, 6.10352e-05, 0.333252,
-          0.999512, 1, 1.00098, 65504, 3.14159, 1, -0, 100.0, -100.0,
-          -0.824219, 42.0 ]
-- Name: Out
-  Format: UInt32
-  Stride: 4
-  FillSize: 64
-- Name: ExpectedOut
-  Format: UInt32
-  Stride: 4
-  Data: [ 0, 12288, 13312, 1024, 13653, 15359, 15360, 15361, 31743, 16968, 15360, 32768, 22080, 54848, 47768, 20800 ]
+  - Name: In
+    Format: Float32
+    Stride: 4
+    Data: [ 0, 0.125, 0.25, 6.10352e-05, 0.333252,
+            0.999512, 1, 1.00098, 65504, 3.14159, 1, -0, 100.0, -100.0,
+            -0.824219, 42.0 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 64
+  - Name: ExpectedOut # The result we expect
+    Format: UInt32
+    Stride: 4
+    # f32tof16 represents f16 in the lower half of resulting uint
+    Data: [ 0, 12288, 13312, 1024, 13653, 15359, 15360, 15361, 31743, 16968, 15360, 32768, 22080, 54848, 47768, 20800 ]
 Results:
-- Result: Test1
-  Rule: BufferExact
-  Actual: Out
-  Expected: ExpectedOut
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
 DescriptorSets:
   - Resources:
     - Name: In
