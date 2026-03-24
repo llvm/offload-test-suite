@@ -6,8 +6,6 @@ StructuredBuffer<double4> In4  : register(t3);
 
 RWStructuredBuffer<int> Out : register(u4);
 
-// Expect all 4s, all elements will be the same.
-
 [numthreads(4,1,1)]
 void main(uint3 TID : SV_GroupThreadID)
 {
