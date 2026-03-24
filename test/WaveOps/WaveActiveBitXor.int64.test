@@ -174,8 +174,8 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# Not implemented: https://github.com/llvm/llvm-project/issues/99166
-# UNSUPPORTED: Clang
+# Bug: https://github.com/llvm/llvm-project/issues/186465
+# XFAIL: Vulkan
 
 # 64 bit wave ops are not supported on metal.
 # https://github.com/llvm/offload-test-suite/issues/355
