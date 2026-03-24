@@ -3,7 +3,7 @@ StructuredBuffer<uint64_t4> In  : register(t0);
 
 RWStructuredBuffer<uint64_t> Out1 : register(u1);
 RWStructuredBuffer<uint64_t2> Out2 : register(u2);
-RWStructuredBuffer<uint64_t3> Out3 : register(u3);
+RWStructuredBuffer<uint64_t4> Out3 : register(u3);
 RWStructuredBuffer<uint64_t4> Out4 : register(u4);
 
 RWStructuredBuffer<uint64_t4> Out5 : register(u5);
@@ -55,8 +55,8 @@ Buffers:
     FillSize: 64
   - Name: Out3
     Format: UInt64
-    Stride: 24
-    FillSize: 96
+    Stride: 32
+    FillSize: 128
   - Name: Out4
     Format: UInt64
     Stride: 32
@@ -77,12 +77,10 @@ Buffers:
   - Name: ExpectedOut3
     Format: UInt64
     Stride: 32
-    Data: [
-      9,17,5,
-      9,17,5,
-      9,17,5,
-      9,17,5,
-    ]
+    Data: [ 9, 17, 5, 0, 
+    9, 17, 5, 0, 
+    9, 17, 5, 0, 
+    9, 17, 5, 0 ]
   - Name: ExpectedOut4
     Format: UInt64
     Stride: 32
