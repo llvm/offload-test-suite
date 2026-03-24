@@ -173,9 +173,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/186465
-# XFAIL: DirectX && Vulkan
-
 # 64 bit wave ops are not supported on metal.
 # https://github.com/llvm/offload-test-suite/issues/355
 # UNSUPPORTED: Metal
