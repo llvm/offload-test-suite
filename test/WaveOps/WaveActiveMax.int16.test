@@ -307,9 +307,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/172577
 # XFAIL: Clang && Vulkan
 
-# Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
-
 # REQUIRES: Int16
 
 # RUN: split-file %s %t
