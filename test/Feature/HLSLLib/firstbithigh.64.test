@@ -89,9 +89,6 @@ DescriptorSets:
 # https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbithigh.64bit.hlsl
 # UNSUPPORTED: DXC && Vulkan
 
-# Bug https://github.com/llvm/llvm-project/issues/143171
-# XFAIL: Clang && Vulkan
-
 # Bug https://github.com/llvm/offload-test-suite/issues/567
 # XFAIL: QC && DirectX
 
