@@ -150,9 +150,6 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/944
 # XFAIL: Intel && DirectX
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/943
-# XFAIL: Intel && Vulkan
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang
 
