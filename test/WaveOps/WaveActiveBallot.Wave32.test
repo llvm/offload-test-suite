@@ -48,6 +48,7 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: WaveSize_32
+# These platforms do not support the WaveSize attribute.
 # UNSUPPORTED: Vulkan || Metal
 
 # RUN: split-file %s %t

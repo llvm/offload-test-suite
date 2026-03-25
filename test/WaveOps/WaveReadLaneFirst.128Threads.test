@@ -252,6 +252,7 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: WaveSize_32
+# These platforms do not support the WaveSize attribute.
 # UNSUPPORTED: Vulkan || Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
