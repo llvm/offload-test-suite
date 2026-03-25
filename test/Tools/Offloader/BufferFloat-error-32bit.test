@@ -4,7 +4,7 @@ RWStructuredBuffer<float> Out1 : register(u0);
 
 [numthreads(1,1,1)]
 void main() {
-  Out1[0] = 20.3;
+  Out1[0] = 20.25;
   Out1[1] = 5.0;
 }
 
@@ -65,7 +65,7 @@ DescriptorSets:
 # CHECK: Name:            Out1
 # CHECK: Format:          Float32
 # CHECK: Stride:          4
-# CHECK: Data:            [ 20.3, 5 ]
+# CHECK: Data:            [ 20.25, 5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -74,4 +74,4 @@ DescriptorSets:
 # CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
 # CHECK-NEXT: [ 0x3fc00000, 0x40200000 ]
 # CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK-NEXT: [ 0x41a26666, 0x40a00000 ]
+# CHECK-NEXT: [ 0x41a20000, 0x40a00000 ]

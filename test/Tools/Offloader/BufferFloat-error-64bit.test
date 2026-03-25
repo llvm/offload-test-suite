@@ -6,7 +6,7 @@ RWStructuredBuffer<double> Out3 : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
-  Out1[0] = 20.3;
+  Out1[0] = 20.25;
   Out1[1] = 5.0;
   Out2[0] = 0.0;
   Out3[0] = asdouble(0x00000000, 0x7FF80000); // Should be NaN
@@ -128,7 +128,7 @@ DescriptorSets:
 # CHECK: Name:            Out1
 # CHECK: Format:          Float64
 # CHECK: Stride:          8
-# CHECK: Data:            [ 20.3, 5 ]
+# CHECK: Data:            [ 20.25, 5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -137,7 +137,7 @@ DescriptorSets:
 # CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
 # CHECK-NEXT: [ 0x3ff8000000000000, 0x4004000000000000 ]
 # CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK-NEXT: [ 0x40344ccccccccccd, 0x4014000000000000 ]
+# CHECK-NEXT: [ 0x4034400000000000, 0x4014000000000000 ]
 # CHECK: Comparison Rule: BufferFloatULP
 # CHECK: ULP: 1
 # CHECK: Expected:
@@ -216,7 +216,7 @@ DescriptorSets:
 # CHECK: Name:            Out1
 # CHECK: Format:          Float64
 # CHECK: Stride:          8
-# CHECK: Data:            [ 20.3, 5 ]
+# CHECK: Data:            [ 20.25, 5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -225,7 +225,7 @@ DescriptorSets:
 # CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
 # CHECK-NEXT: [ 0x3ff8000000000000, 0x4004000000000000 ]
 # CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK-NEXT: [ 0x40344ccccccccccd, 0x4014000000000000 ]
+# CHECK-NEXT: [ 0x4034400000000000, 0x4014000000000000 ]
 
 # CHECK: Test failed: Test5
 # CHECK: Comparison Rule: BufferFloatEpsilon
