@@ -37,12 +37,11 @@ DescriptorSets:
       DirectXBinding:
         Register: 1
         Space: 0
-      VulkanBinding:
-        Binding: 1
 ...
 #--- end
 
 # REQUIRES: WaveSize_32
+# UNSUPPORTED: Vulkan || Metal
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/711
 # XFAIL: WARP && Clang

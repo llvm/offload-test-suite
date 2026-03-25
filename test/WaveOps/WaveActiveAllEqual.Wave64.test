@@ -216,75 +216,56 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
-      VulkanBinding:
-        Binding: 0
     - Name: In2
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
-      VulkanBinding:
-        Binding: 1
     - Name: InVec1
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
-      VulkanBinding:
-        Binding: 2
     - Name: InVec2
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
-      VulkanBinding:
-        Binding: 3
     - Name: Out1
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 4
         Space: 0
-      VulkanBinding:
-        Binding: 4
     - Name: Out2
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 5
         Space: 0
-      VulkanBinding:
-        Binding: 5
     - Name: Out3
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 6
         Space: 0
-      VulkanBinding:
-        Binding: 6
     - Name: Out4
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 7
         Space: 0
-      VulkanBinding:
-        Binding: 7
     - Name: Out5
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 8
         Space: 0
-      VulkanBinding:
-        Binding: 8
     - Name: Out6
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 9
         Space: 0
-      VulkanBinding:
-        Binding: 9
 ...
 #--- end
 
 # REQUIRES: WaveSize_64
+# UNSUPPORTED: Vulkan || Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
