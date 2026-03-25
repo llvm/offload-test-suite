@@ -143,23 +143,23 @@ Buffers:
 
   - Name: Out
     Format: Int32
-    Stride: 2
+    Stride: 4
     FillSize: 224
   - Name: UOut
     Format: Int32
-    Stride: 2
+    Stride: 4
     FillSize: 224
   
   - Name: ExpectedOut
     Format: Int32
-    Stride: 2
+    Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: UExpectedOut
     Format: Int32
-    Stride: 2
+    Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -250,13 +250,10 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/943
-# XFAIL: Intel && Vulkan
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang
 
 # REQUIRES Int16
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -enable-16bit-types -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o 
