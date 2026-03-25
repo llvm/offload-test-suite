@@ -46,12 +46,12 @@ DescriptorSets:
       DirectXBinding:
         Register: 1
         Space: 0
-      VulkanBinding:
-        Binding: 1
 ...
 #--- end
 
 # REQUIRES: WaveSize_128
+# These platforms do not support the WaveSize attribute.
+# UNSUPPORTED: Vulkan || Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
