@@ -9,8 +9,7 @@ RWStructuredBuffer<uint64_t4> Out4 : register(u4);
 RWStructuredBuffer<uint64_t4> Out5 : register(u5);
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID)
-{
+void main(uint3 tid : SV_GroupThreadID){
     uint64_t4 v64 = In[tid.x];
 
     Out1[tid.x] = WaveActiveBitOr(v64.x);
@@ -32,17 +31,17 @@ void main(uint3 tid : SV_GroupThreadID)
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1,1,1]
+    DispatchSize: [1, 1, 1]
 
 Buffers:
   - Name: In
     Format: UInt64
     Stride: 32
     Data: [
-      17,2,4,8,
-      16,32,64,128,
-      256,512,1024,2048,
-      4096,8192,16384,32768
+      0x11, 0x2, 0x4, 0x8,
+      0x10, 0x20, 0x40, 0x80,
+      0x100, 0x200, 0x400, 0x800,
+      0x1000, 0x2000, 0x4000, 0x8000
     ]
 
   - Name: Out1
@@ -69,38 +68,38 @@ Buffers:
   - Name: ExpectedOut1
     Format: UInt64
     Stride: 8
-    Data: [4369, 4369, 4369, 4369]
+    Data: [0x1111, 0x1111, 0x1111, 0x1111]
   - Name: ExpectedOut2
     Format: UInt64
     Stride: 16
     Data: [
-      4369,8738,
-      4369,8738,
-      4369,8738,
-      4369,8738
+      0x1111, 0x2222,
+      0x1111, 0x2222,
+      0x1111, 0x2222,
+      0x1111, 0x2222
     ]
   - Name: ExpectedOut3
     Format: UInt64
     Stride: 24
     Data: [
-      4369,8738,17476,
-      4369,8738,17476,
-      4369,8738,17476,
-      4369,8738,17476
+      0x1111, 0x2222, 0x4444,
+      0x1111, 0x2222, 0x4444,
+      0x1111, 0x2222, 0x4444,
+      0x1111, 0x2222, 0x4444
     ]
   - Name: ExpectedOut4
     Format: UInt64
     Stride: 32
     Data: [
-      4369,8738,17476,34952,
-      4369,8738,17476,34952,
-      4369,8738,17476,34952,
-      4369,8738,17476,34952
+      0x1111, 0x2222, 0x4444, 0x8888,
+      0x1111, 0x2222, 0x4444, 0x8888,
+      0x1111, 0x2222, 0x4444, 0x8888,
+      0x1111, 0x2222, 0x4444, 0x8888
     ]
   - Name: ExpectedOut5
     Format: UInt64
     Stride: 32
-    Data: [ 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4 ]
+    Data: [ 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4 ]
 
 Results:
   - Result: ExpectedOut1
