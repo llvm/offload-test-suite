@@ -97,8 +97,7 @@ Buffers:
             0.0, -20.0, -2.0, -4.75 ]
 Results:
   - Result: Result
-    Rule: BufferFloatULP
-    ULPT: 0
+    Rule: BufferExact
     Actual: Out
     Expected: Expected
 DescriptorSets:
@@ -137,7 +136,7 @@ DescriptorSets:
 # XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1000
-# XFAIL: WARP && DXC && QC
+# XFAIL: arm64 && WARP && DXC
 
 # REQUIRES: Double
 # RUN: split-file %s %t

@@ -11,7 +11,6 @@ void main() {
   Out[0] = fma(A[0], B[0], C[0]);
   Out[1] = double4(fma(A[1].xyz, B[1].xyz, C[1].xyz), fma(A[1].w, B[1].w, C[1].w));
   Out[2] = double4(fma(A[2].xy, B[2].xy, C[2].xy), fma(A[2].zw, B[2].zw, C[2].zw));
-  // Had to add `l` literals at the end because otherwise we lose precision before numbers are converted to `double4`
   Out[3] = fma(double4(1.0000000149011612l, -1.0000000149011612l, 1.0000000000000002l, 0.5l), double4(67108865.0l, 67108865.0l, -0.9999999999999998l, -8.0l), double4(-67108866.0l, 67108866.0l, 1.0l, 1.0l));
   // (1 + 2^-26), -(1 + 2^-26), (1 + 2^-52), 0.5
   // (2^26 + 1), (2^26 + 1), -(1 - 2^-52), -8
@@ -61,8 +60,7 @@ Buffers:
     # last two rows: -(2^-104), 2^-104, 2^-27, -(2^-27), 2^-26, -(2^-26), 2^-104, -3
 Results:
   - Result: Result
-    Rule: BufferFloatULP
-    ULPT: 0
+    Rule: BufferExact
     Actual: Out
     Expected: Expected
 DescriptorSets:
@@ -101,7 +99,7 @@ DescriptorSets:
 # XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1000
-# XFAIL: WARP && DXC && QC
+# XFAIL: arm64 && WARP && DXC
 
 # REQUIRES: Double
 # RUN: split-file %s %t
