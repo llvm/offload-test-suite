@@ -268,11 +268,11 @@ getMemoryIndex(VkPhysicalDevice Device, uint32_t MemoryTypeBits,
                                  "Could not identify appropriate memory.");
 }
 
-static std::vector<VkLayerProperties> queryInstanceLayers() {
+static llvm::SmallVector<VkLayerProperties, 0> queryInstanceLayers() {
   uint32_t LayerCount;
   vkEnumerateInstanceLayerProperties(&LayerCount, nullptr);
 
-  std::vector<VkLayerProperties> Layers;
+  llvm::SmallVector<VkLayerProperties, 0> Layers;
   if (LayerCount == 0)
     return Layers;
 
@@ -282,21 +282,22 @@ static std::vector<VkLayerProperties> queryInstanceLayers() {
   return Layers;
 }
 
-static bool isLayerSupported(const std::vector<VkLayerProperties> &Layers,
-                             llvm::StringRef QueryName) {
-  for (auto Layer : Layers) {
+static bool
+isLayerSupported(const llvm::SmallVector<VkLayerProperties, 0> &Layers,
+                 llvm::StringRef QueryName) {
+  for (auto &Layer : Layers) {
     if (Layer.layerName == QueryName)
       return true;
   }
   return false;
 }
 
-static std::vector<VkExtensionProperties>
+static llvm::SmallVector<VkExtensionProperties, 0>
 queryInstanceExtensions(const char *InstanceLayer) {
   uint32_t ExtCount;
   vkEnumerateInstanceExtensionProperties(InstanceLayer, &ExtCount, nullptr);
 
-  std::vector<VkExtensionProperties> Extensions;
+  llvm::SmallVector<VkExtensionProperties, 0> Extensions;
   if (ExtCount == 0)
     return Extensions;
 
@@ -306,13 +307,13 @@ queryInstanceExtensions(const char *InstanceLayer) {
   return Extensions;
 }
 
-static std::vector<VkExtensionProperties>
+static llvm::SmallVector<VkExtensionProperties, 0>
 queryDeviceExtensions(VkPhysicalDevice PhysicalDevice) {
   uint32_t ExtCount;
   vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
                                        nullptr);
 
-  std::vector<VkExtensionProperties> Extensions;
+  llvm::SmallVector<VkExtensionProperties, 0> Extensions;
   if (ExtCount == 0)
     return Extensions;
 
@@ -323,9 +324,9 @@ queryDeviceExtensions(VkPhysicalDevice PhysicalDevice) {
   return Extensions;
 }
 
-static bool
-isExtensionSupported(const std::vector<VkExtensionProperties> &Extensions,
-                     llvm::StringRef QueryName) {
+static bool isExtensionSupported(
+    const llvm::SmallVector<VkExtensionProperties, 0> &Extensions,
+    llvm::StringRef QueryName) {
   for (const auto &Ext : Extensions) {
     if (Ext.extensionName == QueryName)
       return true;
@@ -353,9 +354,9 @@ private:
   VkDevice Device = VK_NULL_HANDLE;
   std::shared_ptr<VulkanQueue> GraphicsQueue;
   Capabilities Caps;
-  using LayerVector = std::vector<VkLayerProperties>;
+  using LayerVector = llvm::SmallVector<VkLayerProperties, 0>;
   LayerVector InstanceLayers;
-  using ExtensionVector = std::vector<VkExtensionProperties>;
+  using ExtensionVector = llvm::SmallVector<VkExtensionProperties, 0>;
   ExtensionVector DeviceExtensions;
 
   struct BufferRef {
@@ -459,7 +460,7 @@ private:
 public:
   static llvm::Expected<std::shared_ptr<VulkanDevice>>
   create(VkPhysicalDevice PhysicalDevice,
-         std::vector<VkLayerProperties> InstanceLayers) {
+         llvm::SmallVector<VkLayerProperties, 0> InstanceLayers) {
     VkPhysicalDeviceProperties Props;
     vkGetPhysicalDeviceProperties(PhysicalDevice, &Props);
 
@@ -476,7 +477,7 @@ public:
     vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &QueueCount,
                                              QueueFamilyProps.get());
 
-    int SelectedIdx = -1;
+    std::optional<uint32_t> SelectedIdx;
     for (uint32_t I = 0; I < QueueCount; ++I) {
       const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
       // Prefer family supporting both GRAPHICS and COMPUTE
@@ -486,11 +487,11 @@ public:
       }
     }
 
-    if (SelectedIdx == -1)
+    if (!SelectedIdx)
       return llvm::createStringError(std::errc::no_such_device,
                                      "No suitable queue family found.");
 
-    const uint32_t QueueFamilyIdx = static_cast<uint32_t>(SelectedIdx);
+    const uint32_t QueueFamilyIdx = *SelectedIdx;
 
     VkDeviceQueueCreateInfo QueueInfo = {};
     const float QueuePriority = 1.0f;
@@ -548,7 +549,7 @@ public:
 
   VulkanDevice(VkPhysicalDevice P, VkPhysicalDeviceProperties Props, VkDevice D,
                std::shared_ptr<VulkanQueue> Q,
-               std::vector<VkLayerProperties> InstanceLayers)
+               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
       : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(Q),
         InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
@@ -578,7 +579,7 @@ public:
 
     DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
   }
-  VulkanDevice(const VulkanDevice &) = default;
+  VulkanDevice(const VulkanDevice &) = delete;
 
   ~VulkanDevice() override {
     if (Device != VK_NULL_HANDLE) {
@@ -602,7 +603,7 @@ public:
 
   void printExtra(llvm::raw_ostream &OS) override {
     OS << "  Layers:\n";
-    for (auto Layer : InstanceLayers) {
+    for (auto &Layer : InstanceLayers) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
       OS << "  - LayerName: " << llvm::StringRef(Layer.layerName, Sz) << "\n";
       OS << "    SpecVersion: " << Layer.specVersion << "\n";
@@ -2304,14 +2305,14 @@ public:
     CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    const std::vector<VkLayerProperties> AvailableInstanceLayers =
+    const llvm::SmallVector<VkLayerProperties, 0> AvailableInstanceLayers =
         queryInstanceLayers();
     if (Config.EnableValidationLayer) {
       const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
       if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
         EnabledLayers.push_back(ValidationLayer.data());
     }
-    const std::vector<VkExtensionProperties> AvailableExtensions =
+    const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
         queryInstanceExtensions(nullptr);
     if (Config.EnableDebugLayer) {
       const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";

@@ -78,9 +78,8 @@ public:
   MTL::CommandQueue *Queue;
   MTLQueue(MTL::CommandQueue *Queue) : Queue(Queue) {}
   ~MTLQueue() {
-    if (Queue) {
+    if (Queue)
       Queue->release();
-    }
   }
 };
 

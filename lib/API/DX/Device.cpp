@@ -275,6 +275,7 @@ public:
   ComPtr<ID3D12CommandQueue> Queue;
 
   DXQueue(ComPtr<ID3D12CommandQueue> Queue) : Queue(Queue) {}
+  virtual ~DXQueue() {}
 
   static llvm::Expected<std::shared_ptr<DXQueue>>
   createGraphicsQueue(ComPtr<ID3D12Device> Device) {

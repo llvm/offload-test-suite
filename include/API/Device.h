@@ -37,7 +37,7 @@ struct DeviceConfig {
 
 class Queue {
 public:
-  virtual ~Queue() {}
+  virtual ~Queue() = 0;
 
 protected:
   Queue() = default;

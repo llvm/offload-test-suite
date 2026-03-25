@@ -48,6 +48,8 @@ public:
 };
 } // namespace
 
+Queue::~Queue() {}
+
 Device::~Device() {}
 
 void Device::registerDevice(std::shared_ptr<Device> D) {
