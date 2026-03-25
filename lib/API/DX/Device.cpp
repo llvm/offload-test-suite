@@ -353,7 +353,7 @@ public:
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
-  std::shared_ptr<Queue> getGraphicsQueue() override { return GraphicsQueue; }
+  Queue &getGraphicsQueue() override { return *GraphicsQueue.get(); }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
                                          const DeviceConfig &Config) {

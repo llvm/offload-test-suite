@@ -545,9 +545,7 @@ public:
   llvm::StringRef getAPIName() const override { return "Metal"; };
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
-  std::shared_ptr<Queue> getGraphicsQueue() override {
-    return std::static_pointer_cast<Queue>(GraphicsQueue);
-  }
+  Queue &getGraphicsQueue() override { return *GraphicsQueue.get(); }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;

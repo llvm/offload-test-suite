@@ -591,9 +591,7 @@ public:
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
 
-  std::shared_ptr<Queue> getGraphicsQueue() override {
-    return std::static_pointer_cast<Queue>(GraphicsQueue);
-  }
+  Queue &getGraphicsQueue() override { return *GraphicsQueue.get(); }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())

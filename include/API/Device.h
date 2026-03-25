@@ -54,7 +54,7 @@ public:
   virtual GPUAPI getAPI() const = 0;
   virtual llvm::Error executeProgram(Pipeline &P) = 0;
 
-  virtual std::shared_ptr<Queue> getGraphicsQueue() = 0;
+  virtual Queue &getGraphicsQueue() = 0;
 
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
