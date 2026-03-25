@@ -59,19 +59,17 @@ DescriptorSets:
       DirectXBinding:
         Register: 1
         Space: 0
-      VulkanBinding:
-        Binding: 2
     - Name: Out2
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
-      VulkanBinding:
-        Binding: 2
 ...
 #--- end
 
 # REQUIRES: WaveSize_64
+# These platforms do not support the WaveSize attribute.
+# UNSUPPORTED: Vulkan || Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl

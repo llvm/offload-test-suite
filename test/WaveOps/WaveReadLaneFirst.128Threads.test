@@ -232,40 +232,32 @@ DescriptorSets:
       DirectXBinding:
         Register: 0
         Space: 0
-      VulkanBinding:
-        Binding: 0    
     - Name: Out4
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 4
         Space: 0
-      VulkanBinding:
-        Binding: 4
     - Name: Out5
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 5
         Space: 0
-      VulkanBinding:
-        Binding: 5
     - Name: Masks
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 6
         Space: 0
-      VulkanBinding:
-        Binding: 6
 
 ...
 #--- end
 
 # REQUIRES: WaveSize_32
+# These platforms do not support the WaveSize attribute.
+# UNSUPPORTED: Vulkan || Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
-# Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
