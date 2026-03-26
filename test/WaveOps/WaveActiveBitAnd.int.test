@@ -5,22 +5,20 @@ RWStructuredBuffer<uint> Out1 : register(u1);
 RWStructuredBuffer<uint2> Out2 : register(u2);
 RWStructuredBuffer<uint3> Out3 : register(u3);
 RWStructuredBuffer<uint4> Out4 : register(u4);
-
 RWStructuredBuffer<uint4> Out5 : register(u5);
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID)
-{
-    uint4 v = In[tid.x];
+void main(uint3 tid : SV_GroupThreadID) {
+    uint4 V = In[tid.x];
 
-    Out1[tid.x] = WaveActiveBitAnd(v.x);
+    Out1[tid.x] = WaveActiveBitAnd(V.x);
 
-    Out2[tid.x] = WaveActiveBitAnd(v.xy);
+    Out2[tid.x] = WaveActiveBitAnd(V.xy);
 
-    uint3 r3 = WaveActiveBitAnd(v.xyz);
-    Out3[tid.x].xyz = r3;
+    uint3 R3 = WaveActiveBitAnd(V.xyz);
+    Out3[tid.x].xyz = R3;
 
-    Out4[tid.x] = WaveActiveBitAnd(v);
+    Out4[tid.x] = WaveActiveBitAnd(V);
 
     // constant folding uint4
     Out5[tid.x] = WaveActiveBitAnd(uint4(1,2,3,4));
@@ -32,17 +30,17 @@ void main(uint3 tid : SV_GroupThreadID)
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1,1,1]
+    DispatchSize: [1, 1, 1]
 
 Buffers:
   - Name: In
     Format: UInt32
     Stride: 16
     Data: [
-      15,19,23,27,
-      13,21,29,25,
-      11,17,31,27,
-      9,23,15,31
+      0xF, 0x13, 0x17, 0x1B,
+      0xD, 0x15, 0x1D, 0x19,
+      0xB, 0x11, 0x1F, 0x1B,
+      0x9, 0x17, 0xF,  0x1F
     ]
   
   - Name: Out1
@@ -63,37 +61,43 @@ Buffers:
     FillSize: 64
   
   - Name: Out5
-    Format: UInt64
+    Format: UInt32
     Stride: 16
     FillSize: 64
   - Name: ExpectedOut1
     Format: UInt32
     Stride: 4
-    Data: [ 9, 9, 9, 9 ]
+    Data: [ 0x9, 0x9, 0x9, 0x9 ]
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 8
-    Data: [ 9, 17, 9, 17, 9, 17, 9, 17 ]
+    Data: [ 0x9, 0x11, 0x9, 0x11, 
+      0x9, 0x11, 0x9, 0x11 
+    ]
   - Name: ExpectedOut3
     Format: UInt32
     Stride: 12
-    Data: [ 9, 17, 5, 
-    9, 17, 5,
-    9, 17, 5,
-    9, 17, 5 ]
+    Data: [ 0x9, 0x11, 0x5, 
+      0x9, 0x11, 0x5,
+      0x9, 0x11, 0x5,
+      0x9, 0x11, 0x5 
+    ]
   - Name: ExpectedOut4
     Format: UInt32
     Stride: 16
-    Data: [
-      9,17,5,25,
-      9,17,5,25,
-      9,17,5,25,
-      9,17,5,25
-    ]  
+    Data: [ 0x9, 0x11, 0x5, 0x19,
+      0x9, 0x11, 0x5, 0x19, 
+      0x9, 0x11, 0x5, 0x19, 
+      0x9, 0x11, 0x5, 0x19 
+    ]
   - Name: ExpectedOut5
     Format: UInt32
     Stride: 16
-    Data: [1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4]
+    Data: [ 0x1, 0x2, 0x3, 0x4, 
+      0x1, 0x2, 0x3, 0x4, 
+      0x1, 0x2, 0x3, 0x4, 
+      0x1, 0x2, 0x3, 0x4 
+    ]
 
 Results:
   - Result: ExpectedOut1

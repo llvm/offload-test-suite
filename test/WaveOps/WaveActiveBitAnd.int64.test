@@ -5,22 +5,20 @@ RWStructuredBuffer<uint64_t> Out1 : register(u1);
 RWStructuredBuffer<uint64_t2> Out2 : register(u2);
 RWStructuredBuffer<uint64_t3> Out3 : register(u3);
 RWStructuredBuffer<uint64_t4> Out4 : register(u4);
-
 RWStructuredBuffer<uint64_t4> Out5 : register(u5);
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID)
-{
-    uint64_t4 v64 = In[tid.x];
+void main(uint3 tid : SV_GroupThreadID) {
+    uint64_t4 V64 = In[tid.x];
 
-    Out1[tid.x] = WaveActiveBitAnd(v64.x);
+    Out1[tid.x] = WaveActiveBitAnd(V64.x);
 
-    Out2[tid.x] = WaveActiveBitAnd(v64.xy);
+    Out2[tid.x] = WaveActiveBitAnd(V64.xy);
 
-    uint64_t3 r64_3 = WaveActiveBitAnd(v64.xyz);
-    Out3[tid.x].xyz = r64_3;
+    uint64_t3 R64_3 = WaveActiveBitAnd(V64.xyz);
+    Out3[tid.x].xyz = R64_3;
 
-    Out4[tid.x] = WaveActiveBitAnd(v64);
+    Out4[tid.x] = WaveActiveBitAnd(V64);
 
     // constant folding uint4
     Out5[tid.x] = WaveActiveBitAnd(uint64_t4(1,2,3,4));
@@ -39,10 +37,10 @@ Buffers:
     Format: UInt64
     Stride: 32
     Data: [
-      15,19,23,27,
-      13,21,29,25,
-      11,17,31,27,
-      9,23,15,31
+      0xF, 0x13, 0x17, 0x1B,
+      0xD, 0x15, 0x1D, 0x19,
+      0xB, 0x11, 0x1F, 0x1B,
+      0x9, 0x17, 0xF,  0x1F
     ]
 
   - Name: Out1
@@ -69,31 +67,37 @@ Buffers:
   - Name: ExpectedOut1
     Format: UInt64
     Stride: 8
-    Data: [ 9, 9, 9, 9 ]
+    Data: [ 0x9, 0x9, 0x9, 0x9 ]
   - Name: ExpectedOut2
     Format: UInt64
     Stride: 16
-    Data: [ 9, 17, 9, 17, 9, 17, 9, 17 ]
+    Data: [ 0x9, 0x11, 0x9, 0x11, 
+      0x9, 0x11, 0x9, 0x11 
+    ]
   - Name: ExpectedOut3
     Format: UInt64
     Stride: 24
-    Data: [ 9, 17, 5, 
-    9, 17, 5, 
-    9, 17, 5, 
-    9, 17, 5 ]
+    Data: [ 0x9, 0x11, 0x5, 
+      0x9, 0x11, 0x5,
+      0x9, 0x11, 0x5,
+      0x9, 0x11, 0x5 
+    ]
   - Name: ExpectedOut4
     Format: UInt64
     Stride: 32
-    Data: [
-      9,17,5,25,
-      9,17,5,25,
-      9,17,5,25,
-      9,17,5,25
+    Data: [ 0x9, 0x11, 0x5, 0x19,
+      0x9, 0x11, 0x5, 0x19, 
+      0x9, 0x11, 0x5, 0x19, 
+      0x9, 0x11, 0x5, 0x19 
     ]
   - Name: ExpectedOut5
     Format: UInt64
     Stride: 32
-    Data: [1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4, 1, 2, 3, 4]
+    Data: [ 0x1, 0x2, 0x3, 0x4, 
+      0x1, 0x2, 0x3, 0x4, 
+      0x1, 0x2, 0x3, 0x4, 
+      0x1, 0x2, 0x3, 0x4 
+    ]
 
 Results:
   - Result: ExpectedOut1
