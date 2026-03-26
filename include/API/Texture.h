@@ -24,8 +24,9 @@ namespace offloadtest {
 
 // TODO: Add Unorm types (e.g. R8Unorm, RGBA8Unorm) which can be sampled as
 // floats.
-//
 // TODO: Add SRGB types (e.g. RGBA8Srgb) once needed.
+//
+// Note: No 3-channel formats due to lack of Metal support.
 enum class TextureFormat {
   R16Sint,
   R16Uint,
@@ -39,9 +40,6 @@ enum class TextureFormat {
   RG32Sint,
   RG32Uint,
   RG32Float,
-  RGB32Sint,
-  RGB32Uint,
-  RGB32Float,
   RGBA32Sint,
   RGBA32Uint,
   RGBA32Float,
@@ -82,12 +80,6 @@ inline llvm::StringRef getTextureFormatName(TextureFormat Format) {
     return "RG32Uint";
   case TextureFormat::RG32Float:
     return "RG32Float";
-  case TextureFormat::RGB32Sint:
-    return "RGB32Sint";
-  case TextureFormat::RGB32Uint:
-    return "RGB32Uint";
-  case TextureFormat::RGB32Float:
-    return "RGB32Float";
   case TextureFormat::RGBA32Sint:
     return "RGBA32Sint";
   case TextureFormat::RGBA32Uint:
@@ -119,7 +111,6 @@ inline bool isDepthFormat(TextureFormat Format) {
   return Format == TextureFormat::D32Float;
 }
 
-/// DepthStencil cannot be combined with RenderTarget or Storage.
 inline bool isValidTextureUsage(TextureUsage Usage) {
   if ((Usage & DepthStencil) != 0) {
     if ((Usage & RenderTarget) != 0)
@@ -130,20 +121,16 @@ inline bool isValidTextureUsage(TextureUsage Usage) {
   return true;
 }
 
-/// Depth formats require DepthStencil usage and cannot be used as RenderTarget
-/// or Storage. Non-depth formats cannot be used with DepthStencil usage.
 inline bool isValidTextureUsageAndFormat(TextureUsage Usage,
                                          TextureFormat Format) {
   if (!isValidTextureUsage(Usage))
     return false;
   if (isDepthFormat(Format)) {
-    // Depth formats can only be used as DepthStencil and/or Sampled.
     if ((Usage & RenderTarget) != 0)
       return false;
     if ((Usage & Storage) != 0)
       return false;
   } else {
-    // Non-depth formats cannot be used as DepthStencil.
     if ((Usage & DepthStencil) != 0)
       return false;
   }

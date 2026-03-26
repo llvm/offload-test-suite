@@ -17,6 +17,7 @@
 #include "API/API.h"
 #include "API/Buffer.h"
 #include "API/Capabilities.h"
+#include "API/Texture.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 
@@ -60,6 +61,10 @@ public:
   virtual llvm::Expected<std::shared_ptr<Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
+
+  virtual llvm::Expected<std::shared_ptr<Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) = 0;
+
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual ~Device() = 0;
