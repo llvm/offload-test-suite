@@ -134,9 +134,9 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK:  ...
-# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
 # CHECK-NEXT: [ 0x3ff8000000000000, 0x4004000000000000 ]
-# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
 # CHECK-NEXT: [ 0x4034400000000000, 0x4014000000000000 ]
 # CHECK: Comparison Rule: BufferFloatULP
 # CHECK: ULP: 1
@@ -162,10 +162,10 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK:  ...
-# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
-# CHECK-NEXT: [ 0x000fffffffffffff ]
-# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK-NEXT: [ 0x0000000000000000 ]
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0xfffffffffffff ]
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x0 ]
 
 # CHECK: Test failed: Test3
 # CHECK: Comparison Rule: BufferFloatULP
@@ -192,9 +192,9 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK:  ...
-# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
-# CHECK-NEXT: [ 0x0000000000000000 ]
-# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x0 ]
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
 # CHECK-NEXT: [ 0x7ff8000000000000 ]
 
 # CHECK: Test failed: Test4
@@ -222,9 +222,9 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK:  ...
-# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
 # CHECK-NEXT: [ 0x3ff8000000000000, 0x4004000000000000 ]
-# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
 # CHECK-NEXT: [ 0x4034400000000000, 0x4014000000000000 ]
 
 # CHECK: Test failed: Test5
@@ -252,10 +252,10 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK:  ...
-# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
-# CHECK-NEXT: [ 0x000fffffffffffff ]
-# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
-# CHECK-NEXT: [ 0x0000000000000000 ]
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0xfffffffffffff ]
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x0 ]
 
 # CHECK: Test failed: Test6
 # CHECK: Comparison Rule: BufferFloatEpsilon
@@ -282,7 +282,7 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK:  ...
-# CHECK-NEXT: Full Hex 64bit representation of Expected Buffer Values:
-# CHECK-NEXT: [ 0x0000000000000000 ]
-# CHECK-NEXT: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x0 ]
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
 # CHECK-NEXT: [ 0x7ff8000000000000 ]

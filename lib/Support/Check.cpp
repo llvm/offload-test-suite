@@ -13,11 +13,12 @@
 #include "Support/Pipeline.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
+#include <climits>
 #include <cmath>
 #include <cstring>
-#include <iomanip>
 #include <sstream>
 
 constexpr uint16_t Float16BitSign = 0x8000;
@@ -284,29 +285,19 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
 
 template <typename T> static uint64_t toBitPattern(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
-  if constexpr (sizeof(T) == 1) {
-    uint8_t Tmp;
-    memcpy(&Tmp, &Val, sizeof(Tmp));
-    return Tmp;
-  } else if constexpr (sizeof(T) == 2) {
-    uint16_t Tmp;
-    memcpy(&Tmp, &Val, sizeof(Tmp));
-    return Tmp;
-  } else if constexpr (sizeof(T) == 4) {
-    uint32_t Tmp;
-    memcpy(&Tmp, &Val, sizeof(Tmp));
-    return Tmp;
-  } else {
-    uint64_t Tmp;
-    memcpy(&Tmp, &Val, sizeof(Tmp));
-    return Tmp;
-  }
+  uint64_t Bits = 0;
+  memcpy(&Bits, &Val, sizeof(T));
+  // On big-endian hosts, the bytes land at the high end of Bits.
+  // Shift them down so the value occupies the low bits, matching
+  // the zero-extended representation we want.
+  if constexpr (llvm::endianness::native == llvm::endianness::big)
+    Bits >>= (sizeof(uint64_t) - sizeof(T)) * CHAR_BIT;
+  return Bits;
 }
 
-template <typename T> static std::string bitPatternAsHex64(const T &Val) {
+template <typename T> static std::string bitPatternAsHex(const T &Val) {
   std::ostringstream Oss;
-  Oss << "0x" << std::setfill('0') << std::setw(16) << std::hex
-      << toBitPattern(Val);
+  Oss << "0x" << std::hex << toBitPattern(Val);
   return Oss.str();
 }
 
@@ -316,9 +307,9 @@ static void formatBuffer(llvm::ArrayRef<T> Arr,
   if (Arr.empty())
     return;
 
-  Result << "[ " << bitPatternAsHex64(Arr[0]);
+  Result << "[ " << bitPatternAsHex(Arr[0]);
   for (size_t I = 1; I < Arr.size(); ++I)
-    Result << ", " << bitPatternAsHex64(Arr[I]);
+    Result << ", " << bitPatternAsHex(Arr[I]);
   Result << " ]";
 }
 
@@ -421,15 +412,15 @@ llvm::Error verifyResult(offloadtest::Result R) {
   OS << "Got:\n";
   YAMLOS << *R.ActualPtr;
 
-  // Now print exact hex64 representations of each element of the
+  // Now print exact hex representations of each element of the
   // actual and expected buffers.
 
   const std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
   const std::string ActualBufferStr = getBufferStr(R.ActualPtr);
 
-  OS << "Full Hex 64bit representation of Expected Buffer Values:\n"
+  OS << "Full Hex representation of Expected Buffer Values:\n"
      << ExpectedBufferStr << "\n";
-  OS << "Full Hex 64bit representation of Actual Buffer Values:\n"
+  OS << "Full Hex representation of Actual Buffer Values:\n"
      << ActualBufferStr << "\n";
 
   return llvm::createStringError(Str.c_str());
