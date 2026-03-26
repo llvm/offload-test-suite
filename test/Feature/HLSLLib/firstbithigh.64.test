@@ -90,7 +90,7 @@ DescriptorSets:
 # UNSUPPORTED: DXC && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/567
-# XFAIL: QC && DirectX
+# XFAIL: QC && Vulkan && Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/324
 # XFAIL: NV && DirectX
