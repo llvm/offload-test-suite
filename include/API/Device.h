@@ -41,13 +41,8 @@ enum class MemoryLocation {
   GpuToCpu,
 };
 
-enum class BufferUsage {
-  Storage,
-};
-
 struct BufferCreateDesc {
   MemoryLocation Location;
-  BufferUsage Usage;
 };
 
 class Buffer {
