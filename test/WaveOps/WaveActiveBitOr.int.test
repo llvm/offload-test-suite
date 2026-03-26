@@ -9,20 +9,20 @@ RWStructuredBuffer<uint4> Out5 : register(u5);
 
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID) {
-    uint4 v = In[tid.x];
+void main(uint3 TID : SV_GroupThreadID) {
+    uint4 V = In[TID.x];
 
-    Out1[tid.x] = WaveActiveBitOr(v.x);
+    Out1[TID.x] = WaveActiveBitOr(V.x);
 
-    Out2[tid.x] = WaveActiveBitOr(v.xy);
+    Out2[TID.x] = WaveActiveBitOr(V.xy);
 
-    uint3 r3 = WaveActiveBitOr(v.xyz);
-    Out3[tid.x].xyz = r3;
+    uint3 R3 = WaveActiveBitOr(V.xyz);
+    Out3[TID.x].xyz = R3;
 
-    Out4[tid.x] = WaveActiveBitOr(v);    
+    Out4[TID.x] = WaveActiveBitOr(V);    
     
     // constant folding uint4
-    Out5[tid.x] = WaveActiveBitOr(uint4(1,2,3,4));
+    Out5[TID.x] = WaveActiveBitOr(uint4(1,2,3,4));
     
 }
 
