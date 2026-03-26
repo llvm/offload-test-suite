@@ -8,20 +8,20 @@ RWStructuredBuffer<uint4> Out4 : register(u4);
 RWStructuredBuffer<uint4> Out5 : register(u5);
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID) {
-    uint4 V = In[tid.x];
+void main(uint3 TID : SV_GroupThreadID) {
+    uint4 V = In[TID.x];
 
-    Out1[tid.x] = WaveActiveBitAnd(V.x);
+    Out1[TID.x] = WaveActiveBitAnd(V.x);
 
-    Out2[tid.x] = WaveActiveBitAnd(V.xy);
+    Out2[TID.x] = WaveActiveBitAnd(V.xy);
 
     uint3 R3 = WaveActiveBitAnd(V.xyz);
-    Out3[tid.x].xyz = R3;
+    Out3[TID.x].xyz = R3;
 
-    Out4[tid.x] = WaveActiveBitAnd(V);
+    Out4[TID.x] = WaveActiveBitAnd(V);
 
     // constant folding uint4
-    Out5[tid.x] = WaveActiveBitAnd(uint4(1,2,3,4));
+    Out5[TID.x] = WaveActiveBitAnd(uint4(1,2,3,4));
 }
 
 #--- pipeline.yaml

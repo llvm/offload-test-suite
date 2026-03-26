@@ -8,32 +8,32 @@ RWStructuredBuffer<uint> Out4 : register(u4); // loop
 RWStructuredBuffer<uint> Out5 : register(u5); // divergent loop
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID) {
-    uint V = In[tid.x];
+void main(uint3 TID : SV_GroupThreadID) {
+    uint V = In[TID.x];
 
     // divergent branch
-    if (tid.x < 2)
-        Out1[tid.x] = WaveActiveBitAnd(V);
+    if (TID.x < 2)
+        Out1[TID.x] = WaveActiveBitAnd(V);
     else
-        Out2[tid.x] = WaveActiveBitAnd(V);
+        Out2[TID.x] = WaveActiveBitAnd(V);
 
     // reconverged wave op
-    Out3[tid.x] = WaveActiveBitAnd(V);
+    Out3[TID.x] = WaveActiveBitAnd(V);
 
     // loop case
     uint R = V;
     for (uint i = 0; i < 2; i++)
         R = WaveActiveBitAnd(R);
 
-    Out4[tid.x] = R;
+    Out4[TID.x] = R;
 
-    // divergent loop: each thread iterates tid.x times
+    // divergent loop: each thread iterates TID.x times
     // thread 0: 0 iters, thread 1: 1 iter, thread 2: 2 iters, thread 3: 3 iters
     uint R2 = V;
-    for (uint j = 0; j < tid.x; j++)
+    for (uint j = 0; j < TID.x; j++)
         R2 = WaveActiveBitAnd(R2);
 
-    Out5[tid.x] = R2;
+    Out5[TID.x] = R2;
 }
 
 #--- pipeline.yaml
