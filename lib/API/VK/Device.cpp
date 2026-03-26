@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Error.h"
 
@@ -356,6 +357,24 @@ public:
   }
 };
 
+class VulkanTexture : public offloadtest::Texture {
+public:
+  VkDevice Dev;
+  VkImage Image;
+  VkDeviceMemory Memory;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
+                llvm::StringRef Name, TextureCreateDesc Desc)
+      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+
+  ~VulkanTexture() override {
+    vkDestroyImage(Dev, Image, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
 class VulkanQueue : public offloadtest::Queue {
 public:
   VkQueue Queue = VK_NULL_HANDLE;
@@ -615,21 +634,6 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
-    VkMemoryPropertyFlags MemFlags = 0;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      MemFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-      break;
-    case MemoryLocation::CpuToGpu:
-      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-      break;
-    case MemoryLocation::GpuToCpu:
-      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-      break;
-    }
-
     VkBufferCreateInfo BufInfo = {};
     BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     BufInfo.size = SizeInBytes;
@@ -649,8 +653,8 @@ public:
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
-    auto MemIdx =
-        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemFlags);
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
     if (!MemIdx)
       return MemIdx.takeError();
     AllocInfo.memoryTypeIndex = *MemIdx;
@@ -665,6 +669,65 @@ public:
 
     return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
                                           Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(llvm::StringRef Name, TextureCreateDesc &Desc) override {
+    if (!isValidTextureUsageAndFormat(Desc.Usage, Desc.Format))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Invalid texture usage/format combination: usage '%s' is not "
+          "compatible with format '%s'.",
+          getTextureUsageName(Desc.Usage).c_str(),
+          getTextureFormatName(Desc.Format).data());
+
+    VkImageCreateInfo ImageInfo = {};
+    ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.extent = {Desc.Width, Desc.Height, 1};
+    ImageInfo.mipLevels = Desc.MipLevels;
+    ImageInfo.arrayLayers = 1;
+    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
+    ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkImage Image;
+    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to create image.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx) {
+      vkDestroyImage(Device, Image, nullptr);
+      return MemIdx.takeError();
+    }
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+      vkDestroyImage(Device, Image, nullptr);
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate image memory.");
+    }
+    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+      vkDestroyImage(Device, Image, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind image memory.");
+    }
+
+    return std::make_shared<VulkanTexture>(Device, Image, DeviceMemory, Name,
+                                           Desc);
   }
 
   const Capabilities &getCapabilities() override {

@@ -24,8 +24,9 @@ namespace offloadtest {
 
 // TODO: Add Unorm types (e.g. R8Unorm, RGBA8Unorm) which can be sampled as
 // floats.
-//
 // TODO: Add SRGB types (e.g. RGBA8Srgb) once needed.
+//
+// Note: No 3-channel formats due to lack of Metal support.
 enum class TextureFormat {
   R16Sint,
   R16Uint,
@@ -39,9 +40,6 @@ enum class TextureFormat {
   RG32Sint,
   RG32Uint,
   RG32Float,
-  RGB32Sint,
-  RGB32Uint,
-  RGB32Float,
   RGBA32Sint,
   RGBA32Uint,
   RGBA32Float,
@@ -82,12 +80,6 @@ inline llvm::StringRef getTextureFormatName(TextureFormat Format) {
     return "RG32Uint";
   case TextureFormat::RG32Float:
     return "RG32Float";
-  case TextureFormat::RGB32Sint:
-    return "RGB32Sint";
-  case TextureFormat::RGB32Uint:
-    return "RGB32Uint";
-  case TextureFormat::RGB32Float:
-    return "RGB32Float";
   case TextureFormat::RGBA32Sint:
     return "RGBA32Sint";
   case TextureFormat::RGBA32Uint:
