@@ -162,7 +162,7 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
 static llvm::Expected<D3D12_RESOURCE_DESC>
 getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
-  const offloadtest::Buffer &B = *R.BufferPtr;
+  const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
   if (B.OutputProps.MipLevels != 1)
     return llvm::createStringError(std::errc::not_supported,
@@ -270,10 +270,86 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
 
 namespace {
 
+class DXBuffer : public offloadtest::Buffer {
+public:
+  ComPtr<ID3D12Resource> Buffer;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
+           BufferCreateDesc Desc, size_t SizeInBytes)
+      : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+};
+
+class DXFence : public offloadtest::Fence {
+public:
+  std::string Name;
+  ComPtr<ID3D12Fence> Fence;
+  HANDLE Event;
+
+  uint64_t getFenceValue() override { return Fence->GetCompletedValue(); }
+
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+
+    if (Fence->GetCompletedValue() >= SignalValue) {
+      return llvm::Error::success();
+    }
+
+    if (auto Err = HR::toError(Fence->SetEventOnCompletion(SignalValue, Event),
+                               "Failed to register end event."))
+      return Err;
+
+#ifdef _WIN32
+    WaitForSingleObject(Event, INFINITE);
+#else // WSL
+    pollfd PollEvent;
+    PollEvent.fd = (int)Event;
+    PollEvent.events = POLLIN;
+    PollEvent.revents = 0;
+    if (poll(&PollEvent, 1, -1) == -1)
+      return llvm::createStringError(
+          std::error_code(errno, std::system_category()), strerror(errno));
+#endif
+    return llvm::Error::success();
+  }
+
+  DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
+      : Fence(Fence), Event(Event), Name(Name) {}
+
+  ~DXFence() {
+#ifdef _WIN32
+    CloseHandle(Event);
+#else // WSL
+    close((int)Event);
+#endif
+  }
+};
+
+class DXQueue : public offloadtest::Queue {
+public:
+  ComPtr<ID3D12CommandQueue> Queue;
+
+  DXQueue(ComPtr<ID3D12CommandQueue> Queue) : Queue(Queue) {}
+
+  static llvm::Expected<std::shared_ptr<DXQueue>>
+  createGraphicsQueue(ComPtr<ID3D12Device> Device) {
+    const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
+                                           D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
+    ComPtr<ID3D12CommandQueue> Queue;
+    if (auto Err =
+            HR::toError(Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&Queue)),
+                        "Failed to create command queue."))
+      return Err;
+    return std::make_shared<DXQueue>(Queue);
+  }
+};
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12Device> Device;
+  std::shared_ptr<DXQueue> GraphicsQueue;
   Capabilities Caps;
 
   struct ResourceSet {
@@ -300,15 +376,9 @@ private:
     ComPtr<ID3D12RootSignature> RootSig;
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     ComPtr<ID3D12PipelineState> PSO;
-    ComPtr<ID3D12CommandQueue> Queue;
     ComPtr<ID3D12CommandAllocator> Allocator;
     ComPtr<ID3D12GraphicsCommandList> CmdList;
-    ComPtr<ID3D12Fence> Fence;
-#ifdef _WIN32
-    HANDLE Event;
-#else // WSL
-    int Event;
-#endif
+    std::shared_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
     ComPtr<ID3D12Resource> RT;
@@ -321,8 +391,9 @@ private:
   };
 
 public:
-  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, std::string Desc)
-      : Adapter(A), Device(D) {
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D,
+           std::shared_ptr<DXQueue> Q, std::string Desc)
+      : Adapter(A), Device(D), GraphicsQueue(Q) {
     Description = Desc;
   }
   DXDevice(const DXDevice &) = default;
@@ -331,6 +402,64 @@ public:
 
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
+
+  std::shared_ptr<Queue> getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    ComPtr<ID3D12Fence> Fence;
+    if (auto Err = HR::toError(
+            Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)),
+            "Failed to create Fence."))
+      return Err;
+
+#ifdef _WIN32
+    HANDLE Event = CreateEventA(nullptr, false, false, nullptr);
+    if (!Event)
+#else // WSL
+    int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (Event == -1)
+#endif
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create event.");
+
+    return std::make_shared<DXFence>(Fence, Event, Name);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+
+    D3D12_HEAP_TYPE HeapType = D3D12_HEAP_TYPE_DEFAULT;
+    switch (Desc.Location) {
+    case MemoryLocation::GpuOnly:
+      HeapType = D3D12_HEAP_TYPE_DEFAULT;
+      break;
+    case MemoryLocation::CpuToGpu:
+      HeapType = D3D12_HEAP_TYPE_UPLOAD;
+      break;
+    case MemoryLocation::GpuToCpu:
+      HeapType = D3D12_HEAP_TYPE_READBACK;
+      break;
+    }
+
+    const D3D12_RESOURCE_FLAGS Flags =
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+    const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
+    const D3D12_RESOURCE_DESC BufferDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
+
+    ComPtr<ID3D12Resource> DeviceBuffer;
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProps, D3D12_HEAP_FLAG_NONE,
+                                   &BufferDesc, D3D12_RESOURCE_STATE_COMMON,
+                                   nullptr, IID_PPV_ARGS(&DeviceBuffer)),
+                               "Failed to create buffer."))
+      return Err;
+
+    return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+  }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
                                          const DeviceConfig &Config) {
@@ -351,7 +480,14 @@ public:
     if (Config.EnableDebugLayer || Config.EnableValidationLayer)
       if (auto Err = configureInfoQueue(Device.Get()))
         return Err;
-    return DXDevice(Adapter, Device, std::string(DescVec.data()));
+
+    auto GraphicsQueueOrErr = DXQueue::createGraphicsQueue(Device);
+    if (!GraphicsQueueOrErr)
+      return GraphicsQueueOrErr.takeError();
+    const std::shared_ptr<DXQueue> GraphicsQueue = *GraphicsQueueOrErr;
+
+    return DXDevice(Adapter, Device, GraphicsQueue,
+                    std::string(DescVec.data()));
   }
 
   const Capabilities &getCapabilities() override {
@@ -520,12 +656,6 @@ public:
   }
 
   llvm::Error createCommandStructures(InvocationState &IS) {
-    const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
-                                           D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
-    if (auto Err = HR::toError(
-            Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&IS.Queue)),
-            "Failed to create command queue."))
-      return Err;
     if (auto Err = HR::toError(
             Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                            IID_PPV_ARGS(&IS.Allocator)),
@@ -545,7 +675,7 @@ public:
                                  ComPtr<ID3D12Resource> Source) {
     addUploadBeginBarrier(IS, Destination);
     if (R.isTexture()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
           0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                  getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
@@ -610,7 +740,7 @@ public:
     const UINT HeapRangeStartOffset = 0;
     const UINT RangeTileCount = NumTiles;
 
-    ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
+    ID3D12CommandQueue *CommandQueue = GraphicsQueue->Queue.Get();
     CommandQueue->UpdateTileMappings(
         Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
         &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
@@ -1054,55 +1184,20 @@ public:
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  llvm::Error createEvent(InvocationState &IS) {
-    if (auto Err = HR::toError(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                                                   IID_PPV_ARGS(&IS.Fence)),
-                               "Failed to create fence."))
-      return Err;
-#ifdef _WIN32
-    IS.Event = CreateEventA(nullptr, false, false, nullptr);
-    if (!IS.Event)
-#else // WSL
-    IS.Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    if (IS.Event == -1)
-#endif
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create event.");
-    return llvm::Error::success();
-  }
-
   llvm::Error waitForSignal(InvocationState &IS) {
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
+    auto *F = static_cast<DXFence *>(IS.Fence.get());
 
-    if (auto Err = HR::toError(IS.Queue->Signal(IS.Fence.Get(), CurrentCounter),
-                               "Failed to add signal."))
+    if (auto Err = HR::toError(
+            GraphicsQueue->Queue->Signal(F->Fence.Get(), CurrentCounter),
+            "Failed to add signal."))
       return Err;
 
-    if (IS.Fence->GetCompletedValue() < CurrentCounter) {
-#ifdef _WIN32
-      HANDLE Event = IS.Event;
-#else // WSL
-      HANDLE Event = reinterpret_cast<HANDLE>(IS.Event);
-#endif
-      if (auto Err =
-              HR::toError(IS.Fence->SetEventOnCompletion(CurrentCounter, Event),
-                          "Failed to register end event."))
-        return Err;
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
 
-#ifdef _WIN32
-      WaitForSingleObject(IS.Event, INFINITE);
-#else // WSL
-      pollfd PollEvent;
-      PollEvent.fd = IS.Event;
-      PollEvent.events = POLLIN;
-      PollEvent.revents = 0;
-      if (poll(&PollEvent, 1, -1) == -1)
-        return llvm::createStringError(
-            std::error_code(errno, std::system_category()), strerror(errno));
-#endif
-    }
     FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
@@ -1113,7 +1208,7 @@ public:
       return Err;
 
     ID3D12CommandList *const CmdLists[] = {IS.CmdList.Get()};
-    IS.Queue->ExecuteCommandLists(1, CmdLists);
+    GraphicsQueue->Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
   }
@@ -1202,7 +1297,7 @@ public:
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
-        const offloadtest::Buffer &B = *R.first->BufferPtr;
+        const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
             0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                    getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
@@ -1284,7 +1379,7 @@ public:
     // Map readback and copy into host buffer, accounting for row pitch and
     // flipping vertical orientation. DirectX render target origin is top-left,
     // while our image writer expects bottom-left.
-    const Buffer &B = *P.Bindings.RTargetBufferPtr;
+    const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
     if (auto Err = HR::toError(IS.RTReadback->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
@@ -1326,7 +1421,7 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No render target bound for graphics pipeline.");
-    const Buffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
     if (OutBuf.OutputProps.MipLevels != 1)
       return llvm::createStringError(
           std::errc::not_supported,
@@ -1380,7 +1475,7 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No vertex buffer bound for graphics pipeline.");
-    const Buffer &VB = *P.Bindings.VertexBufferPtr;
+    const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
     const uint64_t VBSize = VB.size();
     D3D12_RESOURCE_DESC const Desc = CD3DX12_RESOURCE_DESC::Buffer(VBSize);
     CD3DX12_HEAP_PROPERTIES HeapProps =
@@ -1517,7 +1612,7 @@ public:
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CmdList->ResourceBarrier(1, &Barrier);
 
-    const Buffer &B = *P.Bindings.RTargetBufferPtr;
+    const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
         0,
         CD3DX12_SUBRESOURCE_FOOTPRINT(
@@ -1530,7 +1625,7 @@ public:
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
-        const offloadtest::Buffer &B = *R.first->BufferPtr;
+        const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
             0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                    getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
@@ -1607,9 +1702,10 @@ public:
       return Err;
     llvm::outs() << "Command structures created.\n";
 
-    if (auto Err = createEvent(State))
-      return Err;
-    llvm::outs() << "Event prepared.\n";
+    auto FenceOrErr = this->createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    State.Fence = *FenceOrErr;
 
     if (auto Err = createBuffers(P, State))
       return Err;

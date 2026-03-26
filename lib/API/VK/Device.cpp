@@ -268,20 +268,158 @@ getMemoryIndex(VkPhysicalDevice Device, uint32_t MemoryTypeBits,
                                  "Could not identify appropriate memory.");
 }
 
+static std::vector<VkLayerProperties> queryInstanceLayers() {
+  uint32_t LayerCount;
+  vkEnumerateInstanceLayerProperties(&LayerCount, nullptr);
+
+  std::vector<VkLayerProperties> Layers;
+  if (LayerCount == 0)
+    return Layers;
+
+  Layers.resize(LayerCount);
+  vkEnumerateInstanceLayerProperties(&LayerCount, Layers.data());
+
+  return Layers;
+}
+
+static bool isLayerSupported(const std::vector<VkLayerProperties> &Layers,
+                             llvm::StringRef QueryName) {
+  for (auto Layer : Layers) {
+    if (Layer.layerName == QueryName)
+      return true;
+  }
+  return false;
+}
+
+static std::vector<VkExtensionProperties>
+queryInstanceExtensions(const char *InstanceLayer) {
+  uint32_t ExtCount;
+  vkEnumerateInstanceExtensionProperties(InstanceLayer, &ExtCount, nullptr);
+
+  std::vector<VkExtensionProperties> Extensions;
+  if (ExtCount == 0)
+    return Extensions;
+
+  Extensions.resize(ExtCount);
+  vkEnumerateInstanceExtensionProperties(nullptr, &ExtCount, Extensions.data());
+
+  return Extensions;
+}
+
+static std::vector<VkExtensionProperties>
+queryDeviceExtensions(VkPhysicalDevice PhysicalDevice) {
+  uint32_t ExtCount;
+  vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
+                                       nullptr);
+
+  std::vector<VkExtensionProperties> Extensions;
+  if (ExtCount == 0)
+    return Extensions;
+
+  Extensions.resize(ExtCount);
+  vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
+                                       Extensions.data());
+
+  return Extensions;
+}
+
+static bool
+isExtensionSupported(const std::vector<VkExtensionProperties> &Extensions,
+                     llvm::StringRef QueryName) {
+  for (const auto &Ext : Extensions) {
+    if (Ext.extensionName == QueryName)
+      return true;
+  }
+  return false;
+}
+
 namespace {
 
-class VKDevice : public offloadtest::Device {
+class VulkanBuffer : public offloadtest::Buffer {
+public:
+  VkDevice Dev; // Needed for clean-up
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
+      : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
+
+  ~VulkanBuffer() override {
+    vkDestroyBuffer(Dev, Buffer, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
+class VulkanFence : public offloadtest::Fence {
+public:
+  std::string Name;
+  VkDevice Device;
+  VkSemaphore Semaphore;
+
+  uint64_t getFenceValue() override {
+    uint64_t Value = 0;
+    const VkResult Result =
+        vkGetSemaphoreCounterValue(Device, Semaphore, &Value);
+    assert(Result == VK_SUCCESS);
+    return Value;
+  }
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+    VkSemaphoreWaitInfo WaitInfo = {};
+    WaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    WaitInfo.semaphoreCount = 1;
+    WaitInfo.pSemaphores = &Semaphore;
+    WaitInfo.pValues = &SignalValue;
+
+    const VkResult Result = vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX);
+
+    if (Result == VK_ERROR_DEVICE_LOST)
+      return llvm::createStringError(std::errc::no_such_device, "Device Lost.");
+    if (Result == VK_ERROR_OUT_OF_DEVICE_MEMORY)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Out of Device Memory.");
+    if (Result == VK_ERROR_OUT_OF_HOST_MEMORY)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Out of Host Memory.");
+    if (Result != VK_SUCCESS)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to wait on Semaphore.");
+
+    return llvm::Error::success();
+  }
+
+  VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
+      : Device(Device), Semaphore(Semaphore), Name(Name) {}
+
+  ~VulkanFence() { vkDestroySemaphore(Device, Semaphore, nullptr); }
+};
+
+class VulkanQueue : public offloadtest::Queue {
+public:
+  VkQueue Queue = VK_NULL_HANDLE;
+  uint32_t QueueFamilyIdx = 0;
+  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx)
+      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx) {}
+};
+
+class VulkanDevice : public offloadtest::Device {
 private:
-  VkPhysicalDevice Device;
+  VkPhysicalDevice PhysicalDevice;
   VkPhysicalDeviceProperties Props;
   VkPhysicalDeviceProperties2 Props2;
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
   VkPhysicalDeviceDriverProperties DriverProps;
+  VkDevice Device = VK_NULL_HANDLE;
+  std::shared_ptr<VulkanQueue> GraphicsQueue;
   Capabilities Caps;
   using LayerVector = std::vector<VkLayerProperties>;
-  LayerVector Layers;
+  LayerVector InstanceLayers;
   using ExtensionVector = std::vector<VkExtensionProperties>;
-  ExtensionVector Extensions;
+  ExtensionVector DeviceExtensions;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -305,7 +443,7 @@ private:
 
   struct ResourceBundle {
     ResourceBundle(VkDescriptorType DescriptorType, uint64_t Size,
-                   Buffer *BufferPtr)
+                   CPUBuffer *BufferPtr)
         : DescriptorType(DescriptorType), Size(Size), BufferPtr(BufferPtr) {}
 
     bool isImage() const {
@@ -335,7 +473,7 @@ private:
 
     VkDescriptorType DescriptorType;
     uint64_t Size;
-    Buffer *BufferPtr;
+    CPUBuffer *BufferPtr;
     VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     llvm::SmallVector<ResourceRef> ResourceRefs;
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
@@ -348,14 +486,14 @@ private:
   };
 
   struct InvocationState {
-    VkDevice Device;
-    VkQueue Queue;
     VkCommandPool CmdPool;
     VkCommandBuffer CmdBuffer;
     VkPipelineLayout PipelineLayout;
     VkDescriptorPool Pool = nullptr;
     VkPipelineCache PipelineCache;
     VkPipeline Pipeline;
+
+    std::shared_ptr<Fence> Fence;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer;
@@ -384,19 +522,115 @@ private:
   };
 
 public:
-  VKDevice(VkPhysicalDevice D) : Device(D) {
-    vkGetPhysicalDeviceProperties(Device, &Props);
+  static llvm::Expected<std::shared_ptr<VulkanDevice>>
+  create(VkPhysicalDevice PhysicalDevice,
+         std::vector<VkLayerProperties> InstanceLayers) {
+    VkPhysicalDeviceProperties Props;
+    vkGetPhysicalDeviceProperties(PhysicalDevice, &Props);
+
+    // Find a queue family that supports both graphics and compute.
+    uint32_t QueueCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &QueueCount,
+                                             nullptr);
+    if (QueueCount == 0)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "No queue families reported.");
+
+    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps(
+        new VkQueueFamilyProperties[QueueCount]);
+    vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &QueueCount,
+                                             QueueFamilyProps.get());
+
+    int SelectedIdx = -1;
+    for (uint32_t I = 0; I < QueueCount; ++I) {
+      const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
+      // Prefer family supporting both GRAPHICS and COMPUTE
+      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
+        SelectedIdx = static_cast<int>(I);
+        break;
+      }
+    }
+
+    if (SelectedIdx == -1)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "No suitable queue family found.");
+
+    const uint32_t QueueFamilyIdx = static_cast<uint32_t>(SelectedIdx);
+
+    VkDeviceQueueCreateInfo QueueInfo = {};
+    const float QueuePriority = 1.0f;
+    QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    QueueInfo.queueFamilyIndex = QueueFamilyIdx;
+    QueueInfo.queueCount = 1;
+    QueueInfo.pQueuePriorities = &QueuePriority;
+
+    VkDeviceCreateInfo DeviceInfo = {};
+    DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    DeviceInfo.queueCreateInfoCount = 1;
+    DeviceInfo.pQueueCreateInfos = &QueueInfo;
+
+    VkPhysicalDeviceFeatures2 Features{};
+    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan11Features Features11{};
+    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    VkPhysicalDeviceVulkan12Features Features12{};
+    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan13Features Features13{};
+    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+#ifdef VK_VERSION_1_4
+    VkPhysicalDeviceVulkan14Features Features14{};
+    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+#endif
+
+    Features.pNext = &Features11;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+      Features11.pNext = &Features12;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+      Features12.pNext = &Features13;
+#ifdef VK_VERSION_1_4
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+      Features13.pNext = &Features14;
+#endif
+    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+
+    DeviceInfo.pEnabledFeatures = &Features.features;
+    DeviceInfo.pNext = Features.pNext;
+
+    VkDevice Device = VK_NULL_HANDLE;
+    if (vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device))
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Could not create Vulkan logical device.");
+    VkQueue DeviceQueue = VK_NULL_HANDLE;
+    vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
+
+    const std::shared_ptr<VulkanQueue> GraphicsQueue =
+        std::make_shared<VulkanQueue>(DeviceQueue, QueueFamilyIdx);
+
+    return std::make_shared<VulkanDevice>(PhysicalDevice, Props, Device,
+                                          GraphicsQueue,
+                                          std::move(InstanceLayers));
+  }
+
+  VulkanDevice(VkPhysicalDevice P, VkPhysicalDeviceProperties Props, VkDevice D,
+               std::shared_ptr<VulkanQueue> Q,
+               std::vector<VkLayerProperties> InstanceLayers)
+      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(Q),
+        InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
+
     FloatControlProp.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     FloatControlProp.pNext = nullptr;
+
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     DriverProps.pNext = &FloatControlProp;
+
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     Props2.pNext = &DriverProps;
-    vkGetPhysicalDeviceProperties2(Device, &Props2);
+    vkGetPhysicalDeviceProperties2(PhysicalDevice, &Props2);
+
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
@@ -406,13 +640,102 @@ public:
     // adapter-regex matching.
     Description += " (" + DriverName + ")";
 #endif
-  }
-  VKDevice(const VKDevice &) = default;
 
-  ~VKDevice() override = default;
+    DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
+  }
+  VulkanDevice(const VulkanDevice &) = default;
+
+  ~VulkanDevice() override {
+    if (Device != VK_NULL_HANDLE) {
+      vkDeviceWaitIdle(Device);
+      vkDestroyDevice(Device, nullptr);
+    }
+  }
 
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+
+  std::shared_ptr<Queue> getGraphicsQueue() override {
+    return std::static_pointer_cast<Queue>(GraphicsQueue);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    VkSemaphoreTypeCreateInfo TypeCreateInfo = {};
+    TypeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    TypeCreateInfo.pNext = nullptr;
+    TypeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+    TypeCreateInfo.initialValue = 0;
+
+    VkSemaphoreCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    CreateInfo.pNext = &TypeCreateInfo;
+
+    VkSemaphore Semaphore = VK_NULL_HANDLE;
+    const VkResult Result =
+        vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore);
+    if (Result != VK_SUCCESS) {
+      return llvm::createStringError(std::errc::invalid_argument /*todo*/,
+                                     "Failed to create Semaphore");
+    }
+
+    return std::make_shared<VulkanFence>(Device, Semaphore, Name);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    VkMemoryPropertyFlags MemFlags = 0;
+    switch (Desc.Location) {
+    case MemoryLocation::GpuOnly:
+      MemFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+      break;
+    case MemoryLocation::CpuToGpu:
+      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+      break;
+    case MemoryLocation::GpuToCpu:
+      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                 VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+      break;
+    }
+
+    VkBufferCreateInfo BufInfo = {};
+    BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size = SizeInBytes;
+    BufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer DeviceBuffer;
+    if (vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create device buffer.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx =
+        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemFlags);
+    if (!MemIdx)
+      return MemIdx.takeError();
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate device memory.");
+    if (vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind device buffer memory.");
+
+    return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
+                                          Name, Desc, SizeInBytes);
+  }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
@@ -420,37 +743,9 @@ public:
     return Caps;
   }
 
-  const LayerVector &getLayers() {
-    if (Layers.empty())
-      queryLayers();
-    return Layers;
-  }
-
-  bool isLayerSupported(llvm::StringRef QueryName) {
-    for (auto Layer : getLayers()) {
-      if (Layer.layerName == QueryName)
-        return true;
-    }
-    return false;
-  }
-
-  const ExtensionVector &getExtensions() {
-    if (Extensions.empty())
-      queryExtensions();
-    return Extensions;
-  }
-
-  bool isExtensionSupported(llvm::StringRef QueryName) {
-    for (const auto &Ext : getExtensions()) {
-      if (Ext.extensionName == QueryName)
-        return true;
-    }
-    return false;
-  }
-
   void printExtra(llvm::raw_ostream &OS) override {
     OS << "  Layers:\n";
-    for (auto Layer : getLayers()) {
+    for (auto Layer : InstanceLayers) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
       OS << "  - LayerName: " << llvm::StringRef(Layer.layerName, Sz) << "\n";
       OS << "    SpecVersion: " << Layer.specVersion << "\n";
@@ -460,7 +755,7 @@ public:
     }
 
     OS << "  Extensions:\n";
-    for (const auto &Ext : getExtensions()) {
+    for (const auto &Ext : DeviceExtensions) {
       OS << "  - ExtensionName: " << llvm::StringRef(Ext.extensionName) << "\n";
       OS << "    SpecVersion: " << Ext.specVersion << "\n";
     }
@@ -493,7 +788,7 @@ private:
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
       Features13.pNext = &Features14;
 #endif
-    vkGetPhysicalDeviceFeatures2(Device, &Features);
+    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
         "APIMajorVersion",
@@ -528,112 +823,14 @@ private:
 #include "VKFeatures.def"
   }
 
-  void queryLayers() {
-    assert(Layers.empty() && "Should not be called twice!");
-    uint32_t LayerCount;
-    vkEnumerateInstanceLayerProperties(&LayerCount, nullptr);
-
-    if (LayerCount == 0)
-      return;
-
-    Layers.insert(Layers.begin(), LayerCount, VkLayerProperties());
-    vkEnumerateInstanceLayerProperties(&LayerCount, Layers.data());
-  }
-
-  void queryExtensions() {
-    assert(Extensions.empty() && "Should not be called twice!");
-    uint32_t ExtCount;
-    vkEnumerateDeviceExtensionProperties(Device, nullptr, &ExtCount, nullptr);
-
-    if (ExtCount == 0)
-      return;
-
-    Extensions.insert(Extensions.begin(), ExtCount, VkExtensionProperties());
-    vkEnumerateDeviceExtensionProperties(Device, nullptr, &ExtCount,
-                                         Extensions.data());
-  }
-
 public:
   llvm::Error createDevice(InvocationState &IS) {
-
-    // Find a queue family that supports both graphics and compute.
-    uint32_t QueueCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, nullptr);
-    if (QueueCount == 0)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "No queue families reported.");
-
-    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps(
-        new VkQueueFamilyProperties[QueueCount]);
-    vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount,
-                                             QueueFamilyProps.get());
-
-    int SelectedIdx = -1;
-    for (uint32_t I = 0; I < QueueCount; ++I) {
-      const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
-      // Prefer family supporting both GRAPHICS and COMPUTE
-      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
-        SelectedIdx = static_cast<int>(I);
-        break;
-      }
-    }
-
-    if (SelectedIdx == -1)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "No suitable queue family found.");
-
-    const uint32_t QueueIdx = static_cast<uint32_t>(SelectedIdx);
-
-    VkDeviceQueueCreateInfo QueueInfo = {};
-    const float QueuePriority = 1.0f;
-    QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    QueueInfo.queueFamilyIndex = QueueIdx;
-    QueueInfo.queueCount = 1;
-    QueueInfo.pQueuePriorities = &QueuePriority;
-
-    VkDeviceCreateInfo DeviceInfo = {};
-    DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    DeviceInfo.queueCreateInfoCount = 1;
-    DeviceInfo.pQueueCreateInfos = &QueueInfo;
-
-    VkPhysicalDeviceFeatures2 Features{};
-    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    VkPhysicalDeviceVulkan11Features Features11{};
-    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    VkPhysicalDeviceVulkan12Features Features12{};
-    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    VkPhysicalDeviceVulkan13Features Features13{};
-    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-#ifdef VK_VERSION_1_4
-    VkPhysicalDeviceVulkan14Features Features14{};
-    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
-#endif
-
-    Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
-      Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
-      Features12.pNext = &Features13;
-#ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
-      Features13.pNext = &Features14;
-#endif
-    vkGetPhysicalDeviceFeatures2(Device, &Features);
-
-    DeviceInfo.pEnabledFeatures = &Features.features;
-    DeviceInfo.pNext = Features.pNext;
-
-    if (vkCreateDevice(Device, &DeviceInfo, nullptr, &IS.Device))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Could not create Vulkan logical device.");
-    vkGetDeviceQueue(IS.Device, QueueIdx, 0, &IS.Queue);
-
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    CmdPoolInfo.queueFamilyIndex = QueueIdx;
+    CmdPoolInfo.queueFamilyIndex = GraphicsQueue->QueueFamilyIdx;
     CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
-    if (vkCreateCommandPool(IS.Device, &CmdPoolInfo, nullptr, &IS.CmdPool))
+    if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &IS.CmdPool))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not create command pool.");
     return llvm::Error::success();
@@ -645,7 +842,7 @@ public:
     CBufAllocInfo.commandPool = IS.CmdPool;
     CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     CBufAllocInfo.commandBufferCount = 1;
-    if (vkAllocateCommandBuffers(IS.Device, &CBufAllocInfo, &IS.CmdBuffer))
+    if (vkAllocateCommandBuffers(Device, &CBufAllocInfo, &IS.CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not create command buffer.");
     VkCommandBufferBeginInfo BufferInfo = {};
@@ -656,8 +853,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Expected<BufferRef> createBuffer(InvocationState &IS,
-                                         VkBufferUsageFlags Usage,
+  llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
                                          VkMemoryPropertyFlags MemoryFlags,
                                          size_t Size, void *Data = nullptr) {
     VkBuffer Buffer;
@@ -668,29 +864,29 @@ public:
     BufferInfo.usage = Usage;
     BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(IS.Device, &BufferInfo, nullptr, &Buffer))
+    if (vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Could not create buffer.");
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(IS.Device, Buffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
 
     llvm::Expected<uint32_t> MemIdx =
-        getMemoryIndex(Device, MemReqs.memoryTypeBits, MemoryFlags);
+        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemoryFlags);
     if (!MemIdx)
       return MemIdx.takeError();
 
     AllocInfo.memoryTypeIndex = *MemIdx;
 
-    if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Memory allocation failed.");
     if (Data) {
       void *Dst = nullptr;
-      if (vkMapMemory(IS.Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
+      if (vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
         return llvm::createStringError(std::errc::not_enough_memory,
                                        "Failed to map memory.");
       memcpy(Dst, Data, Size);
@@ -700,22 +896,21 @@ public:
       Range.memory = Memory;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      vkFlushMappedMemoryRanges(IS.Device, 1, &Range);
+      vkFlushMappedMemoryRanges(Device, 1, &Range);
 
-      vkUnmapMemory(IS.Device, Memory);
+      vkUnmapMemory(Device, Memory);
     }
 
-    if (vkBindBufferMemory(IS.Device, Buffer, Memory, 0))
+    if (vkBindBufferMemory(Device, Buffer, Memory, 0))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to bind buffer to memory.");
 
     return BufferRef{Buffer, Memory};
   }
 
-  llvm::Expected<ResourceRef> createImage(InvocationState &IS, Resource &R,
-                                          BufferRef &Host,
+  llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
-    const offloadtest::Buffer &B = *R.BufferPtr;
+    const offloadtest::CPUBuffer &B = *R.BufferPtr;
     if (B.Format == DataFormat::Depth32 && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
@@ -743,31 +938,30 @@ public:
     }
 
     VkImage Image;
-    if (vkCreateImage(IS.Device, &ImageCreateInfo, nullptr, &Image))
+    if (vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image))
       return llvm::createStringError(std::errc::io_error,
                                      "Failed to create image.");
 
     VkSampler Sampler = 0;
 
     VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(IS.Device, Image, &MemReqs);
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
 
     VkDeviceMemory Memory;
-    if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Image memory allocation failed.");
-    if (vkBindImageMemory(IS.Device, Image, Memory, 0))
+    if (vkBindImageMemory(Device, Image, Memory, 0))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Image memory binding failed.");
 
     return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
   }
 
-  llvm::Expected<ResourceRef> createSampler(InvocationState &IS, Resource &R,
-                                            BufferRef &Host) {
+  llvm::Expected<ResourceRef> createSampler(Resource &R, BufferRef &Host) {
     VkSamplerCreateInfo SamplerInfo = {};
     SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     const Sampler &S = *R.SamplerPtr;
@@ -789,7 +983,7 @@ public:
     SamplerInfo.unnormalizedCoordinates = VK_FALSE;
 
     VkSampler Sampler;
-    if (vkCreateSampler(IS.Device, &SamplerInfo, nullptr, &Sampler))
+    if (vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create sampler.");
 
@@ -801,7 +995,7 @@ public:
     if (R.isSampler()) {
       ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
       BufferRef HostBuf = {0, 0};
-      auto ExSamplerRef = createSampler(IS, R, HostBuf);
+      auto ExSamplerRef = createSampler(R, HostBuf);
       if (!ExSamplerRef)
         return ExSamplerRef.takeError();
       Bundle.ResourceRefs.push_back(*ExSamplerRef);
@@ -812,20 +1006,18 @@ public:
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
-          IS,
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
       if (!ExHostBuf)
         return ExHostBuf.takeError();
 
       if (R.isTexture()) {
-        auto ExImageRef = createImage(IS, R, *ExHostBuf);
+        auto ExImageRef = createImage(R, *ExHostBuf);
         if (!ExImageRef)
           return ExImageRef.takeError();
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
         auto ExDeviceBuf = createBuffer(
-            IS,
             getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
@@ -841,8 +1033,7 @@ public:
     if (R.HasCounter) {
       for (uint32_t I = 0; I < R.getArraySize(); ++I) {
         uint32_t CounterValue = 0;
-        auto ExHostBuf = createBuffer(IS,
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        auto ExHostBuf = createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
                                       sizeof(uint32_t), &CounterValue);
@@ -850,7 +1041,6 @@ public:
           return ExHostBuf.takeError();
 
         auto ExDeviceBuf = createBuffer(
-            IS,
             getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sizeof(uint32_t));
@@ -884,7 +1074,7 @@ public:
     ImageCi.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     ImageCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (vkCreateImage(IS.Device, &ImageCi, nullptr, &IS.DepthStencil.Image))
+    if (vkCreateImage(Device, &ImageCi, nullptr, &IS.DepthStencil.Image))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Depth stencil creation failed.");
 
@@ -892,20 +1082,20 @@ public:
     VkMemoryAllocateInfo MemAlloc{};
     MemAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(IS.Device, IS.DepthStencil.Image, &MemReqs);
+    vkGetImageMemoryRequirements(Device, IS.DepthStencil.Image, &MemReqs);
     MemAlloc.allocationSize = MemReqs.size;
-    llvm::Expected<uint32_t> MemIdx = getMemoryIndex(
-        Device, MemReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    llvm::Expected<uint32_t> MemIdx =
+        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     if (!MemIdx)
       return MemIdx.takeError();
 
     MemAlloc.memoryTypeIndex = *MemIdx;
-    if (vkAllocateMemory(IS.Device, &MemAlloc, nullptr,
-                         &IS.DepthStencil.Memory))
+    if (vkAllocateMemory(Device, &MemAlloc, nullptr, &IS.DepthStencil.Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Depth stencil memory allocation failed.");
-    if (vkBindImageMemory(IS.Device, IS.DepthStencil.Image,
-                          IS.DepthStencil.Memory, 0))
+    if (vkBindImageMemory(Device, IS.DepthStencil.Image, IS.DepthStencil.Memory,
+                          0))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Depth stencil memory binding failed.");
     return llvm::Error::success();
@@ -938,13 +1128,12 @@ public:
       IS.FrameBufferResource.ImageLayout =
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
       auto ExHostBuf = createBuffer(
-          IS,
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, FrameBuffer.size(),
           FrameBuffer.BufferPtr->Data[0].get());
       if (!ExHostBuf)
         return ExHostBuf.takeError();
-      auto ExImageRef = createImage(IS, FrameBuffer, *ExHostBuf,
+      auto ExImageRef = createImage(FrameBuffer, *ExHostBuf,
                                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
                                         VK_IMAGE_USAGE_SAMPLED_BIT |
                                         VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
@@ -967,14 +1156,12 @@ public:
                                      false,
                                      std::nullopt,
                                      false};
-      auto ExVHostBuf =
-          createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),
-                       VertexBuffer.BufferPtr->Data[0].get());
+      auto ExVHostBuf = createBuffer(
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+          VertexBuffer.size(), VertexBuffer.BufferPtr->Data[0].get());
       if (!ExVHostBuf)
         return ExVHostBuf.takeError();
       auto ExDeviceBuf = createBuffer(
-          IS,
           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer.size());
       if (!ExDeviceBuf)
@@ -991,32 +1178,41 @@ public:
 
   llvm::Error executeCommandBuffer(InvocationState &IS,
                                    VkPipelineStageFlags WaitMask = 0) {
+    // This is a hack but it works since this is all single threaded code.
+    static uint64_t FenceCounter = 0;
+    const uint64_t CurrentCounter = FenceCounter + 1;
+
     if (vkEndCommandBuffer(IS.CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
 
+    auto *F = static_cast<VulkanFence *>(IS.Fence.get());
+
+    VkTimelineSemaphoreSubmitInfo TimelineSubmitInfo = {};
+    TimelineSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    TimelineSubmitInfo.signalSemaphoreValueCount = 1;
+    TimelineSubmitInfo.pSignalSemaphoreValues = &CurrentCounter;
+
     VkSubmitInfo SubmitInfo = {};
     SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.pNext = &TimelineSubmitInfo;
     SubmitInfo.commandBufferCount = 1;
     SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
     SubmitInfo.pWaitDstStageMask = &WaitMask;
-    VkFenceCreateInfo FenceInfo = {};
-    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence Fence;
-    if (vkCreateFence(IS.Device, &FenceInfo, nullptr, &Fence))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create fence.");
+    SubmitInfo.signalSemaphoreCount = 1;
+    SubmitInfo.pSignalSemaphores = &F->Semaphore;
 
     // Submit to the queue
-    if (vkQueueSubmit(IS.Queue, 1, &SubmitInfo, Fence))
+    if (vkQueueSubmit(GraphicsQueue->Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to submit to queue.");
-    if (vkWaitForFences(IS.Device, 1, &Fence, VK_TRUE, UINT64_MAX))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed waiting for fence.");
 
-    vkDestroyFence(IS.Device, Fence, nullptr);
-    vkFreeCommandBuffers(IS.Device, IS.CmdPool, 1, &IS.CmdBuffer);
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
+
+    vkFreeCommandBuffers(Device, IS.CmdPool, 1, &IS.CmdBuffer);
+
+    FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
 
@@ -1060,7 +1256,7 @@ public:
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
-      if (vkCreateDescriptorPool(IS.Device, &PoolCreateInfo, nullptr, &IS.Pool))
+      if (vkCreateDescriptorPool(Device, &PoolCreateInfo, nullptr, &IS.Pool))
         return llvm::createStringError(std::errc::device_or_resource_busy,
                                        "Failed to create descriptor pool.");
     }
@@ -1102,7 +1298,7 @@ public:
       LayoutCreateInfo.pBindings = Bindings.data();
       llvm::outs() << "Binding " << Bindings.size() << " descriptors.\n";
       VkDescriptorSetLayout Layout;
-      if (vkCreateDescriptorSetLayout(IS.Device, &LayoutCreateInfo, nullptr,
+      if (vkCreateDescriptorSetLayout(Device, &LayoutCreateInfo, nullptr,
                                       &Layout))
         return llvm::createStringError(
             std::errc::device_or_resource_busy,
@@ -1125,7 +1321,7 @@ public:
     PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
     PipelineCreateInfo.pPushConstantRanges = Ranges.data();
 
-    if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
+    if (vkCreatePipelineLayout(Device, &PipelineCreateInfo, nullptr,
                                &IS.PipelineLayout))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create pipeline layout.");
@@ -1143,7 +1339,7 @@ public:
                              IS.DescriptorSetLayouts.size(), VkDescriptorSet());
     llvm::outs() << "Num Descriptor sets: " << IS.DescriptorSetLayouts.size()
                  << "\n";
-    if (vkAllocateDescriptorSets(IS.Device, &DSAllocInfo,
+    if (vkAllocateDescriptorSets(Device, &DSAllocInfo,
                                  IS.DescriptorSets.data()))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to allocate descriptor sets.");
@@ -1220,7 +1416,7 @@ public:
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
             VkImageView View = {0};
-            if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &View))
+            if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create image view.");
             const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
@@ -1246,7 +1442,7 @@ public:
           IndexOfFirstBufferDataInArray = BufferViews.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.buffer = ResRef.Device.Buffer;
-            if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr, &View))
+            if (vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
             IS.BufferViews.push_back(View);
@@ -1298,7 +1494,7 @@ public:
            "size of buffer infos does not match expected count");
 
     llvm::outs() << "WriteDescriptors: " << WriteDescriptors.size() << "\n";
-    vkUpdateDescriptorSets(IS.Device, WriteDescriptors.size(),
+    vkUpdateDescriptorSets(Device, WriteDescriptors.size(),
                            WriteDescriptors.data(), 0, nullptr);
     return llvm::Error::success();
   }
@@ -1312,8 +1508,7 @@ public:
       ShaderCreateInfo.pCode =
           reinterpret_cast<const uint32_t *>(Program.data());
       CompiledShader CS = {Shader.Stage, Shader.Entry, 0};
-      if (vkCreateShaderModule(IS.Device, &ShaderCreateInfo, nullptr,
-                               &CS.Shader))
+      if (vkCreateShaderModule(Device, &ShaderCreateInfo, nullptr, &CS.Shader))
         return llvm::createStringError(std::errc::not_supported,
                                        "Failed to create shader module.");
       IS.Shaders.emplace_back(CS);
@@ -1398,7 +1593,7 @@ public:
     RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
     RPCI.pDependencies = Dependencies.data();
 
-    if (vkCreateRenderPass(IS.Device, &RPCI, nullptr, &IS.RenderPass))
+    if (vkCreateRenderPass(Device, &RPCI, nullptr, &IS.RenderPass))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create render pass.");
     return llvm::Error::success();
@@ -1420,7 +1615,7 @@ public:
     ViewCreateInfo.subresourceRange.layerCount = 1;
     ViewCreateInfo.subresourceRange.levelCount = 1;
     ViewCreateInfo.image = IS.FrameBufferResource.ResourceRefs[0].Image.Image;
-    if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &Views[0]))
+    if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &Views[0]))
       return llvm::createStringError(
           std::errc::device_or_resource_busy,
           "Failed to create frame buffer image view.");
@@ -1438,7 +1633,7 @@ public:
     DepthStencilViewCi.subresourceRange.baseArrayLayer = 0;
     DepthStencilViewCi.subresourceRange.layerCount = 1;
     DepthStencilViewCi.image = IS.DepthStencil.Image;
-    if (vkCreateImageView(IS.Device, &DepthStencilViewCi, nullptr, &Views[1]))
+    if (vkCreateImageView(Device, &DepthStencilViewCi, nullptr, &Views[1]))
       return llvm::createStringError(
           std::errc::device_or_resource_busy,
           "Failed to create depth stencil image view.");
@@ -1453,8 +1648,7 @@ public:
     FbufCreateInfo.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
     FbufCreateInfo.layers = 1;
 
-    if (vkCreateFramebuffer(IS.Device, &FbufCreateInfo, nullptr,
-                            &IS.FrameBuffer))
+    if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create frame buffer.");
     return llvm::Error::success();
@@ -1562,7 +1756,7 @@ public:
   llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
     VkPipelineCacheCreateInfo CacheCreateInfo = {};
     CacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    if (vkCreatePipelineCache(IS.Device, &CacheCreateInfo, nullptr,
+    if (vkCreatePipelineCache(Device, &CacheCreateInfo, nullptr,
                               &IS.PipelineCache))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create pipeline cache.");
@@ -1609,7 +1803,7 @@ public:
       PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
       PipelineCreateInfo.stage = StageInfo;
       PipelineCreateInfo.layout = IS.PipelineLayout;
-      if (vkCreateComputePipelines(IS.Device, IS.PipelineCache, 1,
+      if (vkCreateComputePipelines(Device, IS.PipelineCache, 1,
                                    &PipelineCreateInfo, nullptr, &IS.Pipeline))
         return llvm::createStringError(std::errc::device_or_resource_busy,
                                        "Failed to create pipeline.");
@@ -1722,7 +1916,7 @@ public:
     PipelineCreateInfo.renderPass = IS.RenderPass;
     PipelineCreateInfo.layout = IS.PipelineLayout;
 
-    if (vkCreateGraphicsPipelines(IS.Device, IS.PipelineCache, 1,
+    if (vkCreateGraphicsPipelines(Device, IS.PipelineCache, 1,
                                   &PipelineCreateInfo, nullptr, &IS.Pipeline))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create graphics pipeline.");
@@ -1734,7 +1928,7 @@ public:
     if (R.isSampler())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -1821,7 +2015,7 @@ public:
     if (!R.isReadWrite())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = B.Format == DataFormat::Depth32
                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
@@ -2035,24 +2229,24 @@ public:
         for (; ResRefIt != ResourceRef.end() && DataIt != DataSet.end();
              ++ResRefIt, ++DataIt) {
           void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-          vkMapMemory(IS.Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
+          vkMapMemory(Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
                       &Mapped);
           Range.memory = ResRefIt->Host.Memory;
-          vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+          vkInvalidateMappedMemoryRanges(Device, 1, &Range);
           memcpy(DataIt->get(), Mapped, R.size());
-          vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
+          vkUnmapMemory(Device, ResRefIt->Host.Memory);
         }
         if (R.HasCounter) {
           R.BufferPtr->Counters.clear();
           for (uint32_t I = 0; I < R.getArraySize(); ++I) {
             uint32_t *Mapped = nullptr; // NOLINT(misc-const-correctness)
             auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
-            vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
+            vkMapMemory(Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
                         (void **)&Mapped);
             Range.memory = CounterRef.Host.Memory;
-            vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+            vkInvalidateMappedMemoryRanges(Device, 1, &Range);
             R.BufferPtr->Counters.push_back(*Mapped);
-            vkUnmapMemory(IS.Device, CounterRef.Host.Memory);
+            vkUnmapMemory(Device, CounterRef.Host.Memory);
           }
         }
       }
@@ -2067,86 +2261,86 @@ public:
       const ResourceRef &ResRef = IS.FrameBufferResource.ResourceRefs[0];
 
       void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(IS.Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
+      vkMapMemory(Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
 
       Range.memory = ResRef.Host.Memory;
-      vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+      vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      const Buffer &B = *P.Bindings.RTargetBufferPtr;
+      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
-      vkUnmapMemory(IS.Device, ResRef.Host.Memory);
+      vkUnmapMemory(Device, ResRef.Host.Memory);
     }
     return llvm::Error::success();
   }
 
   llvm::Error cleanup(InvocationState &IS) {
-    vkQueueWaitIdle(IS.Queue);
+    vkQueueWaitIdle(GraphicsQueue->Queue);
     for (auto &V : IS.BufferViews)
-      vkDestroyBufferView(IS.Device, V, nullptr);
+      vkDestroyBufferView(Device, V, nullptr);
 
     for (auto &V : IS.ImageViews)
-      vkDestroyImageView(IS.Device, V, nullptr);
+      vkDestroyImageView(Device, V, nullptr);
 
     for (auto &R : IS.Resources) {
       for (auto &ResRef : R.ResourceRefs) {
         if (R.isBuffer()) {
-          vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
-          vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
+          vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
+          vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
         } else if (R.isSampler()) {
-          vkDestroySampler(IS.Device, ResRef.Image.Sampler, nullptr);
+          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
         } else {
           assert(R.isImage());
-          vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
-          vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
+          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
+          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
         }
-        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
       for (auto &ResRef : R.CounterResourceRefs) {
-        vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
-        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
     }
 
     if (IS.getFullShaderStageMask() != VK_SHADER_STAGE_COMPUTE_BIT) {
       if (IS.VertexBuffer.has_value()) {
-        vkDestroyBuffer(IS.Device, IS.VertexBuffer->Device.Buffer, nullptr);
-        vkFreeMemory(IS.Device, IS.VertexBuffer->Device.Memory, nullptr);
-        vkDestroyBuffer(IS.Device, IS.VertexBuffer->Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, IS.VertexBuffer->Host.Memory, nullptr);
+        vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
+        vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
+        vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
+        vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
       }
       for (auto &ResRef : IS.FrameBufferResource.ResourceRefs) {
         // We know the device resource is an image, so no need to check it.
-        vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
-        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+        vkDestroyImage(Device, ResRef.Image.Image, nullptr);
+        vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
-      vkDestroyImage(IS.Device, IS.DepthStencil.Image, nullptr);
-      vkFreeMemory(IS.Device, IS.DepthStencil.Memory, nullptr);
-      vkDestroyFramebuffer(IS.Device, IS.FrameBuffer, nullptr);
-      vkDestroyRenderPass(IS.Device, IS.RenderPass, nullptr);
+      vkDestroyImage(Device, IS.DepthStencil.Image, nullptr);
+      vkFreeMemory(Device, IS.DepthStencil.Memory, nullptr);
+      vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
+      vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }
 
-    vkDestroyPipeline(IS.Device, IS.Pipeline, nullptr);
+    vkDestroyPipeline(Device, IS.Pipeline, nullptr);
 
     for (auto &S : IS.Shaders)
-      vkDestroyShaderModule(IS.Device, S.Shader, nullptr);
+      vkDestroyShaderModule(Device, S.Shader, nullptr);
 
-    vkDestroyPipelineCache(IS.Device, IS.PipelineCache, nullptr);
+    vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
 
-    vkDestroyPipelineLayout(IS.Device, IS.PipelineLayout, nullptr);
+    vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
 
     for (auto &L : IS.DescriptorSetLayouts)
-      vkDestroyDescriptorSetLayout(IS.Device, L, nullptr);
+      vkDestroyDescriptorSetLayout(Device, L, nullptr);
 
     if (IS.Pool)
-      vkDestroyDescriptorPool(IS.Device, IS.Pool, nullptr);
+      vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
 
-    vkDestroyCommandPool(IS.Device, IS.CmdPool, nullptr);
-    vkDestroyDevice(IS.Device, nullptr);
+    vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
+
     return llvm::Error::success();
   }
 
@@ -2154,6 +2348,12 @@ public:
     InvocationState State;
     if (auto Err = createDevice(State))
       return Err;
+
+    auto FenceOrErr = this->createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    State.Fence = *FenceOrErr;
+
     llvm::outs() << "Physical device created.\n";
     if (auto Err = createShaderModules(P, State))
       return Err;
@@ -2208,7 +2408,7 @@ class VKContext {
 private:
   VkInstance Instance = VK_NULL_HANDLE;
   VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
-  llvm::SmallVector<std::shared_ptr<VKDevice>> Devices;
+  llvm::SmallVector<std::shared_ptr<VulkanDevice>> Devices;
 
   VKContext() = default;
   ~VKContext() { cleanup(); }
@@ -2221,6 +2421,9 @@ public:
   }
 
   void cleanup() {
+    // Free devices before destroying the instance
+    Devices.clear();
+
 #ifndef NDEBUG
     auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
         Instance, "vkDestroyDebugUtilsMessengerEXT");
@@ -2233,32 +2436,52 @@ public:
   }
 
   llvm::Error initialize(const DeviceConfig Config) {
-    // Create a Vulkan 1.1 instance to determine the API version
+
+    // Request the highest supported API version
+    uint32_t ApiVersion = 0;
+    vkEnumerateInstanceVersion(&ApiVersion);
+
     VkApplicationInfo AppInfo = {};
     AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     AppInfo.pApplicationName = "OffloadTest";
-    // TODO: We should set this based on a command line flag, and simplify the
-    // code below to error if the requested version isn't supported.
-    AppInfo.apiVersion = VK_API_VERSION_1_1;
+    AppInfo.apiVersion = ApiVersion;
 
     VkInstanceCreateInfo CreateInfo = {};
     CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     CreateInfo.pApplicationInfo = &AppInfo;
 
-    llvm::SmallVector<const char *> Extensions;
-    llvm::SmallVector<const char *> Layers;
+    llvm::SmallVector<const char *> EnabledInstanceExtensions;
+    llvm::SmallVector<const char *> EnabledLayers;
 #if __APPLE__
     // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
     // extension is required, so we can just force this one on. If it fails, the
     // whole device would fail anyways.
-    Extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+    EnabledInstanceExtensions.push_back(
+        VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
     CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
 #endif
 
-    CreateInfo.ppEnabledExtensionNames = Extensions.data();
-    CreateInfo.enabledExtensionCount = Extensions.size();
+    const std::vector<VkLayerProperties> AvailableInstanceLayers =
+        queryInstanceLayers();
+    if (Config.EnableValidationLayer) {
+      const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
+      if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
+        EnabledLayers.push_back(ValidationLayer.data());
+    }
+    const std::vector<VkExtensionProperties> AvailableExtensions =
+        queryInstanceExtensions(nullptr);
+    if (Config.EnableDebugLayer) {
+      const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
+      if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
+        EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
+    }
 
-    VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+    CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
+    CreateInfo.enabledLayerCount = EnabledLayers.size();
+    CreateInfo.ppEnabledExtensionNames = EnabledInstanceExtensions.data();
+    CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
+
+    const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
     if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
       return llvm::createStringError(std::errc::no_such_device,
                                      "Cannot find a base Vulkan device");
@@ -2267,55 +2490,11 @@ public:
                                      "Unknown Vulkan initialization error: %d",
                                      Res);
 
-    uint32_t DeviceCount = 0;
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to get device count");
-    std::vector<VkPhysicalDevice> PhysicalDevicesTmp(DeviceCount);
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                   PhysicalDevicesTmp.data()))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to enumerate devices");
-    {
-      auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
-      AppInfo.apiVersion = TmpDev->getProps().apiVersion;
-
-      if (Config.EnableValidationLayer) {
-        const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
-        if (TmpDev->isLayerSupported(ValidationLayer))
-          Layers.push_back(ValidationLayer.data());
-      }
-
-      if (Config.EnableDebugLayer) {
-        const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-        if (TmpDev->isExtensionSupported(DebugUtilsExtensionName))
-          Extensions.push_back(DebugUtilsExtensionName.data());
-      }
-
-      CreateInfo.ppEnabledLayerNames = Layers.data();
-      CreateInfo.enabledLayerCount = Layers.size();
-      CreateInfo.ppEnabledExtensionNames = Extensions.data();
-      CreateInfo.enabledExtensionCount = Extensions.size();
-    }
-    vkDestroyInstance(Instance, NULL);
-    Instance = VK_NULL_HANDLE;
-
-    // This second creation shouldn't ever fail, but it tries to create the
-    // highest supported device version.
-    Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a compatible Vulkan device");
-    if (Res)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error %d",
-                                     Res);
-
 #ifndef NDEBUG
     DebugMessenger = registerDebugUtilCallback(Instance);
 #endif
 
-    DeviceCount = 0;
+    uint32_t DeviceCount = 0;
     if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Failed to get device count");
@@ -2324,10 +2503,15 @@ public:
                                    PhysicalDevices.data()))
       return llvm::createStringError(std::errc::no_such_device,
                                      "Failed to enumerate devices");
-    for (const auto &Dev : PhysicalDevices) {
-      auto NewDev = std::make_shared<VKDevice>(Dev);
-      Devices.push_back(NewDev);
-      Device::registerDevice(std::static_pointer_cast<Device>(NewDev));
+    for (const auto &PDev : PhysicalDevices) {
+      auto DeviceOrErr =
+          VulkanDevice::create(PDev, std::move(AvailableInstanceLayers));
+      if (!DeviceOrErr) {
+        return DeviceOrErr.takeError();
+      }
+      const std::shared_ptr<VulkanDevice> Dev = *DeviceOrErr;
+      Devices.push_back(Dev);
+      Device::registerDevice(std::static_pointer_cast<Device>(Dev));
     }
 
     return llvm::Error::success();
@@ -2335,8 +2519,8 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeVKDevices(const DeviceConfig Config) {
+llvm::Error Device::initializeVulkanDevices(const DeviceConfig Config) {
   return VKContext::instance().initialize(Config);
 }
 
-void Device::cleanupVKDevices() { VKContext::instance().cleanup(); }
+void Device::cleanupVulkanDevices() { VKContext::instance().cleanup(); }

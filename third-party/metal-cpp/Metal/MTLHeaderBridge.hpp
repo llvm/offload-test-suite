@@ -1844,6 +1844,8 @@ _MTL_PRIVATE_DEF_SEL(waitForFence_, "waitForFence:");
 _MTL_PRIVATE_DEF_SEL(waitForFence_beforeStages_, "waitForFence:beforeStages:");
 _MTL_PRIVATE_DEF_SEL(waitUntilCompleted, "waitUntilCompleted");
 _MTL_PRIVATE_DEF_SEL(waitUntilScheduled, "waitUntilScheduled");
+_MTL_PRIVATE_DEF_SEL(waitUntilSignaledValue_timeoutMS_,
+                     "waitUntilSignaledValue:timeoutMS:");
 _MTL_PRIVATE_DEF_SEL(width, "width");
 _MTL_PRIVATE_DEF_SEL(
     writeCompactedAccelerationStructureSize_toBuffer_offset_,
