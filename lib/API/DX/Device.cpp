@@ -1462,32 +1462,25 @@ public:
           std::errc::not_supported,
           "Multiple mip levels are not yet supported for DirectX render "
           "targets.");
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    Desc.Width = OutBuf.OutputProps.Width;
-    Desc.Height = OutBuf.OutputProps.Height;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.Format = getDXFormat(OutBuf.Format, OutBuf.Channels);
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-    D3D12_CLEAR_VALUE ClearValue = {};
-    ClearValue.Format = Desc.Format;
-    ClearValue.Color[0] = 0.0f;
-    ClearValue.Color[1] = 0.0f;
-    ClearValue.Color[2] = 0.0f;
-    ClearValue.Color[3] = 0.0f;
+    auto TexFmtOrErr = toTextureFormat(OutBuf.Format, OutBuf.Channels);
+    if (!TexFmtOrErr)
+      return TexFmtOrErr.takeError();
 
-    CD3DX12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &Desc,
-                                   D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                   &ClearValue, IID_PPV_ARGS(&IS.RT)),
-                               "Failed to create render target"))
-      return Err;
+    TextureCreateDesc TexDesc = {};
+    TexDesc.Location = MemoryLocation::GpuOnly;
+    TexDesc.Usage = TextureUsage::RenderTarget;
+    TexDesc.Format = *TexFmtOrErr;
+    TexDesc.Width = OutBuf.OutputProps.Width;
+    TexDesc.Height = OutBuf.OutputProps.Height;
+    TexDesc.MipLevels = 1;
+    TexDesc.OptimizedClearValue = ClearColor{};
+    auto TexOrErr = createTexture("RenderTarget", TexDesc);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    // TODO: Refactor this code once we have readback support for `Buffer`.
+    IS.RT = static_cast<DXTexture &>(**TexOrErr).Resource;
 
     // Create readback buffer sized for the pixel data (raw bytes).
     const uint64_t RBSize = static_cast<uint64_t>(OutBuf.size());
