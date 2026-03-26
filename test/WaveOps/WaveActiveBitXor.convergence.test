@@ -1,31 +1,39 @@
 #--- source.hlsl
-StructuredBuffer<uint4> In : register(t0);
+StructuredBuffer<uint> In : register(t0);
 
 RWStructuredBuffer<uint> Out1 : register(u1); // branch A
 RWStructuredBuffer<uint> Out2 : register(u2); // branch B
 RWStructuredBuffer<uint> Out3 : register(u3); // reconverged
 RWStructuredBuffer<uint> Out4 : register(u4); // loop
+RWStructuredBuffer<uint> Out5 : register(u5); // divergent loop
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID)
-{
-    uint4 v = In[tid.x];
+void main(uint3 tid : SV_GroupThreadID) {
+    uint v = In[tid.x];
 
     // divergent branch
     if (tid.x < 2)
-        Out1[tid.x] = WaveActiveBitXor(v.x);
+        Out1[tid.x] = WaveActiveBitXor(v);
     else
-        Out2[tid.x] = WaveActiveBitXor(v.x);
+        Out2[tid.x] = WaveActiveBitXor(v);
 
     // reconverged wave op
-    Out3[tid.x] = WaveActiveBitXor(v.x);
+    Out3[tid.x] = WaveActiveBitXor(v);
 
     // loop case
-    uint r = v.x;
+    uint r = v;
     for (uint i = 0; i < 2; i++)
         r = WaveActiveBitXor(r);
 
     Out4[tid.x] = r;
+
+    // divergent loop: each thread iterates tid.x times
+    // thread 0: 0 iters, thread 1: 1 iter, thread 2: 2 iters, thread 3: 3 iters
+    uint r2 = v;
+    for (uint j = 0; j < tid.x; j++)
+        r2 = WaveActiveBitXor(r2);
+
+    Out5[tid.x] = r2;
 }
 
 #--- pipeline.yaml
@@ -34,19 +42,14 @@ void main(uint3 tid : SV_GroupThreadID)
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1,1,1]
+    DispatchSize: [1, 1, 1]
 
 Buffers:
 
   - Name: In
     Format: UInt32
-    Stride: 16
-    Data: [
-      3,0,0,0,
-      5,0,0,0,
-      6,0,0,0,
-      9,0,0,0
-    ]
+    Stride: 4
+    Data: [ 0x11, 0x12, 0x14, 0x18 ]
   - Name: Out1
     Format: UInt32
     Stride: 4
@@ -63,23 +66,30 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 16
+  - Name: Out5
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
   - Name: ExpectedOut1
     Format: UInt32
     Stride: 4
-    Data: [6, 6, 0, 0]
+    Data: [ 0x3, 0x3, 0x0, 0x0 ]
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 4
-    Data: [0, 0, 15, 15]
+    Data: [ 0x0, 0x0, 0xc, 0xc ]
   - Name: ExpectedOut3
     Format: UInt32
     Stride: 4
-    Data: [9, 9, 9, 9]
+    Data: [ 0xf, 0xf, 0xf, 0xf ]
   - Name: ExpectedOut4
     Format: UInt32
     Stride: 4
-    Data: [0, 0, 0, 0]
-
+    Data: [ 0x0, 0x0, 0x0, 0x0 ]
+  - Name: ExpectedOut5
+    Format: UInt32
+    Stride: 4
+    Data: [ 0x11, 0x1e, 0x0, 0x0 ]
 
 Results:
   - Result: ExpectedOut1
@@ -98,6 +108,10 @@ Results:
     Rule: BufferExact
     Actual: Out4
     Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
 
 
 DescriptorSets:
@@ -137,6 +151,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 4
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
 ...
 #--- end
 
