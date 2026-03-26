@@ -17,6 +17,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
 #include <cstring>
+#include <iomanip>
 #include <sstream>
 
 constexpr uint16_t Float16BitSign = 0x8000;
@@ -281,14 +282,31 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
-template <typename T> static std::string bitPatternAsHex64(const T &Val) {
+template <typename T> static uint64_t toBitPattern(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
+  if constexpr (sizeof(T) == 1) {
+    uint8_t Tmp;
+    memcpy(&Tmp, &Val, sizeof(Tmp));
+    return Tmp;
+  } else if constexpr (sizeof(T) == 2) {
+    uint16_t Tmp;
+    memcpy(&Tmp, &Val, sizeof(Tmp));
+    return Tmp;
+  } else if constexpr (sizeof(T) == 4) {
+    uint32_t Tmp;
+    memcpy(&Tmp, &Val, sizeof(Tmp));
+    return Tmp;
+  } else {
+    uint64_t Tmp;
+    memcpy(&Tmp, &Val, sizeof(Tmp));
+    return Tmp;
+  }
+}
 
-  uint64_t Bits = 0;
-  memcpy(&Bits, &Val, sizeof(T));
-
+template <typename T> static std::string bitPatternAsHex64(const T &Val) {
   std::ostringstream Oss;
-  Oss << "0x" << std::hex << Bits;
+  Oss << "0x" << std::setfill('0') << std::setw(16) << std::hex
+      << toBitPattern(Val);
   return Oss.str();
 }
 
