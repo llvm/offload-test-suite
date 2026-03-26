@@ -412,13 +412,8 @@ public:
 
   llvm::Expected<std::shared_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
-    if (!isValidTextureUsageAndFormat(Desc.Usage, Desc.Format))
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Invalid texture usage/format combination: usage '%s' is not "
-          "compatible with format '%s'.",
-          getTextureUsageName(Desc.Usage).c_str(),
-          getTextureFormatName(Desc.Format).data());
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
 
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
@@ -433,10 +428,31 @@ public:
     TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     TexDesc.Flags = getDXResourceFlags(Desc.Usage);
 
+    const D3D12_CLEAR_VALUE *ClearValuePtr = nullptr;
+    D3D12_CLEAR_VALUE ClearValue = {};
+    if (Desc.OptimizedClearValue) {
+      ClearValue.Format = TexDesc.Format;
+      std::visit(
+          [&ClearValue](auto &&V) {
+            using T = std::decay_t<decltype(V)>;
+            if constexpr (std::is_same_v<T, ClearColor>) {
+              ClearValue.Color[0] = V.R;
+              ClearValue.Color[1] = V.G;
+              ClearValue.Color[2] = V.B;
+              ClearValue.Color[3] = V.A;
+            } else {
+              ClearValue.DepthStencil.Depth = V.Depth;
+              ClearValue.DepthStencil.Stencil = V.Stencil;
+            }
+          },
+          *Desc.OptimizedClearValue);
+      ClearValuePtr = &ClearValue;
+    }
+
     ComPtr<ID3D12Resource> DeviceTexture;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
                                    &HeapProps, D3D12_HEAP_FLAG_NONE, &TexDesc,
-                                   D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                   D3D12_RESOURCE_STATE_COMMON, ClearValuePtr,
                                    IID_PPV_ARGS(&DeviceTexture)),
                                "Failed to create texture."))
       return Err;

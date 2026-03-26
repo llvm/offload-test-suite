@@ -16,9 +16,12 @@
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Error.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <variant>
 
 namespace offloadtest {
 
@@ -107,35 +110,16 @@ inline std::string getTextureUsageName(TextureUsage Usage) {
   return Result;
 }
 
-inline bool isDepthFormat(TextureFormat Format) {
-  return Format == TextureFormat::D32Float;
-}
+struct ClearColor {
+  float R = 0.0f, G = 0.0f, B = 0.0f, A = 0.0f;
+};
 
-inline bool isValidTextureUsage(TextureUsage Usage) {
-  if ((Usage & DepthStencil) != 0) {
-    if ((Usage & RenderTarget) != 0)
-      return false;
-    if ((Usage & Storage) != 0)
-      return false;
-  }
-  return true;
-}
+struct ClearDepthStencil {
+  float Depth = 1.0f;
+  uint8_t Stencil = 0;
+};
 
-inline bool isValidTextureUsageAndFormat(TextureUsage Usage,
-                                         TextureFormat Format) {
-  if (!isValidTextureUsage(Usage))
-    return false;
-  if (isDepthFormat(Format)) {
-    if ((Usage & RenderTarget) != 0)
-      return false;
-    if ((Usage & Storage) != 0)
-      return false;
-  } else {
-    if ((Usage & DepthStencil) != 0)
-      return false;
-  }
-  return true;
-}
+using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
 // TODO: Currently only 2D textures are supported. When expanding to 1D, 3D,
 // cube, or array textures, add a TextureType enum and validation between usage
@@ -147,7 +131,60 @@ struct TextureCreateDesc {
   uint32_t Width;
   uint32_t Height;
   uint32_t MipLevels;
+  // Clear value for render target or depth/stencil textures. 
+  // How and when this is applied depends on the backend: 
+  // - DX uses it as an optimized clear hint at resource creation time
+  // - VK and MTL apply it at render pass begin (TODO)
+  std::optional<ClearValue> OptimizedClearValue;
 };
+
+inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
+  bool IsDepth = Desc.Format == TextureFormat::D32Float;
+  bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+  bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+
+  // DepthStencil is mutually exclusive with RenderTarget and Storage.
+  if (IsDS && IsRT)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "DepthStencil and RenderTarget are mutually exclusive.");
+  if (IsDS && (Desc.Usage & TextureUsage::Storage) != 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "DepthStencil and Storage are mutually exclusive.");
+
+  // Depth formats require DepthStencil usage; non-depth formats forbid it.
+  if (IsDepth && !IsDS)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Depth format '%s' requires DepthStencil usage.",
+        getTextureFormatName(Desc.Format).data());
+  if (!IsDepth && IsDS)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "DepthStencil usage requires a depth format, got '%s'.",
+        getTextureFormatName(Desc.Format).data());
+
+  // A clear value requires RenderTarget or DepthStencil usage, and the
+  // variant must match.
+  if (Desc.OptimizedClearValue) {
+    if (!IsRT && !IsDS)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "OptimizedClearValue requires RenderTarget or DepthStencil usage.");
+    if (IsRT && !std::holds_alternative<ClearColor>(*Desc.OptimizedClearValue))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderTarget usage requires a ClearColor clear value.");
+    if (IsDS &&
+        !std::holds_alternative<ClearDepthStencil>(*Desc.OptimizedClearValue))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "DepthStencil usage requires a ClearDepthStencil clear value.");
+  }
+
+  return llvm::Error::success();
+}
 
 class Texture {
 public:

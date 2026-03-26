@@ -673,13 +673,8 @@ public:
 
   llvm::Expected<std::shared_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
-    if (!isValidTextureUsageAndFormat(Desc.Usage, Desc.Format))
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Invalid texture usage/format combination: usage '%s' is not "
-          "compatible with format '%s'.",
-          getTextureUsageName(Desc.Usage).c_str(),
-          getTextureFormatName(Desc.Format).data());
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
 
     VkImageCreateInfo ImageInfo = {};
     ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
