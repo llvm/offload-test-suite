@@ -13,6 +13,7 @@
 #define OFFLOADTEST_API_TEXTURE_H
 
 #include "API/Resources.h"
+#include "Support/Pipeline.h"
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringRef.h"
@@ -184,6 +185,72 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
   }
 
   return llvm::Error::success();
+}
+
+// Bridge for code that still describes textures as DataFormat + Channels (e.g.
+// render targets bound via CPUBuffer). Once the pipeline is refactored to use
+// TextureFormat directly, this function can be removed.
+inline llvm::Expected<TextureFormat>
+toTextureFormat(DataFormat Format, int Channels) {
+  switch (Format) {
+  case DataFormat::Int16:
+    switch (Channels) {
+    case 1: return TextureFormat::R16Sint;
+    case 2: return TextureFormat::RG16Sint;
+    case 4: return TextureFormat::RGBA16Sint;
+    }
+    break;
+  case DataFormat::UInt16:
+    switch (Channels) {
+    case 1: return TextureFormat::R16Uint;
+    case 2: return TextureFormat::RG16Uint;
+    case 4: return TextureFormat::RGBA16Uint;
+    }
+    break;
+  case DataFormat::Int32:
+    switch (Channels) {
+    case 1: return TextureFormat::R32Sint;
+    case 2: return TextureFormat::RG32Sint;
+    case 4: return TextureFormat::RGBA32Sint;
+    }
+    break;
+  case DataFormat::UInt32:
+    switch (Channels) {
+    case 1: return TextureFormat::R32Uint;
+    case 2: return TextureFormat::RG32Uint;
+    case 4: return TextureFormat::RGBA32Uint;
+    }
+    break;
+  case DataFormat::Float32:
+    switch (Channels) {
+    case 1: return TextureFormat::R32Float;
+    case 2: return TextureFormat::RG32Float;
+    case 4: return TextureFormat::RGBA32Float;
+    }
+    break;
+  case DataFormat::Depth32:
+    if (Channels == 1)
+      return TextureFormat::D32Float;
+    break;
+  // No TextureFormat mapping for these DataFormats.
+  case DataFormat::Hex8:
+  case DataFormat::Hex16:
+  case DataFormat::Hex32:
+  case DataFormat::Hex64:
+  case DataFormat::UInt64:
+  case DataFormat::Int64:
+  case DataFormat::Float16:
+  case DataFormat::Float64:
+  case DataFormat::Bool:
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "DataFormat %d has no TextureFormat equivalent.",
+        static_cast<int>(Format));
+  }
+  return llvm::createStringError(std::errc::invalid_argument,
+                                 "No TextureFormat for DataFormat %d with %d "
+                                 "channel(s).",
+                                 static_cast<int>(Format), Channels);
 }
 
 class Texture {
