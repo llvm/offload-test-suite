@@ -8,7 +8,7 @@ RWStructuredBuffer<uint> Out4 : register(u4); // loop
 RWStructuredBuffer<uint> Out5 : register(u5); // divergent loop
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_GroupThreadID){
+void main(uint3 tid : SV_GroupThreadID) {
     uint v = In[tid.x];
 
     // divergent branch
