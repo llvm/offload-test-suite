@@ -282,17 +282,27 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
+template <size_t N> struct UIntBySize;
+template <> struct UIntBySize<1> {
+  using type = uint8_t;
+};
+template <> struct UIntBySize<2> {
+  using type = uint16_t;
+};
+template <> struct UIntBySize<4> {
+  using type = uint32_t;
+};
+template <> struct UIntBySize<8> {
+  using type = uint64_t;
+};
+
 template <typename T> static uint64_t toBitPattern(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
-  using UIntT = std::conditional_t<
-      sizeof(T) == 1, uint8_t,
-      std::conditional_t<
-          sizeof(T) == 2, uint16_t,
-          std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>>>;
+  using UIntT = typename UIntBySize<sizeof(T)>::type;
   return llvm::support::endian::read<UIntT>(&Val, llvm::endianness::native);
 }
 
-template <typename T> static std::string bitPatternAsHex(const T &Val) {
+template <typename T> static std::string formatAsHex(const T &Val) {
   std::ostringstream Oss;
   Oss << "0x" << std::hex << toBitPattern(Val);
   return Oss.str();
@@ -304,9 +314,9 @@ static void formatBuffer(llvm::ArrayRef<T> Arr,
   if (Arr.empty())
     return;
 
-  Result << "[ " << bitPatternAsHex(Arr[0]);
+  Result << "[ " << formatAsHex(Arr[0]);
   for (size_t I = 1; I < Arr.size(); ++I)
-    Result << ", " << bitPatternAsHex(Arr[I]);
+    Result << ", " << formatAsHex(Arr[I]);
   Result << " ]";
 }
 
