@@ -13,10 +13,9 @@
 #include "Support/Pipeline.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
-#include "llvm/ADT/bit.h"
+#include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
-#include <climits>
 #include <cmath>
 #include <cstring>
 #include <sstream>
@@ -285,14 +284,12 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
 
 template <typename T> static uint64_t toBitPattern(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
-  uint64_t Bits = 0;
-  memcpy(&Bits, &Val, sizeof(T));
-  // On big-endian hosts, the bytes land at the high end of Bits.
-  // Shift them down so the value occupies the low bits, matching
-  // the zero-extended representation we want.
-  if constexpr (llvm::endianness::native == llvm::endianness::big)
-    Bits >>= (sizeof(uint64_t) - sizeof(T)) * CHAR_BIT;
-  return Bits;
+  using UIntT = std::conditional_t<
+      sizeof(T) == 1, uint8_t,
+      std::conditional_t<
+          sizeof(T) == 2, uint16_t,
+          std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>>>;
+  return llvm::support::endian::read<UIntT>(&Val, llvm::endianness::native);
 }
 
 template <typename T> static std::string bitPatternAsHex(const T &Val) {
