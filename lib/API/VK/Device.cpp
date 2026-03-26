@@ -410,9 +410,33 @@ public:
   VKDevice(const VKDevice &) = default;
 
   ~VKDevice() override = default;
-
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+  uint32_t getSubgroupSize() const override {
+    VkPhysicalDeviceSubgroupProperties SubgroupProps = {};
+    SubgroupProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 SubgroupProperties2 = {};
+    SubgroupProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    SubgroupProperties2.pNext = &SubgroupProps;
+    vkGetPhysicalDeviceProperties2(Device, &SubgroupProperties2);
+    return SubgroupProps.subgroupSize;
+  }
+
+  std::pair<uint32_t, uint32_t> getMinMaxSubgroupSize() const override {
+    VkPhysicalDeviceSubgroupSizeControlPropertiesEXT SubgroupSizeControlProps =
+        {};
+    SubgroupSizeControlProps.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES_EXT;
+
+    VkPhysicalDeviceProperties2 Props2 = {};
+    Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    Props2.pNext = &SubgroupSizeControlProps;
+
+    vkGetPhysicalDeviceProperties2(Device, &Props2);
+    return {SubgroupSizeControlProps.minSubgroupSize,
+            SubgroupSizeControlProps.maxSubgroupSize};
+  }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
@@ -449,6 +473,11 @@ public:
   }
 
   void printExtra(llvm::raw_ostream &OS) override {
+    OS << "  SubgroupSize: " << getSubgroupSize() << "\n";
+    auto MinMax = getMinMaxSubgroupSize();
+    OS << "  MinSubgroupSize: " << MinMax.first << "\n";
+    OS << "  MaxSubgroupSize: " << MinMax.second << "\n";
+
     OS << "  Layers:\n";
     for (auto Layer : getLayers()) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
@@ -660,11 +689,12 @@ public:
                                          VkBufferUsageFlags Usage,
                                          VkMemoryPropertyFlags MemoryFlags,
                                          size_t Size, void *Data = nullptr) {
+    const VkDeviceSize AllocationSize = std::max<size_t>(Size, 1);
     VkBuffer Buffer;
     VkDeviceMemory Memory;
     VkBufferCreateInfo BufferInfo = {};
     BufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    BufferInfo.size = Size;
+    BufferInfo.size = AllocationSize;
     BufferInfo.usage = Usage;
     BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -688,9 +718,9 @@ public:
     if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Memory allocation failed.");
-    if (Data) {
+    if (Data && Size > 0) {
       void *Dst = nullptr;
-      if (vkMapMemory(IS.Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
+      if (vkMapMemory(IS.Device, Memory, 0, AllocationSize, 0, &Dst))
         return llvm::createStringError(std::errc::not_enough_memory,
                                        "Failed to map memory.");
       memcpy(Dst, Data, Size);
@@ -809,12 +839,16 @@ public:
       return llvm::Error::success();
     }
 
-    ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
+    const size_t LogicalSize = R.size();
+    const size_t BackingSize =
+        std::max<size_t>(LogicalSize, R.getElementSize());
+    ResourceBundle Bundle{getDescriptorType(R.Kind),
+                          static_cast<uint32_t>(LogicalSize), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
           IS,
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
+          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, BackingSize, ResData.get());
       if (!ExHostBuf)
         return ExHostBuf.takeError();
 
@@ -828,13 +862,15 @@ public:
             IS,
             getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
+            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, BackingSize);
         if (!ExDeviceBuf)
           return ExDeviceBuf.takeError();
-        VkBufferCopy Copy = {};
-        Copy.size = R.size();
-        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                        &Copy);
+        if (LogicalSize > 0) {
+          VkBufferCopy Copy = {};
+          Copy.size = LogicalSize;
+          vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer,
+                          1, &Copy);
+        }
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
       }
     }
@@ -1904,11 +1940,13 @@ public:
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
-    VkBufferCopy CopyRegion = {};
-    CopyRegion.size = R.size();
-    for (auto &ResRef : R.ResourceRefs)
-      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
-                      &CopyRegion);
+    if (R.size() > 0) {
+      VkBufferCopy CopyRegion = {};
+      CopyRegion.size = R.size();
+      for (auto &ResRef : R.ResourceRefs)
+        vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer,
+                        1, &CopyRegion);
+    }
 
     VkBufferCopy CounterCopyRegion = {};
     CounterCopyRegion.size = sizeof(uint32_t);
@@ -2039,7 +2077,8 @@ public:
                       &Mapped);
           Range.memory = ResRefIt->Host.Memory;
           vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-          memcpy(DataIt->get(), Mapped, R.size());
+          if (R.size() > 0)
+            memcpy(DataIt->get(), Mapped, R.size());
           vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
         }
         if (R.HasCounter) {
