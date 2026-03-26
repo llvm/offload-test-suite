@@ -35,6 +35,14 @@ struct DeviceConfig {
   bool EnableValidationLayer = false;
 };
 
+class Queue {
+public:
+  virtual ~Queue() = 0;
+
+protected:
+  Queue() = default;
+};
+
 class Device {
 protected:
   std::string Description;
@@ -45,6 +53,9 @@ public:
   virtual llvm::StringRef getAPIName() const = 0;
   virtual GPUAPI getAPI() const = 0;
   virtual llvm::Error executeProgram(Pipeline &P) = 0;
+
+  virtual Queue &getGraphicsQueue() = 0;
+
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual ~Device() = 0;
@@ -69,8 +80,8 @@ public:
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  static llvm::Error initializeVKDevices(const DeviceConfig Config);
-  static void cleanupVKDevices();
+  static llvm::Error initializeVulkanDevices(const DeviceConfig Config);
+  static void cleanupVulkanDevices();
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_METAL
