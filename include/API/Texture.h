@@ -111,7 +111,6 @@ inline bool isDepthFormat(TextureFormat Format) {
   return Format == TextureFormat::D32Float;
 }
 
-/// DepthStencil cannot be combined with RenderTarget or Storage.
 inline bool isValidTextureUsage(TextureUsage Usage) {
   if ((Usage & DepthStencil) != 0) {
     if ((Usage & RenderTarget) != 0)
@@ -122,20 +121,16 @@ inline bool isValidTextureUsage(TextureUsage Usage) {
   return true;
 }
 
-/// Depth formats require DepthStencil usage and cannot be used as RenderTarget
-/// or Storage. Non-depth formats cannot be used with DepthStencil usage.
 inline bool isValidTextureUsageAndFormat(TextureUsage Usage,
                                          TextureFormat Format) {
   if (!isValidTextureUsage(Usage))
     return false;
   if (isDepthFormat(Format)) {
-    // Depth formats can only be used as DepthStencil and/or Sampled.
     if ((Usage & RenderTarget) != 0)
       return false;
     if ((Usage & Storage) != 0)
       return false;
   } else {
-    // Non-depth formats cannot be used as DepthStencil.
     if ((Usage & DepthStencil) != 0)
       return false;
   }
