@@ -277,7 +277,7 @@ public:
   DXQueue(ComPtr<ID3D12CommandQueue> Queue) : Queue(Queue) {}
   virtual ~DXQueue() {}
 
-  static llvm::Expected<std::shared_ptr<DXQueue>>
+  static llvm::Expected<DXQueue>
   createGraphicsQueue(ComPtr<ID3D12Device> Device) {
     const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
                                            D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
@@ -286,7 +286,7 @@ public:
             HR::toError(Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&Queue)),
                         "Failed to create command queue."))
       return Err;
-    return std::make_shared<DXQueue>(Queue);
+    return DXQueue(Queue);
   }
 };
 
@@ -294,7 +294,7 @@ class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12Device> Device;
-  std::shared_ptr<DXQueue> GraphicsQueue;
+  DXQueue GraphicsQueue;
   Capabilities Caps;
 
   struct ResourceSet {
@@ -341,8 +341,8 @@ private:
   };
 
 public:
-  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D,
-           std::shared_ptr<DXQueue> Q, std::string Desc)
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
+           std::string Desc)
       : Adapter(A), Device(D), GraphicsQueue(Q) {
     Description = Desc;
   }
@@ -353,7 +353,7 @@ public:
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
-  Queue &getGraphicsQueue() override { return *GraphicsQueue.get(); }
+  Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
                                          const DeviceConfig &Config) {
@@ -378,9 +378,9 @@ public:
     auto GraphicsQueueOrErr = DXQueue::createGraphicsQueue(Device);
     if (!GraphicsQueueOrErr)
       return GraphicsQueueOrErr.takeError();
-    const std::shared_ptr<DXQueue> GraphicsQueue = *GraphicsQueueOrErr;
+    const DXQueue GraphicsQueue = *GraphicsQueueOrErr;
 
-    return DXDevice(Adapter, Device, GraphicsQueue,
+    return DXDevice(Adapter, Device, std::move(GraphicsQueue),
                     std::string(DescVec.data()));
   }
 
@@ -634,7 +634,7 @@ public:
     const UINT HeapRangeStartOffset = 0;
     const UINT RangeTileCount = NumTiles;
 
-    ID3D12CommandQueue *CommandQueue = GraphicsQueue->Queue.Get();
+    ID3D12CommandQueue *CommandQueue = GraphicsQueue.Queue.Get();
     CommandQueue->UpdateTileMappings(
         Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
         &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
@@ -1101,7 +1101,7 @@ public:
     const uint64_t CurrentCounter = FenceCounter + 1;
 
     if (auto Err = HR::toError(
-            GraphicsQueue->Queue->Signal(IS.Fence.Get(), CurrentCounter),
+            GraphicsQueue.Queue->Signal(IS.Fence.Get(), CurrentCounter),
             "Failed to add signal."))
       return Err;
 
@@ -1138,7 +1138,7 @@ public:
       return Err;
 
     ID3D12CommandList *const CmdLists[] = {IS.CmdList.Get()};
-    GraphicsQueue->Queue->ExecuteCommandLists(1, CmdLists);
+    GraphicsQueue.Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
   }

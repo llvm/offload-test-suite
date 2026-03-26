@@ -86,7 +86,7 @@ public:
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
-  std::shared_ptr<MTLQueue> GraphicsQueue;
+  MTLQueue GraphicsQueue;
 
   struct InvocationState {
     InvocationState() { Pool = NS::AutoreleasePool::alloc()->init(); }
@@ -350,7 +350,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = GraphicsQueue->Queue->commandBuffer();
+    IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
 
     MTL::ComputeCommandEncoder *CmdEncoder =
         IS.CmdBuffer->computeCommandEncoder();
@@ -418,7 +418,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = GraphicsQueue->Queue->commandBuffer();
+    IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
 
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
@@ -533,7 +533,7 @@ class MTLDevice : public offloadtest::Device {
 
 public:
   MTLDevice(MTL::Device *D, MTL::CommandQueue *Q)
-      : Device(D), GraphicsQueue(std::make_shared<MTLQueue>(Q)) {
+      : Device(D), GraphicsQueue(MTLQueue(Q)) {
     Description = Device->name()->utf8String();
   }
   const Capabilities &getCapabilities() override {
@@ -545,7 +545,7 @@ public:
   llvm::StringRef getAPIName() const override { return "Metal"; };
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
-  Queue &getGraphicsQueue() override { return *GraphicsQueue.get(); }
+  Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;

@@ -352,7 +352,7 @@ private:
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
   VkPhysicalDeviceDriverProperties DriverProps;
   VkDevice Device = VK_NULL_HANDLE;
-  std::shared_ptr<VulkanQueue> GraphicsQueue;
+  VulkanQueue GraphicsQueue;
   Capabilities Caps;
   using LayerVector = llvm::SmallVector<VkLayerProperties, 0>;
   LayerVector InstanceLayers;
@@ -539,18 +539,17 @@ public:
     VkQueue DeviceQueue = VK_NULL_HANDLE;
     vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
 
-    const std::shared_ptr<VulkanQueue> GraphicsQueue =
-        std::make_shared<VulkanQueue>(DeviceQueue, QueueFamilyIdx);
+    const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
 
     return std::make_shared<VulkanDevice>(PhysicalDevice, Props, Device,
-                                          GraphicsQueue,
+                                          std::move(GraphicsQueue),
                                           std::move(InstanceLayers));
   }
 
   VulkanDevice(VkPhysicalDevice P, VkPhysicalDeviceProperties Props, VkDevice D,
-               std::shared_ptr<VulkanQueue> Q,
+               VulkanQueue Q,
                llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
-      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(Q),
+      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(std::move(Q)),
         InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
@@ -591,7 +590,7 @@ public:
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
 
-  Queue &getGraphicsQueue() override { return *GraphicsQueue.get(); }
+  Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
@@ -684,7 +683,7 @@ public:
 
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    CmdPoolInfo.queueFamilyIndex = GraphicsQueue->QueueFamilyIdx;
+    CmdPoolInfo.queueFamilyIndex = GraphicsQueue.QueueFamilyIdx;
     CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &IS.CmdPool))
@@ -1052,7 +1051,7 @@ public:
                                      "Could not create fence.");
 
     // Submit to the queue
-    if (vkQueueSubmit(GraphicsQueue->Queue, 1, &SubmitInfo, Fence))
+    if (vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, Fence))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to submit to queue.");
     if (vkWaitForFences(Device, 1, &Fence, VK_TRUE, UINT64_MAX))
@@ -2122,7 +2121,7 @@ public:
   }
 
   llvm::Error cleanup(InvocationState &IS) {
-    vkQueueWaitIdle(GraphicsQueue->Queue);
+    vkQueueWaitIdle(GraphicsQueue.Queue);
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(Device, V, nullptr);
 
