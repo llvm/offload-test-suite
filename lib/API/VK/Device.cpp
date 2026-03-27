@@ -580,13 +580,6 @@ public:
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
-  ~VulkanDevice() override {
-    if (Device != VK_NULL_HANDLE) {
-      vkDeviceWaitIdle(Device);
-      vkDestroyDevice(Device, nullptr);
-    }
-  }
-
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
 
@@ -2187,6 +2180,7 @@ public:
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
 
     vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
+    vkDestroyDevice(Device, nullptr);
 
     return llvm::Error::success();
   }
