@@ -1,0 +1,87 @@
+#--- source.hlsl
+
+// This test verifies handling of matrix types in RWStructuredBuffer arrays within structs.
+
+struct B {
+  RWStructuredBuffer<float3x4> Bufs[2];
+};
+
+B b1;
+B b2;
+
+[numthreads(1,1,1)]
+void main() {
+
+  float3x4 x = b1.Bufs[0][0];
+  float3x4 y = b1.Bufs[1][0];
+  b2.Bufs[0][0] = x + y;
+  b2.Bufs[1][0] = x - y;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: BufB1
+    Format: Float32
+    Stride: 48
+    ArraySize: 2
+    Data:
+      - [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+      - [ 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0 ]
+
+  - Name: BufB2
+    Format: Float32
+    Stride: 48
+    ArraySize: 2
+    FillSize: 48
+
+  - Name: ExpectedBufB2
+    Format: Float32
+    Stride: 48
+    ArraySize: 2
+    Data:
+      - [ 1.5, 3.0, 4.5, 6.0, 7.5, 9.0, 10.5, 12.0, 13.5, 15.0, 16.5, 18.0 ]
+      - [ 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0 ]
+
+Results:
+  - Result: ExpectedResultB
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: BufB2
+    Expected: ExpectedBufB2
+
+DescriptorSets:
+  - Resources:
+    - Name: BufB1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufB2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
+# XFAIL: Clang
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8301
+# XFAIL: Vulkan && DXC
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
