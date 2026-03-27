@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Error.h"
 
@@ -336,6 +337,44 @@ static bool isExtensionSupported(
 
 namespace {
 
+class VulkanBuffer : public offloadtest::Buffer {
+public:
+  VkDevice Dev; // Needed for clean-up
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
+      : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
+
+  ~VulkanBuffer() override {
+    vkDestroyBuffer(Dev, Buffer, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
+class VulkanTexture : public offloadtest::Texture {
+public:
+  VkDevice Dev;
+  VkImage Image;
+  VkDeviceMemory Memory;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
+                llvm::StringRef Name, TextureCreateDesc Desc)
+      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+
+  ~VulkanTexture() override {
+    vkDestroyImage(Dev, Image, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
 class VulkanQueue : public offloadtest::Queue {
 public:
   VkQueue Queue = VK_NULL_HANDLE;
@@ -381,7 +420,7 @@ private:
 
   struct ResourceBundle {
     ResourceBundle(VkDescriptorType DescriptorType, uint64_t Size,
-                   Buffer *BufferPtr)
+                   CPUBuffer *BufferPtr)
         : DescriptorType(DescriptorType), Size(Size), BufferPtr(BufferPtr) {}
 
     bool isImage() const {
@@ -411,7 +450,7 @@ private:
 
     VkDescriptorType DescriptorType;
     uint64_t Size;
-    Buffer *BufferPtr;
+    CPUBuffer *BufferPtr;
     VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     llvm::SmallVector<ResourceRef> ResourceRefs;
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
@@ -592,6 +631,105 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    VkBufferCreateInfo BufInfo = {};
+    BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size = SizeInBytes;
+    BufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer DeviceBuffer;
+    if (vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create device buffer.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx)
+      return MemIdx.takeError();
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate device memory.");
+    if (vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind device buffer memory.");
+
+    return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
+                                          Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(llvm::StringRef Name, TextureCreateDesc &Desc) override {
+    if (!isValidTextureUsageAndFormat(Desc.Usage, Desc.Format))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Invalid texture usage/format combination: usage '%s' is not "
+          "compatible with format '%s'.",
+          getTextureUsageName(Desc.Usage).c_str(),
+          getTextureFormatName(Desc.Format).data());
+
+    VkImageCreateInfo ImageInfo = {};
+    ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.extent = {Desc.Width, Desc.Height, 1};
+    ImageInfo.mipLevels = Desc.MipLevels;
+    ImageInfo.arrayLayers = 1;
+    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
+    ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkImage Image;
+    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to create image.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx) {
+      vkDestroyImage(Device, Image, nullptr);
+      return MemIdx.takeError();
+    }
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+      vkDestroyImage(Device, Image, nullptr);
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate image memory.");
+    }
+    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+      vkDestroyImage(Device, Image, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind image memory.");
+    }
+
+    return std::make_shared<VulkanTexture>(Device, Image, DeviceMemory, Name,
+                                           Desc);
+  }
+
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
       queryCapabilities();
@@ -680,7 +818,6 @@ private:
 
 public:
   llvm::Error createDevice(InvocationState &IS) {
-
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     CmdPoolInfo.queueFamilyIndex = GraphicsQueue.QueueFamilyIdx;
@@ -766,7 +903,7 @@ public:
 
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
-    const offloadtest::Buffer &B = *R.BufferPtr;
+    const offloadtest::CPUBuffer &B = *R.BufferPtr;
     if (B.Format == DataFormat::Depth32 && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
@@ -1775,7 +1912,7 @@ public:
     if (R.isSampler())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -1862,7 +1999,7 @@ public:
     if (!R.isReadWrite())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = B.Format == DataFormat::Depth32
                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
@@ -2113,7 +2250,7 @@ public:
       Range.memory = ResRef.Host.Memory;
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      const Buffer &B = *P.Bindings.RTargetBufferPtr;
+      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
       vkUnmapMemory(Device, ResRef.Host.Memory);
     }

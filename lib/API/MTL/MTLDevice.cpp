@@ -10,6 +10,7 @@
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
+#include "MTLResources.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/SmallString.h"
@@ -80,6 +81,38 @@ public:
   ~MTLQueue() {
     if (Queue)
       Queue->release();
+  }
+};
+
+class MTLBuffer : public offloadtest::Buffer {
+public:
+  MTL::Buffer *Buf;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
+            size_t SizeInBytes)
+      : Buf(Buf), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  ~MTLBuffer() override {
+    if (Buf)
+      Buf->release();
+  }
+};
+
+class MTLTexture : public offloadtest::Texture {
+public:
+  MTL::Texture *Tex;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc)
+      : Tex(Tex), Name(Name), Desc(Desc) {}
+
+  ~MTLTexture() override {
+    if (Tex)
+      Tex->release();
   }
 };
 
@@ -424,7 +457,7 @@ class MTLDevice : public offloadtest::Device {
         MTL::RenderPassDescriptor::alloc()->init();
 
     // Setup the render target texture.
-    Buffer *RTarget = P.Bindings.RTargetBufferPtr;
+    CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
 
     const MTL::PixelFormat Format =
         getMTLFormat(RTarget->Format, RTarget->Channels);
@@ -510,7 +543,7 @@ class MTLDevice : public offloadtest::Device {
       }
     }
     if (P.isGraphics()) {
-      Buffer *RTarget = P.Bindings.RTargetBufferPtr;
+      CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
       const uint64_t Width = RTarget->OutputProps.Width;
       const uint64_t Height = RTarget->OutputProps.Height;
       const size_t ElemSize = RTarget->getElementSize();
@@ -546,6 +579,42 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    MTL::Buffer *Buf =
+        Device->newBuffer(SizeInBytes, getMetalResourceOptions(Desc.Location));
+    if (!Buf)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal buffer.");
+    return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(llvm::StringRef Name, TextureCreateDesc &Desc) override {
+    if (!isValidTextureUsageAndFormat(Desc.Usage, Desc.Format))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Invalid texture usage/format combination: usage '%s' is not "
+          "compatible with format '%s'.",
+          getTextureUsageName(Desc.Usage).c_str(),
+          getTextureFormatName(Desc.Format).data());
+
+    MTL::TextureDescriptor *TDesc =
+        MTL::TextureDescriptor::texture2DDescriptor(
+            getMetalFormat(Desc.Format), Desc.Width, Desc.Height,
+            Desc.MipLevels > 1);
+    TDesc->setMipmapLevelCount(Desc.MipLevels);
+    TDesc->setStorageMode(getMetalStorageMode(Desc.Location));
+    TDesc->setUsage(getMetalTextureUsage(Desc.Usage));
+
+    MTL::Texture *Tex = Device->newTexture(TDesc);
+    if (!Tex)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal texture.");
+    return std::make_shared<MTLTexture>(Tex, Name, Desc);
+  }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
