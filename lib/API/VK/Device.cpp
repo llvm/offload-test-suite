@@ -66,6 +66,7 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
 static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
+    return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
   case ResourceKind::Texture2D:
