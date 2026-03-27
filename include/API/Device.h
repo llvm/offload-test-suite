@@ -78,7 +78,7 @@ public:
   virtual Queue &getGraphicsQueue() = 0;
 
   virtual llvm::Expected<std::shared_ptr<Buffer>>
-  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+  createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
