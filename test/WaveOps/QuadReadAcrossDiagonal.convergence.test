@@ -1,0 +1,75 @@
+#--- source.hlsl
+StructuredBuffer<float> In : register(t0);
+RWStructuredBuffer<float> Out : register(u1);
+
+[numthreads(2, 2, 1)]
+void main(uint3 dtid : SV_DispatchThreadID) {
+  uint index = dtid.y * 2 + dtid.x;
+  float value = In[index];
+  // Tests control flow across the quad, but making sure neighboring lanes are active to avoid UB.
+
+  if(index == 0 || index == 3) {
+    // This reads (0, 0) and (1, 1)
+    float value_quad_d = QuadReadAcrossDiagonal(value);
+    Out[index] = value - value_quad_d;
+  } else {
+    // This reads (1, 0) and (0, 1)
+    float value_quad_d = QuadReadAcrossDiagonal(value);
+    Out[index] = value + value_quad_d;
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [ 1, 1, 1 ]
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 4
+    Data: [ 1.0, 10.0, 2.0, 20.0 ]
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [ -19.0, 12.0, 12.0, 19.0 ]
+Results:
+  - Result: ExpectedOut
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unsupported in Clang, I have a working branch for QuadReadAcrossDiagonal intrinsic support
+# waiting on https://github.com/llvm/llvm-project/pull/187440 to be merged, so I can open a PR for it
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/986
+# XFAIL: Intel && Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
