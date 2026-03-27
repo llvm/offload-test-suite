@@ -565,7 +565,7 @@ public:
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
-  createBuffer(llvm::StringRef Name, BufferCreateDesc &Desc,
+  createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     MTL::ResourceOptions StorageMode;
     switch (Desc.Location) {
