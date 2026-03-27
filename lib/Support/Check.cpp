@@ -13,7 +13,7 @@
 #include "Support/Pipeline.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
-#include "llvm/Support/Endian.h"
+#include "llvm/ADT/bit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cmath>
@@ -282,24 +282,11 @@ static bool testBufferFloatULP(offloadtest::Buffer *B1, offloadtest::Buffer *B2,
   return false;
 }
 
-template <size_t N> struct UIntBySize;
-template <> struct UIntBySize<1> {
-  using type = uint8_t;
-};
-template <> struct UIntBySize<2> {
-  using type = uint16_t;
-};
-template <> struct UIntBySize<4> {
-  using type = uint32_t;
-};
-template <> struct UIntBySize<8> {
-  using type = uint64_t;
-};
-
 template <typename T> static uint64_t toBitPattern(const T &Val) {
   static_assert(sizeof(T) <= sizeof(uint64_t), "Type too large for Hex64");
-  using UIntT = typename UIntBySize<sizeof(T)>::type;
-  return llvm::support::endian::read<UIntT>(&Val, llvm::endianness::native);
+  uint64_t Bits = 0;
+  memcpy(&Bits, &Val, sizeof(T));
+  return Bits;
 }
 
 template <typename T> static std::string formatAsHex(const T &Val) {
@@ -422,13 +409,17 @@ llvm::Error verifyResult(offloadtest::Result R) {
   // Now print exact hex representations of each element of the
   // actual and expected buffers.
 
-  const std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
-  const std::string ActualBufferStr = getBufferStr(R.ActualPtr);
+  if constexpr (llvm::endianness::native == llvm::endianness::little) {
+    const std::string ExpectedBufferStr = getBufferStr(R.ExpectedPtr);
+    const std::string ActualBufferStr = getBufferStr(R.ActualPtr);
 
-  OS << "Full Hex representation of Expected Buffer Values:\n"
-     << ExpectedBufferStr << "\n";
-  OS << "Full Hex representation of Actual Buffer Values:\n"
-     << ActualBufferStr << "\n";
+    OS << "Full Hex representation of Expected Buffer Values:\n"
+       << ExpectedBufferStr << "\n";
+    OS << "Full Hex representation of Actual Buffer Values:\n"
+       << ActualBufferStr << "\n";
+  } else {
+    OS << "Hex output is not supported on big-endian hosts.\n";
+  }
 
   return llvm::createStringError(Str.c_str());
 }
