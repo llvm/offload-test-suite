@@ -1,0 +1,182 @@
+#--- source.hlsl
+StructuredBuffer<uint64_t4> In  : register(t0);
+
+RWStructuredBuffer<uint64_t> Out1 : register(u1);
+RWStructuredBuffer<uint64_t2> Out2 : register(u2);
+RWStructuredBuffer<uint64_t3> Out3 : register(u3);
+RWStructuredBuffer<uint64_t4> Out4 : register(u4);
+RWStructuredBuffer<uint64_t4> Out5 : register(u5);
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+    uint64_t4 V64 = In[TID.x];
+
+    Out1[TID.x] = WaveActiveBitXor(V64.x);
+
+    Out2[TID.x] = WaveActiveBitXor(V64.xy);
+
+    uint64_t3 R64_3 = WaveActiveBitXor(V64.xyz);
+    Out3[TID.x].xyz = R64_3;
+
+    Out4[TID.x] = WaveActiveBitXor(V64);
+
+    // constant folding uint4
+    Out5[TID.x] = WaveActiveBitXor(uint64_t4(1,2,3,4));
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: In
+    Format: UInt64
+    Stride: 32
+    Data: [
+      0x11, 0x2, 0x4, 0x8,
+      0x10, 0x20, 0x40, 0x80,
+      0x100, 0x200, 0x400, 0x800,
+      0x1000, 0x2000, 0x4000, 0x8000
+    ]
+
+  - Name: Out1
+    Format: UInt64
+    Stride: 8
+    FillSize: 32
+  - Name: Out2
+    Format: UInt64
+    Stride: 16
+    FillSize: 64
+  - Name: Out3
+    Format: UInt64
+    Stride: 24
+    FillSize: 96
+  - Name: Out4
+    Format: UInt64
+    Stride: 32
+    FillSize: 128
+  - Name: Out5
+    Format: UInt64
+    Stride: 32
+    FillSize: 128
+
+  - Name: ExpectedOut1
+    Format: UInt64
+    Stride: 8
+    Data: [0x1101, 0x1101, 0x1101, 0x1101]
+  - Name: ExpectedOut2
+    Format: UInt64
+    Stride: 16
+    Data: [
+      0x1101, 0x2222,
+      0x1101, 0x2222,
+      0x1101, 0x2222,
+      0x1101, 0x2222
+    ]
+  - Name: ExpectedOut3
+    Format: UInt64
+    Stride: 24
+    Data: [
+      0x1101, 0x2222, 0x4444,
+      0x1101, 0x2222, 0x4444,
+      0x1101, 0x2222, 0x4444,
+      0x1101, 0x2222, 0x4444
+    ]
+  - Name: ExpectedOut4
+    Format: UInt64
+    Stride: 32
+    Data: [
+      0x1101, 0x2222, 0x4444, 0x8888,
+      0x1101, 0x2222, 0x4444, 0x8888,
+      0x1101, 0x2222, 0x4444, 0x8888,
+      0x1101, 0x2222, 0x4444, 0x8888
+    ]
+  - Name: ExpectedOut5
+    Format: UInt64
+    Stride: 32
+    Data: [ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 
+    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 ]
+
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
+
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0    
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4    
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+
+...
+#--- end
+
+# REQUIRES: Int64
+
+# 64 bit wave ops are not supported on metal.
+# https://github.com/llvm/offload-test-suite/issues/355
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
