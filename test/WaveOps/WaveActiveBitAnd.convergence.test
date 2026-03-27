@@ -1,0 +1,173 @@
+#--- source.hlsl
+StructuredBuffer<uint> In : register(t0);
+
+RWStructuredBuffer<uint> Out1 : register(u1); // branch A
+RWStructuredBuffer<uint> Out2 : register(u2); // branch B
+RWStructuredBuffer<uint> Out3 : register(u3); // reconverged
+RWStructuredBuffer<uint> Out4 : register(u4); // loop
+RWStructuredBuffer<uint> Out5 : register(u5); // divergent loop
+
+[numthreads(4,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+    uint V = In[TID.x];
+
+    // divergent branch
+    if (TID.x < 2)
+        Out1[TID.x] = WaveActiveBitAnd(V);
+    else
+        Out2[TID.x] = WaveActiveBitAnd(V);
+
+    // reconverged wave op
+    Out3[TID.x] = WaveActiveBitAnd(V);
+
+    // loop case
+    uint R = V;
+    for (uint i = 0; i < 2; i++)
+        R = WaveActiveBitAnd(R);
+
+    Out4[TID.x] = R;
+
+    // divergent loop: each thread iterates TID.x times
+    // thread 0: 0 iters, thread 1: 1 iter, thread 2: 2 iters, thread 3: 3 iters
+    uint R2 = V;
+    for (uint j = 0; j < TID.x; j++)
+        R2 = WaveActiveBitAnd(R2);
+
+    Out5[TID.x] = R2;
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+
+  - Name: In
+    Format: UInt32
+    Stride: 4
+    Data: [ 0xFFF0, 0xFF0F, 0xF0FF, 0x0FFF ]
+  - Name: Out1
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: Out2
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: Out3
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: Out4
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: Out5
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedOut1
+    Format: UInt32
+    Stride: 4
+    Data: [ 0xFF00, 0xFF00, 0x0, 0x0 ]
+  - Name: ExpectedOut2
+    Format: UInt32
+    Stride: 4
+    Data: [ 0x0, 0x0, 0xFF, 0xFF ]
+  - Name: ExpectedOut3
+    Format: UInt32
+    Stride: 4
+    Data: [ 0x0, 0x0, 0x0, 0x0 ]
+  - Name: ExpectedOut4
+    Format: UInt32
+    Stride: 4
+    Data: [ 0x0, 0x0, 0x0, 0x0 ]
+  - Name: ExpectedOut5
+    Format: UInt32
+    Stride: 4
+    Data: [ 0xFFF0, 0xF, 0xF, 0xF ]
+
+
+Results:
+  - Result: ExpectedOut1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: ExpectedOut2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: ExpectedOut3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+  - Result: ExpectedOut4
+    Rule: BufferExact
+    Actual: Out4
+    Expected: ExpectedOut4
+  - Result: ExpectedOut5
+    Rule: BufferExact
+    Actual: Out5
+    Expected: ExpectedOut5
+
+
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out5
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/977
+# XFAIL: Vulkan && Clang
+
+# Not implemented: https://github.com/llvm/llvm-project/issues/99166
+# UNSUPPORTED: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
