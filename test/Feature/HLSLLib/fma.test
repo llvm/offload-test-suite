@@ -93,7 +93,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1000
-# XFAIL: arm64 && WARP && DXC
+# XFAIL: arm64 && WARP
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1026
 # XFAIL: Intel && Vulkan && DXC
