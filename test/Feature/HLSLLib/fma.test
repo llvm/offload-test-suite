@@ -92,9 +92,6 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/99117
-# XFAIL: Clang
-
 # Bug https://github.com/llvm/offload-test-suite/issues/1000
 # XFAIL: arm64 && WARP && DXC
 
