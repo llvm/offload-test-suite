@@ -470,6 +470,21 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error executeCommands(InvocationState &IS) {
+    // Synchronize managed resources back to the CPU so that any updates we made
+    // on the GPU is visible.
+    // See:
+    // https://developer.apple.com/documentation/metal/synchronizing-a-managed-resource-in-macos
+    MTL::BlitCommandEncoder *BlitEncoder = IS.CmdBuffer->blitCommandEncoder();
+    for (const auto &Buf : IS.Buffers) {
+      if (Buf->storageMode() == MTL::StorageModeManaged)
+        BlitEncoder->synchronizeResource(Buf);
+    }
+    for (const auto &Tex : IS.Textures) {
+      if (Tex->storageMode() == MTL::StorageModeManaged)
+        BlitEncoder->synchronizeResource(Tex);
+    }
+    BlitEncoder->endEncoding();
+
     IS.CmdBuffer->commit();
     IS.CmdBuffer->waitUntilCompleted();
 
