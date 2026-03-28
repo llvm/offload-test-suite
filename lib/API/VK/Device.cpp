@@ -2256,9 +2256,6 @@ public:
   }
 
   void cleanup() {
-    // Free devices before destroying the instance
-    Devices.clear();
-
 #ifndef NDEBUG
     auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
         Instance, "vkDestroyDebugUtilsMessengerEXT");
