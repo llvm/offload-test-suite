@@ -40,7 +40,7 @@ void main() {
   // uint64_t2
   Out3[0] = U3[0] + V3[0];
   Out3[1] = U3[1] + V3[1];
-  Out3[2] = int64_t2(U3[2].x + V3[2].x, U3[2].y + V3[2].y);
+  Out3[2] = uint64_t2(U3[2].x + V3[2].x, U3[2].y + V3[2].y);
 }
 
 //--- pipeline.yaml
@@ -221,12 +221,15 @@ DescriptorSets:
 ...
 #--- end
 
-# This test is failing on Vulkan due to 2 separate bugs.
-# Bug <link>
+# UNSUPPORTED: Metal
+
+# This test is failing on Vulkan due to two separate issues.
+# Bug https://github.com/llvm/offload-test-suite/issues/1030
 # Bug <link>
 # XFAIL: Vulkan
 
-# UNSUPPORTED: Metal
+# Bug https://github.com/llvm/offload-test-suite/issues/1029
+# XFAIL: QC && DirectX
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
