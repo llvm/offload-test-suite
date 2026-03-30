@@ -57,25 +57,27 @@ void Device::registerDevice(std::shared_ptr<Device> D) {
 }
 
 llvm::Error Device::initialize(const DeviceConfig Config) {
+  llvm::Error Result = llvm::Error::success();
 #ifdef OFFLOADTEST_ENABLE_D3D12
   if (auto Err = initializeDXDevices(Config))
-    return Err;
+    Result = llvm::joinErrors(std::move(Result), std::move(Err));
 #endif
 #ifdef OFFLOADTEST_ENABLE_VULKAN
   if (auto Err = initializeVulkanDevices(Config))
-    return Err;
-  // Validation layers have internal state which require a specific destruction
-  // ordering. Relying on the global dtor call for this is unreliable and can
-  // cause a null-deref in the validation layers during the final
-  // vkDestroyInstance. This is a known limitation of the validation layers
-  // which explicitely requires using atexit.
-  atexit(Device::cleanupVulkanDevices);
+    Result = llvm::joinErrors(std::move(Result), std::move(Err));
+  else
+    // Validation layers have internal state which require a specific
+    // destruction ordering. Relying on the global dtor call for this is
+    // unreliable and can cause a null-deref in the validation layers during the
+    // final vkDestroyInstance. This is a known limitation of the validation
+    // layers which explicitely requires using atexit.
+    atexit(Device::cleanupVulkanDevices);
 #endif
 #ifdef OFFLOADTEST_ENABLE_METAL
   if (auto Err = initializeMtlDevices(Config))
-    return Err;
+    Result = llvm::joinErrors(std::move(Result), std::move(Err));
 #endif
-  return llvm::Error::success();
+  return Result;
 }
 
 void Device::uninitialize() { DeviceContext::instance().unregisterDevices(); }
