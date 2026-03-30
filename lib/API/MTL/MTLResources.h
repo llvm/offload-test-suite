@@ -81,6 +81,8 @@ inline MTL::PixelFormat getMetalFormat(TextureFormat Format) {
     return MTL::PixelFormatRGBA32Float;
   case TextureFormat::D32Float:
     return MTL::PixelFormatDepth32Float;
+  case TextureFormat::D32FloatS8Uint:
+    return MTL::PixelFormatDepth32Float_Stencil8;
   }
   llvm_unreachable("All TextureFormat cases handled");
 }

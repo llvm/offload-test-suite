@@ -66,6 +66,8 @@ inline VkFormat getVulkanFormat(TextureFormat Format) {
     return VK_FORMAT_R32G32B32A32_SFLOAT;
   case TextureFormat::D32Float:
     return VK_FORMAT_D32_SFLOAT;
+  case TextureFormat::D32FloatS8Uint:
+    return VK_FORMAT_D32_SFLOAT_S8_UINT;
   }
   llvm_unreachable("All TextureFormat cases handled");
 }

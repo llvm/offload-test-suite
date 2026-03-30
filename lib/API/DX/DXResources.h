@@ -65,6 +65,8 @@ inline DXGI_FORMAT getDXGIFormat(TextureFormat Format) {
     return DXGI_FORMAT_R32G32B32A32_FLOAT;
   case TextureFormat::D32Float:
     return DXGI_FORMAT_D32_FLOAT;
+  case TextureFormat::D32FloatS8Uint:
+    return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
   }
   llvm_unreachable("All TextureFormat cases handled");
 }

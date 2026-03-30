@@ -48,6 +48,7 @@ enum class TextureFormat {
   RGBA32Uint,
   RGBA32Float,
   D32Float,
+  D32FloatS8Uint,
 };
 
 enum TextureUsage : uint32_t {
@@ -92,6 +93,8 @@ inline llvm::StringRef getTextureFormatName(TextureFormat Format) {
     return "RGBA32Float";
   case TextureFormat::D32Float:
     return "D32Float";
+  case TextureFormat::D32FloatS8Uint:
+    return "D32FloatS8Uint";
   }
   llvm_unreachable("All TextureFormat cases handled");
 }
@@ -114,6 +117,7 @@ inline uint32_t getTextureFormatSize(TextureFormat Format) {
   case TextureFormat::RG32Sint:
   case TextureFormat::RG32Uint:
   case TextureFormat::RG32Float:
+  case TextureFormat::D32FloatS8Uint:
     return 8;
   case TextureFormat::RGBA32Sint:
   case TextureFormat::RGBA32Uint:
@@ -142,6 +146,7 @@ inline bool isDepth(TextureFormat Format) {
   case TextureFormat::RGBA32Float:
     return false;
   case TextureFormat::D32Float:
+  case TextureFormat::D32FloatS8Uint:
     return true;
   }
   llvm_unreachable("All TextureFormat cases handled");
@@ -304,6 +309,9 @@ inline llvm::Expected<TextureFormat> toTextureFormat(DataFormat Format,
     }
     break;
   case DataFormat::Depth32:
+    // D32FloatS8Uint is not expressible as DataFormat + Channels because the
+    // stencil component is uint8, not a second Depth32 channel. Once the
+    // pipeline uses TextureFormat directly, this limitation goes away.
     if (Channels == 1)
       return TextureFormat::D32Float;
     break;
