@@ -7,8 +7,11 @@ RWStructuredBuffer<int> Out[4] : register(u0);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
-  for (int i = 0; i < GI; i++)
-    Out[i].IncrementCounter();
+  Out[0].IncrementCounter();
+  Out[1].IncrementCounter();
+  Out[2].IncrementCounter();
+  Out[3].IncrementCounter();
+  
   switch(GI) {
     case 0:
       Out[0][0] = Out[0].IncrementCounter();
