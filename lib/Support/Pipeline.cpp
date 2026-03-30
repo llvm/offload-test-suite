@@ -294,6 +294,7 @@ static void setCounters(IO &I, offloadtest::Buffer &B) {
 void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
                                                   offloadtest::Sampler &S) {
   I.mapRequired("Name", S.Name);
+  I.mapOptional("Kind", S.Kind, SamplerKind::Sampler);
   I.mapOptional("MinFilter", S.MinFilter);
   I.mapOptional("MagFilter", S.MagFilter);
   I.mapOptional("Address", S.Address);
@@ -301,6 +302,20 @@ void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
   I.mapOptional("MaxLOD", S.MaxLOD);
   I.mapOptional("MipLODBias", S.MipLODBias);
   I.mapOptional("ComparisonOp", S.ComparisonOp);
+  if (!I.outputting()) {
+    if (S.Kind == SamplerKind::Sampler &&
+        S.ComparisonOp != CompareFunction::Never) {
+      I.setError("Sampler kind 'Sampler' requires ComparisonOp: Never");
+      return;
+    }
+    if (S.Kind == SamplerKind::SamplerComparison &&
+        S.ComparisonOp == CompareFunction::Never) {
+      I.setError(
+          "Sampler kind 'SamplerComparison' requires ComparisonOp other than "
+          "Never");
+      return;
+    }
+  }
 }
 
 void MappingTraits<offloadtest::Buffer>::mapping(IO &I,

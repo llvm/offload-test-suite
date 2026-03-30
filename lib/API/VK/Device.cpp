@@ -78,7 +78,6 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
   case ResourceKind::SampledTexture:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -150,7 +149,6 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
   case ResourceKind::SampledTexture:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
@@ -171,7 +169,6 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an image view!");
   }
   llvm_unreachable("All cases handled");
@@ -785,7 +782,7 @@ public:
     SamplerInfo.anisotropyEnable = VK_FALSE;
     SamplerInfo.maxAnisotropy = 1.0f;
     SamplerInfo.compareEnable =
-        R.Kind == ResourceKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+        S.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
     SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
     SamplerInfo.minLod = S.MinLOD;
     SamplerInfo.maxLod = S.MaxLOD;
@@ -806,9 +803,7 @@ public:
       auto *Samp = R.SampledTexturePtr->SamplerPtr;
 
       Resource ReusedRes;
-      ReusedRes.Kind = Samp->ComparisonOp != CompareFunction::Never
-                           ? ResourceKind::SamplerComparison
-                           : ResourceKind::Sampler;
+      ReusedRes.Kind = ResourceKind::Sampler;
       ReusedRes.SamplerPtr = Samp;
 
       BufferRef HostBuf = {0, 0};
@@ -1236,8 +1231,7 @@ public:
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         uint32_t IndexOfFirstBufferDataInArray;
-        if (R.Kind == ResourceKind::Sampler ||
-            R.Kind == ResourceKind::SamplerComparison) {
+        if (R.Kind == ResourceKind::Sampler) {
           IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             const VkDescriptorImageInfo ImageInfo = {
