@@ -365,7 +365,9 @@ private:
     // Resources for graphics pipelines.
     std::shared_ptr<DXTexture> RT;
     std::shared_ptr<DXBuffer> RTReadback;
+    std::shared_ptr<DXTexture> DS;
     ComPtr<ID3D12DescriptorHeap> RTVHeap;
+    ComPtr<ID3D12DescriptorHeap> DSVHeap;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -1478,6 +1480,16 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    auto TexOrErr = offloadtest::createDepthStencil(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DS = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    return llvm::Error::success();
+  }
+
   llvm::Error createVertexBuffer(Pipeline &P, InvocationState &IS) {
     if (!P.Bindings.VertexBufferPtr)
       return llvm::createStringError(
@@ -1553,8 +1565,11 @@ public:
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    PSODesc.DepthStencilState.DepthEnable = false;
+    PSODesc.DepthStencilState.DepthEnable = true;
+    PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
+    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Format);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSODesc.NumRenderTargets = 1;
@@ -1586,6 +1601,19 @@ public:
         IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
     Device->CreateRenderTargetView(IS.RT->Resource.Get(), nullptr, RTVHandle);
 
+    // Create descriptor heap and view for the depth/stencil buffer.
+    D3D12_DESCRIPTOR_HEAP_DESC DSVHeapDesc = {};
+    DSVHeapDesc.NumDescriptors = 1;
+    DSVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+    DSVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
+                                   &DSVHeapDesc, IID_PPV_ARGS(&IS.DSVHeap)),
+                               "Failed to create DSV heap"))
+      return Err;
+    const D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle =
+        IS.DSVHeap->GetCPUDescriptorHandleForHeapStart();
+    Device->CreateDepthStencilView(IS.DS->Resource.Get(), nullptr, DSVHandle);
+
     IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1595,7 +1623,17 @@ public:
     }
     IS.CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
+    IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, &DSVHandle);
+
+    const auto *DepthCV =
+        std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
+    if (!DepthCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth/stencil clear value must be a ClearDepthStencil.");
+    IS.CmdList->ClearDepthStencilView(
+        DSVHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
     VP.Width =
@@ -1732,10 +1770,15 @@ public:
       llvm::outs() << "Compute command list created.\n";
 
     } else {
-      // Create render target, readback and vertex buffer and PSO.
+      // Create render target, depth/stencil, readback and vertex buffer and PSO.
       if (auto Err = createRenderTarget(P, State))
         return Err;
       llvm::outs() << "Render target created.\n";
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
+      if (auto Err = createDepthStencil(P, State))
+        return Err;
+      llvm::outs() << "Depth stencil created.\n";
       if (auto Err = createVertexBuffer(P, State))
         return Err;
       llvm::outs() << "Vertex buffer created.\n";

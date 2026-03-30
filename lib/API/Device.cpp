@@ -108,7 +108,7 @@ offloadtest::createRenderTarget(Device &Dev, const CPUBuffer &Buf) {
 }
 
 llvm::Expected<std::shared_ptr<Texture>>
-createDepthStencil(Device &Dev, uint32_t Width, uint32_t Height) {
+offloadtest::createDepthStencil(Device &Dev, uint32_t Width, uint32_t Height) {
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
   Desc.Usage = TextureUsage::DepthStencil;

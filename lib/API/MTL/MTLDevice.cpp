@@ -146,6 +146,7 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Buffer *> Buffers;
     std::shared_ptr<MTLTexture> FrameBufferTexture;
     std::shared_ptr<MTLBuffer> FrameBufferReadback;
+    std::shared_ptr<MTLTexture> DepthStencil;
     MTL::CommandBuffer *CmdBuffer = nullptr;
   };
 
@@ -283,6 +284,12 @@ class MTLDevice : public offloadtest::Device {
             MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
         RPCA->setPixelFormat(PF);
         Desc->colorAttachments()->setObject(RPCA, 0);
+
+        // Set the depth/stencil format on the pipeline descriptor.
+        const MTL::PixelFormat DepthFmt =
+            getMetalFormat(TextureFormat::D32FloatS8Uint);
+        Desc->setDepthAttachmentPixelFormat(DepthFmt);
+        Desc->setStencilAttachmentPixelFormat(DepthFmt);
       }
 
       IS.RenderPipeline = Device->newRenderPipelineState(Desc, &Error);
@@ -475,10 +482,24 @@ class MTLDevice : public offloadtest::Device {
     return llvm::Error::success();
   }
 
+  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    auto TexOrErr = offloadtest::createDepthStencil(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DepthStencil = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+    return llvm::Error::success();
+  }
+
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
     IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
 
     if (auto Err = createRenderTarget(P, IS))
+      return Err;
+    // TODO: Always created for graphics pipelines. Consider making this
+    // conditional on the pipeline definition.
+    if (auto Err = createDepthStencil(P, IS))
       return Err;
 
     MTL::RenderPassDescriptor *Desc =
@@ -487,19 +508,56 @@ class MTLDevice : public offloadtest::Device {
     const uint64_t Width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
     const uint64_t Height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
 
+    // Color attachment.
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
     CADesc->setTexture(IS.FrameBufferTexture->Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
-    const auto &CV =
-        std::get<ClearColor>(*IS.FrameBufferTexture->Desc.OptimizedClearValue);
-    CADesc->setClearColor(MTL::ClearColor(CV.R, CV.G, CV.B, CV.A));
+    const auto *ColorCV =
+        std::get_if<ClearColor>(&*IS.FrameBufferTexture->Desc.OptimizedClearValue);
+    if (!ColorCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Render target clear value must be a ClearColor.");
+
+    CADesc->setClearColor(MTL::ClearColor(ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A));
     CADesc->setStoreAction(MTL::StoreActionStore);
     Desc->colorAttachments()->setObject(CADesc, 0);
+
+    // Depth/stencil attachment.
+    const auto *DepthCV =
+        std::get_if<ClearDepthStencil>(&*IS.DepthStencil->Desc.OptimizedClearValue);
+    if (!DepthCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth/stencil clear value must be a ClearDepthStencil.");
+          
+    auto *DADesc = Desc->depthAttachment();
+    DADesc->setTexture(IS.DepthStencil->Tex);
+    DADesc->setLoadAction(MTL::LoadActionClear);
+    DADesc->setClearDepth(DepthCV->Depth);
+    DADesc->setStoreAction(MTL::StoreActionDontCare);
+
+    auto *SADesc = Desc->stencilAttachment();
+    SADesc->setTexture(IS.DepthStencil->Tex);
+    SADesc->setLoadAction(MTL::LoadActionClear);
+    SADesc->setClearStencil(DepthCV->Stencil);
+    SADesc->setStoreAction(MTL::StoreActionDontCare);
 
     MTL::RenderCommandEncoder *CmdEncoder =
         IS.CmdBuffer->renderCommandEncoder(Desc);
 
     CmdEncoder->setRenderPipelineState(IS.RenderPipeline);
+
+    // Configure depth stencil state: depth test enabled, write all, less.
+    MTL::DepthStencilDescriptor *DSDesc =
+        MTL::DepthStencilDescriptor::alloc()->init();
+    DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
+    DSDesc->setDepthWriteEnabled(true);
+    MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
+    CmdEncoder->setDepthStencilState(DSState);
+    DSDesc->release();
+    DSState->release();
+
     // Explicitly set viewport to texture dimensions.
     CmdEncoder->setViewport(
         MTL::Viewport{0.0, 0.0, (double)Width, (double)Height, 0.0, 1.0});

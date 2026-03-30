@@ -474,7 +474,7 @@ private:
     VkFramebuffer FrameBuffer;
     std::shared_ptr<VulkanTexture> RenderTarget;
     std::shared_ptr<VulkanBuffer> RTReadback;
-    ImageRef DepthStencil = {0, 0, 0};
+    std::shared_ptr<VulkanTexture> DepthStencil;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
     VkRenderPass RenderPass;
@@ -1070,46 +1070,12 @@ public:
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    // Create an optimal image used as the depth stencil attachment
-    VkImageCreateInfo ImageCi = {};
-    ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCi.imageType = VK_IMAGE_TYPE_2D;
-    ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
-    // Use example's height and width
-    ImageCi.extent = {
-        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Width),
-        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Height),
-        1};
-    ImageCi.mipLevels = 1;
-    ImageCi.arrayLayers = 1;
-    ImageCi.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageCi.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ImageCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    ImageCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (vkCreateImage(Device, &ImageCi, nullptr, &IS.DepthStencil.Image))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Depth stencil creation failed.");
-
-    // Allocate memory for the image (device local) and bind it to our image
-    VkMemoryAllocateInfo MemAlloc{};
-    MemAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(Device, IS.DepthStencil.Image, &MemReqs);
-    MemAlloc.allocationSize = MemReqs.size;
-    llvm::Expected<uint32_t> MemIdx =
-        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (!MemIdx)
-      return MemIdx.takeError();
-
-    MemAlloc.memoryTypeIndex = *MemIdx;
-    if (vkAllocateMemory(Device, &MemAlloc, nullptr, &IS.DepthStencil.Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Depth stencil memory allocation failed.");
-    if (vkBindImageMemory(Device, IS.DepthStencil.Image, IS.DepthStencil.Memory,
-                          0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Depth stencil memory binding failed.");
+    auto TexOrErr = offloadtest::createDepthStencil(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DepthStencil = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -1124,6 +1090,8 @@ public:
     if (P.isGraphics()) {
       if (auto Err = createRenderTarget(P, IS))
         return Err;
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
 
@@ -1607,7 +1575,7 @@ public:
     DepthStencilViewCi.subresourceRange.levelCount = 1;
     DepthStencilViewCi.subresourceRange.baseArrayLayer = 0;
     DepthStencilViewCi.subresourceRange.layerCount = 1;
-    DepthStencilViewCi.image = IS.DepthStencil.Image;
+    DepthStencilViewCi.image = IS.DepthStencil->Image;
     if (vkCreateImageView(Device, &DepthStencilViewCi, nullptr, &Views[1]))
       return llvm::createStringError(
           std::errc::device_or_resource_busy,
@@ -1993,8 +1961,9 @@ public:
                              VkImageLayout OldLayout,
                              VkAccessFlags SrcAccessMask,
                              VkPipelineStageFlags SrcStageMask) {
-    VkImageAspectFlags AspectMask =
-        isDepth(Tex.Desc.Format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    VkImageAspectFlags AspectMask = isDepth(Tex.Desc.Format)
+                                        ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                        : VK_IMAGE_ASPECT_COLOR_BIT;
 
     // Transition texture to transfer source.
     VkImageSubresourceRange SubRange = {};
@@ -2165,11 +2134,21 @@ public:
       copyResourceDataToDevice(IS, R);
 
     if (P.isGraphics()) {
-      const auto &CV =
-          std::get<ClearColor>(*IS.RenderTarget->Desc.OptimizedClearValue);
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*IS.RenderTarget->Desc.OptimizedClearValue);
+      if (!ColorCV)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Render target clear value must be a ClearColor.");
+      const auto *DepthCV = std::get_if<ClearDepthStencil>(
+          &*IS.DepthStencil->Desc.OptimizedClearValue);
+      if (!DepthCV)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Depth/stencil clear value must be a ClearDepthStencil.");
       VkClearValue ClearValues[2] = {};
-      ClearValues[0].color = {{CV.R, CV.G, CV.B, CV.A}};
-      ClearValues[1].depthStencil = {1.0f, 0};
+      ClearValues[0].color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+      ClearValues[1].depthStencil = {DepthCV->Depth, DepthCV->Stencil};
 
       VkRenderPassBeginInfo RenderPassBeginInfo = {};
       RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -2346,9 +2325,8 @@ public:
         vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
       }
       // Render target image and readback buffer are owned by
-      // IS.RenderTarget and IS.RTReadback (shared_ptrs).
-      vkDestroyImage(Device, IS.DepthStencil.Image, nullptr);
-      vkFreeMemory(Device, IS.DepthStencil.Memory, nullptr);
+      // Render target, readback buffer, and depth stencil are owned by
+      // shared_ptrs (IS.RenderTarget, IS.RTReadback, IS.DepthStencil).
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
       vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }
