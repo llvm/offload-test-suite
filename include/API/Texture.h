@@ -96,6 +96,57 @@ inline llvm::StringRef getTextureFormatName(TextureFormat Format) {
   llvm_unreachable("All TextureFormat cases handled");
 }
 
+// Returns the size in bytes of a single texel/element for the given format.
+inline uint32_t getTextureFormatSize(TextureFormat Format) {
+  switch (Format) {
+  case TextureFormat::R16Sint:
+  case TextureFormat::R16Uint:
+    return 2;
+  case TextureFormat::RG16Sint:
+  case TextureFormat::RG16Uint:
+  case TextureFormat::R32Sint:
+  case TextureFormat::R32Uint:
+  case TextureFormat::R32Float:
+  case TextureFormat::D32Float:
+    return 4;
+  case TextureFormat::RGBA16Sint:
+  case TextureFormat::RGBA16Uint:
+  case TextureFormat::RG32Sint:
+  case TextureFormat::RG32Uint:
+  case TextureFormat::RG32Float:
+    return 8;
+  case TextureFormat::RGBA32Sint:
+  case TextureFormat::RGBA32Uint:
+  case TextureFormat::RGBA32Float:
+    return 16;
+  }
+  llvm_unreachable("All TextureFormat cases handled");
+}
+
+inline bool isDepth(TextureFormat Format) {
+  switch (Format) {
+  case TextureFormat::R16Sint:
+  case TextureFormat::R16Uint:
+  case TextureFormat::RG16Sint:
+  case TextureFormat::RG16Uint:
+  case TextureFormat::R32Sint:
+  case TextureFormat::R32Uint:
+  case TextureFormat::R32Float:
+  case TextureFormat::RGBA16Sint:
+  case TextureFormat::RGBA16Uint:
+  case TextureFormat::RG32Sint:
+  case TextureFormat::RG32Uint:
+  case TextureFormat::RG32Float:
+  case TextureFormat::RGBA32Sint:
+  case TextureFormat::RGBA32Uint:
+  case TextureFormat::RGBA32Float:
+    return false;
+  case TextureFormat::D32Float:
+    return true;
+  }
+  llvm_unreachable("All TextureFormat cases handled");
+}
+
 inline std::string getTextureUsageName(TextureUsage Usage) {
   std::string Result;
   if ((Usage & Sampled) != 0)
@@ -140,7 +191,7 @@ struct TextureCreateDesc {
 };
 
 inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
-  bool IsDepth = Desc.Format == TextureFormat::D32Float;
+  bool IsDepth = isDepth(Desc.Format);
   bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
   bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
 
@@ -199,42 +250,57 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
 // Bridge for code that still describes textures as DataFormat + Channels (e.g.
 // render targets bound via CPUBuffer). Once the pipeline is refactored to use
 // TextureFormat directly, this function can be removed.
-inline llvm::Expected<TextureFormat>
-toTextureFormat(DataFormat Format, int Channels) {
+inline llvm::Expected<TextureFormat> toTextureFormat(DataFormat Format,
+                                                     int Channels) {
   switch (Format) {
   case DataFormat::Int16:
     switch (Channels) {
-    case 1: return TextureFormat::R16Sint;
-    case 2: return TextureFormat::RG16Sint;
-    case 4: return TextureFormat::RGBA16Sint;
+    case 1:
+      return TextureFormat::R16Sint;
+    case 2:
+      return TextureFormat::RG16Sint;
+    case 4:
+      return TextureFormat::RGBA16Sint;
     }
     break;
   case DataFormat::UInt16:
     switch (Channels) {
-    case 1: return TextureFormat::R16Uint;
-    case 2: return TextureFormat::RG16Uint;
-    case 4: return TextureFormat::RGBA16Uint;
+    case 1:
+      return TextureFormat::R16Uint;
+    case 2:
+      return TextureFormat::RG16Uint;
+    case 4:
+      return TextureFormat::RGBA16Uint;
     }
     break;
   case DataFormat::Int32:
     switch (Channels) {
-    case 1: return TextureFormat::R32Sint;
-    case 2: return TextureFormat::RG32Sint;
-    case 4: return TextureFormat::RGBA32Sint;
+    case 1:
+      return TextureFormat::R32Sint;
+    case 2:
+      return TextureFormat::RG32Sint;
+    case 4:
+      return TextureFormat::RGBA32Sint;
     }
     break;
   case DataFormat::UInt32:
     switch (Channels) {
-    case 1: return TextureFormat::R32Uint;
-    case 2: return TextureFormat::RG32Uint;
-    case 4: return TextureFormat::RGBA32Uint;
+    case 1:
+      return TextureFormat::R32Uint;
+    case 2:
+      return TextureFormat::RG32Uint;
+    case 4:
+      return TextureFormat::RGBA32Uint;
     }
     break;
   case DataFormat::Float32:
     switch (Channels) {
-    case 1: return TextureFormat::R32Float;
-    case 2: return TextureFormat::RG32Float;
-    case 4: return TextureFormat::RGBA32Float;
+    case 1:
+      return TextureFormat::R32Float;
+    case 2:
+      return TextureFormat::RG32Float;
+    case 4:
+      return TextureFormat::RGBA32Float;
     }
     break;
   case DataFormat::Depth32:
@@ -260,6 +326,56 @@ toTextureFormat(DataFormat Format, int Channels) {
                                  "No TextureFormat for DataFormat %d with %d "
                                  "channel(s).",
                                  static_cast<int>(Format), Channels);
+}
+
+// Validates that a TextureCreateDesc is consistent with the CPUBuffer it was
+// derived from. Call this after building a TextureCreateDesc from a CPUBuffer
+// to catch mismatches between the two description systems.
+// ⚠️ This exists as a safety mechanism while the API is refactored.
+inline llvm::Error
+validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
+                                    const CPUBuffer &Buf) {
+  auto ExpectedFmt = toTextureFormat(Buf.Format, Buf.Channels);
+  if (!ExpectedFmt)
+    return ExpectedFmt.takeError();
+  if (Desc.Format != *ExpectedFmt)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc format '%s' does not match CPUBuffer format "
+        "(DataFormat %d, %d channels -> '%s').",
+        getTextureFormatName(Desc.Format).data(), static_cast<int>(Buf.Format),
+        Buf.Channels, getTextureFormatName(*ExpectedFmt).data());
+  if (Desc.Width != static_cast<uint32_t>(Buf.OutputProps.Width))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc width %u does not match CPUBuffer width %d.",
+        Desc.Width, Buf.OutputProps.Width);
+  if (Desc.Height != static_cast<uint32_t>(Buf.OutputProps.Height))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc height %u does not match CPUBuffer height %d.",
+        Desc.Height, Buf.OutputProps.Height);
+  if (Desc.MipLevels != static_cast<uint32_t>(Buf.OutputProps.MipLevels))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
+        "levels %d.",
+        Desc.MipLevels, Buf.OutputProps.MipLevels);
+  uint32_t TexelSize = getTextureFormatSize(Desc.Format);
+  if (Buf.Stride > 0 && static_cast<uint32_t>(Buf.Stride) != TexelSize)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "CPUBuffer stride %d does not match texture format element size %u.",
+        Buf.Stride, TexelSize);
+  uint64_t ExpectedSize =
+      static_cast<uint64_t>(Desc.Width) * Desc.Height * TexelSize;
+  if (static_cast<uint64_t>(Buf.size()) != ExpectedSize)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "CPUBuffer size %u does not match expected size %llu "
+        "(width %u * height %u * element size %u).",
+        Buf.size(), ExpectedSize, Desc.Width, Desc.Height, TexelSize);
+  return llvm::Error::success();
 }
 
 class Texture {

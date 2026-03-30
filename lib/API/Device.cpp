@@ -101,5 +101,8 @@ offloadtest::createRenderTarget(Device &Dev, const CPUBuffer &Buf) {
   Desc.MipLevels = 1;
   Desc.OptimizedClearValue = ClearColor{};
 
+  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
+    return Err;
+
   return Dev.createTexture("RenderTarget", Desc);
 }
