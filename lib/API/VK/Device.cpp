@@ -889,7 +889,7 @@ public:
         // both valid image and sampler handles.
         if (R.isSampledTexture()) {
           BufferRef NullHost = {0, 0};
-          auto ExSamplerRef = createSampler(IS, R, NullHost);
+          auto ExSamplerRef = createSampler(R, NullHost);
           if (!ExSamplerRef)
             return ExSamplerRef.takeError();
           ExImageRef->Image.Sampler = ExSamplerRef->Image.Sampler;

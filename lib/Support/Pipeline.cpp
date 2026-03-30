@@ -260,7 +260,7 @@ static void setCounters(IO &I, offloadtest::Buffer &B) {
 void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
                                                   offloadtest::Sampler &S) {
   I.mapRequired("Name", S.Name);
-  I.mapOptional("Kind", S.Kind, SamplerKind::Sampler);
+  I.mapOptional("Kind", S.Kind);
   I.mapOptional("MinFilter", S.MinFilter);
   I.mapOptional("MagFilter", S.MagFilter);
   I.mapOptional("Address", S.Address);
