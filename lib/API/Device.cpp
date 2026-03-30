@@ -106,3 +106,17 @@ offloadtest::createRenderTarget(Device &Dev, const CPUBuffer &Buf) {
 
   return Dev.createTexture("RenderTarget", Desc);
 }
+
+llvm::Expected<std::shared_ptr<Texture>>
+createDepthStencil(Device &Dev, uint32_t Width, uint32_t Height) {
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::DepthStencil;
+  Desc.Format = TextureFormat::D32FloatS8Uint;
+  Desc.Width = Width;
+  Desc.Height = Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
+
+  return Dev.createTexture("DepthStencil", Desc);
+}

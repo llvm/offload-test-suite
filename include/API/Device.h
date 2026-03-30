@@ -104,6 +104,12 @@ public:
 llvm::Expected<std::shared_ptr<Texture>>
 createRenderTarget(Device &Dev, const CPUBuffer &Buf);
 
+// Creates a depth/stencil texture matching the dimensions of a render target.
+// TODO: Currently always created for graphics pipelines. Consider making this
+// conditional on the pipeline definition (e.g. a flag in Pipeline).
+llvm::Expected<std::shared_ptr<Texture>>
+createDepthStencil(Device &Dev, uint32_t Width, uint32_t Height);
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_DEVICE_H
