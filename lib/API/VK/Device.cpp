@@ -80,7 +80,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::Sampler:
   case ResourceKind::SamplerComparison:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
-  case ResourceKind::CombinedImageSampler:
+  case ResourceKind::SampledTexture:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   }
   llvm_unreachable("All cases handled");
@@ -151,7 +151,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
   case ResourceKind::SamplerComparison:
-  case ResourceKind::CombinedImageSampler:
+  case ResourceKind::SampledTexture:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
@@ -161,7 +161,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
-  case ResourceKind::CombinedImageSampler:
+  case ResourceKind::SampledTexture:
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
@@ -801,9 +801,9 @@ public:
   }
 
   llvm::Error createResource(Resource &R, InvocationState &IS) {
-    if (R.Kind == ResourceKind::CombinedImageSampler) {
-      auto *Buf = R.CombinedImageSamplerPtr->TexturePtr;
-      auto *Samp = R.CombinedImageSamplerPtr->SamplerPtr;
+    if (R.Kind == ResourceKind::SampledTexture) {
+      auto *Buf = R.SampledTexturePtr->TexturePtr;
+      auto *Samp = R.SampledTexturePtr->SamplerPtr;
 
       Resource ReusedRes;
       ReusedRes.Kind = Samp->ComparisonOp != CompareFunction::Never
@@ -1249,8 +1249,8 @@ public:
           VkImageViewCreateInfo ViewCreateInfo = {};
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
-          const auto *Buf = R.Kind == ResourceKind::CombinedImageSampler
-                                ? R.CombinedImageSamplerPtr->TexturePtr
+          const auto *Buf = R.Kind == ResourceKind::SampledTexture
+                                ? R.SampledTexturePtr->TexturePtr
                                 : R.BufferPtr;
 
           ViewCreateInfo.format = getVKFormat(Buf->Format, Buf->Channels);
