@@ -26,11 +26,16 @@ int main(int ArgC, char **ArgV) {
   const ExitOnError ExitOnErr("api-query: error: ");
 
   const DeviceConfig Config;
-  if (auto Err = Device::initialize(Config))
-    logAllUnhandledErrors(std::move(Err), errs(), "api-query: error: ");
+  auto DevicesOrErr = initializeDevices(Config);
+  if (!DevicesOrErr) {
+    logAllUnhandledErrors(std::move(DevicesOrErr.takeError()), errs(),
+                          "api-query: error: ");
+    return 1;
+  }
+  auto Devices = *DevicesOrErr;
 
   outs() << "Devices:\n";
-  for (const auto &D : Device::devices()) {
+  for (const auto &D : Devices) {
     outs() << "- API: " << D->getAPIName() << "\n";
     outs() << "  Description: " << D->getDescription() << "\n";
     outs() << "  Driver: " << D->getDriverName() << "\n";
@@ -42,6 +47,6 @@ int main(int ArgC, char **ArgV) {
     }
     D->printExtra(outs());
   }
-  Device::uninitialize();
+
   return 0;
 }

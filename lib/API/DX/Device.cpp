@@ -1735,7 +1735,8 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
+llvm::Error offloadtest::initializeDX12Devices(const DeviceConfig Config,
+                                               DeviceVector &Devices) {
 #ifdef _WIN32
   if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
     ComPtr<ID3D12Debug1> Debug1;
@@ -1777,7 +1778,7 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
     if (!ExDevice)
       return ExDevice.takeError();
     auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
-    Device::registerDevice(std::static_pointer_cast<Device>(ShPtr));
+    Devices.push_back(ShPtr);
   }
   return llvm::Error::success();
 }

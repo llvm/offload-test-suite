@@ -334,6 +334,13 @@ static bool isExtensionSupported(
   return false;
 }
 
+struct VulkanInstance {
+  VkInstance Instance;
+  VulkanInstance(VkInstance Instance) : Instance(Instance) {}
+  VulkanInstance(VulkanInstance &) = delete;
+  ~VulkanInstance() { vkDestroyInstance(Instance, nullptr); }
+};
+
 namespace {
 
 class VulkanBuffer : public offloadtest::Buffer {
@@ -366,7 +373,8 @@ public:
 
 class VulkanDevice : public offloadtest::Device {
 private:
-  VkPhysicalDevice PhysicalDevice;
+  std::shared_ptr<VulkanInstance> Instance;
+  VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
   VkPhysicalDeviceProperties Props;
   VkPhysicalDeviceProperties2 Props2;
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
@@ -444,21 +452,21 @@ private:
   };
 
   struct InvocationState {
-    VkCommandPool CmdPool;
-    VkCommandBuffer CmdBuffer;
-    VkPipelineLayout PipelineLayout;
+    VkCommandPool CmdPool = VK_NULL_HANDLE;
+    VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     VkDescriptorPool Pool = nullptr;
-    VkPipelineCache PipelineCache;
-    VkPipeline Pipeline;
+    VkPipelineCache PipelineCache = VK_NULL_HANDLE;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
 
     // FrameBuffer associated data for offscreen rendering.
-    VkFramebuffer FrameBuffer;
+    VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
     ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
                                           nullptr};
     ImageRef DepthStencil = {0, 0, 0};
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
-    VkRenderPass RenderPass;
+    VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
 
     llvm::SmallVector<CompiledShader> Shaders;
@@ -479,7 +487,8 @@ private:
 
 public:
   static llvm::Expected<std::shared_ptr<VulkanDevice>>
-  create(VkPhysicalDevice PhysicalDevice,
+  create(std::shared_ptr<VulkanInstance> Instance,
+         VkPhysicalDevice PhysicalDevice,
          llvm::SmallVector<VkLayerProperties, 0> InstanceLayers) {
     VkPhysicalDeviceProperties Props;
     vkGetPhysicalDeviceProperties(PhysicalDevice, &Props);
@@ -561,16 +570,16 @@ public:
 
     const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
 
-    return std::make_shared<VulkanDevice>(PhysicalDevice, Props, Device,
-                                          std::move(GraphicsQueue),
+    return std::make_shared<VulkanDevice>(Instance, PhysicalDevice, Props,
+                                          Device, std::move(GraphicsQueue),
                                           std::move(InstanceLayers));
   }
 
-  VulkanDevice(VkPhysicalDevice P, VkPhysicalDeviceProperties Props, VkDevice D,
-               VulkanQueue Q,
+  VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
+               VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
                llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
-      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(std::move(Q)),
-        InstanceLayers(std::move(InstanceLayers)) {
+      : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
+        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -2194,7 +2203,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error cleanup(InvocationState &IS) {
+  void cleanup(InvocationState &IS) {
     vkQueueWaitIdle(GraphicsQueue.Queue);
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(Device, V, nullptr);
@@ -2245,14 +2254,17 @@ public:
       vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }
 
-    vkDestroyPipeline(Device, IS.Pipeline, nullptr);
+    if (IS.Pipeline)
+      vkDestroyPipeline(Device, IS.Pipeline, nullptr);
 
     for (auto &S : IS.Shaders)
       vkDestroyShaderModule(Device, S.Shader, nullptr);
 
-    vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
+    if (IS.PipelineCache)
+      vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
 
-    vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
+    if (IS.PipelineLayout)
+      vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
 
     for (auto &L : IS.DescriptorSetLayouts)
       vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -2260,182 +2272,179 @@ public:
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
 
-    vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
+    if (IS.CmdPool)
+      vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
 
-    return llvm::Error::success();
+    if (Device) {
+      vkDestroyDevice(Device, nullptr);
+      Device = VK_NULL_HANDLE;
+    }
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
-    if (auto Err = createDevice(State))
+    if (auto Err = createDevice(State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Physical device created.\n";
-    if (auto Err = createShaderModules(P, State))
+    if (auto Err = createShaderModules(P, State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Shader module created.\n";
-    if (auto Err = createCommandBuffer(State))
+    if (auto Err = createCommandBuffer(State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Copy command buffer created.\n";
-    if (auto Err = createResources(P, State))
+    if (auto Err = createResources(P, State)) {
+      cleanup(State);
       return Err;
+    }
     if (P.isGraphics()) {
-      if (auto Err = createRenderPass(P, State))
+      if (auto Err = createRenderPass(P, State)) {
+        cleanup(State);
         return Err;
+      }
       llvm::outs() << "Render pass created.\n";
-      if (auto Err = createFrameBuffer(P, State))
+      if (auto Err = createFrameBuffer(P, State)) {
+        cleanup(State);
         return Err;
+      }
       llvm::outs() << "Frame buffer created.\n";
     }
     llvm::outs() << "Memory buffers created.\n";
-    if (auto Err = executeCommandBuffer(State))
+    if (auto Err = executeCommandBuffer(State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Executed copy command buffer.\n";
-    if (auto Err = createCommandBuffer(State))
+    if (auto Err = createCommandBuffer(State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Execute command buffer created.\n";
-    if (auto Err = createDescriptorPool(P, State))
+    if (auto Err = createDescriptorPool(P, State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Descriptor pool created.\n";
-    if (auto Err = createDescriptorSets(P, State))
+    if (auto Err = createDescriptorSets(P, State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createPipeline(P, State))
+    if (auto Err = createPipeline(P, State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Compute pipeline created.\n";
-    if (auto Err = createCommands(P, State))
+    if (auto Err = createCommands(P, State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    if (auto Err =
+            executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Executed compute command buffer.\n";
-    if (auto Err = readBackData(P, State))
+    if (auto Err = readBackData(P, State)) {
+      cleanup(State);
       return Err;
+    }
     llvm::outs() << "Compute pipeline created.\n";
 
-    if (auto Err = cleanup(State))
-      return Err;
+    cleanup(State);
     llvm::outs() << "Cleanup complete.\n";
-    return llvm::Error::success();
-  }
-};
-
-class VKContext {
-private:
-  VkInstance Instance = VK_NULL_HANDLE;
-  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
-  llvm::SmallVector<std::shared_ptr<VulkanDevice>> Devices;
-
-  VKContext() = default;
-  ~VKContext() { cleanup(); }
-  VKContext(const VKContext &) = delete;
-
-public:
-  static VKContext &instance() {
-    static VKContext Ctx;
-    return Ctx;
-  }
-
-  void cleanup() {
-    // Free devices before destroying the instance
-    Devices.clear();
-
-#ifndef NDEBUG
-    auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-        Instance, "vkDestroyDebugUtilsMessengerEXT");
-    if (Func != nullptr) {
-      Func(Instance, DebugMessenger, nullptr);
-    }
-#endif
-    vkDestroyInstance(Instance, NULL);
-    Instance = VK_NULL_HANDLE;
-  }
-
-  llvm::Error initialize(const DeviceConfig Config) {
-
-    // Request the highest supported API version
-    uint32_t ApiVersion = 0;
-    vkEnumerateInstanceVersion(&ApiVersion);
-
-    VkApplicationInfo AppInfo = {};
-    AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    AppInfo.pApplicationName = "OffloadTest";
-    AppInfo.apiVersion = ApiVersion;
-
-    VkInstanceCreateInfo CreateInfo = {};
-    CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    CreateInfo.pApplicationInfo = &AppInfo;
-
-    llvm::SmallVector<const char *> EnabledInstanceExtensions;
-    llvm::SmallVector<const char *> EnabledLayers;
-#if __APPLE__
-    // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
-    // extension is required, so we can just force this one on. If it fails, the
-    // whole device would fail anyways.
-    EnabledInstanceExtensions.push_back(
-        VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
-
-    const llvm::SmallVector<VkLayerProperties, 0> AvailableInstanceLayers =
-        queryInstanceLayers();
-    if (Config.EnableValidationLayer) {
-      const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
-      if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
-        EnabledLayers.push_back(ValidationLayer.data());
-    }
-    const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
-        queryInstanceExtensions(nullptr);
-    if (Config.EnableDebugLayer) {
-      const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-      if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
-        EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
-    }
-
-    CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
-    CreateInfo.enabledLayerCount = EnabledLayers.size();
-    CreateInfo.ppEnabledExtensionNames = EnabledInstanceExtensions.data();
-    CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
-
-    const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a base Vulkan device");
-    if (Res)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error: %d",
-                                     Res);
-
-#ifndef NDEBUG
-    DebugMessenger = registerDebugUtilCallback(Instance);
-#endif
-
-    uint32_t DeviceCount = 0;
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to get device count");
-    std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                   PhysicalDevices.data()))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to enumerate devices");
-    for (const auto &PDev : PhysicalDevices) {
-      auto DeviceOrErr =
-          VulkanDevice::create(PDev, std::move(AvailableInstanceLayers));
-      if (!DeviceOrErr) {
-        return DeviceOrErr.takeError();
-      }
-      const std::shared_ptr<VulkanDevice> Dev = *DeviceOrErr;
-      Devices.push_back(Dev);
-      Device::registerDevice(std::static_pointer_cast<Device>(Dev));
-    }
-
     return llvm::Error::success();
   }
 };
 } // namespace
 
-llvm::Error Device::initializeVulkanDevices(const DeviceConfig Config) {
-  return VKContext::instance().initialize(Config);
-}
+llvm::Error offloadtest::initializeVulkanDevices(const DeviceConfig Config,
+                                                 DeviceVector &Devices) {
+  // Request the highest supported API version
+  uint32_t ApiVersion = 0;
+  vkEnumerateInstanceVersion(&ApiVersion);
 
-void Device::cleanupVulkanDevices() { VKContext::instance().cleanup(); }
+  VkApplicationInfo AppInfo = {};
+  AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+  AppInfo.pApplicationName = "OffloadTest";
+  AppInfo.apiVersion = ApiVersion;
+
+  VkInstanceCreateInfo CreateInfo = {};
+  CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  CreateInfo.pApplicationInfo = &AppInfo;
+
+  llvm::SmallVector<const char *> EnabledInstanceExtensions;
+  llvm::SmallVector<const char *> EnabledLayers;
+#if __APPLE__
+  // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
+  // extension is required, so we can just force this one on. If it fails, the
+  // whole device would fail anyways.
+  EnabledInstanceExtensions.push_back(
+      VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+  const llvm::SmallVector<VkLayerProperties, 0> AvailableInstanceLayers =
+      queryInstanceLayers();
+  if (Config.EnableValidationLayer) {
+    const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
+    if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
+      EnabledLayers.push_back(ValidationLayer.data());
+  }
+  const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
+      queryInstanceExtensions(nullptr);
+  if (Config.EnableDebugLayer) {
+    const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
+    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
+      EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
+  }
+
+  CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
+  CreateInfo.enabledLayerCount = EnabledLayers.size();
+  CreateInfo.ppEnabledExtensionNames = EnabledInstanceExtensions.data();
+  CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
+
+  VkInstance Instance = VK_NULL_HANDLE;
+  const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+  if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Cannot find a base Vulkan device");
+  if (Res)
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Unknown Vulkan initialization error: %d",
+                                   Res);
+
+#ifndef NDEBUG
+  DebugMessenger = registerDebugUtilCallback(Instance);
+#endif
+
+  uint32_t DeviceCount = 0;
+  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Failed to get device count");
+  std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
+  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                 PhysicalDevices.data()))
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Failed to enumerate devices");
+
+  std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
+      std::make_shared<VulkanInstance>(Instance);
+  for (const auto &PDev : PhysicalDevices) {
+    auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
+                                            std::move(AvailableInstanceLayers));
+    if (!DeviceOrErr) {
+      return DeviceOrErr.takeError();
+    }
+    const std::shared_ptr<VulkanDevice> Dev = *DeviceOrErr;
+    Devices.push_back(Dev);
+  }
+
+  return llvm::Error::success();
+}
