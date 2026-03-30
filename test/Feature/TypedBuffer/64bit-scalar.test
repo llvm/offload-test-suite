@@ -1,0 +1,137 @@
+#--- source.hlsl
+
+// This test checks that we will get the expected values from invoking
+// Load and Store methods on 64-bit single-element typed buffers `[RW]Buffer`.
+
+// The expected behaviour is to load the values in at the given offset, 
+// add them, and store the result at the respective offset in `Out`.
+
+Buffer<int64_t> U0 : register(t0);
+RWBuffer<int64_t> V0 : register(u1);
+Buffer<uint64_t> U1 : register(t2);
+RWBuffer<uint64_t> V1 : register(u3);
+
+RWBuffer<int64_t> Out0 : register(u4);
+RWBuffer<uint64_t> Out1 : register(u5);
+
+[numthreads(1,1,1)]
+void main() {
+  // int64_t
+  Out0[0] = U0[0] + V0[0];
+  Out0[1] = U0[1] + V0[1];
+  Out0[2] = U0[2] + V0[2];
+
+  // uint64_t
+  Out1[0] = U1[0] + V1[0];
+  Out1[1] = U1[1] + V1[1];
+  Out1[2] = U1[2] + V1[2];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: U0
+    Format: Int64
+    Channels: 1
+    Data: [ -100, 200, -300 ]
+  - Name: V0
+    Format: Int64
+    Channels: 1
+    Data: [ 5, 6, -7 ]
+  - Name: Out0
+    Format: Int64
+    Channels: 1
+    FillSize: 24
+  - Name: ExpectedOut0
+    Format: Int64
+    Channels: 1
+    Data: [ -95, 206, -307 ]
+  - Name: U1
+    Format: UInt64
+    Channels: 1
+    Data: [ 100, 200, 300 ]
+  - Name: V1
+    Format: UInt64
+    Channels: 1
+    Data: [ 5, 6, 7 ]
+  - Name: Out1
+    Format: UInt64
+    Channels: 1
+    FillSize: 24
+  - Name: ExpectedOut1
+    Format: UInt64
+    Channels: 1
+    Data: [ 105, 206, 307 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+DescriptorSets:
+  - Resources:
+    - Name: U0
+      Kind: Buffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: V0
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: U1
+      Kind: Buffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: V1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out0
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out1
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+# UNSUPPORTED: Metal
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1030
+# XFAIL: Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1029
+# XFAIL: QC && DirectX
+
+# REQUIRES: Int64
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
