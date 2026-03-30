@@ -128,7 +128,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   case ResourceKind::Sampler:
     return D3D12_RESOURCE_DIMENSION_UNKNOWN;
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("SampledTextures aren't supported in DirectX!");
   }
   llvm_unreachable("All cases handled");
@@ -155,7 +155,7 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
 
   case ResourceKind::Sampler:
     return SAMPLER;
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Combined image samplers aren't supported in DirectX!");
   }
   llvm_unreachable("All cases handled");
@@ -227,7 +227,7 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
     llvm_unreachable("Not an SRV type!");
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Combined image samplers aren't supported in DirectX!");
   }
   return Desc;
@@ -266,7 +266,7 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
     llvm_unreachable("Not a UAV type!");
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Combined image samplers aren't supported in DirectX!");
   }
   return Desc;

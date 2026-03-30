@@ -300,7 +300,7 @@ class MTLDevice : public offloadtest::Device {
         break;
       case ResourceKind::Sampler:
         llvm_unreachable("Not implemented yet.");
-      case ResourceKind::SampledTexture:
+      case ResourceKind::SampledTexture2D:
         llvm_unreachable("SampledTextures aren't supported in Metal.");
       case ResourceKind::StructuredBuffer:
       case ResourceKind::RWStructuredBuffer:

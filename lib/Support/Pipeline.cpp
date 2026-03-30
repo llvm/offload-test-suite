@@ -37,32 +37,6 @@ uint32_t PushConstantBlock::size() const {
 namespace llvm {
 namespace yaml {
 
-void MappingTraits<offloadtest::SampledTexture>::mapping(
-    IO &I, offloadtest::SampledTexture &C) {
-  I.mapRequired("Name", C.Name);
-
-  if (I.outputting()) {
-    I.mapRequired("Texture", C.Texture);
-    I.mapRequired("TextureKind", C.TextureKind);
-  } else {
-    I.mapOptional("Texture", C.Texture);
-    if (C.Texture.empty())
-      I.mapOptional("Buffer", C.Texture);
-    if (C.Texture.empty()) {
-      I.setError("SampledTexture requires 'Texture' field");
-      return;
-    }
-    I.mapOptional("TextureKind", C.TextureKind, ResourceKind::Texture2D);
-    if (C.TextureKind != ResourceKind::Texture2D) {
-      I.setError("SampledTexture currently only supports TextureKind: "
-                 "Texture2D");
-      return;
-    }
-  }
-
-  I.mapRequired("Sampler", C.Sampler);
-}
-
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
@@ -71,29 +45,21 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
 
   I.mapRequired("Buffers", P.Buffers);
   I.mapOptional("Samplers", P.Samplers);
-  I.mapOptional("SampledTextures", P.SampledTextures);
   I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
   I.mapOptional("PushConstants", P.PushConstants);
 
   if (!I.outputting()) {
-    for (auto &CIS : P.SampledTextures) {
-      CIS.TexturePtr = P.getBuffer(CIS.Texture);
-      if (!CIS.TexturePtr)
-        I.setError(Twine("Referenced texture ") + CIS.Texture + " not found!");
-      CIS.SamplerPtr = P.getSampler(CIS.Sampler);
-      if (!CIS.SamplerPtr)
-        I.setError(Twine("Referenced sampler ") + CIS.Sampler + " not found!");
-    }
-
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (R.Kind == ResourceKind::SampledTexture) {
-          R.SampledTexturePtr = P.getSampledTexture(R.Name);
-          if (!R.SampledTexturePtr)
-            I.setError(Twine("Referenced combined image sampler ") + R.Name +
-                       " not found!");
+        if (R.isSampledTexture()) {
+          R.SamplerPtr = P.getSampler(R.Name);
+          if (!R.SamplerPtr)
+            I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
+          R.BufferPtr = P.getBuffer(R.Name);
+          if (!R.BufferPtr)
+            I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
         } else if (R.isSampler()) {
           R.SamplerPtr = P.getSampler(R.Name);
           if (!R.SamplerPtr)

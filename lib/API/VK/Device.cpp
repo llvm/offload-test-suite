@@ -79,7 +79,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   case ResourceKind::Sampler:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   }
   llvm_unreachable("All cases handled");
@@ -149,7 +149,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
@@ -159,7 +159,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
-  case ResourceKind::SampledTexture:
+  case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
@@ -848,44 +848,6 @@ public:
   }
 
   llvm::Error createResource(Resource &R, InvocationState &IS) {
-    if (R.Kind == ResourceKind::SampledTexture) {
-      auto *Buf = R.SampledTexturePtr->TexturePtr;
-      auto *Samp = R.SampledTexturePtr->SamplerPtr;
-
-      Resource ReusedRes;
-      ReusedRes.Kind = ResourceKind::Sampler;
-      ReusedRes.SamplerPtr = Samp;
-
-      BufferRef HostBuf = {0, 0};
-      auto ExSamplerRef = createSampler(IS, ReusedRes, HostBuf);
-      if (!ExSamplerRef)
-        return ExSamplerRef.takeError();
-      VkSampler Sampler = ExSamplerRef->Image.Sampler;
-
-      ReusedRes.Kind = ResourceKind::Texture2D;
-      ReusedRes.BufferPtr = Buf;
-
-      ResourceBundle Bundle{getDescriptorType(R.Kind), Buf->size(), Buf};
-      for (auto &ResData : Buf->Data) {
-        auto ExHostBuf = createBuffer(
-            IS,
-            VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, Buf->size(), ResData.get());
-        if (!ExHostBuf)
-          return ExHostBuf.takeError();
-
-        auto ExImageRef = createImage(IS, ReusedRes, *ExHostBuf);
-        if (!ExImageRef)
-          return ExImageRef.takeError();
-
-        ResourceRef RR = *ExImageRef;
-        RR.Image.Sampler = Sampler;
-        Bundle.ResourceRefs.push_back(RR);
-      }
-      IS.Resources.push_back(Bundle);
-      return llvm::Error::success();
-    }
-
     // Samplers don't have backing data buffers, so handle them separately
     if (R.isSampler()) {
       ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
@@ -910,6 +872,17 @@ public:
         auto ExImageRef = createImage(R, *ExHostBuf);
         if (!ExImageRef)
           return ExImageRef.takeError();
+
+        // Sampled textures use combined-image-sampler descriptors and need
+        // both valid image and sampler handles.
+        if (R.isSampledTexture()) {
+          BufferRef NullHost = {0, 0};
+          auto ExSamplerRef = createSampler(IS, R, NullHost);
+          if (!ExSamplerRef)
+            return ExSamplerRef.takeError();
+          ExImageRef->Image.Sampler = ExSamplerRef->Image.Sampler;
+        }
+
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
         auto ExDeviceBuf = createBuffer(
@@ -1015,7 +988,6 @@ public:
                               {},
                               P.Bindings.RTargetBufferPtr,
                               nullptr,
-                              nullptr,
                               false,
                               std::nullopt,
                               false};
@@ -1048,7 +1020,6 @@ public:
                                      {},
                                      {},
                                      P.Bindings.VertexBufferPtr,
-                                     nullptr,
                                      nullptr,
                                      false,
                                      std::nullopt,
@@ -1274,7 +1245,7 @@ public:
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         uint32_t IndexOfFirstBufferDataInArray;
-        if (R.Kind == ResourceKind::Sampler) {
+        if (R.isSampler()) {
           IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             const VkDescriptorImageInfo ImageInfo = {
@@ -1286,22 +1257,20 @@ public:
           VkImageViewCreateInfo ViewCreateInfo = {};
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
-          const auto *Buf = R.Kind == ResourceKind::SampledTexture
-                                ? R.SampledTexturePtr->TexturePtr
-                                : R.BufferPtr;
-
-          ViewCreateInfo.format = getVKFormat(Buf->Format, Buf->Channels);
+          ViewCreateInfo.format =
+              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
           ViewCreateInfo.components = {
               VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
           ViewCreateInfo.subresourceRange.aspectMask =
-              Buf->Format == DataFormat::Depth32 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
+              R.BufferPtr->Format == DataFormat::Depth32
+                  ? VK_IMAGE_ASPECT_DEPTH_BIT
+                  : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
           ViewCreateInfo.subresourceRange.layerCount = 1;
           ViewCreateInfo.subresourceRange.levelCount =
-              Buf->OutputProps.MipLevels;
+              R.BufferPtr->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;

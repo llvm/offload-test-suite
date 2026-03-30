@@ -73,7 +73,17 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: SampledTex0
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0,  # White (1,1)
+            0.5, 0.5, 0.5, 1.0 ] # Mip 1 (Average)
+
+  - Name: SampledTex1
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
@@ -121,33 +131,23 @@ Bindings:
   RenderTarget: RT
 
 Samplers:
-  - Name: Samp0
+  - Name: SampledTex0
     Address: Clamp
     MinFilter: Linear
     MagFilter: Nearest
-  - Name: Samp1
+  - Name: SampledTex1
     Address: Clamp
     MinFilter: Nearest
     MagFilter: Linear
 
-SampledTextures:
-  - Name: SampledTex0
-    Texture: Tex
-    TextureKind: Texture2D
-    Sampler: Samp0
-  - Name: SampledTex1
-    Texture: Tex
-    TextureKind: Texture2D
-    Sampler: Samp1
-
 DescriptorSets:
   - Resources:
     - Name: SampledTex0
-      Kind: SampledTexture
+      Kind: SampledTexture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
     - Name: SampledTex1
-      Kind: SampledTexture
+      Kind: SampledTexture2D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 1 }
     - Name: Out
