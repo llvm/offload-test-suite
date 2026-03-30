@@ -14,8 +14,8 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> CombinedSamp0 : register(s0); // Mag=Nearest, Min=Linear
-[[vk::binding(1, 0)]] vk::SampledTexture2D<float4> CombinedSamp1 : register(s1); // Mag=Linear, Min=Nearest
+[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTex0 : register(s0); // Mag=Nearest, Min=Linear
+[[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTex1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
@@ -36,22 +36,22 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Samp0 (Mag=Nearest, Min=Linear):
   //   Sample(uv_mag) -> Mag(Nearest) -> White
   //   Sample(uv_min) -> Min(Linear)  -> Grey
-  float4 r0 = CombinedSamp0.Sample(uv_mag);
-  float4 r1 = CombinedSamp0.Sample(uv_min);
+  float4 r0 = SampledTex0.Sample(uv_mag);
+  float4 r1 = SampledTex0.Sample(uv_min);
 
   // Samp1 (Mag=Linear, Min=Nearest):
   //   Sample(uv_mag) -> Mag(Linear)  -> Grey
   //   Sample(uv_min) -> Min(Nearest) -> White
-  float4 r2 = CombinedSamp1.Sample(uv_mag);
-  float4 r3 = CombinedSamp1.Sample(uv_min);
+  float4 r2 = SampledTex1.Sample(uv_mag);
+  float4 r3 = SampledTex1.Sample(uv_min);
 
   // Overloads with Offset
   // Offset (-1, -1) applied to (0.5001, 0.5001) effectively samples near (0,0) -> Red
-  float4 r4 = CombinedSamp0.Sample(uv_mag, int2(-1, -1));
+  float4 r4 = SampledTex0.Sample(uv_mag, int2(-1, -1));
 
   // Overloads with Offset and Clamp
   // Clamp 0.0f should behave normally (Red)
-  float4 r5 = CombinedSamp0.Sample(uv_mag, int2(-1, -1), 0.0f);
+  float4 r5 = SampledTex0.Sample(uv_mag, int2(-1, -1), 0.0f);
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -130,24 +130,24 @@ Samplers:
     MinFilter: Nearest
     MagFilter: Linear
 
-CombinedImageSamplers:
-  - Name: CombinedSamp0
+SampledTextures:
+  - Name: SampledTex0
     Texture: Tex
     TextureKind: Texture2D
     Sampler: Samp0
-  - Name: CombinedSamp1
+  - Name: SampledTex1
     Texture: Tex
     TextureKind: Texture2D
     Sampler: Samp1
 
 DescriptorSets:
   - Resources:
-    - Name: CombinedSamp0
-      Kind: CombinedImageSampler
+    - Name: SampledTex0
+      Kind: SampledTexture
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: CombinedSamp1
-      Kind: CombinedImageSampler
+    - Name: SampledTex1
+      Kind: SampledTexture
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 1 }
     - Name: Out
