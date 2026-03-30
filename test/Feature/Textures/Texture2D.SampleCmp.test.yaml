@@ -152,11 +152,13 @@ Bindings:
 
 Samplers:
   - Name: Samp
+    Kind: SamplerComparison
     MinFilter: Linear
     MagFilter: Linear
     Address: Clamp
     ComparisonOp: Less
   - Name: SampGreater
+    Kind: SamplerComparison
     MinFilter: Linear
     MagFilter: Linear
     Address: Clamp
@@ -169,7 +171,7 @@ DescriptorSets:
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
     - Name: Samp
-      Kind: SamplerComparison
+      Kind: Sampler
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 1 }
     - Name: Out
@@ -177,7 +179,7 @@ DescriptorSets:
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 2 }
     - Name: SampGreater
-      Kind: SamplerComparison
+      Kind: Sampler
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
 

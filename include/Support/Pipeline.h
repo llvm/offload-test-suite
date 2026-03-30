@@ -59,7 +59,6 @@ enum class ResourceKind {
   RWTexture2D,
   ConstantBuffer,
   Sampler,
-  SamplerComparison,
   SampledTexture,
 };
 
@@ -78,6 +77,8 @@ enum class CompareFunction {
   Always
 };
 
+enum class SamplerKind { Sampler, SamplerComparison };
+
 struct Sampler {
   std::string Name;
   FilterMode MinFilter = FilterMode::Linear;
@@ -87,6 +88,7 @@ struct Sampler {
   float MaxLOD = std::numeric_limits<float>::max();
   float MipLODBias = 0.0f;
   CompareFunction ComparisonOp = CompareFunction::Never;
+  SamplerKind Kind = SamplerKind::Sampler;
 };
 
 struct DirectXBinding {
@@ -197,7 +199,6 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
     case ResourceKind::SampledTexture:
       return false;
     case ResourceKind::StructuredBuffer:
@@ -213,7 +214,6 @@ struct Resource {
   bool isSampler() const {
     switch (Kind) {
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
     case ResourceKind::SampledTexture:
       return true;
     case ResourceKind::Buffer:
@@ -239,7 +239,6 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
       return false;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
@@ -293,7 +292,6 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
     case ResourceKind::SampledTexture:
       return false;
     case ResourceKind::RWBuffer:
@@ -619,6 +617,15 @@ template <> struct ScalarEnumerationTraits<offloadtest::CompareFunction> {
   }
 };
 
+template <> struct ScalarEnumerationTraits<offloadtest::SamplerKind> {
+  static void enumeration(IO &I, offloadtest::SamplerKind &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::SamplerKind::Val)
+    ENUM_CASE(Sampler);
+    ENUM_CASE(SamplerComparison);
+#undef ENUM_CASE
+  }
+};
+
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   static void enumeration(IO &I, offloadtest::DataFormat &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataFormat::Val)
@@ -654,7 +661,6 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(RWTexture2D);
     ENUM_CASE(ConstantBuffer);
     ENUM_CASE(Sampler);
-    ENUM_CASE(SamplerComparison);
     ENUM_CASE(SampledTexture);
 #undef ENUM_CASE
   }
