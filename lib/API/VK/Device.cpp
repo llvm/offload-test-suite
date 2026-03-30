@@ -174,6 +174,18 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+static VkImageType getVKImageType(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
+    return VK_IMAGE_TYPE_2D;
+  default:
+    llvm_unreachable("Unsupported image kind");
+  }
+  llvm_unreachable("All cases handled");
+}
+
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
   switch (Stage) {
   case Stages::Compute:
@@ -773,7 +785,7 @@ public:
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
@@ -929,7 +941,7 @@ public:
     // Create an optimal image used as the depth stencil attachment
     VkImageCreateInfo ImageCi = {};
     ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCi.imageType = VK_IMAGE_TYPE_2D;
+    ImageCi.imageType = getVKImageType(ResourceKind::Texture2D);
     ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     // Use example's height and width
     ImageCi.extent = {
@@ -1462,7 +1474,7 @@ public:
     std::array<VkImageView, 2> Views = {};
     VkImageViewCreateInfo ViewCreateInfo = {};
     ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ViewCreateInfo.viewType = getImageViewType(ResourceKind::Texture2D);
     ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
                                         P.Bindings.RTargetBufferPtr->Channels);
     ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
@@ -1482,7 +1494,7 @@ public:
 
     VkImageViewCreateInfo DepthStencilViewCi = {};
     DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    DepthStencilViewCi.viewType = getImageViewType(ResourceKind::Texture2D);
     DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     DepthStencilViewCi.subresourceRange = {};
     DepthStencilViewCi.subresourceRange.aspectMask =
