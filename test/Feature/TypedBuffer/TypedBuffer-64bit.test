@@ -225,7 +225,7 @@ DescriptorSets:
 
 # This test is failing on Vulkan due to two separate issues.
 # Bug https://github.com/llvm/offload-test-suite/issues/1030
-# Bug <link>
+# Bug https://github.com/llvm/offload-test-suite/issues/1037
 # XFAIL: Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1029
