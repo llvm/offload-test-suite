@@ -128,6 +128,9 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/986
 # XFAIL: Intel && Vulkan && DXC
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1013
+# XFAIL: WARP && AMD
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
