@@ -68,16 +68,11 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   case DataFormat::Float32:
     DXFormats(FLOAT) break;
   case DataFormat::UInt64:
+  case DataFormat::Int64:
     if (Channels == 1)
       return DXGI_FORMAT_R32G32_UINT;
     if (Channels == 2)
       return DXGI_FORMAT_R32G32B32A32_UINT;
-    llvm_unreachable("Unsupported channel count for 64-bit format");
-  case DataFormat::Int64:
-    if (Channels == 1)
-      return DXGI_FORMAT_R32G32_SINT;
-    if (Channels == 2)
-      return DXGI_FORMAT_R32G32B32A32_SINT;
     llvm_unreachable("Unsupported channel count for 64-bit format");
   case DataFormat::Depth32:
     llvm_unreachable(
