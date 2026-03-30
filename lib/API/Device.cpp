@@ -39,7 +39,7 @@ offloadtest::initializeDevices(const DeviceConfig Config) {
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = initializeMtlDevices(Config, Devices))
+  if (auto Err = initializeMetalDevices(Config, Devices))
     return Err;
 #endif
 

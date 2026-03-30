@@ -106,7 +106,7 @@ int run() {
   const DeviceConfig Config = {Debug, Validation};
   auto DevicesOrErr = initializeDevices(Config);
   if (!DevicesOrErr) {
-    logAllUnhandledErrors(std::move(DevicesOrErr.takeError()), errs(),
+    logAllUnhandledErrors(DevicesOrErr.takeError(), errs(),
                           "gpu-exec: error: ");
     return 1;
   }

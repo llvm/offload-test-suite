@@ -28,7 +28,7 @@ int main(int ArgC, char **ArgV) {
   const DeviceConfig Config;
   auto DevicesOrErr = initializeDevices(Config);
   if (!DevicesOrErr) {
-    logAllUnhandledErrors(std::move(DevicesOrErr.takeError()), errs(),
+    logAllUnhandledErrors(DevicesOrErr.takeError(), errs(),
                           "api-query: error: ");
     return 1;
   }
