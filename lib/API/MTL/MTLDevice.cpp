@@ -132,6 +132,8 @@ class MTLDevice : public offloadtest::Device {
         ComputePipeline->release();
       if (RenderPipeline)
         RenderPipeline->release();
+      if (FrameBufferReadback)
+        FrameBufferReadback->release();
 
       Pool->release();
     }
@@ -145,6 +147,7 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
     MTL::Texture *FrameBufferTexture = nullptr;
+    MTL::Buffer *FrameBufferReadback = nullptr;
     MTL::CommandBuffer *CmdBuffer = nullptr;
   };
 
@@ -466,13 +469,14 @@ class MTLDevice : public offloadtest::Device {
     const uint64_t Height = RTarget->OutputProps.Height;
     MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
         Format, Width, Height, false);
-    // Create a shared texture used for both rendering and CPU readback.
-    MTL::TextureDescriptor *SharedDesc = TDesc->copy();
-    SharedDesc->setUsage(MTL::TextureUsageRenderTarget |
-                         MTL::TextureUsageShaderRead |
-                         MTL::TextureUsageShaderWrite);
-    SharedDesc->setStorageMode(MTL::StorageModeShared);
-    IS.FrameBufferTexture = Device->newTexture(SharedDesc);
+    TDesc->setUsage(MTL::TextureUsageRenderTarget |
+                    MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite);
+    TDesc->setStorageMode(MTL::StorageModePrivate);
+    IS.FrameBufferTexture = Device->newTexture(TDesc);
+
+    // Create a readback buffer for copying render target data to the CPU.
+    IS.FrameBufferReadback =
+        Device->newBuffer(RTarget->size(), MTL::ResourceStorageModeShared);
 
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
     CADesc->setTexture(IS.FrameBufferTexture);
@@ -498,6 +502,15 @@ class MTLDevice : public offloadtest::Device {
                                P.Bindings.getVertexCount());
 
     CmdEncoder->endEncoding();
+
+    // Blit the render target into the readback buffer for CPU access.
+    MTL::BlitCommandEncoder *Blit = IS.CmdBuffer->blitCommandEncoder();
+    const size_t ElemSize = RTarget->getElementSize();
+    const size_t RowBytes = Width * ElemSize;
+    Blit->copyFromTexture(IS.FrameBufferTexture, 0, 0, MTL::Origin(0, 0, 0),
+                          MTL::Size(Width, Height, 1), IS.FrameBufferReadback,
+                          0, RowBytes, 0);
+    Blit->endEncoding();
 
     return llvm::Error::success();
   }
@@ -549,16 +562,15 @@ class MTLDevice : public offloadtest::Device {
       const size_t ElemSize = RTarget->getElementSize();
       const size_t RowBytes = Width * ElemSize;
 
-      // Read the framebuffer one row at a time into the output buffer.
-      // Read rows from the texture bottom-to-top into the buffer top-to-bottom
-      // so the final image is upright.
+      // Read from the readback buffer. The blit copied the texture data in
+      // GPU layout order, so we flip rows here to produce an upright image.
+      const unsigned char *Src = reinterpret_cast<const unsigned char *>(
+          IS.FrameBufferReadback->contents());
       unsigned char *Buf =
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
-        const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        unsigned char *Dst = Buf + R * RowBytes;
-        IS.FrameBufferTexture->getBytes(
-            Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
+        const uint64_t SrcRow = (Height - 1) - R;
+        memcpy(Buf + R * RowBytes, Src + SrcRow * RowBytes, RowBytes);
       }
     }
     return llvm::Error::success();
