@@ -127,7 +127,7 @@ class MTLDevice : public offloadtest::Device {
       llvm::StringMap<uint32_t> ShaderAttrIndices;
       for (uint32_t Ai = 0; Ai < FnAttrs->count(); ++Ai) {
         auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(Ai));
-        if (A && A->active()) {
+        if (A && A->isActive()) {
           ShaderAttrIndices.insert(std::make_pair(
               llvm::StringRef(A->name()->utf8String()), A->attributeIndex()));
           llvm::errs() << "Shader attr: " << A->name()->utf8String()
@@ -515,7 +515,7 @@ class MTLDevice : public offloadtest::Device {
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
         const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        const unsigned char *Dst = Buf + R * RowBytes;
+        unsigned char *Dst = Buf + R * RowBytes;
         IS.FrameBufferTexture->getBytes(
             Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
       }
