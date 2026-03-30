@@ -132,8 +132,6 @@ class MTLDevice : public offloadtest::Device {
         ComputePipeline->release();
       if (RenderPipeline)
         RenderPipeline->release();
-      if (FrameBufferReadback)
-        FrameBufferReadback->release();
 
       Pool->release();
     }
@@ -146,8 +144,8 @@ class MTLDevice : public offloadtest::Device {
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
-    MTL::Texture *FrameBufferTexture = nullptr;
-    MTL::Buffer *FrameBufferReadback = nullptr;
+    std::shared_ptr<MTLTexture> FrameBufferTexture;
+    std::shared_ptr<MTLBuffer> FrameBufferReadback;
     MTL::CommandBuffer *CmdBuffer = nullptr;
   };
 
@@ -453,33 +451,44 @@ class MTLDevice : public offloadtest::Device {
     return llvm::Error::success();
   }
 
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = Device::createRenderTarget(OutBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.FrameBufferTexture = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+
+    // Create a readback buffer for copying render target data to the CPU.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.FrameBufferReadback = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
+
+    return llvm::Error::success();
+  }
+
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
     IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
+
+    if (auto Err = createRenderTarget(P, IS))
+      return Err;
 
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
-    // Setup the render target texture.
-    CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
-
-    const MTL::PixelFormat Format =
-        getMTLFormat(RTarget->Format, RTarget->Channels);
-
-    const uint64_t Width = RTarget->OutputProps.Width;
-    const uint64_t Height = RTarget->OutputProps.Height;
-    MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
-        Format, Width, Height, false);
-    TDesc->setUsage(MTL::TextureUsageRenderTarget |
-                    MTL::TextureUsageShaderRead | MTL::TextureUsageShaderWrite);
-    TDesc->setStorageMode(MTL::StorageModePrivate);
-    IS.FrameBufferTexture = Device->newTexture(TDesc);
-
-    // Create a readback buffer for copying render target data to the CPU.
-    IS.FrameBufferReadback =
-        Device->newBuffer(RTarget->size(), MTL::ResourceStorageModeShared);
+    const uint64_t Width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
+    const uint64_t Height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
 
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
-    CADesc->setTexture(IS.FrameBufferTexture);
+    CADesc->setTexture(IS.FrameBufferTexture->Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
     CADesc->setClearColor(MTL::ClearColor());
     CADesc->setStoreAction(MTL::StoreActionStore);
@@ -507,9 +516,9 @@ class MTLDevice : public offloadtest::Device {
     MTL::BlitCommandEncoder *Blit = IS.CmdBuffer->blitCommandEncoder();
     const size_t ElemSize = RTarget->getElementSize();
     const size_t RowBytes = Width * ElemSize;
-    Blit->copyFromTexture(IS.FrameBufferTexture, 0, 0, MTL::Origin(0, 0, 0),
-                          MTL::Size(Width, Height, 1), IS.FrameBufferReadback,
-                          0, RowBytes, 0);
+    Blit->copyFromTexture(IS.FrameBufferTexture->Tex, 0, 0,
+                          MTL::Origin(0, 0, 0), MTL::Size(Width, Height, 1),
+                          IS.FrameBufferReadback->Buf, 0, RowBytes, 0);
     Blit->endEncoding();
 
     return llvm::Error::success();
@@ -565,7 +574,7 @@ class MTLDevice : public offloadtest::Device {
       // Read from the readback buffer. The blit copied the texture data in
       // GPU layout order, so we flip rows here to produce an upright image.
       const unsigned char *Src = reinterpret_cast<const unsigned char *>(
-          IS.FrameBufferReadback->contents());
+          IS.FrameBufferReadback->Buf->contents());
       unsigned char *Buf =
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
@@ -595,8 +604,8 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
-    MTL::Buffer *Buf =
-        Device->newBuffer(SizeInBytes, getMetalResourceOptions(Desc.Location));
+    MTL::Buffer *Buf = Device->newBuffer(
+        SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");
@@ -612,7 +621,7 @@ public:
         getMetalFormat(Desc.Format), Desc.Width, Desc.Height,
         Desc.MipLevels > 1);
     TDesc->setMipmapLevelCount(Desc.MipLevels);
-    TDesc->setStorageMode(getMetalStorageMode(Desc.Location));
+    TDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));
     TDesc->setUsage(getMetalTextureUsage(Desc.Usage));
 
     MTL::Texture *Tex = Device->newTexture(TDesc);

@@ -65,6 +65,13 @@ public:
   virtual llvm::Expected<std::shared_ptr<Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) = 0;
 
+  // Creates a render target texture from a CPUBuffer description.
+  // TODO / WIP Refactoring: 
+  // For now, Backends should call this and
+  // then create their own readback buffer separately.
+  llvm::Expected<std::shared_ptr<Texture>>
+  createRenderTarget(const CPUBuffer &Buf);
+
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual ~Device() = 0;

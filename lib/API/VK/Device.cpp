@@ -472,6 +472,8 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer;
+    std::shared_ptr<VulkanTexture> RenderTarget;
+    std::shared_ptr<VulkanBuffer> RTReadback;
     ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
                                           nullptr};
     ImageRef DepthStencil = {0, 0, 0};
@@ -1045,6 +1047,38 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = Device::createRenderTarget(RTBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+
+    // Create a host-visible staging buffer for readback.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+
+    IS.FrameBufferResource.Size = RTBuf.size();
+    IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
+    IS.FrameBufferResource.ImageLayout =
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    IS.FrameBufferResource.ResourceRefs.push_back(ResourceRef(
+        BufferRef{IS.RTReadback->Buffer, IS.RTReadback->Memory},
+        ImageRef{IS.RenderTarget->Image, 0, IS.RenderTarget->Memory}));
+
+    return llvm::Error::success();
+  }
+
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     // Create an optimal image used as the depth stencil attachment
     VkImageCreateInfo ImageCi = {};
@@ -1098,36 +1132,8 @@ public:
     }
 
     if (P.isGraphics()) {
-      if (!P.Bindings.RTargetBufferPtr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No RenderTarget buffer specified for graphics pipeline.");
-      Resource FrameBuffer = {ResourceKind::Texture2D,
-                              "RenderTarget",
-                              {},
-                              {},
-                              P.Bindings.RTargetBufferPtr,
-                              nullptr,
-                              false,
-                              std::nullopt,
-                              false};
-      IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
-      IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
-      IS.FrameBufferResource.ImageLayout =
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      auto ExHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, FrameBuffer.size(),
-          FrameBuffer.BufferPtr->Data[0].get());
-      if (!ExHostBuf)
-        return ExHostBuf.takeError();
-      auto ExImageRef = createImage(FrameBuffer, *ExHostBuf,
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                        VK_IMAGE_USAGE_SAMPLED_BIT |
-                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-      if (!ExImageRef)
-        return ExImageRef.takeError();
-      IS.FrameBufferResource.ResourceRefs.push_back(*ExImageRef);
+      if (auto Err = createRenderTarget(P, IS))
+        return Err;
       if (auto Err = createDepthStencil(P, IS))
         return Err;
 
@@ -2290,13 +2296,8 @@ public:
         vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
         vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
       }
-      for (auto &ResRef : IS.FrameBufferResource.ResourceRefs) {
-        // We know the device resource is an image, so no need to check it.
-        vkDestroyImage(Device, ResRef.Image.Image, nullptr);
-        vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
-        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
-      }
+      // Render target image and readback buffer are owned by
+      // IS.RenderTarget and IS.RTReadback (shared_ptrs).
       vkDestroyImage(Device, IS.DepthStencil.Image, nullptr);
       vkFreeMemory(Device, IS.DepthStencil.Memory, nullptr);
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);

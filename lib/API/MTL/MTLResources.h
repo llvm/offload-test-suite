@@ -18,7 +18,13 @@
 
 namespace offloadtest {
 
-inline MTL::StorageMode getMetalStorageMode(MemoryLocation Location) {
+// Metal requires different storage modes for textures and buffers.
+// Textures use Managed for GpuToCpu because Shared textures are not available
+// on discrete GPUs and lack hardware compression/tiling optimizations.
+// Buffers use Shared for GpuToCpu because they are linear memory with no
+// layout concerns, and Shared avoids the explicit synchronizeResource step
+// that Managed requires.
+inline MTL::StorageMode getMetalTextureStorageMode(MemoryLocation Location) {
   switch (Location) {
   case MemoryLocation::GpuOnly:
     return MTL::StorageModePrivate;
@@ -29,13 +35,14 @@ inline MTL::StorageMode getMetalStorageMode(MemoryLocation Location) {
   llvm_unreachable("All MemoryLocation cases handled");
 }
 
-inline MTL::ResourceOptions getMetalResourceOptions(MemoryLocation Location) {
+inline MTL::ResourceOptions getMetalBufferResourceOptions(MemoryLocation Location) {
   switch (Location) {
   case MemoryLocation::GpuOnly:
     return MTL::ResourceStorageModePrivate;
   case MemoryLocation::CpuToGpu:
-  case MemoryLocation::GpuToCpu:
     return MTL::ResourceStorageModeManaged;
+  case MemoryLocation::GpuToCpu:
+    return MTL::ResourceStorageModeShared;
   }
   llvm_unreachable("All MemoryLocation cases handled");
 }

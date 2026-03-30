@@ -166,6 +166,13 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "DepthStencil usage requires a depth format, got '%s'.",
         getTextureFormatName(Desc.Format).data());
 
+  // Render targets and depth/stencil textures only support a single mip level.
+  if ((IsRT || IsDS) && Desc.MipLevels != 1)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Multiple mip levels are not supported for render target or "
+        "depth/stencil textures.");
+
   // A clear value requires RenderTarget or DepthStencil usage, and the
   // variant must match.
   if (Desc.OptimizedClearValue) {
