@@ -132,10 +132,10 @@ struct TextureCreateDesc {
   uint32_t Width;
   uint32_t Height;
   uint32_t MipLevels;
-  // Clear value for render target or depth/stencil textures. 
-  // How and when this is applied depends on the backend: 
+  // Clear value for render target or depth/stencil textures.
+  // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time
-  // - VK and MTL apply it at render pass begin (TODO)
+  // - VK and MTL apply it at render pass begin
   std::optional<ClearValue> OptimizedClearValue;
 };
 
@@ -144,15 +144,17 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
   bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
   bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
 
-  // DepthStencil is mutually exclusive with RenderTarget and Storage.
+  // DepthStencil + RenderTarget is not supported.
   if (IsDS && IsRT)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "DepthStencil and RenderTarget are mutually exclusive.");
+  // DepthStencil + Storage is a valid but discouraged configuration (poor
+  // performance on most hardware). Not supported for now.
   if (IsDS && (Desc.Usage & TextureUsage::Storage) != 0)
     return llvm::createStringError(
-        std::errc::invalid_argument,
-        "DepthStencil and Storage are mutually exclusive.");
+        std::errc::not_supported,
+        "DepthStencil combined with Storage is not yet supported.");
 
   // Depth formats require DepthStencil usage; non-depth formats forbid it.
   if (IsDepth && !IsDS)

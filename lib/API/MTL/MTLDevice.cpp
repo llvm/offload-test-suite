@@ -458,7 +458,7 @@ class MTLDevice : public offloadtest::Device {
           "No render target bound for graphics pipeline.");
     const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
 
-    auto TexOrErr = Device::createRenderTarget(OutBuf);
+    auto TexOrErr = offloadtest::createRenderTarget(*this, OutBuf);
     if (!TexOrErr)
       return TexOrErr.takeError();
 
@@ -490,7 +490,9 @@ class MTLDevice : public offloadtest::Device {
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
     CADesc->setTexture(IS.FrameBufferTexture->Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
-    CADesc->setClearColor(MTL::ClearColor());
+    const auto &CV =
+        std::get<ClearColor>(*IS.FrameBufferTexture->Desc.OptimizedClearValue);
+    CADesc->setClearColor(MTL::ClearColor(CV.R, CV.G, CV.B, CV.A));
     CADesc->setStoreAction(MTL::StoreActionStore);
     Desc->colorAttachments()->setObject(CADesc, 0);
 
