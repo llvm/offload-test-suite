@@ -77,6 +77,14 @@ def setWaveSizeFeaturesDirectX(config, device):
         MinSizeInt *= 2
 
 
+def hasAVX512():
+    # Check if the host CPU supports AVX-512 instructions. This is only
+    # relevant for WARP and so we assume the OS is Windows
+    import ctypes
+    # PF_AVX512F_INSTRUCTIONS_AVAILABLE = 41
+    return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(41))
+
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
@@ -89,6 +97,8 @@ def setDeviceFeatures(config, device, compiler):
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
         config.available_features.add(config.warp_arch)
+        if hasAVX512():
+            config.available_features.add("AVX512")
 
     if "Intel" in device["Description"]:
         config.available_features.add("Intel")
