@@ -1961,7 +1961,7 @@ public:
                              VkImageLayout OldLayout,
                              VkAccessFlags SrcAccessMask,
                              VkPipelineStageFlags SrcStageMask) {
-    VkImageAspectFlags AspectMask = isDepth(Tex.Desc.Format)
+    VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Format)
                                         ? VK_IMAGE_ASPECT_DEPTH_BIT
                                         : VK_IMAGE_ASPECT_COLOR_BIT;
 

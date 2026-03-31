@@ -35,7 +35,8 @@ inline MTL::StorageMode getMetalTextureStorageMode(MemoryLocation Location) {
   llvm_unreachable("All MemoryLocation cases handled");
 }
 
-inline MTL::ResourceOptions getMetalBufferResourceOptions(MemoryLocation Location) {
+inline MTL::ResourceOptions
+getMetalBufferResourceOptions(MemoryLocation Location) {
   switch (Location) {
   case MemoryLocation::GpuOnly:
     return MTL::ResourceStorageModePrivate;
@@ -47,44 +48,48 @@ inline MTL::ResourceOptions getMetalBufferResourceOptions(MemoryLocation Locatio
   llvm_unreachable("All MemoryLocation cases handled");
 }
 
-inline MTL::PixelFormat getMetalFormat(TextureFormat Format) {
+inline MTL::PixelFormat getMetalPixelFormat(Format Format) {
   switch (Format) {
-  case TextureFormat::R16Sint:
+  case Format::R16Sint:
     return MTL::PixelFormatR16Sint;
-  case TextureFormat::R16Uint:
+  case Format::R16Uint:
     return MTL::PixelFormatR16Uint;
-  case TextureFormat::RG16Sint:
+  case Format::RG16Sint:
     return MTL::PixelFormatRG16Sint;
-  case TextureFormat::RG16Uint:
+  case Format::RG16Uint:
     return MTL::PixelFormatRG16Uint;
-  case TextureFormat::RGBA16Sint:
+  case Format::RGBA16Sint:
     return MTL::PixelFormatRGBA16Sint;
-  case TextureFormat::RGBA16Uint:
+  case Format::RGBA16Uint:
     return MTL::PixelFormatRGBA16Uint;
-  case TextureFormat::R32Sint:
+  case Format::R32Sint:
     return MTL::PixelFormatR32Sint;
-  case TextureFormat::R32Uint:
+  case Format::R32Uint:
     return MTL::PixelFormatR32Uint;
-  case TextureFormat::R32Float:
+  case Format::R32Float:
     return MTL::PixelFormatR32Float;
-  case TextureFormat::RG32Sint:
+  case Format::RG32Sint:
     return MTL::PixelFormatRG32Sint;
-  case TextureFormat::RG32Uint:
+  case Format::RG32Uint:
     return MTL::PixelFormatRG32Uint;
-  case TextureFormat::RG32Float:
+  case Format::RG32Float:
     return MTL::PixelFormatRG32Float;
-  case TextureFormat::RGBA32Sint:
+  // Metal has no 3-component pixel format.
+  // RGB32Float is only valid as a vertex format.
+  case Format::RGB32Float:
+    llvm_unreachable("RGB32Float has no Metal pixel format equivalent");
+  case Format::RGBA32Sint:
     return MTL::PixelFormatRGBA32Sint;
-  case TextureFormat::RGBA32Uint:
+  case Format::RGBA32Uint:
     return MTL::PixelFormatRGBA32Uint;
-  case TextureFormat::RGBA32Float:
+  case Format::RGBA32Float:
     return MTL::PixelFormatRGBA32Float;
-  case TextureFormat::D32Float:
+  case Format::D32Float:
     return MTL::PixelFormatDepth32Float;
-  case TextureFormat::D32FloatS8Uint:
+  case Format::D32FloatS8Uint:
     return MTL::PixelFormatDepth32Float_Stencil8;
   }
-  llvm_unreachable("All TextureFormat cases handled");
+  llvm_unreachable("All Format cases handled");
 }
 
 inline MTL::TextureUsage getMetalTextureUsage(TextureUsage Usage) {
@@ -98,6 +103,48 @@ inline MTL::TextureUsage getMetalTextureUsage(TextureUsage Usage) {
   if ((Usage & DepthStencil) != 0)
     Flags |= MTL::TextureUsageRenderTarget;
   return Flags;
+}
+
+inline MTL::VertexFormat getMetalVertexFormat(Format Fmt) {
+  switch (Fmt) {
+  case Format::R16Sint:
+    return MTL::VertexFormatShort;
+  case Format::R16Uint:
+    return MTL::VertexFormatUShort;
+  case Format::RG16Sint:
+    return MTL::VertexFormatShort2;
+  case Format::RG16Uint:
+    return MTL::VertexFormatUShort2;
+  case Format::RGBA16Sint:
+    return MTL::VertexFormatShort4;
+  case Format::RGBA16Uint:
+    return MTL::VertexFormatUShort4;
+  case Format::R32Sint:
+    return MTL::VertexFormatInt;
+  case Format::R32Uint:
+    return MTL::VertexFormatUInt;
+  case Format::R32Float:
+    return MTL::VertexFormatFloat;
+  case Format::RG32Sint:
+    return MTL::VertexFormatInt2;
+  case Format::RG32Uint:
+    return MTL::VertexFormatUInt2;
+  case Format::RG32Float:
+    return MTL::VertexFormatFloat2;
+  case Format::RGB32Float:
+    return MTL::VertexFormatFloat3;
+  case Format::RGBA32Sint:
+    return MTL::VertexFormatInt4;
+  case Format::RGBA32Uint:
+    return MTL::VertexFormatUInt4;
+  case Format::RGBA32Float:
+    return MTL::VertexFormatFloat4;
+  // Depth formats cannot be used as vertex attributes.
+  case Format::D32Float:
+  case Format::D32FloatS8Uint:
+    llvm_unreachable("Depth formats are not valid vertex formats");
+  }
+  llvm_unreachable("All Format cases handled");
 }
 
 } // namespace offloadtest

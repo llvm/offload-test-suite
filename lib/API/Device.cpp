@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 
 #include "Config.h"
 
@@ -88,7 +89,7 @@ Device::DeviceIterator Device::end() { return DeviceContext::instance().end(); }
 
 llvm::Expected<std::shared_ptr<Texture>>
 offloadtest::createRenderTarget(Device &Dev, const CPUBuffer &Buf) {
-  auto TexFmtOrErr = toTextureFormat(Buf.Format, Buf.Channels);
+  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
   if (!TexFmtOrErr)
     return TexFmtOrErr.takeError();
 
@@ -112,7 +113,7 @@ offloadtest::createDepthStencil(Device &Dev, uint32_t Width, uint32_t Height) {
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
   Desc.Usage = TextureUsage::DepthStencil;
-  Desc.Format = TextureFormat::D32FloatS8Uint;
+  Desc.Format = Format::D32FloatS8Uint;
   Desc.Width = Width;
   Desc.Height = Height;
   Desc.MipLevels = 1;

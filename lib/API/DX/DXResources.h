@@ -31,44 +31,46 @@ inline D3D12_HEAP_TYPE getDXHeapType(MemoryLocation Location) {
   llvm_unreachable("All MemoryLocation cases handled");
 }
 
-inline DXGI_FORMAT getDXGIFormat(TextureFormat Format) {
+inline DXGI_FORMAT getDXGIFormat(Format Format) {
   switch (Format) {
-  case TextureFormat::R16Sint:
+  case Format::R16Sint:
     return DXGI_FORMAT_R16_SINT;
-  case TextureFormat::R16Uint:
+  case Format::R16Uint:
     return DXGI_FORMAT_R16_UINT;
-  case TextureFormat::RG16Sint:
+  case Format::RG16Sint:
     return DXGI_FORMAT_R16G16_SINT;
-  case TextureFormat::RG16Uint:
+  case Format::RG16Uint:
     return DXGI_FORMAT_R16G16_UINT;
-  case TextureFormat::RGBA16Sint:
+  case Format::RGBA16Sint:
     return DXGI_FORMAT_R16G16B16A16_SINT;
-  case TextureFormat::RGBA16Uint:
+  case Format::RGBA16Uint:
     return DXGI_FORMAT_R16G16B16A16_UINT;
-  case TextureFormat::R32Sint:
+  case Format::R32Sint:
     return DXGI_FORMAT_R32_SINT;
-  case TextureFormat::R32Uint:
+  case Format::R32Uint:
     return DXGI_FORMAT_R32_UINT;
-  case TextureFormat::R32Float:
+  case Format::R32Float:
     return DXGI_FORMAT_R32_FLOAT;
-  case TextureFormat::RG32Sint:
+  case Format::RG32Sint:
     return DXGI_FORMAT_R32G32_SINT;
-  case TextureFormat::RG32Uint:
+  case Format::RG32Uint:
     return DXGI_FORMAT_R32G32_UINT;
-  case TextureFormat::RG32Float:
+  case Format::RG32Float:
     return DXGI_FORMAT_R32G32_FLOAT;
-  case TextureFormat::RGBA32Sint:
+  case Format::RGB32Float:
+    return DXGI_FORMAT_R32G32B32_FLOAT;
+  case Format::RGBA32Sint:
     return DXGI_FORMAT_R32G32B32A32_SINT;
-  case TextureFormat::RGBA32Uint:
+  case Format::RGBA32Uint:
     return DXGI_FORMAT_R32G32B32A32_UINT;
-  case TextureFormat::RGBA32Float:
+  case Format::RGBA32Float:
     return DXGI_FORMAT_R32G32B32A32_FLOAT;
-  case TextureFormat::D32Float:
+  case Format::D32Float:
     return DXGI_FORMAT_D32_FLOAT;
-  case TextureFormat::D32FloatS8Uint:
+  case Format::D32FloatS8Uint:
     return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
   }
-  llvm_unreachable("All TextureFormat cases handled");
+  llvm_unreachable("All Format cases handled");
 }
 
 inline D3D12_RESOURCE_FLAGS getDXResourceFlags(TextureUsage Usage) {

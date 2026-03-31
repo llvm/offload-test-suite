@@ -287,7 +287,7 @@ class MTLDevice : public offloadtest::Device {
 
         // Set the depth/stencil format on the pipeline descriptor.
         const MTL::PixelFormat DepthFmt =
-            getMetalFormat(TextureFormat::D32FloatS8Uint);
+            getMetalPixelFormat(Format::D32FloatS8Uint);
         Desc->setDepthAttachmentPixelFormat(DepthFmt);
         Desc->setStencilAttachmentPixelFormat(DepthFmt);
       }
@@ -678,7 +678,7 @@ public:
       return Err;
 
     MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
-        getMetalFormat(Desc.Format), Desc.Width, Desc.Height,
+        getMetalPixelFormat(Desc.Format), Desc.Width, Desc.Height,
         Desc.MipLevels > 1);
     TDesc->setMipmapLevelCount(Desc.MipLevels);
     TDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));

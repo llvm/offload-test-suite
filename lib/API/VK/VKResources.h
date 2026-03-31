@@ -32,44 +32,46 @@ inline VkMemoryPropertyFlags getVulkanMemoryFlags(MemoryLocation Location) {
   llvm_unreachable("All MemoryLocation cases handled");
 }
 
-inline VkFormat getVulkanFormat(TextureFormat Format) {
+inline VkFormat getVulkanFormat(Format Format) {
   switch (Format) {
-  case TextureFormat::R16Sint:
+  case Format::R16Sint:
     return VK_FORMAT_R16_SINT;
-  case TextureFormat::R16Uint:
+  case Format::R16Uint:
     return VK_FORMAT_R16_UINT;
-  case TextureFormat::RG16Sint:
+  case Format::RG16Sint:
     return VK_FORMAT_R16G16_SINT;
-  case TextureFormat::RG16Uint:
+  case Format::RG16Uint:
     return VK_FORMAT_R16G16_UINT;
-  case TextureFormat::RGBA16Sint:
+  case Format::RGBA16Sint:
     return VK_FORMAT_R16G16B16A16_SINT;
-  case TextureFormat::RGBA16Uint:
+  case Format::RGBA16Uint:
     return VK_FORMAT_R16G16B16A16_UINT;
-  case TextureFormat::R32Sint:
+  case Format::R32Sint:
     return VK_FORMAT_R32_SINT;
-  case TextureFormat::R32Uint:
+  case Format::R32Uint:
     return VK_FORMAT_R32_UINT;
-  case TextureFormat::R32Float:
+  case Format::R32Float:
     return VK_FORMAT_R32_SFLOAT;
-  case TextureFormat::RG32Sint:
+  case Format::RG32Sint:
     return VK_FORMAT_R32G32_SINT;
-  case TextureFormat::RG32Uint:
+  case Format::RG32Uint:
     return VK_FORMAT_R32G32_UINT;
-  case TextureFormat::RG32Float:
+  case Format::RG32Float:
     return VK_FORMAT_R32G32_SFLOAT;
-  case TextureFormat::RGBA32Sint:
+  case Format::RGB32Float:
+    return VK_FORMAT_R32G32B32_SFLOAT;
+  case Format::RGBA32Sint:
     return VK_FORMAT_R32G32B32A32_SINT;
-  case TextureFormat::RGBA32Uint:
+  case Format::RGBA32Uint:
     return VK_FORMAT_R32G32B32A32_UINT;
-  case TextureFormat::RGBA32Float:
+  case Format::RGBA32Float:
     return VK_FORMAT_R32G32B32A32_SFLOAT;
-  case TextureFormat::D32Float:
+  case Format::D32Float:
     return VK_FORMAT_D32_SFLOAT;
-  case TextureFormat::D32FloatS8Uint:
+  case Format::D32FloatS8Uint:
     return VK_FORMAT_D32_SFLOAT_S8_UINT;
   }
-  llvm_unreachable("All TextureFormat cases handled");
+  llvm_unreachable("All Format cases handled");
 }
 
 inline VkImageUsageFlags getVulkanImageUsage(TextureUsage Usage) {
@@ -85,6 +87,7 @@ inline VkImageUsageFlags getVulkanImageUsage(TextureUsage Usage) {
     Flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   return Flags;
 }
+
 
 } // namespace offloadtest
 

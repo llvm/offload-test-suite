@@ -18,6 +18,7 @@
 #include "API/Buffer.h"
 #include "API/Capabilities.h"
 #include "API/Texture.h"
+#include "Support/Pipeline.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 
