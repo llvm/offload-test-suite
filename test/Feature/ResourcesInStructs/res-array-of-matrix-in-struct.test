@@ -11,7 +11,6 @@ B b2;
 
 [numthreads(1,1,1)]
 void main() {
-
   float3x4 x = b1.Bufs[0][0];
   float3x4 y = b1.Bufs[1][0];
   b2.Bufs[0][0] = x + y;
