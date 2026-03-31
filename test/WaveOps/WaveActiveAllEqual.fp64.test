@@ -157,7 +157,8 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/355
 # XFAIL: Metal
 
-# REQUIRES double
+# REQUIRES Double
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -enable-16bit-types -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o 
