@@ -44,6 +44,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("RuntimeSettings", P.Settings);
 
   I.mapRequired("Buffers", P.Buffers);
+  I.mapOptional("VertexBuffers", P.VertexBuffers);
   I.mapOptional("Samplers", P.Samplers);
   I.mapOptional("Results", P.Results);
   I.mapRequired("DescriptorSets", P.Sets);
@@ -396,6 +397,123 @@ void MappingTraits<offloadtest::VertexAttribute>::mapping(
   I.mapRequired("Channels", A.Channels);
   I.mapRequired("Offset", A.Offset);
   I.mapRequired("Name", A.Name);
+}
+
+void MappingTraits<offloadtest::VertexStreamData>::mapping(
+    IO &I, offloadtest::VertexStreamData &S) {
+  I.mapRequired("Name", S.Name);
+  I.mapRequired("Format", S.Fmt);
+  // Values are always parsed as doubles regardless of the target format.
+  // Conversion to the storage type happens during interleaving.
+  I.mapRequired("Data", S.Values);
+
+  if (!I.outputting()) {
+    if (!offloadtest::isVertexCompatible(S.Fmt)) {
+      I.setError("Format '" + llvm::Twine(offloadtest::getFormatName(S.Fmt)) +
+                 "' is not a valid vertex stream format.");
+      return;
+    }
+    const uint32_t Components = offloadtest::getComponentCount(S.Fmt);
+    if (S.Values.size() % Components != 0) {
+      I.setError("Data size is not a multiple of the format's component "
+                 "count (" +
+                 llvm::Twine(Components) + ").");
+      return;
+    }
+  }
+}
+
+// Converts a double value to the storage type for the given format and writes
+// it to Dst. Returns the number of bytes written.
+static uint32_t writeComponent(char *Dst, double Value,
+                               offloadtest::Format Fmt) {
+  using F = offloadtest::Format;
+  switch (Fmt) {
+  case F::R16Sint:
+  case F::RG16Sint:
+  case F::RGBA16Sint: {
+    int16_t V = static_cast<int16_t>(Value);
+    memcpy(Dst, &V, sizeof(V));
+    return sizeof(V);
+  }
+  case F::R16Uint:
+  case F::RG16Uint:
+  case F::RGBA16Uint: {
+    uint16_t V = static_cast<uint16_t>(Value);
+    memcpy(Dst, &V, sizeof(V));
+    return sizeof(V);
+  }
+  case F::R32Sint:
+  case F::RG32Sint:
+  case F::RGBA32Sint: {
+    int32_t V = static_cast<int32_t>(Value);
+    memcpy(Dst, &V, sizeof(V));
+    return sizeof(V);
+  }
+  case F::R32Uint:
+  case F::RG32Uint:
+  case F::RGBA32Uint: {
+    uint32_t V = static_cast<uint32_t>(Value);
+    memcpy(Dst, &V, sizeof(V));
+    return sizeof(V);
+  }
+  case F::R32Float:
+  case F::RG32Float:
+  case F::RGB32Float:
+  case F::RGBA32Float: {
+    float V = static_cast<float>(Value);
+    memcpy(Dst, &V, sizeof(V));
+    return sizeof(V);
+  }
+  case F::D32Float:
+  case F::D32FloatS8Uint:
+    llvm_unreachable("Depth formats are not valid vertex stream formats");
+  }
+  llvm_unreachable("All Format cases handled");
+}
+
+void MappingTraits<offloadtest::ParsedVertexBuffer>::mapping(
+    IO &I, offloadtest::ParsedVertexBuffer &VB) {
+  I.mapRequired("Name", VB.Name);
+  I.mapRequired("Streams", VB.Streams);
+
+  if (!I.outputting() && !VB.Streams.empty()) {
+    // Derive vertex count from the first stream's values and component count.
+    const uint32_t Components0 =
+        offloadtest::getComponentCount(VB.Streams[0].Fmt);
+    const uint32_t VertexCount = VB.Streams[0].Values.size() / Components0;
+
+    // Validate all streams have the same vertex count.
+    for (size_t S = 1; S < VB.Streams.size(); ++S) {
+      const uint32_t Components =
+          offloadtest::getComponentCount(VB.Streams[S].Fmt);
+      const uint32_t Count = VB.Streams[S].Values.size() / Components;
+      if (Count != VertexCount) {
+        I.setError("All vertex streams must have the same vertex count.");
+        return;
+      }
+    }
+
+    // Interleave per-stream data into a single buffer, converting each
+    // double value to the stream's target storage type.
+    const uint32_t Stride = VB.getStride();
+    VB.InterleavedSize = static_cast<size_t>(Stride) * VertexCount;
+    VB.InterleavedData = std::make_unique<char[]>(VB.InterleavedSize);
+
+    for (uint32_t V = 0; V < VertexCount; ++V) {
+      uint32_t StreamOffset = 0;
+      for (const auto &Stream : VB.Streams) {
+        const uint32_t Components =
+            offloadtest::getComponentCount(Stream.Fmt);
+        char *Dst = VB.InterleavedData.get() + V * Stride + StreamOffset;
+        for (uint32_t C = 0; C < Components; ++C) {
+          double Value = Stream.Values[V * Components + C];
+          Dst += writeComponent(Dst, Value, Stream.Fmt);
+        }
+        StreamOffset += offloadtest::getFormatSize(Stream.Fmt);
+      }
+    }
+  }
 }
 
 void MappingTraits<offloadtest::IOBindings>::mapping(

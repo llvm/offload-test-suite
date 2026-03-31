@@ -13,6 +13,8 @@
 #ifndef OFFLOADTEST_SUPPORT_PIPELINE_H
 #define OFFLOADTEST_SUPPORT_PIPELINE_H
 
+#include "API/Resources.h"
+
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -345,6 +347,48 @@ struct VertexAttribute {
   uint32_t size() const { return getFormatSize(Format) * Channels; }
 };
 
+// Parsed vertex stream from the YAML VertexBuffers section. Holds per-stream
+// data before interleaving into the final vertex buffer.
+//
+// Values are stored as doubles (the YAML parser's native numeric type) rather
+// than in the target format's storage type. This avoids needing format-specific
+// parsing and lets us derive the vertex count directly from the number of
+// values.
+//
+// Conversion to the target byte representation happens during interleaving
+// into ParsedVertexBuffer::InterleavedData.
+struct VertexStreamData {
+  std::string Name; // Semantic name (e.g. POSITION, COLOR).
+  Format Fmt;
+  llvm::SmallVector<double> Values; // One value per component.
+};
+
+// Parsed vertex buffer from the YAML VertexBuffers section. The parser
+// interleaves per-stream data into InterleavedData.
+//
+// TODO: Add support for de-interleaved data?
+struct ParsedVertexBuffer {
+  std::string Name;
+  llvm::SmallVector<VertexStreamData> Streams;
+  // Interleaved vertex data, computed by the parser from per-stream data.
+  std::unique_ptr<char[]> InterleavedData;
+  size_t InterleavedSize = 0;
+
+  uint32_t getStride() const {
+    uint32_t Stride = 0;
+    for (const auto &S : Streams)
+      Stride += getFormatSize(S.Fmt);
+    return Stride;
+  }
+
+  uint32_t getVertexCount() const {
+    uint32_t Stride = getStride();
+    if (Stride == 0)
+      return 0;
+    return InterleavedSize / Stride;
+  }
+};
+
 struct IOBindings {
   std::string VertexBuffer;
   CPUBuffer *VertexBufferPtr;
@@ -415,6 +459,7 @@ struct Pipeline {
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
   llvm::SmallVector<CPUBuffer> Buffers;
+  llvm::SmallVector<ParsedVertexBuffer> VertexBuffers;
   llvm::SmallVector<Sampler> Samplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -441,6 +486,13 @@ struct Pipeline {
     return nullptr;
   }
 
+  ParsedVertexBuffer *getVertexBuffer(llvm::StringRef Name) {
+    for (auto &VB : VertexBuffers)
+      if (Name == VB.Name)
+        return &VB;
+    return nullptr;
+  }
+
   Sampler *getSampler(llvm::StringRef Name) {
     for (auto &S : Samplers)
       if (Name == S.Name)
@@ -464,6 +516,8 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexStreamData)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::ParsedVertexBuffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantBlock)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
@@ -519,6 +573,14 @@ template <> struct MappingTraits<offloadtest::VertexAttribute> {
   static void mapping(IO &I, offloadtest::VertexAttribute &A);
 };
 
+template <> struct MappingTraits<offloadtest::VertexStreamData> {
+  static void mapping(IO &I, offloadtest::VertexStreamData &S);
+};
+
+template <> struct MappingTraits<offloadtest::ParsedVertexBuffer> {
+  static void mapping(IO &I, offloadtest::ParsedVertexBuffer &VB);
+};
+
 template <> struct MappingTraits<offloadtest::OutputProperties> {
   static void mapping(IO &I, offloadtest::OutputProperties &P);
 };
@@ -545,6 +607,31 @@ template <> struct MappingTraits<offloadtest::RuntimeSettings> {
 
 template <> struct MappingTraits<offloadtest::SpecializationConstant> {
   static void mapping(IO &I, offloadtest::SpecializationConstant &C);
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::Format> {
+  static void enumeration(IO &I, offloadtest::Format &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Format::Val)
+    ENUM_CASE(R16Sint);
+    ENUM_CASE(R16Uint);
+    ENUM_CASE(RG16Sint);
+    ENUM_CASE(RG16Uint);
+    ENUM_CASE(RGBA16Sint);
+    ENUM_CASE(RGBA16Uint);
+    ENUM_CASE(R32Sint);
+    ENUM_CASE(R32Uint);
+    ENUM_CASE(R32Float);
+    ENUM_CASE(RG32Sint);
+    ENUM_CASE(RG32Uint);
+    ENUM_CASE(RG32Float);
+    ENUM_CASE(RGB32Float);
+    ENUM_CASE(RGBA32Sint);
+    ENUM_CASE(RGBA32Uint);
+    ENUM_CASE(RGBA32Float);
+    ENUM_CASE(D32Float);
+    ENUM_CASE(D32FloatS8Uint);
+#undef ENUM_CASE
+  }
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::Rule> {

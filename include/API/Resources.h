@@ -121,6 +121,35 @@ inline uint32_t getFormatSizeInBytes(Format Format) {
   llvm_unreachable("All Format cases handled");
 }
 
+// Returns the number of components per element for the given format.
+inline uint32_t getComponentCount(Format Format) {
+  switch (Format) {
+  case Format::R16Sint:
+  case Format::R16Uint:
+  case Format::R32Sint:
+  case Format::R32Uint:
+  case Format::R32Float:
+  case Format::D32Float:
+    return 1;
+  case Format::RG16Sint:
+  case Format::RG16Uint:
+  case Format::RG32Sint:
+  case Format::RG32Uint:
+  case Format::RG32Float:
+  case Format::D32FloatS8Uint:
+    return 2;
+  case Format::RGB32Float:
+    return 3;
+  case Format::RGBA16Sint:
+  case Format::RGBA16Uint:
+  case Format::RGBA32Sint:
+  case Format::RGBA32Uint:
+  case Format::RGBA32Float:
+    return 4;
+  }
+  llvm_unreachable("All Format cases handled");
+}
+
 inline bool isDepthFormat(Format Format) {
   switch (Format) {
   case Format::R16Sint:
