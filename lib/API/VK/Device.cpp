@@ -337,8 +337,14 @@ static bool isExtensionSupported(
 
 struct VulkanInstance {
   VkInstance Instance;
-  VulkanInstance(VkInstance Instance) : Instance(Instance) {}
-  VulkanInstance(VulkanInstance &) = delete;
+  VkDebugUtilsMessengerEXT DebugMessenger;
+
+  VulkanInstance(VkInstance Instance, VkDebugUtilsMessengerEXT DebugMessenger)
+      : Instance(Instance), DebugMessenger(DebugMessenger) {}
+  VulkanInstance(const VulkanInstance &) = delete;
+  VulkanInstance(VulkanInstance &&) = delete;
+  VulkanInstance &operator=(const VulkanInstance &) = delete;
+  VulkanInstance &operator=(VulkanInstance &&) = delete;
   ~VulkanInstance() { vkDestroyInstance(Instance, nullptr); }
 };
 
@@ -2397,7 +2403,7 @@ llvm::Error offloadtest::initializeVulkanDevices(
                                    Res);
 
 #ifndef NDEBUG
-  DebugMessenger = registerDebugUtilCallback(Instance);
+  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
 #endif
 
   uint32_t DeviceCount = 0;
@@ -2411,15 +2417,14 @@ llvm::Error offloadtest::initializeVulkanDevices(
                                    "Failed to enumerate devices");
 
   std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
-      std::make_shared<VulkanInstance>(Instance);
+      std::make_shared<VulkanInstance>(Instance, DebugMessenger);
   for (const auto &PDev : PhysicalDevices) {
     auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
                                             std::move(AvailableInstanceLayers));
     if (!DeviceOrErr) {
       return DeviceOrErr.takeError();
     }
-    const std::shared_ptr<VulkanDevice> Dev = *DeviceOrErr;
-    Devices.push_back(Dev);
+    Devices.push_back(*DeviceOrErr);
   }
 
   return llvm::Error::success();
