@@ -127,6 +127,8 @@ public:
             size_t SizeInBytes)
       : Buf(Buf), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
 
+  size_t getSizeInBytes() const override { return SizeInBytes; }
+
   ~MTLBuffer() override {
     if (Buf)
       Buf->release();

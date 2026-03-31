@@ -293,6 +293,8 @@ public:
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes)
       : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  size_t getSizeInBytes() const override { return SizeInBytes; }
 };
 
 class DXTexture : public offloadtest::Texture {

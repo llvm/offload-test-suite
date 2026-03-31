@@ -386,6 +386,8 @@ public:
       : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
 
+  size_t getSizeInBytes() const override { return SizeInBytes; }
+
   ~VulkanBuffer() override {
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
