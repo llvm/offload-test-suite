@@ -338,15 +338,6 @@ struct RuntimeSettings {
   dx::Settings DX;
 };
 
-struct VertexAttribute {
-  DataFormat Format;
-  int Channels;
-  int Offset;
-  std::string Name;
-
-  uint32_t size() const { return getFormatSize(Format) * Channels; }
-};
-
 // Parsed vertex stream from the YAML VertexBuffers section. Holds per-stream
 // data before interleaving into the final vertex buffer.
 //
@@ -391,22 +382,10 @@ struct ParsedVertexBuffer {
 
 struct IOBindings {
   std::string VertexBuffer;
-  CPUBuffer *VertexBufferPtr;
-  llvm::SmallVector<VertexAttribute> VertexAttributes;
+  ParsedVertexBuffer *VertexBufferPtr = nullptr;
 
   std::string RenderTarget;
-  CPUBuffer *RTargetBufferPtr;
-
-  uint32_t getVertexStride() const {
-    uint32_t Stride = 0;
-    for (auto VA : VertexAttributes)
-      Stride += VA.size();
-    return Stride;
-  }
-
-  uint32_t getVertexCount() const {
-    return VertexBufferPtr->size() / getVertexStride();
-  }
+  CPUBuffer *RTargetBufferPtr = nullptr;
 };
 
 // Describes a contiguous group of bytes in a push constant block.
@@ -515,7 +494,6 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Sampler)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
-LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexStreamData)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::ParsedVertexBuffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
@@ -567,10 +545,6 @@ template <> struct MappingTraits<offloadtest::PushConstantValue> {
 
 template <> struct MappingTraits<offloadtest::PushConstantBlock> {
   static void mapping(IO &I, offloadtest::PushConstantBlock &B);
-};
-
-template <> struct MappingTraits<offloadtest::VertexAttribute> {
-  static void mapping(IO &I, offloadtest::VertexAttribute &A);
 };
 
 template <> struct MappingTraits<offloadtest::VertexStreamData> {

@@ -10,6 +10,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
+#include "API/VertexBuffer.h"
 #include "Support/Pipeline.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
@@ -626,7 +628,7 @@ private:
     std::shared_ptr<VulkanTexture> RenderTarget;
     std::shared_ptr<VulkanBuffer> RTReadback;
     std::shared_ptr<VulkanTexture> DepthStencil;
-    std::optional<ResourceRef> VertexBuffer = std::nullopt;
+    std::optional<offloadtest::VertexBuffer> VB = std::nullopt;
 
     VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
@@ -794,9 +796,17 @@ public:
     VkBufferCreateInfo BufInfo = {};
     BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     BufInfo.size = SizeInBytes;
-    BufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.usage =
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    switch (Desc.Usage) {
+    case BufferUsage::Storage:
+      BufInfo.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::VertexBuffer:
+      BufInfo.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    }
     BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer DeviceBuffer;
@@ -1234,6 +1244,7 @@ public:
     // Create a host-visible staging buffer for readback.
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
+    BufDesc.Usage = BufferUsage::Storage;
     auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -1268,34 +1279,36 @@ public:
       if (auto Err = createDepthStencil(P, IS))
         return Err;
 
-      if (P.Bindings.VertexBufferPtr == nullptr)
+      if (!P.Bindings.VertexBufferPtr)
         return llvm::createStringError(
             std::errc::invalid_argument,
-            "No Vertex buffer specified for graphics pipeline.");
-      const Resource VertexBuffer = {ResourceKind::StructuredBuffer,
-                                     "VertexBuffer",
-                                     {},
-                                     {},
-                                     P.Bindings.VertexBufferPtr,
-                                     nullptr,
-                                     false,
-                                     std::nullopt,
-                                     false};
-      auto ExVHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-          VertexBuffer.size(), VertexBuffer.BufferPtr->Data[0].get());
-      if (!ExVHostBuf)
-        return ExVHostBuf.takeError();
-      auto ExDeviceBuf = createBuffer(
-          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer.size());
-      if (!ExDeviceBuf)
-        return ExDeviceBuf.takeError();
-      VkBufferCopy Copy = {};
-      Copy.size = VertexBuffer.size();
-      vkCmdCopyBuffer(IS.CB->CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer,
-                      1, &Copy);
-      IS.VertexBuffer = ResourceRef(*ExVHostBuf, *ExDeviceBuf);
+            "No vertex buffer specified for graphics pipeline.");
+
+      const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
+
+      BufferCreateDesc VBBufDesc = {};
+      VBBufDesc.Location = MemoryLocation::CpuToGpu;
+      VBBufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr =
+          createBuffer("VertexBuffer", VBBufDesc, PVB.InterleavedSize);
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+
+      VertexBufferDesc VBDesc;
+      for (const auto &S : PVB.Streams)
+        VBDesc.Streams.push_back({S.Name, S.Fmt});
+
+      IS.VB = offloadtest::VertexBuffer{VBDesc, *BufOrErr};
+
+      // TODO: Currently uses a single CpuToGpu mapped buffer. For optimal GPU
+      // performance on discrete GPUs, use a staging buffer + copy to a GpuOnly
+      // vertex buffer instead.
+      auto *VKBuf = static_cast<VulkanBuffer *>(IS.VB->Data.get());
+      const size_t BufSize = IS.VB->Data->getSizeInBytes();
+      void *Mapped = nullptr;
+      vkMapMemory(Device, VKBuf->Memory, 0, BufSize, 0, &Mapped);
+      memcpy(Mapped, PVB.InterleavedData.get(), BufSize);
+      vkUnmapMemory(Device, VKBuf->Memory);
     }
 
     return llvm::Error::success();
@@ -1961,21 +1974,25 @@ public:
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     MultisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    const uint32_t Stride = P.Bindings.getVertexStride();
+    // Build vertex input state from the vertex buffer description.
+    if (!IS.VB)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Vertex buffer not initialized.");
+    const VertexBufferDesc &VBDesc = IS.VB->Desc;
 
     VkVertexInputBindingDescription VertexInputBinding{};
     VertexInputBinding.binding = 0;
-    VertexInputBinding.stride = Stride;
+    VertexInputBinding.stride = VBDesc.getStride();
     VertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     llvm::SmallVector<VkVertexInputAttributeDescription> Attributes;
-    for (size_t I = 0; I < P.Bindings.VertexAttributes.size(); ++I) {
-      const VertexAttribute &VA = P.Bindings.VertexAttributes[I];
+    for (uint32_t I = 0; I < VBDesc.Streams.size(); ++I) {
+      const VertexStream &S = VBDesc.Streams[I];
       VkVertexInputAttributeDescription VkVA = {};
       VkVA.location = I;
       VkVA.binding = 0;
-      VkVA.format = getVKFormat(VA.Format, VA.Channels);
-      VkVA.offset = VA.Offset;
+      VkVA.format = getVulkanFormat(S.Fmt);
+      VkVA.offset = VBDesc.getOffset(I);
       Attributes.push_back(VkVA);
     }
 
@@ -2352,13 +2369,16 @@ public:
       llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
                    << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
     } else {
+      if (!IS.VB)
+        return llvm::createStringError(std::errc::invalid_argument,
+                                       "Vertex buffer not initialized.");
       VkDeviceSize Offsets[1]{0};
-      assert(IS.VertexBuffer.has_value());
-      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1,
-                             &IS.VertexBuffer->Device.Buffer, Offsets);
+      VkBuffer VBHandle =
+          static_cast<VulkanBuffer *>(IS.VB->Data.get())->Buffer;
+      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
       // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
-      llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
+      vkCmdDraw(IS.CB->CmdBuffer, IS.VB->getVertexCount(), 1, 0, 0);
+      llvm::outs() << "Drew " << IS.VB->getVertexCount() << " vertices.\n";
       vkCmdEndRenderPass(IS.CB->CmdBuffer);
       copyTextureToReadback(IS.CB->CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
@@ -2468,12 +2488,9 @@ public:
     }
 
     if (IS.getFullShaderStageMask() != VK_SHADER_STAGE_COMPUTE_BIT) {
-      if (IS.VertexBuffer.has_value()) {
-        vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
-        vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
-        vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
-        vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
-      }
+      // Vertex buffer, render target, readback buffer, and depth stencil are
+      // owned by shared_ptrs (IS.VB, IS.RenderTarget, IS.RTReadback,
+      // IS.DepthStencil).
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
       vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }

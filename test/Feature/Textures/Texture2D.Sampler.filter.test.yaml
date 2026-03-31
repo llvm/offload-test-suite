@@ -49,6 +49,15 @@ Shaders:
   - Stage: Pixel
     Entry: mainPS
 
+VertexBuffers:
+  - Name: VB
+    Streams:
+      - Name: POSITION
+        Format: RGB32Float
+        Data: [-1.0, -1.0, 0.0,
+                3.0, -1.0, 0.0,
+               -1.0,  3.0, 0.0]
+
 Buffers:
   - Name: Tex
     Format: Float32
@@ -76,20 +85,8 @@ Buffers:
     FillSize: 16
     OutputProps: { Width: 1, Height: 1, Depth: 1 }
 
-  - Name: VB
-    Format: Float32
-    Channels: 3
-    Data: [-1.0, -1.0, 0.0,
-            3.0, -1.0, 0.0,
-           -1.0,  3.0, 0.0]
-
 Bindings:
   VertexBuffer: VB
-  VertexAttributes:
-    - Format: Float32
-      Channels: 3
-      Offset: 0
-      Name: POSITION
   RenderTarget: RT
 
 Samplers:

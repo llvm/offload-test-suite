@@ -33,6 +33,8 @@
 
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "API/FormatConversion.h"
+#include "API/VertexBuffer.h"
 #include "DXFeatures.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
@@ -484,7 +486,7 @@ private:
     std::shared_ptr<DXTexture> RT;
     std::shared_ptr<DXBuffer> RTReadback;
     std::shared_ptr<DXTexture> DS;
-    ComPtr<ID3D12Resource> VB;
+    std::optional<offloadtest::VertexBuffer> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
@@ -516,9 +518,9 @@ public:
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
 
     const D3D12_RESOURCE_FLAGS Flags =
-        HeapType == D3D12_HEAP_TYPE_READBACK
-            ? D3D12_RESOURCE_FLAG_NONE
-            : D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        HeapType == D3D12_HEAP_TYPE_DEFAULT
+            ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+            : D3D12_RESOURCE_FLAG_NONE;
 
     const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
@@ -1587,6 +1589,7 @@ public:
     // Create readback buffer sized for the pixel data (raw bytes).
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
+    BufDesc.Usage = BufferUsage::Storage;
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -1610,29 +1613,37 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No vertex buffer bound for graphics pipeline.");
-    const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
-    const uint64_t VBSize = VB.size();
-    D3D12_RESOURCE_DESC const Desc = CD3DX12_RESOURCE_DESC::Buffer(VBSize);
-    CD3DX12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &Desc,
-                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                   IID_PPV_ARGS(&IS.VB)),
-                               "Failed to create vertex buffer"))
-      return Err;
 
+    const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
+
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::CpuToGpu;
+    BufDesc.Usage = BufferUsage::VertexBuffer;
+    auto BufOrErr = createBuffer("VertexBuffer", BufDesc, PVB.InterleavedSize);
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+
+    VertexBufferDesc VBDesc;
+    for (const auto &S : PVB.Streams)
+      VBDesc.Streams.push_back({S.Name, S.Fmt});
+
+    IS.VB = offloadtest::VertexBuffer{VBDesc, *BufOrErr};
+
+    // TODO: Currently uses a single CpuToGpu mapped buffer. For optimal GPU
+    // performance on discrete GPUs, use a staging buffer + copy to a GpuOnly
+    // vertex buffer instead.
+    auto *DXBuf = static_cast<DXBuffer *>(IS.VB->Data.get());
     void *Ptr = nullptr;
-    if (auto Err = HR::toError(IS.VB->Map(0, nullptr, &Ptr),
+    if (auto Err = HR::toError(DXBuf->Buffer->Map(0, nullptr, &Ptr),
                                "Failed to map vertex buffer"))
       return Err;
-    memcpy(Ptr, VB.Data[0].get(), VBSize);
-    IS.VB->Unmap(0, nullptr);
+    memcpy(Ptr, PVB.InterleavedData.get(), IS.VB->Data->getSizeInBytes());
+    DXBuf->Buffer->Unmap(0, nullptr);
 
     D3D12_VERTEX_BUFFER_VIEW VBView = {};
-    VBView.BufferLocation = IS.VB->GetGPUVirtualAddress();
-    VBView.SizeInBytes = static_cast<UINT>(VBSize);
-    VBView.StrideInBytes = P.Bindings.getVertexStride();
+    VBView.BufferLocation = DXBuf->Buffer->GetGPUVirtualAddress();
+    VBView.SizeInBytes = static_cast<UINT>(IS.VB->Data->getSizeInBytes());
+    VBView.StrideInBytes = IS.VB->Desc.getStride();
 
     IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     IS.CB->CmdList->IASetVertexBuffers(0, 1, &VBView);
@@ -1641,13 +1652,16 @@ public:
   }
 
   llvm::Error createGraphicsPSO(Pipeline &P, InvocationState &IS) {
-    // Create the input layout based on the vertex attributes.
+    if (!IS.VB)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Vertex buffer not initialized.");
+    // Create the input layout from the vertex buffer description.
     std::vector<D3D12_INPUT_ELEMENT_DESC> InputLayout;
-    for (size_t I = 0; I < P.Bindings.VertexAttributes.size(); ++I) {
-      const VertexAttribute &Attr = P.Bindings.VertexAttributes[I];
-      InputLayout.push_back({Attr.Name.c_str(), 0,
-                             getDXFormat(Attr.Format, Attr.Channels), 0,
-                             static_cast<UINT>(Attr.Offset),
+    const VertexBufferDesc &VBDesc = IS.VB->Desc;
+    for (uint32_t I = 0; I < VBDesc.Streams.size(); ++I) {
+      const VertexStream &S = VBDesc.Streams[I];
+      InputLayout.push_back({S.Name.c_str(), 0, getDXGIFormat(S.Fmt), 0,
+                             VBDesc.getOffset(I),
                              D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0});
     }
 
@@ -1701,6 +1715,9 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
+    if (!IS.VB)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Vertex buffer not initialized.");
     IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1737,7 +1754,7 @@ public:
                                 static_cast<LONG>(VP.Height)};
     IS.CB->CmdList->RSSetScissorRects(1, &Scissor);
 
-    IS.CB->CmdList->DrawInstanced(P.Bindings.getVertexCount(), 1, 0, 0);
+    IS.CB->CmdList->DrawInstanced(IS.VB->getVertexCount(), 1, 0, 0);
 
     // Transition the render target to copy source and copy to the readback
     // buffer.

@@ -32,13 +32,15 @@ Shaders:
     Entry: main
   - Stage: Pixel
     Entry: main
-Buffers:
+VertexBuffers:
   - Name: VertexData
-    Format: Float32
-    Stride: 16
-    Data: [  0.0,  3.0, 0.0, 1.0,
-             3.0, -3.0, 0.0, 1.0,
-            -3.0, -3.0, 0.0, 1.0 ]
+    Streams:
+      - Name: POSITION
+        Format: RGBA32Float
+        Data: [  0.0,  3.0, 0.0, 1.0,
+                 3.0, -3.0, 0.0, 1.0,
+                -3.0, -3.0, 0.0, 1.0 ]
+Buffers:
   - Name: Output
     Format: Float32
     Channels: 4
@@ -49,11 +51,6 @@ Buffers:
       Depth: 1
 Bindings:
   VertexBuffer: VertexData
-  VertexAttributes:
-    - Format: Float32
-      Channels: 4
-      Offset: 0
-      Name: POSITION
   RenderTarget: Output
 DescriptorSets: []
 ...

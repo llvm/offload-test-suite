@@ -122,10 +122,12 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                  std::to_string(DescriptorTableCount));
 
     if (!P.Bindings.VertexBuffer.empty()) {
-      P.Bindings.VertexBufferPtr = P.getBuffer(P.Bindings.VertexBuffer);
+      P.Bindings.VertexBufferPtr =
+          P.getVertexBuffer(P.Bindings.VertexBuffer);
       if (!P.Bindings.VertexBufferPtr)
         I.setError(Twine("Referenced vertex buffer ") +
-                   P.Bindings.VertexBuffer + " not found!");
+                   P.Bindings.VertexBuffer +
+                   " not found in VertexBuffers!");
     }
 
     if (!P.Bindings.RenderTarget.empty()) {
@@ -391,14 +393,6 @@ void MappingTraits<offloadtest::VulkanBinding>::mapping(
   I.mapOptional("CounterBinding", B.CounterBinding);
 }
 
-void MappingTraits<offloadtest::VertexAttribute>::mapping(
-    IO &I, offloadtest::VertexAttribute &A) {
-  I.mapRequired("Format", A.Format);
-  I.mapRequired("Channels", A.Channels);
-  I.mapRequired("Offset", A.Offset);
-  I.mapRequired("Name", A.Name);
-}
-
 void MappingTraits<offloadtest::VertexStreamData>::mapping(
     IO &I, offloadtest::VertexStreamData &S) {
   I.mapRequired("Name", S.Name);
@@ -519,7 +513,6 @@ void MappingTraits<offloadtest::ParsedVertexBuffer>::mapping(
 void MappingTraits<offloadtest::IOBindings>::mapping(
     IO &I, offloadtest::IOBindings &B) {
   I.mapOptional("VertexBuffer", B.VertexBuffer);
-  I.mapOptional("VertexAttributes", B.VertexAttributes);
   I.mapOptional("RenderTarget", B.RenderTarget);
 }
 
