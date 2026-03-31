@@ -48,6 +48,8 @@ public:
 };
 } // namespace
 
+Queue::~Queue() {}
+
 Device::~Device() {}
 
 void Device::registerDevice(std::shared_ptr<Device> D) {
@@ -60,14 +62,14 @@ llvm::Error Device::initialize(const DeviceConfig Config) {
     return Err;
 #endif
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVKDevices(Config))
+  if (auto Err = initializeVulkanDevices(Config))
     return Err;
   // Validation layers have internal state which require a specific destruction
   // ordering. Relying on the global dtor call for this is unreliable and can
   // cause a null-deref in the validation layers during the final
   // vkDestroyInstance. This is a known limitation of the validation layers
   // which explicitely requires using atexit.
-  atexit(Device::cleanupVKDevices);
+  atexit(Device::cleanupVulkanDevices);
 #endif
 #ifdef OFFLOADTEST_ENABLE_METAL
   if (auto Err = initializeMtlDevices(Config))

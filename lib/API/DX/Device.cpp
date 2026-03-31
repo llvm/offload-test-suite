@@ -277,10 +277,31 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
 
 namespace {
 
+class DXQueue : public offloadtest::Queue {
+public:
+  ComPtr<ID3D12CommandQueue> Queue;
+
+  DXQueue(ComPtr<ID3D12CommandQueue> Queue) : Queue(Queue) {}
+  virtual ~DXQueue() {}
+
+  static llvm::Expected<DXQueue>
+  createGraphicsQueue(ComPtr<ID3D12Device> Device) {
+    const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
+                                           D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
+    ComPtr<ID3D12CommandQueue> Queue;
+    if (auto Err =
+            HR::toError(Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&Queue)),
+                        "Failed to create command queue."))
+      return Err;
+    return DXQueue(Queue);
+  }
+};
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12Device> Device;
+  DXQueue GraphicsQueue;
   Capabilities Caps;
 
   struct ResourceSet {
@@ -307,7 +328,6 @@ private:
     ComPtr<ID3D12RootSignature> RootSig;
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     ComPtr<ID3D12PipelineState> PSO;
-    ComPtr<ID3D12CommandQueue> Queue;
     ComPtr<ID3D12CommandAllocator> Allocator;
     ComPtr<ID3D12GraphicsCommandList> CmdList;
     ComPtr<ID3D12Fence> Fence;
@@ -328,8 +348,9 @@ private:
   };
 
 public:
-  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, std::string Desc)
-      : Adapter(A), Device(D) {
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
+           std::string Desc)
+      : Adapter(A), Device(D), GraphicsQueue(Q) {
     Description = Desc;
   }
   DXDevice(const DXDevice &) = default;
@@ -338,6 +359,8 @@ public:
 
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
+
+  Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
                                          const DeviceConfig &Config) {
@@ -358,7 +381,14 @@ public:
     if (Config.EnableDebugLayer || Config.EnableValidationLayer)
       if (auto Err = configureInfoQueue(Device.Get()))
         return Err;
-    return DXDevice(Adapter, Device, std::string(DescVec.data()));
+
+    auto GraphicsQueueOrErr = DXQueue::createGraphicsQueue(Device);
+    if (!GraphicsQueueOrErr)
+      return GraphicsQueueOrErr.takeError();
+    const DXQueue GraphicsQueue = *GraphicsQueueOrErr;
+
+    return DXDevice(Adapter, Device, std::move(GraphicsQueue),
+                    std::string(DescVec.data()));
   }
 
   const Capabilities &getCapabilities() override {
@@ -527,12 +557,6 @@ public:
   }
 
   llvm::Error createCommandStructures(InvocationState &IS) {
-    const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
-                                           D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
-    if (auto Err = HR::toError(
-            Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&IS.Queue)),
-            "Failed to create command queue."))
-      return Err;
     if (auto Err = HR::toError(
             Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                            IID_PPV_ARGS(&IS.Allocator)),
@@ -617,7 +641,7 @@ public:
     const UINT HeapRangeStartOffset = 0;
     const UINT RangeTileCount = NumTiles;
 
-    ID3D12CommandQueue *CommandQueue = IS.Queue.Get();
+    ID3D12CommandQueue *CommandQueue = GraphicsQueue.Queue.Get();
     CommandQueue->UpdateTileMappings(
         Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
         &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
@@ -1083,8 +1107,9 @@ public:
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
 
-    if (auto Err = HR::toError(IS.Queue->Signal(IS.Fence.Get(), CurrentCounter),
-                               "Failed to add signal."))
+    if (auto Err = HR::toError(
+            GraphicsQueue.Queue->Signal(IS.Fence.Get(), CurrentCounter),
+            "Failed to add signal."))
       return Err;
 
     if (IS.Fence->GetCompletedValue() < CurrentCounter) {
@@ -1120,7 +1145,7 @@ public:
       return Err;
 
     ID3D12CommandList *const CmdLists[] = {IS.CmdList.Get()};
-    IS.Queue->ExecuteCommandLists(1, CmdLists);
+    GraphicsQueue.Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
   }

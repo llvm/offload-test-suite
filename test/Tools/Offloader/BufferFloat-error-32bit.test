@@ -1,13 +1,11 @@
 #--- source.hlsl
 
-RWStructuredBuffer<int> Out : register(u0);
+RWStructuredBuffer<float> Out1 : register(u0);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0] = 20;
-  Out[1] = 30;
-  Out[2] = 40;
-  Out[3] = 50;
+  Out1[0] = 20.25;
+  Out1[1] = 5.0;
 }
 
 //--- pipeline.yaml
@@ -18,22 +16,23 @@ Shaders:
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-  - Name: Out
-    Format: Int32
+  - Name: Out1
+    Format: Float32
     Stride: 4
-    FillSize: 16
+    FillSize: 8
   - Name: Expected1
-    Format: Int32
+    Format: Float32
     Stride: 4
-    Data: [ 1, 2, 3, 4 ]
+    Data: [ 1.5, 2.5 ]
 Results:
   - Result: Test1
-    Rule: BufferExact
-    Actual: Out
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out1
     Expected: Expected1
 DescriptorSets:
   - Resources:
-    - Name: Out
+    - Name: Out1
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
@@ -48,13 +47,14 @@ DescriptorSets:
 # RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
 
 # CHECK: Test failed: Test1
-# CHECK: Comparison Rule: BufferExact
+# CHECK: Comparison Rule: BufferFloatULP
+# CHECK: ULP: 1
 # CHECK: Expected:
 # CHECK: ---
 # CHECK: Name:            Expected1
-# CHECK: Format:          Int32
+# CHECK: Format:          Float32
 # CHECK: Stride:          4
-# CHECK: Data:            [ 1, 2, 3, 4 ]
+# CHECK: Data:            [ 1.5, 2.5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
@@ -62,15 +62,16 @@ DescriptorSets:
 # CHECK:  ...
 # CHECK: Got:
 # CHECK: ---
-# CHECK: Name:            Out
-# CHECK: Format:          Int32
+# CHECK: Name:            Out1
+# CHECK: Format:          Float32
 # CHECK: Stride:          4
-# CHECK: Data:            [ 20, 30, 40, 50 ]
+# CHECK: Data:            [ 20.25, 5 ]
 # CHECK: OutputProps:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
-# CHECK: Full Hex representation of Expected Buffer Values:
-# CHECK: [ 0x1, 0x2, 0x3, 0x4 ]
-# CHECK: Full Hex representation of Actual Buffer Values:
-# CHECK: [ 0x14, 0x1e, 0x28, 0x32 ]
+# CHECK:  ...
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x3fc00000, 0x40200000 ]
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x41a20000, 0x40a00000 ]
