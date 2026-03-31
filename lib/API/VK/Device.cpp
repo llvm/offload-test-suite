@@ -455,7 +455,7 @@ private:
     VkCommandPool CmdPool = VK_NULL_HANDLE;
     VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
-    VkDescriptorPool Pool = nullptr;
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
     VkPipelineCache PipelineCache = VK_NULL_HANDLE;
     VkPipeline Pipeline = VK_NULL_HANDLE;
 
