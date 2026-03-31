@@ -2283,82 +2283,56 @@ public:
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
-    if (auto Err = createDevice(State)) {
+    auto CleanupState = llvm::scope_exit([&]() {
       cleanup(State);
+      llvm::outs() << "Cleanup complete.\n";
+    });
+
+    if (auto Err = createDevice(State))
       return Err;
-    }
     llvm::outs() << "Physical device created.\n";
-    if (auto Err = createShaderModules(P, State)) {
-      cleanup(State);
+    if (auto Err = createShaderModules(P, State))
       return Err;
-    }
     llvm::outs() << "Shader module created.\n";
-    if (auto Err = createCommandBuffer(State)) {
-      cleanup(State);
+    if (auto Err = createCommandBuffer(State))
       return Err;
-    }
     llvm::outs() << "Copy command buffer created.\n";
-    if (auto Err = createResources(P, State)) {
-      cleanup(State);
+    if (auto Err = createResources(P, State))
       return Err;
-    }
     if (P.isGraphics()) {
-      if (auto Err = createRenderPass(P, State)) {
-        cleanup(State);
+      if (auto Err = createRenderPass(P, State))
         return Err;
-      }
       llvm::outs() << "Render pass created.\n";
-      if (auto Err = createFrameBuffer(P, State)) {
-        cleanup(State);
+      if (auto Err = createFrameBuffer(P, State))
         return Err;
-      }
       llvm::outs() << "Frame buffer created.\n";
     }
     llvm::outs() << "Memory buffers created.\n";
-    if (auto Err = executeCommandBuffer(State)) {
-      cleanup(State);
+    if (auto Err = executeCommandBuffer(State))
       return Err;
-    }
     llvm::outs() << "Executed copy command buffer.\n";
-    if (auto Err = createCommandBuffer(State)) {
-      cleanup(State);
+    if (auto Err = createCommandBuffer(State))
       return Err;
-    }
     llvm::outs() << "Execute command buffer created.\n";
-    if (auto Err = createDescriptorPool(P, State)) {
-      cleanup(State);
+    if (auto Err = createDescriptorPool(P, State))
       return Err;
-    }
     llvm::outs() << "Descriptor pool created.\n";
-    if (auto Err = createDescriptorSets(P, State)) {
-      cleanup(State);
+    if (auto Err = createDescriptorSets(P, State))
       return Err;
-    }
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createPipeline(P, State)) {
-      cleanup(State);
+    if (auto Err = createPipeline(P, State))
       return Err;
-    }
     llvm::outs() << "Compute pipeline created.\n";
-    if (auto Err = createCommands(P, State)) {
-      cleanup(State);
+    if (auto Err = createCommands(P, State))
       return Err;
-    }
     llvm::outs() << "Commands created.\n";
-    if (auto Err =
-            executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT)) {
-      cleanup(State);
+    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
       return Err;
-    }
     llvm::outs() << "Executed compute command buffer.\n";
-    if (auto Err = readBackData(P, State)) {
-      cleanup(State);
+    if (auto Err = readBackData(P, State))
       return Err;
-    }
     llvm::outs() << "Compute pipeline created.\n";
 
-    cleanup(State);
-    llvm::outs() << "Cleanup complete.\n";
     return llvm::Error::success();
   }
 };
