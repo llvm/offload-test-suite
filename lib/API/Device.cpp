@@ -24,9 +24,9 @@ Queue::~Queue() {}
 
 Device::~Device() {}
 
-llvm::Expected<DeviceVector>
+llvm::Expected<llvm::SmallVector<std::shared_ptr<Device>>>
 offloadtest::initializeDevices(const DeviceConfig Config) {
-  DeviceVector Devices;
+  llvm::SmallVector<std::shared_ptr<Device>> Devices;
 
 #ifdef OFFLOADTEST_ENABLE_D3D12
   if (auto Err = initializeDX12Devices(Config, Devices))

@@ -1735,8 +1735,9 @@ public:
 };
 } // namespace
 
-llvm::Error offloadtest::initializeDX12Devices(const DeviceConfig Config,
-                                               DeviceVector &Devices) {
+llvm::Error offloadtest::initializeDX12Devices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices) {
 #ifdef _WIN32
   if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
     ComPtr<ID3D12Debug1> Debug1;

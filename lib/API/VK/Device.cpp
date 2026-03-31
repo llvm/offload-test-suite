@@ -2339,8 +2339,9 @@ public:
 };
 } // namespace
 
-llvm::Error offloadtest::initializeVulkanDevices(const DeviceConfig Config,
-                                                 DeviceVector &Devices) {
+llvm::Error offloadtest::initializeVulkanDevices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices) {
   // Request the highest supported API version
   uint32_t ApiVersion = 0;
   vkEnumerateInstanceVersion(&ApiVersion);

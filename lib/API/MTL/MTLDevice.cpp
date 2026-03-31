@@ -619,8 +619,9 @@ private:
 };
 } // namespace
 
-llvm::Error offloadtest::initializeMetalDevices(const DeviceConfig /*Config*/,
-                                                DeviceVector &Devices) {
+llvm::Error offloadtest::initializeMetalDevices(
+    const DeviceConfig /*Config*/,
+    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices) {
   MTL::Device *MetalDevice = MTL::CreateSystemDefaultDevice();
   MTL::CommandQueue *MetalQueue = MetalDevice->newCommandQueue();
 

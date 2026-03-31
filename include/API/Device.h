@@ -88,15 +88,17 @@ public:
   llvm::StringRef getDriverName() const { return DriverName; }
 };
 
-typedef llvm::SmallVector<std::shared_ptr<Device>> DeviceVector;
-
-llvm::Error initializeDX12Devices(const DeviceConfig Config,
-                                  DeviceVector &Devices);
-llvm::Error initializeVulkanDevices(const DeviceConfig Config,
-                                    DeviceVector &Devices);
-llvm::Error initializeMetalDevices(const DeviceConfig Config,
-                                   DeviceVector &Devices);
-llvm::Expected<DeviceVector> initializeDevices(const DeviceConfig Config);
+llvm::Error
+initializeDX12Devices(const DeviceConfig Config,
+                      llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices);
+llvm::Error initializeVulkanDevices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices);
+llvm::Error
+initializeMetalDevices(const DeviceConfig Config,
+                       llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices);
+llvm::Expected<llvm::SmallVector<std::shared_ptr<Device>>>
+initializeDevices(const DeviceConfig Config);
 
 } // namespace offloadtest
 
