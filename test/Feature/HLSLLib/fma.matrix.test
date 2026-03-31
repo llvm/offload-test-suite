@@ -1,0 +1,141 @@
+#--- source.hlsl
+
+StructuredBuffer<double4> A : register(t0);
+StructuredBuffer<double4> B : register(t1);
+StructuredBuffer<double4> C : register(t2);
+
+RWStructuredBuffer<double4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  double3x2 r32 = fma(double3x2(A[0].xyz, A[1].xyz),
+                      double3x2(B[0].xyz, B[1].xyz),
+                      double3x2(C[0].xyz, C[1].xyz));
+
+  double2x4 r24 = fma(double2x4(A[2], A[3]),
+                      double2x4(B[2], B[3]),
+                      double2x4(C[2], C[3]));
+
+  double3x1 r31 = fma(double3x1(A[4].xyz),
+                      double3x1(B[4].xyz),
+                      double3x1(C[4].xyz));
+
+  double4x4 r44 = fma(double4x4(A[5], A[6], A[7], A[8]),
+                      double4x4(B[5], B[6], B[7], B[8]),
+                      double4x4(C[5], C[6], C[7], C[8]));
+
+  Out[0] = double4(r32[0], r32[1]);
+  Out[1] = double4(r32[2], 0.0, 0.0);
+  Out[2] = r24[0];
+  Out[3] = r24[1];
+  Out[4] = double4(r31[0][0], r31[1][0], r31[2][0], 0.0);
+  Out[5] = r44[0];
+  Out[6] = r44[1];
+  Out[7] = r44[2];
+  Out[8] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: A
+    Format: Float64
+    Stride: 32
+    Data: [ 1.5, -2.5, 0.5, 0.0,
+            -0.5, 2.0, 3.0, 0.0,
+            0.25, -0.25, 10.4, -10.6,
+            0.0, 10.0, -10.0, 10.5,
+            1.25, -4.0, 2.5, 0.0,
+            1.0, 2.0, 3.0, 4.0,
+            -1.0, -2.0, -3.0, -4.0,
+            0.5, 1.5, -0.5, -1.5,
+            10.0, -10.0, 2.25, -2.25 ]
+  - Name: B
+    Format: Float64
+    Stride: 32
+    Data: [ 2.0, -1.0, 4.0, 0.0,
+            4.0, -0.5, 1.5, 0.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 2.0, -1.0, 1.0,
+            2.0, -0.5, 3.0, 0.0,
+            2.0, -1.0, 0.5, 3.0,
+            4.0, 0.5, -2.0, -1.0,
+            1.0, 2.0, 3.0, 4.0,
+            -0.5, 1.5, -1.0, 2.0 ]
+  - Name: C
+    Format: Float64
+    Stride: 32
+    Data: [ 0.25, 0.75, -1.5, 0.0,
+            1.5, 1.0, -2.0, 0.0,
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 0.5, 0.5, 0.0,
+            0.5, 1.0, -1.5, 0.0,
+            0.5, 1.0, -1.5, 0.0,
+            -0.5, 2.0, 1.0, 3.0,
+            1.5, -2.0, 0.5, -4.0,
+            5.0, -5.0, 0.25, -0.25 ]
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    FillSize: 288
+  - Name: Expected
+    Format: Float64
+    Stride: 32
+    Data: [ 3.25, 3.25, 0.5, -0.5,
+            0.0, 2.5, 0.0, 0.0,
+            0.25, -0.25, 10.4, -10.6,
+            0.0, 20.5, 10.5, 10.5,
+            3.0, 3.0, 6.0, 0.0,
+            2.5, -1.0, 0.0, 12.0,
+            -4.5, 1.0, 7.0, 7.0,
+            2.0, 1.0, -1.0, -10.0,
+            0.0, -20.0, -2.0, -4.75 ]
+Results:
+  - Result: Result
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: C
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1000
+# XFAIL: arm64 && WARP
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
