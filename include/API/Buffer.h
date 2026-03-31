@@ -19,8 +19,14 @@
 
 namespace offloadtest {
 
+enum class BufferUsage {
+  Storage,
+  VertexBuffer,
+};
+
 struct BufferCreateDesc {
   MemoryLocation Location;
+  BufferUsage Usage;
 };
 
 class Buffer {
@@ -28,6 +34,8 @@ class Buffer {
 
 public:
   virtual ~Buffer();
+  virtual size_t getSizeInBytes() const = 0;
+
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;
 

@@ -157,6 +157,8 @@ public:
       : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
 
+  size_t getSizeInBytes() const override { return SizeInBytes; }
+
   ~MTLBuffer() override {
     if (Buf)
       Buf->release();
@@ -256,7 +258,7 @@ class MTLDevice : public offloadtest::Device {
 
     NS::AutoreleasePool *Pool = nullptr;
     MTL::Buffer *ArgBuffer;
-    MTL::Buffer *VertexBuffer;
+    std::shared_ptr<MTLBuffer> VB;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
     std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
@@ -347,12 +349,27 @@ class MTLDevice : public offloadtest::Device {
       IS.ArgBuffer->didModifyRange(NS::Range::Make(0, IS.ArgBuffer->length()));
     }
     if (P.isGraphics()) {
-      // Create and mark the vertex buffer as modified.
-      IS.VertexBuffer = Device->newBuffer(
-          P.Bindings.VertexBufferPtr->Data.back().get(),
-          P.Bindings.VertexBufferPtr->size(), MTL::ResourceStorageModeManaged);
-      IS.VertexBuffer->didModifyRange(
-          NS::Range::Make(0, IS.VertexBuffer->length()));
+      if (!P.Bindings.VertexBufferPtr)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "No vertex buffer specified for graphics pipeline.");
+      const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::CpuToGpu;
+      BufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr = createBuffer("VertexBuffer", BufDesc, VB.size());
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.VB = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
+
+      // TODO: Currently uses a single CpuToGpu mapped buffer. On discrete GPUs
+      // (DX/VK), consider using a staging buffer + copy to a GpuOnly vertex
+      // buffer for optimal GPU read performance. On Apple Silicon this is
+      // unnecessary due to unified memory.
+      const size_t BufSize = IS.VB->getSizeInBytes();
+      memcpy(IS.VB->Buf->contents(), VB.Data[0].get(), BufSize);
+      IS.VB->Buf->didModifyRange(NS::Range::Make(0, BufSize));
     }
     return llvm::Error::success();
   }
@@ -442,6 +459,7 @@ class MTLDevice : public offloadtest::Device {
     // Create a readback buffer for copying render target data to the CPU.
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
+    BufDesc.Usage = BufferUsage::Storage;
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -537,7 +555,7 @@ class MTLDevice : public offloadtest::Device {
 
     // Bind vertex buffer at slot 0 to match the vertex descriptor which
     // references buffer index 0.
-    CmdEncoder->setVertexBuffer(IS.VertexBuffer, 0, 0);
+    CmdEncoder->setVertexBuffer(IS.VB->Buf, 0, 0);
 
     CmdEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0),
                                P.Bindings.getVertexCount());
