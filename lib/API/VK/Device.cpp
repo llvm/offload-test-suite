@@ -362,6 +362,12 @@ public:
   VkDevice Dev;
   VkImage Image;
   VkDeviceMemory Memory;
+  // TODO:
+  // RenderTarget and DepthStencil views are created at texture creation time.
+  // Ideally Sampled/Storage image views would also live here, but they are
+  // currently created during descriptor set setup, which determines their
+  // binding layout.
+  VkImageView View = VK_NULL_HANDLE;
   std::string Name;
   TextureCreateDesc Desc;
 
@@ -370,6 +376,8 @@ public:
       : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
 
   ~VulkanTexture() override {
+    if (View)
+      vkDestroyImageView(Dev, View, nullptr);
     vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
@@ -721,8 +729,37 @@ public:
                                      "Failed to bind image memory.");
     }
 
-    return std::make_shared<VulkanTexture>(Device, Image, DeviceMemory, Name,
-                                           Desc);
+    auto Tex = std::make_shared<VulkanTexture>(Device, Image, DeviceMemory,
+                                               Name, Desc);
+
+    bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      VkImageViewCreateInfo ViewCi = {};
+      ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      ViewCi.format = getVulkanFormat(Desc.Format);
+      ViewCi.subresourceRange.baseMipLevel = 0;
+      ViewCi.subresourceRange.levelCount = 1;
+      ViewCi.subresourceRange.baseArrayLayer = 0;
+      ViewCi.subresourceRange.layerCount = 1;
+      ViewCi.image = Image;
+      if (IsRT) {
+        ViewCi.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                             VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+        ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      } else {
+        ViewCi.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+      }
+      if (vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View)) {
+        // Tex destructor will clean up Image + Memory.
+        return llvm::createStringError(std::errc::device_or_resource_busy,
+                                       "Failed to create image view.");
+      }
+    }
+
+    return Tex;
   }
 
   const Capabilities &getCapabilities() override {
@@ -1462,8 +1499,7 @@ public:
   llvm::Error createRenderPass(Pipeline &P, InvocationState &IS) {
     std::array<VkAttachmentDescription, 2> Attachments = {};
 
-    Attachments[0].format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
+    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Format);
     Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1472,7 +1508,7 @@ public:
     Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    Attachments[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Format);
     Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1543,52 +1579,16 @@ public:
   }
 
   llvm::Error createFrameBuffer(Pipeline &P, InvocationState &IS) {
-    std::array<VkImageView, 2> Views = {};
-    VkImageViewCreateInfo ViewCreateInfo = {};
-    ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
-    ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
-                                 VK_COMPONENT_SWIZZLE_B,
-                                 VK_COMPONENT_SWIZZLE_A};
-    ViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    ViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    ViewCreateInfo.subresourceRange.layerCount = 1;
-    ViewCreateInfo.subresourceRange.levelCount = 1;
-    ViewCreateInfo.image = IS.RenderTarget->Image;
-    if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &Views[0]))
-      return llvm::createStringError(
-          std::errc::device_or_resource_busy,
-          "Failed to create frame buffer image view.");
-    IS.ImageViews.push_back(Views[0]);
-
-    VkImageViewCreateInfo DepthStencilViewCi = {};
-    DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
-    DepthStencilViewCi.subresourceRange = {};
-    DepthStencilViewCi.subresourceRange.aspectMask =
-        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    DepthStencilViewCi.subresourceRange.baseMipLevel = 0;
-    DepthStencilViewCi.subresourceRange.levelCount = 1;
-    DepthStencilViewCi.subresourceRange.baseArrayLayer = 0;
-    DepthStencilViewCi.subresourceRange.layerCount = 1;
-    DepthStencilViewCi.image = IS.DepthStencil->Image;
-    if (vkCreateImageView(Device, &DepthStencilViewCi, nullptr, &Views[1]))
-      return llvm::createStringError(
-          std::errc::device_or_resource_busy,
-          "Failed to create depth stencil image view.");
-    IS.ImageViews.push_back(Views[1]);
+    std::array<VkImageView, 2> Views = {IS.RenderTarget->View,
+                                        IS.DepthStencil->View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     FbufCreateInfo.renderPass = IS.RenderPass;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
-    FbufCreateInfo.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
+    FbufCreateInfo.width = IS.RenderTarget->Desc.Width;
+    FbufCreateInfo.height = IS.RenderTarget->Desc.Height;
     FbufCreateInfo.layers = 1;
 
     if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))

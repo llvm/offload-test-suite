@@ -294,6 +294,16 @@ public:
 class DXTexture : public offloadtest::Texture {
 public:
   ComPtr<ID3D12Resource> Resource;
+  // TODO:
+  // RTV/DSV views own a dedicated single-descriptor heap and are created at
+  // texture creation time. Ideally SRV/UAV views would also live here, but
+  // they currently require a shared CBV_SRV_UAV heap whose indices are
+  // determined at pipeline bind time. Moving them here would require a
+  // descriptor heap allocator, which is not yet implemented.
+  //
+  // Either an RTV or DSV descriptor, depending on Desc.Usage.
+  ComPtr<ID3D12DescriptorHeap> ViewHeap;
+  D3D12_CPU_DESCRIPTOR_HANDLE ViewHandle = {};
   std::string Name;
   TextureCreateDesc Desc;
 
@@ -366,8 +376,6 @@ private:
     std::shared_ptr<DXTexture> RT;
     std::shared_ptr<DXBuffer> RTReadback;
     std::shared_ptr<DXTexture> DS;
-    ComPtr<ID3D12DescriptorHeap> RTVHeap;
-    ComPtr<ID3D12DescriptorHeap> DSVHeap;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -462,7 +470,31 @@ public:
                                "Failed to create texture."))
       return Err;
 
-    return std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+    auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+
+    bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+      HeapDesc.NumDescriptors = 1;
+      HeapDesc.Type =
+          IsRT ? D3D12_DESCRIPTOR_HEAP_TYPE_RTV : D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+      HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      if (auto Err = HR::toError(Device->CreateDescriptorHeap(
+                                     &HeapDesc, IID_PPV_ARGS(&Tex->ViewHeap)),
+                                 IsRT ? "Failed to create RTV heap."
+                                      : "Failed to create DSV heap."))
+        return Err;
+      Tex->ViewHandle = Tex->ViewHeap->GetCPUDescriptorHandleForHeapStart();
+      if (IsRT)
+        Device->CreateRenderTargetView(DeviceTexture.Get(), nullptr,
+                                       Tex->ViewHandle);
+      else
+        Device->CreateDepthStencilView(DeviceTexture.Get(), nullptr,
+                                       Tex->ViewHandle);
+    }
+
+    return Tex;
   }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
@@ -1586,34 +1618,6 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    // Create descriptor heap for the render target view. We do this later and
-    // separately from other descriptors just as a convenience since we need the
-    // descriptor handle to bind the render target.
-    D3D12_DESCRIPTOR_HEAP_DESC RTVHeapDesc = {};
-    RTVHeapDesc.NumDescriptors = 1;
-    RTVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    RTVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &RTVHeapDesc, IID_PPV_ARGS(&IS.RTVHeap)),
-                               "Failed to create RTV heap"))
-      return Err;
-    const D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle =
-        IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
-    Device->CreateRenderTargetView(IS.RT->Resource.Get(), nullptr, RTVHandle);
-
-    // Create descriptor heap and view for the depth/stencil buffer.
-    D3D12_DESCRIPTOR_HEAP_DESC DSVHeapDesc = {};
-    DSVHeapDesc.NumDescriptors = 1;
-    DSVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-    DSVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &DSVHeapDesc, IID_PPV_ARGS(&IS.DSVHeap)),
-                               "Failed to create DSV heap"))
-      return Err;
-    const D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle =
-        IS.DSVHeap->GetCPUDescriptorHandleForHeapStart();
-    Device->CreateDepthStencilView(IS.DS->Resource.Get(), nullptr, DSVHandle);
-
     IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1623,7 +1627,8 @@ public:
     }
     IS.CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, &DSVHandle);
+    IS.CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
+                                   &IS.DS->ViewHandle);
 
     const auto *DepthCV =
         std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
@@ -1632,7 +1637,7 @@ public:
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
     IS.CmdList->ClearDepthStencilView(
-        DSVHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        IS.DS->ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
