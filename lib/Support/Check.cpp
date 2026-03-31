@@ -324,7 +324,8 @@ static void formatBufferArray(offloadtest::CPUBuffer *B,
   }
 }
 
-template <typename T> static std::string formatBuffer(offloadtest::CPUBuffer *B) {
+template <typename T>
+static std::string formatBuffer(offloadtest::CPUBuffer *B) {
   llvm::SmallString<256> Str;
   llvm::raw_svector_ostream Result(Str);
 
