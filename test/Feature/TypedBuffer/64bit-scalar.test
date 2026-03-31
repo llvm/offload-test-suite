@@ -126,10 +126,7 @@ DescriptorSets:
 # UNSUPPORTED: Metal
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1030
-# XFAIL: Vulkan
-
-# Bug https://github.com/llvm/offload-test-suite/issues/1029
-# XFAIL: QC && DirectX
+# XFAIL: Vulkan && !AMD
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
