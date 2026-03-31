@@ -346,10 +346,12 @@ struct VulkanInstance {
   VulkanInstance &operator=(const VulkanInstance &) = delete;
   VulkanInstance &operator=(VulkanInstance &&) = delete;
   ~VulkanInstance() {
-    auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-        Instance, "vkDestroyDebugUtilsMessengerEXT");
-    assert(Func != nullptr);
-    Func(Instance, DebugMessenger, nullptr);
+    if (DebugMessenger) {
+      auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+          Instance, "vkDestroyDebugUtilsMessengerEXT");
+      assert(Func != nullptr);
+      Func(Instance, DebugMessenger, nullptr);
+    }
     vkDestroyInstance(Instance, nullptr);
   }
 };
@@ -2409,7 +2411,10 @@ llvm::Error offloadtest::initializeVulkanDevices(
                                    Res);
 
 #ifndef NDEBUG
-  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
+  const VkDebugUtilsMessengerEXT DebugMessenger =
+      registerDebugUtilCallback(Instance);
+#else
+  const VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
 #endif
 
   uint32_t DeviceCount = 0;
