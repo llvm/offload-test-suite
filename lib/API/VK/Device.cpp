@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "Support/Pipeline.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 
 #include <algorithm>
