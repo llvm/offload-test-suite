@@ -1777,8 +1777,7 @@ llvm::Error offloadtest::initializeDX12Devices(const DeviceConfig Config,
     auto ExDevice = DXDevice::create(Adapter, Config);
     if (!ExDevice)
       return ExDevice.takeError();
-    auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
-    Devices.push_back(ShPtr);
+    Devices.push_back(std::make_shared<DXDevice>(*ExDevice));
   }
   return llvm::Error::success();
 }
