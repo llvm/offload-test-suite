@@ -345,7 +345,13 @@ struct VulkanInstance {
   VulkanInstance(VulkanInstance &&) = delete;
   VulkanInstance &operator=(const VulkanInstance &) = delete;
   VulkanInstance &operator=(VulkanInstance &&) = delete;
-  ~VulkanInstance() { vkDestroyInstance(Instance, nullptr); }
+  ~VulkanInstance() {
+    auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+        Instance, "vkDestroyDebugUtilsMessengerEXT");
+    assert(Func != nullptr);
+    Func(Instance, DebugMessenger, nullptr);
+    vkDestroyInstance(Instance, nullptr);
+  }
 };
 
 namespace {
