@@ -7,27 +7,10 @@ RWStructuredBuffer<int> Out[4] : register(u0);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
+  for (int i = 0; i < GI; i++)
+    Out[NonUniformResourceIndex(GI)].IncrementCounter();
   
-  switch(GI) {
-    case 0:
-      Out[0].IncrementCounter();
-      break;
-    case 1:
-      Out[1][0] = Out[1].IncrementCounter();
-      Out[1][0] = Out[1].IncrementCounter();
-      break;
-    case 2:
-      Out[2][0] = Out[2].IncrementCounter();
-      Out[2][0] = Out[2].IncrementCounter();
-      Out[2][0] = Out[2].IncrementCounter();
-      break;
-    case 3:
-      Out[3][0] = Out[3].IncrementCounter();
-      Out[3][0] = Out[3].IncrementCounter();
-      Out[3][0] = Out[3].IncrementCounter();
-      Out[3][0] = Out[3].IncrementCounter();
-      break;
-  }
+  Out[NonUniformResourceIndex(GI)][0] = Out[NonUniformResourceIndex(GI)].IncrementCounter();
 }
 
 //--- pipeline.yaml
@@ -64,6 +47,7 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/304
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
 # XFAIL: Metal
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
