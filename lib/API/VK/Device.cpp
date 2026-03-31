@@ -2411,10 +2411,9 @@ llvm::Error offloadtest::initializeVulkanDevices(
                                    Res);
 
 #ifndef NDEBUG
-  const VkDebugUtilsMessengerEXT DebugMessenger =
-      registerDebugUtilCallback(Instance);
+  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
 #else
-  const VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
+  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
 #endif
 
   uint32_t DeviceCount = 0;
@@ -2427,7 +2426,7 @@ llvm::Error offloadtest::initializeVulkanDevices(
     return llvm::createStringError(std::errc::no_such_device,
                                    "Failed to enumerate devices");
 
-  std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
+  const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
       std::make_shared<VulkanInstance>(Instance, DebugMessenger);
   for (const auto &PDev : PhysicalDevices) {
     auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
