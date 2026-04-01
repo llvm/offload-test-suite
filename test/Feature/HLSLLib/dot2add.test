@@ -18,7 +18,7 @@ void main(uint3 DTID : SV_DispatchThreadID) {
     Out[15] = dot2add(half2(1, 49152), half2(-49152, 1), float(-2));
   }
 }
-#--- pipeline.yaml
+//--- pipeline.yaml
 
 ---
 Shaders:
