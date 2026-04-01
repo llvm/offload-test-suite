@@ -10,6 +10,7 @@
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "MTLResources.h"
 #include "Support/Pipeline.h"
 
@@ -197,6 +198,9 @@ public:
     return CB->getKind() == GPUAPI::Metal;
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder() override;
+
 private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
@@ -228,6 +232,70 @@ llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
   InFlightBatches.push_back({SignalValue, std::move(CBs)});
 
   return offloadtest::SubmitResult{SubmitFence.get(), SignalValue};
+}
+
+class MTLComputeEncoder : public offloadtest::ComputeEncoder {
+  MTL::CommandBuffer *CmdBuffer;
+  MTL::ComputeCommandEncoder *Encoder;
+
+  /// Accumulated barrier scope from commands recorded since the last barrier.
+  MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
+
+  /// Record that a command touched the given resource types.  The accumulated
+  /// scope is flushed as a memoryBarrier before the next command.
+  void addBarrierScope(MTL::BarrierScope Scope) { PendingScope |= Scope; }
+
+  void flushBarrier() {
+    if (PendingScope != MTL::BarrierScope(0)) {
+      Encoder->memoryBarrier(PendingScope);
+      PendingScope = MTL::BarrierScope(0);
+    }
+  }
+
+public:
+  MTLComputeEncoder(MTL::CommandBuffer *CmdBuffer,
+                    MTL::ComputeCommandEncoder *Encoder)
+      : ComputeEncoder(GPUAPI::Metal), CmdBuffer(CmdBuffer),
+        Encoder(Encoder) {}
+
+  ~MTLComputeEncoder() override = default;
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Metal;
+  }
+
+  MTL::ComputeCommandEncoder *getNative() const { return Encoder; }
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ, uint32_t ThreadsPerGroupX,
+                       uint32_t ThreadsPerGroupY,
+                       uint32_t ThreadsPerGroupZ) override {
+    flushBarrier();
+    const MTL::Size GridSize(
+        static_cast<NS::UInteger>(ThreadsPerGroupX) * GroupCountX,
+        static_cast<NS::UInteger>(ThreadsPerGroupY) * GroupCountY,
+        static_cast<NS::UInteger>(ThreadsPerGroupZ) * GroupCountZ);
+    const MTL::Size GroupSize(ThreadsPerGroupX, ThreadsPerGroupY,
+                              ThreadsPerGroupZ);
+    Encoder->dispatchThreads(GridSize, GroupSize);
+    addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
+    return llvm::Error::success();
+  }
+
+  void endEncoding() override {
+    Encoder->endEncoding();
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+MTLCommandBuffer::createComputeEncoder() {
+  MTL::ComputeCommandEncoder *NativeEncoder =
+      CmdBuffer->computeCommandEncoder();
+  if (!NativeEncoder)
+    return llvm::createStringError(
+        std::errc::device_or_resource_busy,
+        "Failed to create Metal compute command encoder.");
+  return std::make_unique<MTLComputeEncoder>(CmdBuffer, NativeEncoder);
 }
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
@@ -505,20 +573,20 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    MTL::ComputeCommandEncoder *CmdEncoder =
-        IS.CB->CmdBuffer->computeCommandEncoder();
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
+    MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
 
-    auto CloseCommandEncoder =
-        llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
-
-    CmdEncoder->setComputePipelineState(IS.ComputePipeline);
-    CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
+    NativeEncoder->setComputePipelineState(IS.ComputePipeline);
+    NativeEncoder->setBuffer(IS.ArgBuffer, 0, 2);
     for (uint64_t I = 0; I < IS.Textures.size(); ++I)
-      CmdEncoder->useResource(IS.Textures[I],
-                              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+      NativeEncoder->useResource(IS.Textures[I], MTL::ResourceUsageRead |
+                                                     MTL::ResourceUsageWrite);
     for (uint64_t I = 0; I < IS.Buffers.size(); ++I)
-      CmdEncoder->useResource(IS.Buffers[I],
-                              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+      NativeEncoder->useResource(IS.Buffers[I], MTL::ResourceUsageRead |
+                                                    MTL::ResourceUsageWrite);
 
     NS::UInteger TGS[3] = {IS.ComputePipeline->maxTotalThreadsPerThreadgroup(),
                            1, 1};
@@ -562,13 +630,10 @@ class MTLDevice : public offloadtest::Device {
 
     const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-    const MTL::Size GridSize =
-        MTL::Size(TGS[0] * DispatchSize[0], TGS[1] * DispatchSize[1],
-                  TGS[2] * DispatchSize[2]);
-    const MTL::Size GroupSize(TGS[0], TGS[1], TGS[2]);
-    CmdEncoder->dispatchThreads(GridSize, GroupSize);
-    CmdEncoder->memoryBarrier(MTL::BarrierScopeBuffers);
-
+    if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
+                                    DispatchSize[2], TGS[0], TGS[1], TGS[2]))
+      return Err;
+    Encoder.endEncoding();
     return llvm::Error::success();
   }
 
