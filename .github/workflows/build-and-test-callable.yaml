@@ -109,14 +109,14 @@ jobs:
 
     steps:
       - name: Run dxdiag (Windows only)
-        if: inputs.OS == 'windows'
+        if: inputs.OS == 'windows' && vars.RUN_DXDIAG == 'true'
         shell: pwsh
         run: |
           $output = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
       - name: Upload dxdiag result (Windows only)
-        if: inputs.OS == 'windows'
+        if: inputs.OS == 'windows' && vars.RUN_DXDIAG == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: dxdiag-report
