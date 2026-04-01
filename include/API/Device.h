@@ -58,6 +58,19 @@ class Queue {
 public:
   virtual ~Queue() = 0;
 
+  /// Submit command buffers for execution and block until completion.
+  /// Command buffers execute in array order, but dependencies between them
+  /// require appropriate barriers within the command buffers themselves.
+  virtual llvm::Error
+  submit(llvm::SmallVectorImpl<std::unique_ptr<CommandBuffer>> &&CBs) = 0;
+
+  /// Convenience overload for submitting a single command buffer.
+  llvm::Error submit(std::unique_ptr<CommandBuffer> CB) {
+    llvm::SmallVector<std::unique_ptr<CommandBuffer>, 1> CBs;
+    CBs.push_back(std::move(CB));
+    return submit(std::move(CBs));
+  }
+
 protected:
   Queue() = default;
 };

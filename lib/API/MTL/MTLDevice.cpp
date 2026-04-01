@@ -77,12 +77,18 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
 namespace {
 class MTLQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   MTL::CommandQueue *Queue;
   MTLQueue(MTL::CommandQueue *Queue) : Queue(Queue) {}
-  ~MTLQueue() {
+  ~MTLQueue() override {
     if (Queue)
       Queue->release();
   }
+
+  llvm::Error submit(
+      llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs)
+      override;
 };
 
 class MTLFence : public offloadtest::Fence {
@@ -181,6 +187,24 @@ private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
 
+llvm::Error MTLQueue::submit(
+    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+  // Metal serial queues guarantee that command buffers execute in commit order,
+  // so no explicit wait on prior work is needed here.
+  for (auto &CB : CBs)
+    llvm::cast<MTLCommandBuffer>(CB.get())->CmdBuffer->commit();
+
+  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
+  for (auto &CB : CBs) {
+    auto &MCB = *llvm::cast<MTLCommandBuffer>(CB.get());
+    MCB.CmdBuffer->waitUntilCompleted();
+
+    NS::Error *Err = MCB.CmdBuffer->error();
+    if (Err)
+      return toError(Err);
+  }
+  return llvm::Error::success();
+}
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -213,7 +237,6 @@ class MTLDevice : public offloadtest::Device {
     std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
-    std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
 
   llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
@@ -655,24 +678,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error executeCommands(InvocationState &IS) {
-    // This is a hack but it works since this is all single threaded code.
-    static uint64_t FenceCounter = 0;
-    const uint64_t CurrentCounter = FenceCounter + 1;
-    auto *F = static_cast<MTLFence *>(IS.CompletionFence.get());
-
-    IS.CB->CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
-    IS.CB->CmdBuffer->commit();
-
-    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
-      return Err;
-
-    // Check and surface any errors that occurred during execution.
-    NS::Error *CBErr = IS.CB->CmdBuffer->error();
-    if (CBErr)
-      return toError(CBErr);
-
-    FenceCounter = CurrentCounter;
-    return llvm::Error::success();
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
@@ -788,11 +794,6 @@ public:
     if (!CBOrErr)
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
-
-    auto FenceOrErr = createFence("Fence");
-    if (!FenceOrErr)
-      return FenceOrErr.takeError();
-    IS.CompletionFence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, IS))
       return Err;
