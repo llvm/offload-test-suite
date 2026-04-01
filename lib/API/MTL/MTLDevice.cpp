@@ -621,11 +621,11 @@ private:
 
 llvm::Error offloadtest::initializeMetalDevices(
     const DeviceConfig /*Config*/,
-    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices) {
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
   MTL::Device *MetalDevice = MTL::CreateSystemDefaultDevice();
   MTL::CommandQueue *MetalQueue = MetalDevice->newCommandQueue();
 
-  auto DefaultDev = std::make_shared<MTLDevice>(MetalDevice, MetalQueue);
+  auto DefaultDev = std::make_unique<MTLDevice>(MetalDevice, MetalQueue);
   Devices.push_back(DefaultDev);
 
   return llvm::Error::success();

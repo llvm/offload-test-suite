@@ -501,7 +501,7 @@ private:
   };
 
 public:
-  static llvm::Expected<std::shared_ptr<VulkanDevice>>
+  static llvm::Expected<std::unique_ptr<VulkanDevice>>
   create(std::shared_ptr<VulkanInstance> Instance,
          VkPhysicalDevice PhysicalDevice,
          llvm::SmallVector<VkLayerProperties, 0> InstanceLayers) {
@@ -585,7 +585,7 @@ public:
 
     const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
 
-    return std::make_shared<VulkanDevice>(Instance, PhysicalDevice, Props,
+    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
                                           Device, std::move(GraphicsQueue),
                                           std::move(InstanceLayers));
   }
@@ -2355,7 +2355,7 @@ public:
 
 llvm::Error offloadtest::initializeVulkanDevices(
     const DeviceConfig Config,
-    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices) {
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
   // Request the highest supported API version
   uint32_t ApiVersion = 0;
   vkEnumerateInstanceVersion(&ApiVersion);
@@ -2434,7 +2434,7 @@ llvm::Error offloadtest::initializeVulkanDevices(
     if (!DeviceOrErr) {
       return DeviceOrErr.takeError();
     }
-    Devices.push_back(*DeviceOrErr);
+    Devices.push_back(std::move(*DeviceOrErr));
   }
 
   return llvm::Error::success();

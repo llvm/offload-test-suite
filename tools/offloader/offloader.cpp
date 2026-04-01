@@ -110,7 +110,7 @@ int run() {
                           "gpu-exec: error: ");
     return 1;
   }
-  auto Devices = *DevicesOrErr;
+  auto Devices = std::move(*DevicesOrErr);
 
   const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;

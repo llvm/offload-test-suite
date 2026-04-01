@@ -32,7 +32,7 @@ int main(int ArgC, char **ArgV) {
                           "api-query: error: ");
     return 1;
   }
-  auto Devices = *DevicesOrErr;
+  auto Devices = std::move(*DevicesOrErr);
 
   outs() << "Devices:\n";
   for (const auto &D : Devices) {

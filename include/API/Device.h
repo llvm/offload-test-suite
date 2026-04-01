@@ -90,14 +90,14 @@ public:
 
 llvm::Error
 initializeDX12Devices(const DeviceConfig Config,
-                      llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices);
+                      llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices);
 llvm::Error initializeVulkanDevices(
     const DeviceConfig Config,
-    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices);
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices);
 llvm::Error
 initializeMetalDevices(const DeviceConfig Config,
-                       llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices);
-llvm::Expected<llvm::SmallVector<std::shared_ptr<Device>>>
+                       llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices);
+llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
 initializeDevices(const DeviceConfig Config);
 
 } // namespace offloadtest

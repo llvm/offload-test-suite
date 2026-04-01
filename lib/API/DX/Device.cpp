@@ -409,8 +409,8 @@ public:
     return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
   }
 
-  static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
-                                         const DeviceConfig &Config) {
+  static llvm::Expected<std::unique_ptr<offloadtest::Device>>
+  create(ComPtr<IDXCoreAdapter> Adapter, const DeviceConfig &Config) {
     ComPtr<ID3D12Device> Device;
     if (auto Err =
             HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
@@ -434,8 +434,8 @@ public:
       return GraphicsQueueOrErr.takeError();
     const DXQueue GraphicsQueue = *GraphicsQueueOrErr;
 
-    return DXDevice(Adapter, Device, std::move(GraphicsQueue),
-                    std::string(DescVec.data()));
+    return std::make_unique<DXDevice>(Adapter, Device, std::move(GraphicsQueue),
+                                      std::string(DescVec.data()));
   }
 
   const Capabilities &getCapabilities() override {
@@ -1737,7 +1737,7 @@ public:
 
 llvm::Error offloadtest::initializeDX12Devices(
     const DeviceConfig Config,
-    llvm::SmallVectorImpl<std::shared_ptr<Device>> &Devices) {
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
 #ifdef _WIN32
   if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
     ComPtr<ID3D12Debug1> Debug1;
@@ -1778,7 +1778,7 @@ llvm::Error offloadtest::initializeDX12Devices(
     auto ExDevice = DXDevice::create(Adapter, Config);
     if (!ExDevice)
       return ExDevice.takeError();
-    Devices.push_back(std::make_shared<DXDevice>(*ExDevice));
+    Devices.push_back(std::move(*ExDevice));
   }
   return llvm::Error::success();
 }
