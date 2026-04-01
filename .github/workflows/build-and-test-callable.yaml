@@ -119,10 +119,6 @@ jobs:
           $output = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
-      - name: Copy dxdiag to workspace
-        if: inputs.OS == 'windows'
-        shell: powershell
-        run: Copy-Item $env:RUNNER_TEMP\dxdiag.txt "$env:GITHUB_WORKSPACE\dxdiag.txt"
 
       - name: Upload dxdiag artifact
         if: inputs.OS == 'windows'
