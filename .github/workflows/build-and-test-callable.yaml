@@ -116,7 +116,8 @@ jobs:
         if: inputs.OS == 'windows'
         shell: powershell
         run: |
-          $output = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
+          $fileName = "dxdiag-${{ inputs.SKU }}.txt"
+          $output = Join-Path $env:RUNNER_TEMP $fileName
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
 
