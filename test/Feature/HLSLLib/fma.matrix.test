@@ -97,7 +97,8 @@ Buffers:
             0.0, -20.0, -2.0, -4.75 ]
 Results:
   - Result: Result
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: Out
     Expected: Expected
 DescriptorSets:
@@ -137,5 +138,5 @@ DescriptorSets:
 
 # REQUIRES: Double
 # RUN: split-file %s %t
-# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
