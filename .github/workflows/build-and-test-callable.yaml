@@ -119,12 +119,17 @@ jobs:
           $output = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
-      - name: Upload dxdiag result (Windows only)
+      - name: Copy dxdiag to workspace
+        if: inputs.OS == 'windows'
+        shell: powershell
+        run: Copy-Item $env:RUNNER_TEMP\dxdiag.txt "$env:GITHUB_WORKSPACE\dxdiag.txt"
+
+      - name: Upload dxdiag artifact
         if: inputs.OS == 'windows'
         uses: actions/upload-artifact@v4
         with:
           name: dxdiag-report
-          path: ${{ runner.temp }}/dxdiag.txt
+          path: dxdiag.txt
       - name: Checkout DXC
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
