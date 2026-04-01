@@ -13,6 +13,10 @@ void main(uint3 TID : SV_GroupThreadID) {
 
     Out1[TID.x] = WaveActiveBitXor(V64.x);
 
+    // 3 thread case
+    if (TID.x != 1)
+      Out1[TID.x + 4] = WaveActiveBitXor(V64.x);
+
     Out2[TID.x] = WaveActiveBitXor(V64.xy);
 
     uint64_t3 R64_3 = WaveActiveBitXor(V64.xyz);
@@ -20,8 +24,15 @@ void main(uint3 TID : SV_GroupThreadID) {
 
     Out4[TID.x] = WaveActiveBitXor(V64);
 
-    // constant folding uint4
+    // constant folding
     Out5[TID.x] = WaveActiveBitXor(uint64_t4(1,2,3,4));
+
+    if (TID.x != 1)
+        Out5[TID.x + 4] = WaveActiveBitXor(uint64_t4(1,2,3,4));
+    if (TID.x % 2)
+        Out5[TID.x + 4 * 2] = WaveActiveBitXor(uint64_t4(1,2,3,4));
+    if (TID.x == 1)
+        Out5[TID.x + 4 * 3] = WaveActiveBitXor(uint64_t4(1,2,3,4));
 }
 
 #--- pipeline.yaml
@@ -46,7 +57,7 @@ Buffers:
   - Name: Out1
     Format: UInt64
     Stride: 8
-    FillSize: 32
+    FillSize: 64
   - Name: Out2
     Format: UInt64
     Stride: 16
@@ -62,12 +73,12 @@ Buffers:
   - Name: Out5
     Format: UInt64
     Stride: 32
-    FillSize: 128
+    FillSize: 512
 
   - Name: ExpectedOut1
     Format: UInt64
     Stride: 8
-    Data: [0x1101, 0x1101, 0x1101, 0x1101]
+    Data: [0x1101, 0x1101, 0x1101, 0x1101, 0x1111, 0x0, 0x1111, 0x1111 ]
   - Name: ExpectedOut2
     Format: UInt64
     Stride: 16
@@ -99,7 +110,14 @@ Buffers:
     Format: UInt64
     Stride: 32
     Data: [ 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 
-    0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 ]
+      0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+      0x1, 0x2, 0x3, 0x4, 0x0, 0x0, 0x0, 0x0,
+      0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4,
+      0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 
+      0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+      0x0, 0x0, 0x0, 0x0, 0x1, 0x2, 0x3, 0x4,
+      0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0 
+    ]
 
 Results:
   - Result: ExpectedOut1
