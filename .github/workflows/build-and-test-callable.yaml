@@ -61,7 +61,7 @@ on:
       run_dxdiag:
         description: "Run dxdiag"
         required: true
-        default: "true"
+        default: true
   workflow_call:
     inputs:
       OffloadTest-branch:
@@ -113,14 +113,14 @@ jobs:
 
     steps:
       - name: Run dxdiag (Windows only)
-        if: inputs.OS == 'windows' && inputs.run_dxdiag == 'true'
+        if: inputs.OS == windows
         shell: pwsh
         run: |
           $output = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
       - name: Upload dxdiag result (Windows only)
-        if: inputs.OS == 'windows' && inputs.run_dxdiag == 'true'
+        if: inputs.OS == windows
         uses: actions/upload-artifact@v4
         with:
           name: dxdiag-report
