@@ -77,13 +77,26 @@ def setWaveSizeFeaturesDirectX(config, device):
         MinSizeInt *= 2
 
 
-def hasAVX512():
-    # Check if the host CPU supports AVX-512 instructions. This is only
-    # relevant for WARP and so we assume the OS is Windows
-    import ctypes
+def hostSupportsAVX512():
+    # Check if the host CPU supports AVX-512 instructions.
+    system = platform.system()
+    if system == "Windows":
+        import ctypes
 
-    # PF_AVX512F_INSTRUCTIONS_AVAILABLE = 41
-    return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(41))
+        # PF_AVX512F_INSTRUCTIONS_AVAILABLE = 41
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(41))
+    elif system == "Linux":
+        # Applicable if run on WSL
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if line.startswith("flags"):
+                        return "avx512f" in line.split()
+        except (IOError, OSError):
+            return False
+        return False
+    # Extend to relevant platforms when applicable
+    return False
 
 
 def setDeviceFeatures(config, device, compiler):
@@ -98,8 +111,6 @@ def setDeviceFeatures(config, device, compiler):
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
         config.available_features.add(config.warp_arch)
-        if hasAVX512():
-            config.available_features.add("AVX512")
 
     if "Intel" in device["Description"]:
         config.available_features.add("Intel")
@@ -120,6 +131,9 @@ def setDeviceFeatures(config, device, compiler):
     if appleSilicon:
         gen = appleSilicon.group(1)
         config.available_features.add(f"AppleM{gen}")
+
+    if hostSupportsAVX512():
+        config.available_features.add("AVX512")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:
