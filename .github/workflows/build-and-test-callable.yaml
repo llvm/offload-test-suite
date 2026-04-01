@@ -58,7 +58,6 @@ on:
         required: false
         default: ''
         type: string
-          inputs:
       run_dxdiag:
         description: "Run dxdiag"
         required: true
