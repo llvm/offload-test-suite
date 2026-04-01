@@ -125,9 +125,6 @@ DescriptorSets:
 
 # UNSUPPORTED: Metal
 
-# Bug https://github.com/llvm/offload-test-suite/issues/1030
-# XFAIL: Vulkan && !AMD
-
 # REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
