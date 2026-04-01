@@ -60,7 +60,7 @@ on:
         type: string
       run_dxdiag:
         description: "Run dxdiag"
-        required: true
+        required: false
         default: true
   workflow_call:
     inputs:
@@ -114,7 +114,7 @@ jobs:
     steps:
       - name: Run dxdiag (Windows only)
         if: inputs.OS == 'windows'
-        shell: pwsh
+        shell: powershell
         run: |
           $output = Join-Path $env:RUNNER_TEMP "dxdiag.txt"
           dxdiag /t $output
