@@ -34,12 +34,28 @@ pip3 install pyyaml
 
 On Windows, the [Graphics Tools](https://learn.microsoft.com/en-us/windows/win32/direct3d12/directx-12-programming-environment-set-up#debug-layer) optional feature is additionally required to run the test suite.
 
-# Adding to LLVM Build
+# Building
 
-Add the following to the CMake options:
+The LLVM project provides a CMake cache file,
+[`clang/cmake/caches/HLSL.cmake`](https://github.com/llvm/llvm-project/blob/main/clang/cmake/caches/HLSL.cmake),
+that configures the required projects and targets for HLSL development. You can
+use it with `-C` to set up a build that includes the offload test suite:
 
 ```shell
--DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${workspaceRoot}\..\OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest"
+cmake -G Ninja -Bbuild \
+  -C <path to llvm-project>/clang/cmake/caches/HLSL.cmake \
+  -C <path to OffloadTest>/cmake/caches/OffloadTest.cmake \
+  <path to llvm-project>/llvm
+```
+
+The `OffloadTest.cmake` cache file automatically sets
+`LLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR` and `LLVM_EXTERNAL_PROJECTS` based on its
+location in the source tree. If you already have an LLVM build configured, you
+can add the offload test suite to it by passing the same `-C` flag or by adding
+the following to your CMake options:
+
+```shell
+-DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=<path to OffloadTest> -DLLVM_EXTERNAL_PROJECTS="OffloadTest"
 ```
 
 If you do not have a build of dxc on your path you'll need to specify the shader
@@ -48,6 +64,20 @@ compiler to use by passing:
 ```shell
 -DDXC_DIR=<path to folder containing dxc & dxv>
 ```
+
+## Running Tests
+
+```shell
+cmake --build build --target check-hlsl
+```
+
+The `check-hlsl` target builds all required tools and runs the full test suite.
+You can also run tests for a specific platform with `check-hlsl-<platform>`
+(e.g. `check-hlsl-vk`, `check-hlsl-d3d12`). To only run `clang`-based tests
+(without requiring DXC), use `check-hlsl-clang-<platform>` (e.g.
+`check-hlsl-clang-mtl`). Subdirectories of the test suite are also available as
+targets with `check-hlsl-<platform>-<path>` where the path is lowercased with
+directory separators replaced by `-` (e.g. `check-hlsl-d3d12-feature-hlsllib`).
 
 ## Enabling clang-tidy
 
