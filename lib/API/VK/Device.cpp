@@ -358,10 +358,18 @@ public:
 
 class VulkanQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   VkQueue Queue = VK_NULL_HANDLE;
   uint32_t QueueFamilyIdx = 0;
-  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx)
-      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx) {}
+  // TODO: Ensure device lifetime is managed (e.g. via shared_ptr).
+  VkDevice Device = VK_NULL_HANDLE;
+  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx, VkDevice Device)
+      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx), Device(Device) {}
+
+  llvm::Error
+  submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
+      override;
 };
 
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
@@ -414,6 +422,37 @@ private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
 };
 
+llvm::Error VulkanQueue::submit(
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
+  for (auto &CB : CBs) {
+    auto &VCB = CB->as<VulkanCommandBuffer>();
+    if (vkEndCommandBuffer(VCB.CmdBuffer))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not end command buffer.");
+
+    VkSubmitInfo SubmitInfo = {};
+    SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.commandBufferCount = 1;
+    SubmitInfo.pCommandBuffers = &VCB.CmdBuffer;
+
+    VkFenceCreateInfo FenceInfo = {};
+    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    VkFence Fence;
+    if (vkCreateFence(Device, &FenceInfo, nullptr, &Fence))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not create fence.");
+
+    if (vkQueueSubmit(Queue, 1, &SubmitInfo, Fence))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to submit to queue.");
+    if (vkWaitForFences(Device, 1, &Fence, VK_TRUE, UINT64_MAX))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed waiting for fence.");
+
+    vkDestroyFence(Device, Fence, nullptr);
+  }
+  return llvm::Error::success();
+}
 class VulkanDevice : public offloadtest::Device {
 private:
   VkPhysicalDevice PhysicalDevice;
@@ -608,7 +647,8 @@ public:
     VkQueue DeviceQueue = VK_NULL_HANDLE;
     vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
 
-    const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
+    const VulkanQueue GraphicsQueue =
+        VulkanQueue(DeviceQueue, QueueFamilyIdx, Device);
 
     return std::make_shared<VulkanDevice>(PhysicalDevice, Props, Device,
                                           std::move(GraphicsQueue),
@@ -1131,34 +1171,8 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeCommandBuffer(InvocationState &IS,
-                                   VkPipelineStageFlags WaitMask = 0) {
-    if (vkEndCommandBuffer(IS.CB->CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not end command buffer.");
-
-    VkSubmitInfo SubmitInfo = {};
-    SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    SubmitInfo.commandBufferCount = 1;
-    SubmitInfo.pCommandBuffers = &IS.CB->CmdBuffer;
-    SubmitInfo.pWaitDstStageMask = &WaitMask;
-    VkFenceCreateInfo FenceInfo = {};
-    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence Fence;
-    if (vkCreateFence(Device, &FenceInfo, nullptr, &Fence))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create fence.");
-
-    // Submit to the queue
-    if (vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, Fence))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to submit to queue.");
-    if (vkWaitForFences(Device, 1, &Fence, VK_TRUE, UINT64_MAX))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed waiting for fence.");
-
-    vkDestroyFence(Device, Fence, nullptr);
-    return llvm::Error::success();
+  llvm::Error executeCommandBuffer(InvocationState &IS) {
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error createDescriptorPool(Pipeline &P, InvocationState &IS) {
@@ -2333,7 +2347,7 @@ public:
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed compute command buffer.\n";
     if (auto Err = readBackData(P, State))

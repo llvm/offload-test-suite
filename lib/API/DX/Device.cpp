@@ -291,22 +291,28 @@ public:
 
 class DXQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   ComPtr<ID3D12CommandQueue> Queue;
 
   DXQueue(ComPtr<ID3D12CommandQueue> Queue) : Queue(Queue) {}
-  virtual ~DXQueue() {}
+  ~DXQueue() override {}
 
   static llvm::Expected<DXQueue>
   createGraphicsQueue(ComPtr<ID3D12Device> Device) {
     const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
                                            D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
-    ComPtr<ID3D12CommandQueue> Queue;
-    if (auto Err =
-            HR::toError(Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&Queue)),
-                        "Failed to create command queue."))
+    ComPtr<ID3D12CommandQueue> CmdQueue;
+    if (auto Err = HR::toError(
+            Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&CmdQueue)),
+            "Failed to create command queue."))
       return Err;
-    return DXQueue(Queue);
+    return DXQueue(CmdQueue);
   }
+
+  llvm::Error
+  submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
+      override;
 };
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
@@ -369,6 +375,52 @@ private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
 };
 
+llvm::Error DXQueue::submit(
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
+  // This is a hack but it works since this is all single threaded code.
+  static uint64_t FenceCounter = 0;
+
+  for (auto &CB : CBs) {
+    auto &DCB = CB->as<DXCommandBuffer>();
+    if (auto Err =
+            HR::toError(DCB.CmdList->Close(), "Failed to close command list."))
+      return Err;
+
+    ID3D12CommandList *const CmdLists[] = {DCB.CmdList.Get()};
+    Queue->ExecuteCommandLists(1, CmdLists);
+
+    const uint64_t CurrentCounter = FenceCounter + 1;
+    if (auto Err = HR::toError(Queue->Signal(DCB.Fence.Get(), CurrentCounter),
+                               "Failed to add signal."))
+      return Err;
+
+    if (DCB.Fence->GetCompletedValue() < CurrentCounter) {
+#ifdef _WIN32
+      HANDLE Event = DCB.Event;
+#else // WSL
+      HANDLE Event = reinterpret_cast<HANDLE>(DCB.Event);
+#endif
+      if (auto Err = HR::toError(
+              DCB.Fence->SetEventOnCompletion(CurrentCounter, Event),
+              "Failed to register end event."))
+        return Err;
+
+#ifdef _WIN32
+      WaitForSingleObject(DCB.Event, INFINITE);
+#else // WSL
+      pollfd PollEvent;
+      PollEvent.fd = DCB.Event;
+      PollEvent.events = POLLIN;
+      PollEvent.revents = 0;
+      if (poll(&PollEvent, 1, -1) == -1)
+        return llvm::createStringError(
+            std::error_code(errno, std::system_category()), strerror(errno));
+#endif
+    }
+    FenceCounter = CurrentCounter;
+  }
+  return llvm::Error::success();
+}
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
@@ -1175,8 +1227,10 @@ public:
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
+  // waitForSignal is used for tile mapping synchronization, not command buffer
+  // submission. TODO: Replace with a proper fence abstraction.
   llvm::Error waitForSignal(InvocationState &IS) {
-    // This is a hack but it works since this is all single threaded code.
+    // Reuse the command buffer's fence for a quick queue-level signal/wait.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
 
@@ -1213,14 +1267,7 @@ public:
   }
 
   llvm::Error executeCommandList(InvocationState &IS) {
-    if (auto Err = HR::toError(IS.CB->CmdList->Close(),
-                               "Failed to close command list."))
-      return Err;
-
-    ID3D12CommandList *const CmdLists[] = {IS.CB->CmdList.Get()};
-    GraphicsQueue.Queue->ExecuteCommandLists(1, CmdLists);
-
-    return waitForSignal(IS);
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {

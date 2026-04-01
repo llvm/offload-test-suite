@@ -62,6 +62,19 @@ class Queue {
 public:
   virtual ~Queue() = 0;
 
+  /// Submit command buffers for execution and block until completion.
+  // TODO: Return a Fence instead of blocking, once the Fence abstraction
+  // from PR #1007 is available.
+  virtual llvm::Error
+  submit(llvm::SmallVector<std::unique_ptr<CommandBuffer>> CBs) = 0;
+
+  /// Convenience overload for submitting a single command buffer.
+  llvm::Error submit(std::unique_ptr<CommandBuffer> CB) {
+    llvm::SmallVector<std::unique_ptr<CommandBuffer>> CBs;
+    CBs.push_back(std::move(CB));
+    return submit(std::move(CBs));
+  }
+
 protected:
   Queue() = default;
 };

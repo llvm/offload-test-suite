@@ -75,12 +75,18 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
 namespace {
 class MTLQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   MTL::CommandQueue *Queue;
   MTLQueue(MTL::CommandQueue *Queue) : Queue(Queue) {}
-  ~MTLQueue() {
+  ~MTLQueue() override {
     if (Queue)
       Queue->release();
   }
+
+  llvm::Error
+  submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
+      override;
 };
 
 class MTLBuffer : public offloadtest::Buffer {
@@ -122,6 +128,19 @@ private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
 
+llvm::Error MTLQueue::submit(
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
+  for (auto &CB : CBs) {
+    auto &MCB = CB->as<MTLCommandBuffer>();
+    MCB.CmdBuffer->commit();
+    MCB.CmdBuffer->waitUntilCompleted();
+
+    NS::Error *Err = MCB.CmdBuffer->error();
+    if (Err)
+      return toError(Err);
+  }
+  return llvm::Error::success();
+}
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -505,15 +524,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error executeCommands(InvocationState &IS) {
-    IS.CB->CmdBuffer->commit();
-    IS.CB->CmdBuffer->waitUntilCompleted();
-
-    // Check and surface any errors that occurred during execution.
-    NS::Error *CBErr = IS.CB->CmdBuffer->error();
-    if (CBErr)
-      return toError(CBErr);
-
-    return llvm::Error::success();
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
