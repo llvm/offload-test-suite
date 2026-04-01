@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "Support/Pipeline.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
@@ -540,6 +541,30 @@ public:
     return CB;
   }
 
+  /// Pending pipeline barrier state accumulated by encoders. Lives on the
+  /// command buffer because in Vulkan all encoders record into the same
+  /// VkCommandBuffer.
+  VkPipelineStageFlags PendingSrcStage = 0;
+  VkAccessFlags PendingSrcAccess = 0;
+
+  void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
+    PendingSrcStage |= Stage;
+    PendingSrcAccess |= Access;
+  }
+
+  void flushBarrier(VkPipelineStageFlags DstStage, VkAccessFlags DstAccess) {
+    if (PendingSrcStage == 0)
+      return;
+    VkMemoryBarrier Barrier = {};
+    Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    Barrier.srcAccessMask = PendingSrcAccess;
+    Barrier.dstAccessMask = DstAccess;
+    vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, DstStage, 0, 1, &Barrier,
+                         0, nullptr, 0, nullptr);
+    PendingSrcStage = 0;
+    PendingSrcAccess = 0;
+  }
+
   ~VulkanCommandBuffer() override {
     if (CmdPool != VK_NULL_HANDLE)
       vkDestroyCommandPool(Device, CmdPool, nullptr);
@@ -548,6 +573,9 @@ public:
   static bool classof(const CommandBuffer *CB) {
     return CB->getKind() == GPUAPI::Vulkan;
   }
+
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder(offloadtest::EncoderMode Mode) override;
 
 private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
@@ -600,6 +628,58 @@ llvm::Error VulkanQueue::submit(
     return Err;
 
   return llvm::Error::success();
+}
+
+class VKComputeEncoder : public offloadtest::ComputeEncoder {
+  VulkanCommandBuffer &CB;
+
+  void addDstBarrier(VkPipelineStageFlags DstStage, VkAccessFlags DstAccess) {
+    CB.addPendingBarrier(DstStage, DstAccess);
+    if (isSerial())
+      barrier();
+  }
+
+public:
+  VKComputeEncoder(VulkanCommandBuffer &CB, EncoderMode Mode)
+      : ComputeEncoder(GPUAPI::Vulkan, Mode), CB(CB) {}
+
+  ~VKComputeEncoder() override = default;
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Vulkan;
+  }
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
+                       uint32_t /*ThreadsPerGroupY*/,
+                       uint32_t /*ThreadsPerGroupZ*/) override {
+    // Vulkan bakes threadgroup size into the pipeline; only group counts are
+    // used for dispatch.
+    addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
+
+    vkCmdDispatch(CB.CmdBuffer, GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  void barrier() override {
+    CB.flushBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                    VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
+  }
+
+  void endEncoding() override {
+    // State remains on the command buffer for the next encoder.
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+VulkanCommandBuffer::createComputeEncoder(offloadtest::EncoderMode Mode) {
+  if (Mode == offloadtest::EncoderMode::Parallel) {
+    // Ensure all prior work is visible before entering parallel mode.
+    flushBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                 VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
+  }
+  return std::make_unique<VKComputeEncoder>(*this, Mode);
 }
 class VulkanDevice : public offloadtest::Device {
 private:
@@ -2393,10 +2473,16 @@ public:
     }
 
     if (P.isCompute()) {
+      auto EncoderOrErr = IS.CB->createComputeEncoder(EncoderMode::Parallel);
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-      vkCmdDispatch(IS.CB->CmdBuffer, DispatchSize[0], DispatchSize[1],
-                    DispatchSize[2]);
+      if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
+                                      DispatchSize[2], 1, 1, 1))
+        return Err;
+      Encoder.endEncoding();
       llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
                    << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
     } else {

@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "API/FormatConversion.h"
 
 #include "Config.h"
@@ -20,6 +21,8 @@
 #include <memory>
 
 using namespace offloadtest;
+
+CommandEncoder::~CommandEncoder() {}
 
 Buffer::~Buffer() {}
 

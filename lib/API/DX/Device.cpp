@@ -33,6 +33,7 @@
 
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "DXFeatures.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
@@ -469,6 +470,8 @@ class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
+  /// Whether a UAV barrier is pending from a prior compute command.
+  bool PendingUAVBarrier = false;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12Device> Device) {
@@ -492,6 +495,20 @@ public:
   static bool classof(const CommandBuffer *CB) {
     return CB->getKind() == GPUAPI::DirectX;
   }
+
+  void addPendingUAVBarrier() { PendingUAVBarrier = true; }
+
+  void flushBarrier() {
+    if (!PendingUAVBarrier)
+      return;
+    const D3D12_RESOURCE_BARRIER Barrier =
+        CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
+    CmdList->ResourceBarrier(1, &Barrier);
+    PendingUAVBarrier = false;
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder(offloadtest::EncoderMode Mode) override;
 
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
@@ -532,6 +549,50 @@ llvm::Error DXQueue::submit(
     return Err;
 
   return llvm::Error::success();
+}
+
+class DXComputeEncoder : public offloadtest::ComputeEncoder {
+  DXCommandBuffer &CB;
+
+  void addDstBarrier() {
+    CB.addPendingUAVBarrier();
+    if (isSerial())
+      barrier();
+  }
+
+public:
+  DXComputeEncoder(DXCommandBuffer &CB, EncoderMode Mode)
+      : ComputeEncoder(GPUAPI::DirectX, Mode), CB(CB) {}
+
+  ~DXComputeEncoder() override = default;
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::DirectX;
+  }
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
+                       uint32_t /*ThreadsPerGroupY*/,
+                       uint32_t /*ThreadsPerGroupZ*/) override {
+    // DX12 bakes threadgroup size into the pipeline; only group counts are
+    // used for dispatch.
+    addDstBarrier();
+    CB.CmdList->Dispatch(GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  void barrier() override { CB.flushBarrier(); }
+
+  void endEncoding() override {
+    // State remains on the command buffer for the next encoder.
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+DXCommandBuffer::createComputeEncoder(offloadtest::EncoderMode Mode) {
+  if (Mode == offloadtest::EncoderMode::Parallel)
+    flushBarrier();
+  return std::make_unique<DXComputeEncoder>(*this, Mode);
 }
 class DXDevice : public offloadtest::Device {
 private:
@@ -1530,10 +1591,18 @@ public:
       }
     }
 
-    const llvm::ArrayRef<int> DispatchSize =
-        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-
-    IS.CB->CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
+    {
+      auto EncoderOrErr = IS.CB->createComputeEncoder(EncoderMode::Parallel);
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
+      const llvm::ArrayRef<int> DispatchSize =
+          llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
+      if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
+                                      DispatchSize[2], 1, 1, 1))
+        return Err;
+      Encoder.endEncoding();
+    }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
