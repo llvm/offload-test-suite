@@ -62,6 +62,7 @@ on:
         description: "Run dxdiag"
         required: false
         default: true
+        type: boolean  
   workflow_call:
     inputs:
       OffloadTest-branch:
@@ -104,29 +105,32 @@ on:
         required: false
         default: ''
         type: string
+      run_dxdiag:                   
+        description: "Run dxdiag"
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   build:
     permissions:
       checks: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
-
     steps:
       - name: Run dxdiag (Windows only)
-        if: inputs.OS == 'windows'
+        if: inputs.OS == 'windows' && inputs.run_dxdiag 
         shell: powershell
         run: |
           $fileName = "dxdiag-${{ inputs.SKU }}.txt"
           $output = Join-Path $env:RUNNER_TEMP $fileName
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
-
       - name: Upload dxdiag artifact
-        if: inputs.OS == 'windows'
+        if: inputs.OS == 'windows' && inputs.run_dxdiag 
         uses: actions/upload-artifact@v4
         with:
-          name: dxdiag-report
-          path: dxdiag-${{ inputs.SKU }}.txt
+          name: dxdiag-${{ inputs.SKU }}-${{ inputs.BuildType }} 
+          path: ${{ runner.temp }}/dxdiag-${{ inputs.SKU }}.txt 
       - name: Checkout DXC
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
