@@ -370,7 +370,7 @@ class MTLDevice : public offloadtest::Device {
     if (TableSize > 0) {
       IS.ArgBuffer =
           Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      uint32_t HeapIndex = 0;
+      const uint32_t HeapIndex = 0;
       for (auto &D : P.Sets) {
         for (auto &R : D.Resources) {
           if (auto Err = createDescriptor(R, IS, HeapIndex++))
@@ -512,25 +512,26 @@ class MTLDevice : public offloadtest::Device {
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
     CADesc->setTexture(IS.FrameBufferTexture->Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
-    const auto *ColorCV =
-        std::get_if<ClearColor>(&*IS.FrameBufferTexture->Desc.OptimizedClearValue);
+    const auto *ColorCV = std::get_if<ClearColor>(
+        &*IS.FrameBufferTexture->Desc.OptimizedClearValue);
     if (!ColorCV)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Render target clear value must be a ClearColor.");
 
-    CADesc->setClearColor(MTL::ClearColor(ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A));
+    CADesc->setClearColor(
+        MTL::ClearColor(ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A));
     CADesc->setStoreAction(MTL::StoreActionStore);
     Desc->colorAttachments()->setObject(CADesc, 0);
 
     // Depth/stencil attachment.
-    const auto *DepthCV =
-        std::get_if<ClearDepthStencil>(&*IS.DepthStencil->Desc.OptimizedClearValue);
+    const auto *DepthCV = std::get_if<ClearDepthStencil>(
+        &*IS.DepthStencil->Desc.OptimizedClearValue);
     if (!DepthCV)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
-          
+
     auto *DADesc = Desc->depthAttachment();
     DADesc->setTexture(IS.DepthStencil->Tex);
     DADesc->setLoadAction(MTL::LoadActionClear);
@@ -597,8 +598,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    uint32_t TextureIndex = 0;
-    uint32_t BufferIndex = 0;
+    const uint32_t TextureIndex = 0;
+    const uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         assert(R.BufferPtr->ArraySize == 1 &&

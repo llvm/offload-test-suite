@@ -33,7 +33,6 @@ enum TextureUsage : uint32_t {
   LLVM_MARK_AS_BITMASK_ENUM(/* LargestValue = */ DepthStencil)
 };
 
-
 inline std::string getTextureUsageName(TextureUsage Usage) {
   std::string Result;
   if ((Usage & Sampled) != 0)
@@ -84,9 +83,9 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "Format '%s' is not compatible with texture creation.",
         getFormatName(Desc.Format).data());
 
-  bool IsDepth = isDepthFormat(Desc.Format);
-  bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
-  bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+  const bool IsDepth = isDepthFormat(Desc.Format);
+  const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+  const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
 
   // DepthStencil + RenderTarget is not supported.
   if (IsDS && IsRT)

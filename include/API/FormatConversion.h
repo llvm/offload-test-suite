@@ -137,13 +137,13 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
         "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
         "levels %d.",
         Desc.MipLevels, Buf.OutputProps.MipLevels);
-  uint32_t TexelSize = getFormatSize(Desc.Format);
+  const uint32_t TexelSize = getFormatSize(Desc.Format);
   if (Buf.Stride > 0 && static_cast<uint32_t>(Buf.Stride) != TexelSize)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "CPUBuffer stride %d does not match texture format element size %u.",
         Buf.Stride, TexelSize);
-  uint64_t ExpectedSize =
+  const uint64_t ExpectedSize =
       static_cast<uint64_t>(Desc.Width) * Desc.Height * TexelSize;
   if (static_cast<uint64_t>(Buf.size()) != ExpectedSize)
     return llvm::createStringError(

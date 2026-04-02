@@ -472,13 +472,13 @@ public:
 
     auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
 
-    bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
-    bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
     if (IsRT || IsDS) {
       D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
       HeapDesc.NumDescriptors = 1;
-      HeapDesc.Type =
-          IsRT ? D3D12_DESCRIPTOR_HEAP_TYPE_RTV : D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+      HeapDesc.Type = IsRT ? D3D12_DESCRIPTOR_HEAP_TYPE_RTV
+                           : D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
       HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
       if (auto Err = HR::toError(Device->CreateDescriptorHeap(
                                      &HeapDesc, IID_PPV_ARGS(&Tex->ViewHeap)),
@@ -1669,7 +1669,8 @@ public:
         CD3DX12_SUBRESOURCE_FOOTPRINT(
             getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
             B.OutputProps.Height, 1, B.OutputProps.Width * B.getElementSize())};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback->Buffer.Get(), Footprint);
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback->Buffer.Get(),
+                                               Footprint);
     const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT->Resource.Get(), 0);
 
     IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
@@ -1775,7 +1776,8 @@ public:
       llvm::outs() << "Compute command list created.\n";
 
     } else {
-      // Create render target, depth/stencil, readback and vertex buffer and PSO.
+      // Create render target, depth/stencil, readback and vertex buffer and
+      // PSO.
       if (auto Err = createRenderTarget(P, State))
         return Err;
       llvm::outs() << "Render target created.\n";
