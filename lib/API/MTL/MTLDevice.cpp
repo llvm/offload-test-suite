@@ -626,7 +626,7 @@ llvm::Error offloadtest::initializeMetalDevices(
   MTL::CommandQueue *MetalQueue = MetalDevice->newCommandQueue();
 
   auto DefaultDev = std::make_unique<MTLDevice>(MetalDevice, MetalQueue);
-  Devices.push_back(DefaultDev);
+  Devices.push_back(std::move(DefaultDev));
 
   return llvm::Error::success();
 }
