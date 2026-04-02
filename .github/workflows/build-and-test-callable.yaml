@@ -188,19 +188,7 @@ jobs:
         run: |
           $fileName = "dxdiag.txt"
           $output = Join-Path $env:RUNNER_TEMP $fileName
-          dxdiag /t $output
-          
-          $timeout = 60
-          $elapsed = 0
-          Write-Host "Waiting for dxdiag to finish..."
-          while (-not (Test-Path $output) -or (Get-Item $output).Length -eq 0) {
-            if ($elapsed -ge $timeout) {
-              Write-Error "Timed out waiting for dxdiag to produce $output"
-              exit 1
-            }
-            Start-Sleep -Seconds 2
-            $elapsed += 2
-          }
+          dxdiag /t $output | Out-Null
           Write-Host "DxDiag report saved to $output"
       - name: Upload dxdiag artifact
         if: inputs.OS == 'windows' && failure()
