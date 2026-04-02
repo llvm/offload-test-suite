@@ -33,6 +33,7 @@
 
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 #include "DXFeatures.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
@@ -357,6 +358,17 @@ public:
   }
 };
 
+class DXPipelineState : public offloadtest::PipelineState {
+public:
+  std::string Name;
+  ComPtr<ID3D12RootSignature> RootSig;
+  ComPtr<ID3D12PipelineState> PSO;
+
+  DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
+                  ComPtr<ID3D12PipelineState> PSO)
+      : Name(Name), RootSig(RootSig), PSO(PSO) {}
+};
+
 class DXFence : public offloadtest::Fence {
 public:
 #ifdef _WIN32
@@ -584,10 +596,10 @@ private:
   };
 
   struct InvocationState {
-    ComPtr<ID3D12RootSignature> RootSig;
     ComPtr<ID3D12DescriptorHeap> DescHeap;
-    ComPtr<ID3D12PipelineState> PSO;
     std::unique_ptr<DXCommandBuffer> CB;
+
+    std::shared_ptr<PipelineState> Pipeline;
 
     // Resources for graphics pipelines.
     std::unique_ptr<offloadtest::Texture> RT;
@@ -620,6 +632,215 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Error
+  createRootSignatureFromShader(llvm::StringRef, const ShaderContainer &Shader,
+                                ComPtr<ID3D12RootSignature> &OutRootSignature) {
+    // Try pulling a root signature from the DXIL first
+    auto ExContainer =
+        llvm::object::DXContainer::create(Shader.Shader->getMemBufferRef());
+    // If this fails we really have a problem...
+    if (!ExContainer)
+      return ExContainer.takeError();
+
+    bool HasRootSigPart = false;
+    for (const auto &Part : *ExContainer)
+      if (memcmp(Part.Part.Name, "RTS0", 4) == 0)
+        HasRootSigPart = true;
+
+    if (HasRootSigPart) {
+      const llvm::StringRef Binary = Shader.Shader->getBuffer();
+      if (auto Err = HR::toError(
+              Device->CreateRootSignature(0, Binary.data(), Binary.size(),
+                                          IID_PPV_ARGS(&OutRootSignature)),
+              "Failed to create root signature."))
+        return Err;
+    }
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error createRootSignatureFromBindingsDesc(
+      llvm::StringRef, const BindingsDesc &BindingsDesc, bool IsGraphics,
+      ComPtr<ID3D12RootSignature> &OutRootSignature) {
+    uint32_t DescriptorCount = 0;
+    for (auto &D : BindingsDesc.DescriptorSetDescs)
+      DescriptorCount += D.ResourceBindings.size();
+
+    std::vector<D3D12_ROOT_PARAMETER> RootParams;
+    const std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges =
+        std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]>(
+            new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
+    uint32_t RangeIdx = 0;
+    for (const auto &D : BindingsDesc.DescriptorSetDescs) {
+      uint32_t DescriptorIdx = 0;
+      const uint32_t StartRangeIdx = RangeIdx;
+      for (const auto &R : D.ResourceBindings) {
+        switch (getDXKind(R.Kind)) {
+        case SRV:
+          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+          break;
+        case UAV:
+          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+          break;
+        case CBV:
+          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+          break;
+        case SAMPLER:
+          llvm_unreachable("Not implemented yet."); // Requires a separate heap
+        }
+        Ranges.get()[RangeIdx].NumDescriptors = R.DescriptorCount;
+        Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
+        Ranges.get()[RangeIdx].RegisterSpace = R.DXBinding.Space;
+        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
+            DescriptorIdx;
+        RangeIdx++;
+        DescriptorIdx += R.DescriptorCount;
+      }
+      RootParams.push_back(D3D12_ROOT_PARAMETER{
+          D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+          {D3D12_ROOT_DESCRIPTOR_TABLE{
+              static_cast<uint32_t>(D.ResourceBindings.size()),
+              &Ranges.get()[StartRangeIdx]}},
+          D3D12_SHADER_VISIBILITY_ALL});
+    }
+
+    CD3DX12_ROOT_SIGNATURE_DESC Desc;
+    Desc.Init(static_cast<uint32_t>(RootParams.size()), RootParams.data(), 0,
+              nullptr,
+              IsGraphics
+                  ? D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
+                  : D3D12_ROOT_SIGNATURE_FLAG_NONE);
+
+    ComPtr<ID3DBlob> Signature;
+    ComPtr<ID3DBlob> Error;
+    if (auto Err = HR::toError(
+            D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1,
+                                        &Signature, &Error),
+            "Failed to seialize root signature.")) {
+      const std::string Msg =
+          std::string(reinterpret_cast<char *>(Error->GetBufferPointer()),
+                      Error->GetBufferSize() / sizeof(char));
+      return joinErrors(
+          std::move(Err),
+          llvm::createStringError(std::errc::protocol_error, Msg.c_str()));
+    }
+
+    if (auto Err = HR::toError(
+            Device->CreateRootSignature(0, Signature->GetBufferPointer(),
+                                        Signature->GetBufferSize(),
+                                        IID_PPV_ARGS(&OutRootSignature)),
+            "Failed to create root signature."))
+      return Err;
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error
+  createRootSignature(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                      const ShaderContainer &Shader, bool IsGraphics,
+                      ComPtr<ID3D12RootSignature> &OutRootSignature) {
+    assert(OutRootSignature.Get() == nullptr);
+
+    if (auto Err =
+            createRootSignatureFromShader(Name, Shader, OutRootSignature))
+      return Err;
+
+    if (OutRootSignature.Get() != nullptr)
+      return llvm::Error::success();
+
+    return createRootSignatureFromBindingsDesc(Name, BindingsDesc, IsGraphics,
+                                               OutRootSignature);
+  }
+
+  llvm::Expected<std::shared_ptr<PipelineState>>
+  createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   ShaderContainer CS) override {
+    ComPtr<ID3D12RootSignature> RootSig;
+    if (auto Err = createRootSignature(Name, BindingsDesc, CS,
+                                       /*IsGraphics=*/false, RootSig))
+      return Err;
+
+    auto DXIL = CS.Shader->getBuffer();
+    const D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {
+        RootSig.Get(),
+        {DXIL.data(), DXIL.size()},
+        0,
+        {
+            nullptr,
+            0,
+        },
+        D3D12_PIPELINE_STATE_FLAG_NONE};
+
+    ComPtr<ID3D12PipelineState> PSO;
+    if (auto Err = HR::toError(
+            Device->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&PSO)),
+            "Failed to create PSO."))
+      return Err;
+
+    return std::make_shared<DXPipelineState>(Name, RootSig, PSO);
+  }
+
+  llvm::Expected<std::shared_ptr<PipelineState>>
+  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                     llvm::ArrayRef<Format> RTFormats,
+                     std::optional<Format> DSFormat, ShaderContainer VS,
+                     ShaderContainer PS) override {
+    assert(RTFormats.size() <= 8);
+
+    ComPtr<ID3D12RootSignature> RootSig;
+    if (auto Err = createRootSignature(Name, BindingsDesc, VS,
+                                       /*IsGraphics=*/true, RootSig))
+      return Err;
+
+    std::vector<D3D12_INPUT_ELEMENT_DESC> DXInputLayout;
+    DXInputLayout.reserve(InputLayout.size());
+    for (const InputLayoutDesc &Elem : InputLayout) {
+      D3D12_INPUT_ELEMENT_DESC ElementDesc = {};
+      ElementDesc.SemanticName = Elem.Name.c_str();
+      ElementDesc.SemanticIndex = 0;
+      ElementDesc.Format = getDXGIFormat(Elem.Format);
+      ElementDesc.InputSlot = 0;
+      ElementDesc.AlignedByteOffset = Elem.OffsetInBytes;
+      ElementDesc.InputSlotClass =
+          Elem.InstanceStepRate ? D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
+                                : D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA;
+      ElementDesc.InstanceDataStepRate = Elem.InstanceStepRate.value_or(0);
+      DXInputLayout.push_back(ElementDesc);
+    }
+
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc = {};
+    PSODesc.InputLayout = {DXInputLayout.data(), (UINT)DXInputLayout.size()};
+    PSODesc.pRootSignature = RootSig.Get();
+    PSODesc.VS = {VS.Shader->getBuffer().data(), VS.Shader->getBuffer().size()};
+    PSODesc.PS = {PS.Shader->getBuffer().data(), PS.Shader->getBuffer().size()};
+    if (PSODesc.VS.BytecodeLength == 0 || PSODesc.PS.BytecodeLength == 0)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Graphics pipeline requires both a vertex "
+                                     "shader and a pixel shader.");
+
+    PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    PSODesc.DepthStencilState.DepthEnable = false;
+    PSODesc.DepthStencilState.StencilEnable = false;
+    PSODesc.SampleMask = UINT_MAX;
+    PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    PSODesc.NumRenderTargets = static_cast<UINT>(RTFormats.size());
+    if (DSFormat)
+      PSODesc.DSVFormat = getDXGIFormat(*DSFormat);
+    for (size_t I = 0; I < RTFormats.size(); ++I)
+      PSODesc.RTVFormats[I] = getDXGIFormat(RTFormats[I]);
+    PSODesc.SampleDesc.Count = 1;
+
+    ComPtr<ID3D12PipelineState> PSO;
+    if (auto Err = HR::toError(
+            Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO)),
+            "Failed to create graphics PSO."))
+      return Err;
+
+    return std::make_shared<DXPipelineState>(Name, RootSig, PSO);
+  }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
@@ -827,101 +1048,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRootSignature(Pipeline &P, InvocationState &State) {
-    // Try pulling a root signature from the DXIL first
-
-    auto ExContainer = llvm::object::DXContainer::create(
-        P.Shaders[0].Shader->getMemBufferRef());
-    // If this fails we really have a problem...
-    if (!ExContainer)
-      return ExContainer.takeError();
-
-    bool HasRootSigPart = false;
-    for (const auto &Part : *ExContainer)
-      if (memcmp(Part.Part.Name, "RTS0", 4) == 0)
-        HasRootSigPart = true;
-
-    if (HasRootSigPart) {
-      const llvm::StringRef Binary = P.Shaders[0].Shader->getBuffer();
-      if (auto Err = HR::toError(
-              Device->CreateRootSignature(0, Binary.data(), Binary.size(),
-                                          IID_PPV_ARGS(&State.RootSig)),
-              "Failed to create root signature."))
-        return Err;
-      return llvm::Error::success();
-    }
-
-    std::vector<D3D12_ROOT_PARAMETER> RootParams;
-    const uint32_t DescriptorCount = P.getDescriptorCount();
-    const std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges =
-        std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]>(
-            new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
-
-    uint32_t RangeIdx = 0;
-    for (const auto &D : P.Sets) {
-      uint32_t DescriptorIdx = 0;
-      const uint32_t StartRangeIdx = RangeIdx;
-      for (const auto &R : D.Resources) {
-        switch (getDXKind(R.Kind)) {
-        case SRV:
-          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-          break;
-        case UAV:
-          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-          break;
-        case CBV:
-          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-          break;
-        case SAMPLER:
-          llvm_unreachable("Not implemented yet.");
-        }
-        Ranges.get()[RangeIdx].NumDescriptors = R.getArraySize();
-        Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
-        Ranges.get()[RangeIdx].RegisterSpace = R.DXBinding.Space;
-        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
-            DescriptorIdx;
-        RangeIdx++;
-        DescriptorIdx += R.getArraySize();
-      }
-      RootParams.push_back(
-          D3D12_ROOT_PARAMETER{D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-                               {D3D12_ROOT_DESCRIPTOR_TABLE{
-                                   static_cast<uint32_t>(D.Resources.size()),
-                                   &Ranges.get()[StartRangeIdx]}},
-                               D3D12_SHADER_VISIBILITY_ALL});
-    }
-
-    CD3DX12_ROOT_SIGNATURE_DESC Desc;
-    Desc.Init(static_cast<uint32_t>(RootParams.size()), RootParams.data(), 0,
-              nullptr,
-              P.isGraphics()
-                  ? D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
-                  : D3D12_ROOT_SIGNATURE_FLAG_NONE);
-
-    ComPtr<ID3DBlob> Signature;
-    ComPtr<ID3DBlob> Error;
-    if (auto Err = HR::toError(
-            D3D12SerializeRootSignature(&Desc, D3D_ROOT_SIGNATURE_VERSION_1,
-                                        &Signature, &Error),
-            "Failed to seialize root signature.")) {
-      const std::string Msg =
-          std::string(reinterpret_cast<char *>(Error->GetBufferPointer()),
-                      Error->GetBufferSize() / sizeof(char));
-      return joinErrors(
-          std::move(Err),
-          llvm::createStringError(std::errc::protocol_error, Msg.c_str()));
-    }
-
-    if (auto Err = HR::toError(
-            Device->CreateRootSignature(0, Signature->GetBufferPointer(),
-                                        Signature->GetBufferSize(),
-                                        IID_PPV_ARGS(&State.RootSig)),
-            "Failed to create root signature."))
-      return Err;
-
-    return llvm::Error::success();
-  }
-
   llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
@@ -932,23 +1058,6 @@ public:
     if (auto Err = HR::toError(Device->CreateDescriptorHeap(
                                    &HeapDesc, IID_PPV_ARGS(&State.DescHeap)),
                                "Failed to create descriptor heap."))
-      return Err;
-    return llvm::Error::success();
-  }
-
-  llvm::Error createComputePSO(llvm::StringRef DXIL, InvocationState &State) {
-    const D3D12_COMPUTE_PIPELINE_STATE_DESC Desc = {
-        State.RootSig.Get(),
-        {DXIL.data(), DXIL.size()},
-        0,
-        {
-            nullptr,
-            0,
-        },
-        D3D12_PIPELINE_STATE_FLAG_NONE};
-    if (auto Err = HR::toError(
-            Device->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&State.PSO)),
-            "Failed to create PSO."))
       return Err;
     return llvm::Error::success();
   }
@@ -1493,8 +1602,10 @@ public:
       IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
       Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
-    IS.CB->CmdList->SetComputeRootSignature(IS.RootSig.Get());
-    IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
+    const DXPipelineState *DXPipeline =
+        static_cast<const DXPipelineState *>(IS.Pipeline.get());
+    IS.CB->CmdList->SetComputeRootSignature(DXPipeline->RootSig.Get());
+    IS.CB->CmdList->SetPipelineState(DXPipeline->PSO.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1761,80 +1872,21 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createGraphicsPSO(Pipeline &P, InvocationState &IS) {
-    // Create the input layout based on the vertex attributes.
-    std::vector<D3D12_INPUT_ELEMENT_DESC> InputLayout;
-    for (size_t I = 0; I < P.Bindings.VertexAttributes.size(); ++I) {
-      const VertexAttribute &Attr = P.Bindings.VertexAttributes[I];
-      InputLayout.push_back({Attr.Name.c_str(), 0,
-                             getDXFormat(Attr.Format, Attr.Channels), 0,
-                             static_cast<UINT>(Attr.Offset),
-                             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0});
-    }
-
-    D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc = {};
-    PSODesc.InputLayout = {InputLayout.data(), (UINT)InputLayout.size()};
-    PSODesc.pRootSignature = IS.RootSig.Get();
-
-    for (auto &S : P.Shaders) {
-      switch (S.Stage) {
-      case Stages::Vertex:
-        PSODesc.VS = {S.Shader->getBuffer().data(),
-                      S.Shader->getBuffer().size()};
-        break;
-      case Stages::Pixel:
-        PSODesc.PS = {S.Shader->getBuffer().data(),
-                      S.Shader->getBuffer().size()};
-        break;
-      default:
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Unsupported shader type in graphics pipeline.");
-      }
-    }
-
-    // TODO: Add support for more shader stages and different pipeline shapes.
-    if (PSODesc.VS.BytecodeLength == 0 || PSODesc.PS.BytecodeLength == 0)
-      return llvm::createStringError(std::errc::invalid_argument,
-                                     "Graphics pipeline requires both a vertex "
-                                     "shader and a pixel shader.");
-
-    PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    PSODesc.DepthStencilState.DepthEnable = true;
-    PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-    PSODesc.DepthStencilState.StencilEnable = false;
-    auto &DS = llvm::cast<DXTexture>(*IS.DS);
-    PSODesc.DSVFormat = getDXGIFormat(DS.Desc.Fmt);
-    PSODesc.SampleMask = UINT_MAX;
-    PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-    PSODesc.NumRenderTargets = 1;
-    PSODesc.RTVFormats[0] = getDXFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
-    PSODesc.SampleDesc.Count = 1;
-
-    if (auto Err = HR::toError(Device->CreateGraphicsPipelineState(
-                                   &PSODesc, IID_PPV_ARGS(&IS.PSO)),
-                               "Failed to create graphics PSO."))
-      return Err;
-
-    return llvm::Error::success();
-  }
-
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
     auto &RT = llvm::cast<DXTexture>(*IS.RT);
     auto &DS = llvm::cast<DXTexture>(*IS.DS);
     auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
 
-    IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
+    const DXPipelineState *DXPipeline =
+        static_cast<const DXPipelineState *>(IS.Pipeline.get());
+    IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline->RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
       IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
       IS.CB->CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
-    IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
+    IS.CB->CmdList->SetPipelineState(DXPipeline->PSO.Get());
 
     IS.CB->CmdList->OMSetRenderTargets(1, &RT.RTVHandle, false, &DS.DSVHandle);
 
@@ -1925,9 +1977,6 @@ public:
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
-    if (auto Err = createRootSignature(P, State))
-      return Err;
-    llvm::outs() << "RootSignature created.\n";
     if (auto Err = createDescriptorHeap(P, State))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
@@ -1942,15 +1991,39 @@ public:
       return Err;
     llvm::outs() << "Buffers created.\n";
 
+    BindingsDesc BindingsDesc = {};
+    for (auto &S : P.Sets) {
+      DescriptorSetLayoutDesc Layout;
+      for (auto &R : S.Resources) {
+        ResourceBindingDesc ResourceBinding = {};
+        ResourceBinding.Kind = R.Kind;
+        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
+        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        ResourceBinding.DescriptorCount = R.getArraySize();
+
+        Layout.ResourceBindings.push_back(ResourceBinding);
+      }
+
+      BindingsDesc.DescriptorSetDescs.push_back(Layout);
+    }
+
     if (P.isCompute()) {
       // This is an arbitrary distinction that we could alter in the future.
       if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
         return llvm::createStringError(
             std::errc::invalid_argument,
             "Compute pipeline must have exactly one compute shader.");
-      if (auto Err = createComputePSO(P.Shaders[0].Shader->getBuffer(), State))
-        return Err;
-      llvm::outs() << "PSO created.\n";
+
+      ShaderContainer CS = {};
+      CS.EntryPoint = P.Shaders[0].Entry;
+      CS.Shader = P.Shaders[0].Shader.get();
+
+      auto PipelineStateOrErr =
+          createPipelineCs("Compute Pipeline State", BindingsDesc, CS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      State.Pipeline = *PipelineStateOrErr;
+      llvm::outs() << "Compute Pipeline created.\n";
       if (auto Err = createComputeCommands(P, State))
         return Err;
       llvm::outs() << "Compute command list created.\n";
@@ -1969,9 +2042,48 @@ public:
       if (auto Err = createVertexBuffer(P, State))
         return Err;
       llvm::outs() << "Vertex buffer created.\n";
-      if (auto Err = createGraphicsPSO(P, State))
-        return Err;
-      llvm::outs() << "Graphics PSO created.\n";
+
+      ShaderContainer VS = {};
+      ShaderContainer PS = {};
+      for (auto &Shader : P.Shaders) {
+        if (Shader.Stage == Stages::Vertex) {
+          VS.EntryPoint = Shader.Entry;
+          VS.Shader = Shader.Shader.get();
+        } else if (Shader.Stage == Stages::Pixel) {
+          PS.EntryPoint = Shader.Entry;
+          PS.Shader = Shader.Shader.get();
+        }
+      }
+
+      // Create the input layout based on the vertex attributes.
+      llvm::SmallVector<InputLayoutDesc> InputLayout;
+      for (auto &Attr : P.Bindings.VertexAttributes) {
+        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        InputLayoutDesc Desc = {};
+        Desc.Name = Attr.Name;
+        Desc.Format = *FormatOrErr;
+        Desc.OffsetInBytes = Attr.Offset;
+        InputLayout.push_back(Desc);
+      }
+
+      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                  P.Bindings.RTargetBufferPtr->Channels);
+      if (!FormatOrErr)
+        return FormatOrErr.takeError();
+
+      llvm::SmallVector<Format> RTFormats;
+      RTFormats.push_back(*FormatOrErr);
+
+      auto PipelineStateOrErr = createPipelineVsPs(
+          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
+          Format::D32FloatS8Uint, VS, PS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      State.Pipeline = *PipelineStateOrErr;
+      llvm::outs() << "Graphics Pipeline created.\n";
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";

@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 #include "Support/Pipeline.h"
 #include "Support/VkError.h"
 #include "VKResources.h"
@@ -19,6 +20,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <system_error>
@@ -69,17 +71,22 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+
   case ResourceKind::Texture2D:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+
   case ResourceKind::RWTexture2D:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+
   case ResourceKind::Sampler:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
   case ResourceKind::SampledTexture2D:
@@ -566,6 +573,29 @@ private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
 };
 
+class VulkanPipelineState : public offloadtest::PipelineState {
+public:
+  std::string Name;
+  VkDevice Dev;
+  VkPipeline Pipeline;
+  VkPipelineLayout Layout;
+  llvm::SmallVector<VkDescriptorSetLayout>
+      SetLayouts; // Do we need to keep these alive?
+
+  VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
+                      VkPipelineLayout Layout,
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+      : Name(Name.str()), Dev(Dev), Pipeline(Pipeline), Layout(Layout),
+        SetLayouts(std::move(SetLayouts)) {}
+
+  ~VulkanPipelineState() override {
+    vkDestroyPipeline(Dev, Pipeline, nullptr);
+    vkDestroyPipelineLayout(Dev, Layout, nullptr);
+    for (VkDescriptorSetLayout L : SetLayouts)
+      vkDestroyDescriptorSetLayout(Dev, L, nullptr);
+  }
+};
+
 class VulkanDevice : public offloadtest::Device {
 private:
   std::shared_ptr<VulkanInstance> Instance;
@@ -640,18 +670,11 @@ private:
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
   };
 
-  struct CompiledShader {
-    Stages Stage;
-    std::string Entry;
-    VkShaderModule Shader;
-  };
-
   struct InvocationState {
     std::unique_ptr<VulkanCommandBuffer> CB;
-    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     VkDescriptorPool Pool = VK_NULL_HANDLE;
-    VkPipelineCache PipelineCache = VK_NULL_HANDLE;
-    VkPipeline Pipeline = VK_NULL_HANDLE;
+
+    std::shared_ptr<PipelineState> Pipeline;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
@@ -663,20 +686,10 @@ private:
     VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
 
-    llvm::SmallVector<CompiledShader> Shaders;
-    llvm::SmallVector<VkDescriptorSetLayout> DescriptorSetLayouts;
     llvm::SmallVector<ResourceBundle> Resources;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
     llvm::SmallVector<VkImageView> ImageViews;
-
-    uint32_t getFullShaderStageMask() {
-      if (0 != ShaderStageMask)
-        return ShaderStageMask;
-      for (const auto &S : Shaders)
-        ShaderStageMask |= getShaderStageFlag(S.Stage);
-      return ShaderStageMask;
-    }
   };
 
 public:
@@ -825,6 +838,390 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Error
+  createPipelineLayout(const BindingsDesc &BindingsDesc,
+                       VkShaderStageFlags StageFlags,
+                       llvm::SmallVectorImpl<VkDescriptorSetLayout> &SetLayouts,
+                       VkPipelineLayout &PipelineLayout) {
+    // Build descriptor set layouts from BindingsDesc.
+    for (const DescriptorSetLayoutDesc &SetDesc :
+         BindingsDesc.DescriptorSetDescs) {
+      std::vector<VkDescriptorSetLayoutBinding> Binds;
+      for (const ResourceBindingDesc &RB : SetDesc.ResourceBindings) {
+        const VulkanBinding VKBinding = RB.VKBinding.value();
+
+        VkDescriptorSetLayoutBinding B = {};
+        B.binding = VKBinding.Binding;
+        B.descriptorType = getDescriptorType(RB.Kind);
+        B.descriptorCount = RB.DescriptorCount;
+        B.stageFlags = StageFlags;
+        Binds.push_back(B);
+
+        if (VKBinding.CounterBinding) {
+          VkDescriptorSetLayoutBinding CB = {};
+          CB.binding = *VKBinding.CounterBinding;
+          CB.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+          CB.descriptorCount = RB.DescriptorCount;
+          CB.stageFlags = StageFlags;
+          Binds.push_back(CB);
+        }
+      }
+      VkDescriptorSetLayoutCreateInfo SetCI = {};
+      SetCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      SetCI.bindingCount = static_cast<uint32_t>(Binds.size());
+      SetCI.pBindings = Binds.data();
+      VkDescriptorSetLayout SetLayout = VK_NULL_HANDLE;
+      if (auto Err = VK::toError(
+              vkCreateDescriptorSetLayout(Device, &SetCI, nullptr, &SetLayout),
+              "Failed to create descriptor set layout.")) {
+        for (auto *L : SetLayouts)
+          vkDestroyDescriptorSetLayout(Device, L, nullptr);
+        return Err;
+      }
+      SetLayouts.push_back(SetLayout);
+    }
+
+    llvm::SmallVector<VkPushConstantRange> Ranges;
+    for (const auto &PCR : BindingsDesc.PushConstantRanges) {
+      const VkPushConstantRange R = {
+          static_cast<VkShaderStageFlags>(StageFlags), PCR.OffsetInBytes,
+          PCR.SizeInBytes};
+      Ranges.emplace_back(std::move(R));
+    }
+
+    VkPipelineLayoutCreateInfo LayoutCI = {};
+    LayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    LayoutCI.setLayoutCount = static_cast<uint32_t>(SetLayouts.size());
+    LayoutCI.pSetLayouts = SetLayouts.empty() ? nullptr : SetLayouts.data();
+    LayoutCI.pushConstantRangeCount = static_cast<uint32_t>(Ranges.size());
+    LayoutCI.pPushConstantRanges = Ranges.empty() ? nullptr : Ranges.data();
+    if (auto Err = VK::toError(
+            vkCreatePipelineLayout(Device, &LayoutCI, nullptr, &PipelineLayout),
+            "Failed to create pipeline layout.")) {
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    return llvm::Error::success();
+  }
+
+  llvm::Expected<VkShaderModule>
+  createShaderModule(const llvm::MemoryBuffer *Shader, const char *Kind) {
+    const llvm::StringRef Bytecode = Shader->getBuffer();
+    VkShaderModuleCreateInfo ModuleCI = {};
+    ModuleCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ModuleCI.codeSize = Bytecode.size();
+    ModuleCI.pCode = reinterpret_cast<const uint32_t *>(Bytecode.data());
+    VkShaderModule Module = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(Device, &ModuleCI, nullptr, &Module))
+      return llvm::createStringError(
+          std::errc::not_supported, "Failed to create %s shader module.", Kind);
+    return Module;
+  }
+
+  llvm::Expected<std::shared_ptr<PipelineState>>
+  createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   ShaderContainer CS) override {
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err =
+            createPipelineLayout(BindingsDesc, VK_SHADER_STAGE_COMPUTE_BIT,
+                                 SetLayouts, PipelineLayout))
+      return Err;
+
+    // Create compute shader module.
+    auto CSModOrErr = createShaderModule(CS.Shader, "compute");
+    if (!CSModOrErr) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return CSModOrErr.takeError();
+    }
+    VkShaderModule CSModule = *CSModOrErr;
+
+    VkPipelineShaderStageCreateInfo StageCI = {};
+    StageCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    StageCI.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    StageCI.module = CSModule;
+    StageCI.pName = CS.EntryPoint.c_str();
+
+    llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
+    llvm::SmallVector<char> SpecData;
+    VkSpecializationInfo SpecInfo = {};
+    if (!CS.SpecializationConstants.empty()) {
+      llvm::DenseSet<uint32_t> SeenConstantIDs;
+
+      for (const auto &SpecConst : CS.SpecializationConstants) {
+        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "Test configuration contains multiple entries for "
+              "specialization constant ID %u.",
+              SpecConst.ConstantID);
+
+        VkSpecializationMapEntry Entry;
+        if (auto Err = parseSpecializationConstant(SpecConst, Entry, SpecData))
+          return Err;
+        SpecEntries.push_back(Entry);
+      }
+      SpecInfo.mapEntryCount = SpecEntries.size();
+      SpecInfo.pMapEntries = SpecEntries.data();
+      SpecInfo.dataSize = SpecData.size();
+      SpecInfo.pData = SpecData.data();
+      StageCI.pSpecializationInfo = &SpecInfo;
+    }
+
+    VkComputePipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    PipelineCI.stage = StageCI;
+    PipelineCI.layout = PipelineLayout;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateComputePipelines(Device, VK_NULL_HANDLE,
+                                                        1, &PipelineCI, nullptr,
+                                                        &Pipeline),
+                               "Failed to create compute pipeline.")) {
+      vkDestroyShaderModule(Device, CSModule, nullptr);
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    // No longer need shader modules after pipeline compilation.
+    vkDestroyShaderModule(Device, CSModule, nullptr);
+
+    return std::make_shared<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
+
+  llvm::Expected<std::shared_ptr<PipelineState>>
+  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                     llvm::ArrayRef<Format> RTFormats,
+                     std::optional<Format> DSFormat, ShaderContainer VS,
+                     ShaderContainer PS) override {
+    const VkShaderStageFlags GraphicsFlags =
+        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
+                                        PipelineLayout))
+      return Err;
+
+    std::vector<VkShaderModule> ShaderModules;
+    auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
+    if (!VSModOrErr) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return VSModOrErr.takeError();
+    }
+    ShaderModules.push_back(*VSModOrErr);
+
+    auto PSModOrErr = createShaderModule(PS.Shader, "pixel");
+    if (!PSModOrErr) {
+      for (auto *M : ShaderModules)
+        vkDestroyShaderModule(Device, M, nullptr);
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return PSModOrErr.takeError();
+    }
+    ShaderModules.push_back(*PSModOrErr);
+
+    // Build specialization info for vertex shader.
+    llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
+    llvm::SmallVector<char> VSSpecData;
+    VkSpecializationInfo VSSpecInfo = {};
+    if (!VS.SpecializationConstants.empty()) {
+      llvm::DenseSet<uint32_t> SeenConstantIDs;
+      for (const auto &SpecConst : VS.SpecializationConstants) {
+        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "Test configuration contains multiple entries for "
+              "specialization constant ID %u.",
+              SpecConst.ConstantID);
+
+        VkSpecializationMapEntry Entry;
+        if (auto Err =
+                parseSpecializationConstant(SpecConst, Entry, VSSpecData))
+          return Err;
+        VSSpecEntries.push_back(Entry);
+      }
+      VSSpecInfo.mapEntryCount = VSSpecEntries.size();
+      VSSpecInfo.pMapEntries = VSSpecEntries.data();
+      VSSpecInfo.dataSize = VSSpecData.size();
+      VSSpecInfo.pData = VSSpecData.data();
+    }
+
+    // Build specialization info for pixel/fragment shader.
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    if (!PS.SpecializationConstants.empty()) {
+      llvm::DenseSet<uint32_t> SeenConstantIDs;
+      for (const auto &SpecConst : PS.SpecializationConstants) {
+        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "Test configuration contains multiple entries for "
+              "specialization constant ID %u.",
+              SpecConst.ConstantID);
+
+        VkSpecializationMapEntry Entry;
+        if (auto Err =
+                parseSpecializationConstant(SpecConst, Entry, PSSpecData))
+          return Err;
+        PSSpecEntries.push_back(Entry);
+      }
+      PSSpecInfo.mapEntryCount = PSSpecEntries.size();
+      PSSpecInfo.pMapEntries = PSSpecEntries.data();
+      PSSpecInfo.dataSize = PSSpecData.size();
+      PSSpecInfo.pData = PSSpecData.data();
+    }
+
+    const std::array<VkPipelineShaderStageCreateInfo, 2> Stages = {{
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+         VK_SHADER_STAGE_VERTEX_BIT, ShaderModules[0], VS.EntryPoint.c_str(),
+         VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo},
+        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+         VK_SHADER_STAGE_FRAGMENT_BIT, ShaderModules[1], PS.EntryPoint.c_str(),
+         PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo},
+    }};
+
+    // Build vertex input attribute and binding descriptions from InputLayout.
+    uint32_t Stride = 0;
+    std::vector<VkVertexInputAttributeDescription> Attributes;
+    Attributes.reserve(InputLayout.size());
+    for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
+      const InputLayoutDesc &Elem = InputLayout[I];
+      const uint32_t ElemSize = getFormatSizeInBytes(Elem.Format);
+      VkVertexInputAttributeDescription Attr = {};
+      Attr.location = I;
+      Attr.binding = 0;
+      Attr.format = getVulkanFormat(Elem.Format);
+      Attr.offset = Elem.OffsetInBytes;
+      Attributes.push_back(Attr);
+      Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
+    }
+
+    VkVertexInputBindingDescription BindingDesc = {};
+    BindingDesc.binding = 0;
+    BindingDesc.stride = Stride;
+    BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkPipelineVertexInputStateCreateInfo VertexInputCI = {};
+    VertexInputCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VertexInputCI.vertexBindingDescriptionCount = InputLayout.empty() ? 0 : 1;
+    VertexInputCI.pVertexBindingDescriptions =
+        InputLayout.empty() ? nullptr : &BindingDesc;
+    VertexInputCI.vertexAttributeDescriptionCount =
+        static_cast<uint32_t>(Attributes.size());
+    VertexInputCI.pVertexAttributeDescriptions =
+        Attributes.empty() ? nullptr : Attributes.data();
+
+    VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
+    InputAssemblyCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    InputAssemblyCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    VkPipelineViewportStateCreateInfo ViewportCI = {};
+    ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewportCI.viewportCount = 1;
+    ViewportCI.scissorCount = 1;
+
+    const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                        VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo DynamicCI = {};
+    DynamicCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicCI.dynamicStateCount = 2;
+    DynamicCI.pDynamicStates = DynStates;
+
+    VkPipelineRasterizationStateCreateInfo RastCI = {};
+    RastCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RastCI.polygonMode = VK_POLYGON_MODE_FILL;
+    RastCI.cullMode = VK_CULL_MODE_NONE;
+    RastCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RastCI.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
+    MultisampleCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
+    DepthStencilCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    DepthStencilCI.depthTestEnable = VK_TRUE;
+    DepthStencilCI.depthWriteEnable = VK_TRUE;
+    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    DepthStencilCI.front = DepthStencilCI.back;
+
+    llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
+        RTFormats.size());
+    for (auto &BA : BlendAttachments)
+      BA.colorWriteMask = 0xf;
+    VkPipelineColorBlendStateCreateInfo BlendCI = {};
+    BlendCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    BlendCI.attachmentCount = static_cast<uint32_t>(BlendAttachments.size());
+    BlendCI.pAttachments = BlendAttachments.data();
+
+    // Use dynamic rendering (Vulkan 1.3 core): no render pass object required.
+    llvm::SmallVector<VkFormat> ColorFormats;
+    for (const Format F : RTFormats)
+      ColorFormats.push_back(getVulkanFormat(F));
+    VkPipelineRenderingCreateInfo DynRenderCI = {};
+    DynRenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    DynRenderCI.colorAttachmentCount =
+        static_cast<uint32_t>(ColorFormats.size());
+    DynRenderCI.pColorAttachmentFormats = ColorFormats.data();
+    if (DSFormat)
+      DynRenderCI.depthAttachmentFormat = getVulkanFormat(*DSFormat);
+
+    VkGraphicsPipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCI.pNext = &DynRenderCI;
+    PipelineCI.stageCount = static_cast<uint32_t>(Stages.size());
+    PipelineCI.pStages = Stages.data();
+    PipelineCI.pVertexInputState = &VertexInputCI;
+    PipelineCI.pInputAssemblyState = &InputAssemblyCI;
+    PipelineCI.pViewportState = &ViewportCI;
+    PipelineCI.pRasterizationState = &RastCI;
+    PipelineCI.pMultisampleState = &MultisampleCI;
+    PipelineCI.pDepthStencilState = &DepthStencilCI;
+    PipelineCI.pColorBlendState = &BlendCI;
+    PipelineCI.pDynamicState = &DynamicCI;
+    PipelineCI.layout = PipelineLayout;
+    PipelineCI.renderPass = VK_NULL_HANDLE;
+
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
+                                                         1, &PipelineCI,
+                                                         nullptr, &Pipeline),
+                               "Failed to create graphics pipeline.")) {
+      for (auto *M : ShaderModules)
+        vkDestroyShaderModule(Device, M, nullptr);
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    // No longer need shader modules after pipeline compilation.
+    for (auto *M : ShaderModules)
+      vkDestroyShaderModule(Device, M, nullptr);
+
+    return std::make_shared<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
@@ -1410,81 +1807,22 @@ public:
   }
 
   llvm::Error createDescriptorSets(Pipeline &P, InvocationState &IS) {
-    for (const auto &S : P.Sets) {
-      std::vector<VkDescriptorSetLayoutBinding> Bindings;
-      for (const auto &R : S.Resources) {
-        VkDescriptorSetLayoutBinding Binding = {};
-        if (!R.VKBinding.has_value())
-          return llvm::createStringError(std::errc::invalid_argument,
-                                         "No VulkanBinding provided for '%s'",
-                                         R.Name.c_str());
-        if (R.HasCounter && !R.VKBinding->CounterBinding)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "No CounterBinding provided for resource '%s' with a counter",
-              R.Name.c_str());
-        Binding.binding = R.VKBinding->Binding;
-        Binding.descriptorType = getDescriptorType(R.Kind);
-        Binding.descriptorCount = R.getArraySize();
-        Binding.stageFlags = IS.getFullShaderStageMask();
-        Bindings.push_back(Binding);
-        if (R.HasCounter) {
-          VkDescriptorSetLayoutBinding CounterBinding = {};
-          CounterBinding.binding = *R.VKBinding->CounterBinding;
-          CounterBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterBinding.descriptorCount = R.getArraySize();
-          CounterBinding.stageFlags = IS.getFullShaderStageMask();
-          Bindings.push_back(CounterBinding);
-        }
-      }
-      VkDescriptorSetLayoutCreateInfo LayoutCreateInfo = {};
-      LayoutCreateInfo.sType =
-          VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-      LayoutCreateInfo.bindingCount = Bindings.size();
-      LayoutCreateInfo.pBindings = Bindings.data();
-      llvm::outs() << "Binding " << Bindings.size() << " descriptors.\n";
-      VkDescriptorSetLayout Layout;
-      if (auto Err =
-              VK::toError(vkCreateDescriptorSetLayout(Device, &LayoutCreateInfo,
-                                                      nullptr, &Layout),
-                          "Failed to create descriptor set layout."))
-        return Err;
-      IS.DescriptorSetLayouts.push_back(Layout);
-    }
-
-    VkPipelineLayoutCreateInfo PipelineCreateInfo = {};
-    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
-    PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
-
-    llvm::SmallVector<VkPushConstantRange, 1> Ranges;
-    for (const auto &PCB : P.PushConstants) {
-      const VkPushConstantRange R = {
-          static_cast<VkShaderStageFlags>(getShaderStageFlag(PCB.Stage)),
-          /* offset= */ 0, static_cast<uint32_t>(PCB.size())};
-      Ranges.emplace_back(std::move(R));
-    }
-    PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
-    PipelineCreateInfo.pPushConstantRanges = Ranges.data();
-
-    if (auto Err =
-            VK::toError(vkCreatePipelineLayout(Device, &PipelineCreateInfo,
-                                               nullptr, &IS.PipelineLayout),
-                        "Failed to create pipeline layout."))
-      return Err;
-
     if (P.Sets.size() == 0)
       return llvm::Error::success();
+
+    const VulkanPipelineState *VulkanPipeline =
+        static_cast<VulkanPipelineState *>(IS.Pipeline.get());
 
     VkDescriptorSetAllocateInfo DSAllocInfo = {};
     DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     DSAllocInfo.descriptorPool = IS.Pool;
-    DSAllocInfo.descriptorSetCount = IS.DescriptorSetLayouts.size();
-    DSAllocInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
+    DSAllocInfo.descriptorSetCount = VulkanPipeline->SetLayouts.size(); // error
+    DSAllocInfo.pSetLayouts = VulkanPipeline->SetLayouts.data();
     assert(IS.DescriptorSets.empty());
     IS.DescriptorSets.insert(IS.DescriptorSets.begin(),
-                             IS.DescriptorSetLayouts.size(), VkDescriptorSet());
-    llvm::outs() << "Num Descriptor sets: " << IS.DescriptorSetLayouts.size()
+                             VulkanPipeline->SetLayouts.size(),
+                             VkDescriptorSet());
+    llvm::outs() << "Num Descriptor sets: " << VulkanPipeline->SetLayouts.size()
                  << "\n";
     if (auto Err =
             VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
@@ -1646,24 +1984,6 @@ public:
     llvm::outs() << "WriteDescriptors: " << WriteDescriptors.size() << "\n";
     vkUpdateDescriptorSets(Device, WriteDescriptors.size(),
                            WriteDescriptors.data(), 0, nullptr);
-    return llvm::Error::success();
-  }
-
-  llvm::Error createShaderModules(Pipeline &P, InvocationState &IS) {
-    for (const auto &Shader : P.Shaders) {
-      const llvm::StringRef Program = Shader.Shader->getBuffer();
-      VkShaderModuleCreateInfo ShaderCreateInfo = {};
-      ShaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      ShaderCreateInfo.codeSize = Program.size();
-      ShaderCreateInfo.pCode =
-          reinterpret_cast<const uint32_t *>(Program.data());
-      CompiledShader CS = {Shader.Stage, Shader.Entry, 0};
-      if (auto Err = VK::toError(vkCreateShaderModule(Device, &ShaderCreateInfo,
-                                                      nullptr, &CS.Shader),
-                                 "Failed to create shader module."))
-        return Err;
-      IS.Shaders.emplace_back(CS);
-    }
     return llvm::Error::success();
   }
 
@@ -1871,181 +2191,6 @@ public:
     default:
       llvm_unreachable("Unsupported specialization constant type");
     }
-    return llvm::Error::success();
-  }
-
-  llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
-    VkPipelineCacheCreateInfo CacheCreateInfo = {};
-    CacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    if (auto Err =
-            VK::toError(vkCreatePipelineCache(Device, &CacheCreateInfo, nullptr,
-                                              &IS.PipelineCache),
-                        "Failed to create pipeline cache."))
-      return Err;
-
-    if (P.isCompute()) {
-      const offloadtest::Shader &Shader = P.Shaders[0];
-      assert(IS.Shaders.size() == 1 &&
-             "Currently only support one compute shader");
-      const CompiledShader &S = IS.Shaders[0];
-      VkPipelineShaderStageCreateInfo StageInfo = {};
-      StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      StageInfo.module = S.Shader;
-      StageInfo.pName = S.Entry.c_str();
-
-      llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
-      llvm::SmallVector<char> SpecData;
-      VkSpecializationInfo SpecInfo = {};
-      if (!Shader.SpecializationConstants.empty()) {
-        llvm::DenseSet<uint32_t> SeenConstantIDs;
-        for (const auto &SpecConst : Shader.SpecializationConstants) {
-          if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-            return llvm::createStringError(
-                std::errc::invalid_argument,
-                "Test configuration contains multiple entries for "
-                "specialization constant ID %u.",
-                SpecConst.ConstantID);
-
-          VkSpecializationMapEntry Entry;
-          if (auto Err =
-                  parseSpecializationConstant(SpecConst, Entry, SpecData))
-            return Err;
-          SpecEntries.push_back(Entry);
-        }
-
-        SpecInfo.mapEntryCount = SpecEntries.size();
-        SpecInfo.pMapEntries = SpecEntries.data();
-        SpecInfo.dataSize = SpecData.size();
-        SpecInfo.pData = SpecData.data();
-        StageInfo.pSpecializationInfo = &SpecInfo;
-      }
-
-      VkComputePipelineCreateInfo PipelineCreateInfo = {};
-      PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      PipelineCreateInfo.stage = StageInfo;
-      PipelineCreateInfo.layout = IS.PipelineLayout;
-      if (auto Err =
-              VK::toError(vkCreateComputePipelines(Device, IS.PipelineCache, 1,
-                                                   &PipelineCreateInfo, nullptr,
-                                                   &IS.Pipeline),
-                          "Failed to create pipeline."))
-        return Err;
-      return llvm::Error::success();
-    }
-
-    llvm::SmallVector<VkPipelineShaderStageCreateInfo> Stages;
-    for (const auto &S : IS.Shaders) {
-      VkPipelineShaderStageCreateInfo StageInfo = {};
-      StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      StageInfo.stage = getShaderStageFlag(S.Stage);
-      StageInfo.module = S.Shader;
-      StageInfo.pName = S.Entry.c_str();
-      Stages.emplace_back(StageInfo);
-    }
-
-    VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
-    InputAssemblyCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    InputAssemblyCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineRasterizationStateCreateInfo RastStateCI = {};
-    RastStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    RastStateCI.polygonMode = VK_POLYGON_MODE_FILL;
-    RastStateCI.cullMode = VK_CULL_MODE_NONE;
-    RastStateCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    RastStateCI.depthClampEnable = VK_FALSE;
-    RastStateCI.rasterizerDiscardEnable = VK_FALSE;
-    RastStateCI.depthBiasEnable = VK_FALSE;
-    RastStateCI.lineWidth = 1.0f;
-
-    VkPipelineColorBlendAttachmentState BlendState = {};
-    BlendState.colorWriteMask = 0xf;
-    BlendState.blendEnable = VK_FALSE;
-    VkPipelineColorBlendStateCreateInfo BlendStateCI = {};
-    BlendStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    BlendStateCI.attachmentCount = 1;
-    BlendStateCI.pAttachments = &BlendState;
-
-    VkPipelineViewportStateCreateInfo ViewStateCI = {};
-    ViewStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    ViewStateCI.viewportCount = 1;
-    ViewStateCI.scissorCount = 1;
-
-    const VkDynamicState DynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
-                                            VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo DynamicStateCI = {};
-    DynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    DynamicStateCI.pDynamicStates = &DynamicStates[0];
-    DynamicStateCI.dynamicStateCount = 2;
-
-    VkPipelineDepthStencilStateCreateInfo DepthStencilStateCI = {};
-    DepthStencilStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    DepthStencilStateCI.depthTestEnable = VK_TRUE;
-    DepthStencilStateCI.depthWriteEnable = VK_TRUE;
-    DepthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    DepthStencilStateCI.depthBoundsTestEnable = VK_FALSE;
-    DepthStencilStateCI.back.failOp = VK_STENCIL_OP_KEEP;
-    DepthStencilStateCI.back.passOp = VK_STENCIL_OP_KEEP;
-    DepthStencilStateCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
-    DepthStencilStateCI.stencilTestEnable = VK_FALSE;
-    DepthStencilStateCI.front = DepthStencilStateCI.back;
-
-    VkPipelineMultisampleStateCreateInfo MultisampleStateCI = {};
-    MultisampleStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    const uint32_t Stride = P.Bindings.getVertexStride();
-
-    VkVertexInputBindingDescription VertexInputBinding{};
-    VertexInputBinding.binding = 0;
-    VertexInputBinding.stride = Stride;
-    VertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    llvm::SmallVector<VkVertexInputAttributeDescription> Attributes;
-    for (size_t I = 0; I < P.Bindings.VertexAttributes.size(); ++I) {
-      const VertexAttribute &VA = P.Bindings.VertexAttributes[I];
-      VkVertexInputAttributeDescription VkVA = {};
-      VkVA.location = I;
-      VkVA.binding = 0;
-      VkVA.format = getVKFormat(VA.Format, VA.Channels);
-      VkVA.offset = VA.Offset;
-      Attributes.push_back(VkVA);
-    }
-
-    VkPipelineVertexInputStateCreateInfo VertexInputStateCi = {};
-    VertexInputStateCi.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VertexInputStateCi.vertexBindingDescriptionCount = 1;
-    VertexInputStateCi.pVertexBindingDescriptions = &VertexInputBinding;
-    VertexInputStateCi.vertexAttributeDescriptionCount = Attributes.size();
-    VertexInputStateCi.pVertexAttributeDescriptions = Attributes.data();
-
-    VkGraphicsPipelineCreateInfo PipelineCreateInfo = {};
-    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    PipelineCreateInfo.stageCount = Stages.size();
-    PipelineCreateInfo.pStages = Stages.data();
-    PipelineCreateInfo.pVertexInputState = &VertexInputStateCi;
-    PipelineCreateInfo.pInputAssemblyState = &InputAssemblyCI;
-    PipelineCreateInfo.pRasterizationState = &RastStateCI;
-    PipelineCreateInfo.pColorBlendState = &BlendStateCI;
-    PipelineCreateInfo.pMultisampleState = &MultisampleStateCI;
-    PipelineCreateInfo.pViewportState = &ViewStateCI;
-    PipelineCreateInfo.pDepthStencilState = &DepthStencilStateCI;
-    PipelineCreateInfo.pDynamicState = &DynamicStateCI;
-    PipelineCreateInfo.renderPass = IS.RenderPass;
-    PipelineCreateInfo.layout = IS.PipelineLayout;
-
-    if (auto Err = VK::toError(vkCreateGraphicsPipelines(
-                                   Device, IS.PipelineCache, 1,
-                                   &PipelineCreateInfo, nullptr, &IS.Pipeline),
-                               "Failed to create graphics pipeline."))
-      return Err;
-
     return llvm::Error::success();
   }
 
@@ -2372,16 +2517,18 @@ public:
     const VkPipelineBindPoint BindPoint = P.isGraphics()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
-    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, IS.Pipeline);
+    const VulkanPipelineState *VulkanPipeline =
+        static_cast<VulkanPipelineState *>(IS.Pipeline.get());
+    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, VulkanPipeline->Pipeline);
     if (IS.DescriptorSets.size() > 0)
-      vkCmdBindDescriptorSets(IS.CB->CmdBuffer, BindPoint, IS.PipelineLayout, 0,
-                              IS.DescriptorSets.size(),
-                              IS.DescriptorSets.data(), 0, 0);
+      vkCmdBindDescriptorSets(
+          IS.CB->CmdBuffer, BindPoint, VulkanPipeline->Layout, 0,
+          IS.DescriptorSets.size(), IS.DescriptorSets.data(), 0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
-      vkCmdPushConstants(IS.CB->CmdBuffer, IS.PipelineLayout,
+      vkCmdPushConstants(IS.CB->CmdBuffer, VulkanPipeline->Layout,
                          getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }
@@ -2517,31 +2664,16 @@ public:
       }
     }
 
-    if (IS.getFullShaderStageMask() != VK_SHADER_STAGE_COMPUTE_BIT) {
-      if (IS.VertexBuffer.has_value()) {
-        vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
-        vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
-        vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
-        vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
-      }
-      vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
-      vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
+    if (IS.VertexBuffer.has_value()) {
+      vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
+      vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
+      vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
+      vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
     }
-
-    if (IS.Pipeline)
-      vkDestroyPipeline(Device, IS.Pipeline, nullptr);
-
-    for (auto &S : IS.Shaders)
-      vkDestroyShaderModule(Device, S.Shader, nullptr);
-
-    if (IS.PipelineCache)
-      vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
-
-    if (IS.PipelineLayout)
-      vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
-
-    for (auto &L : IS.DescriptorSetLayouts)
-      vkDestroyDescriptorSetLayout(Device, L, nullptr);
+    if (IS.FrameBuffer)
+      vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
+    if (IS.RenderPass)
+      vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
 
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
@@ -2561,10 +2693,6 @@ public:
     State.CB = std::move(*CBOrErr);
     llvm::outs() << "Command buffer created.\n";
 
-    if (auto Err = createShaderModules(P, State))
-      return Err;
-    llvm::outs() << "Shader module created.\n";
-    llvm::outs() << "Copy command buffer created.\n";
     if (auto Err = createResources(P, State))
       return Err;
     if (P.isGraphics()) {
@@ -2575,6 +2703,101 @@ public:
         return Err;
       llvm::outs() << "Frame buffer created.\n";
     }
+
+    BindingsDesc BindingsDesc = {};
+    for (auto &S : P.Sets) {
+      DescriptorSetLayoutDesc Layout;
+      for (auto &R : S.Resources) {
+        ResourceBindingDesc ResourceBinding = {};
+        ResourceBinding.Kind = R.Kind;
+        ResourceBinding.VKBinding = R.VKBinding;
+        ResourceBinding.DescriptorCount = R.getArraySize();
+        Layout.ResourceBindings.push_back(ResourceBinding);
+
+        if (R.HasCounter && !R.VKBinding->CounterBinding)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "No CounterBinding provided for resource '%s' with a counter",
+              R.Name.c_str());
+      }
+      BindingsDesc.DescriptorSetDescs.push_back(Layout);
+    }
+    for (const auto &PCB : P.PushConstants) {
+      PushConstantsRange Range = {};
+      Range.OffsetInBytes = 0;
+      Range.SizeInBytes = PCB.size();
+      BindingsDesc.PushConstantRanges.push_back(Range);
+    }
+
+    if (P.isCompute()) {
+      // This is an arbitrary distinction that we could alter in the future.
+      if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Compute pipeline must have exactly one compute shader.");
+
+      ShaderContainer CS = {};
+      CS.EntryPoint = P.Shaders[0].Entry;
+      CS.Shader = P.Shaders[0].Shader.get();
+      CS.SpecializationConstants = P.Shaders[0].SpecializationConstants;
+      if (CS.Shader == nullptr) {
+        llvm::outs() << "CS is null :(\n";
+        llvm::outs() << "Shader count: " << P.Shaders.size() << "\n";
+      }
+      assert(CS.Shader != nullptr);
+
+      auto PipelineStateOrErr =
+          createPipelineCs("Compute Pipeline State", BindingsDesc, CS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      State.Pipeline = *PipelineStateOrErr;
+      llvm::outs() << "Compute Pipeline created.\n";
+    } else {
+      ShaderContainer VS = {};
+      ShaderContainer PS = {};
+      for (auto &Shader : P.Shaders) {
+        if (Shader.Stage == Stages::Vertex) {
+          VS.EntryPoint = Shader.Entry;
+          VS.Shader = Shader.Shader.get();
+          VS.SpecializationConstants = Shader.SpecializationConstants;
+        } else if (Shader.Stage == Stages::Pixel) {
+          PS.EntryPoint = Shader.Entry;
+          PS.Shader = Shader.Shader.get();
+          PS.SpecializationConstants = Shader.SpecializationConstants;
+        }
+      }
+
+      // Create the input layout based on the vertex attributes.
+      llvm::SmallVector<InputLayoutDesc> InputLayout;
+      for (auto &Attr : P.Bindings.VertexAttributes) {
+        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        InputLayoutDesc Desc = {};
+        Desc.Name = Attr.Name;
+        Desc.Format = *FormatOrErr;
+        Desc.OffsetInBytes = Attr.Offset;
+        InputLayout.push_back(Desc);
+      }
+
+      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                  P.Bindings.RTargetBufferPtr->Channels);
+      if (!FormatOrErr)
+        return FormatOrErr.takeError();
+
+      llvm::SmallVector<Format> RTFormats;
+      RTFormats.push_back(*FormatOrErr);
+
+      auto PipelineStateOrErr = createPipelineVsPs(
+          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
+          Format::D32FloatS8Uint, VS, PS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      State.Pipeline = *PipelineStateOrErr;
+      llvm::outs() << "Graphics Pipeline created.\n";
+    }
+
     llvm::outs() << "Memory buffers created.\n";
     // No explicit wait: the next submit's GPU-side timeline semaphore
     // dependency ensures the copy completes before the dispatch runs.
@@ -2594,9 +2817,6 @@ public:
     if (auto Err = createDescriptorSets(P, State))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createPipeline(P, State))
-      return Err;
-    llvm::outs() << "Compute pipeline created.\n";
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
