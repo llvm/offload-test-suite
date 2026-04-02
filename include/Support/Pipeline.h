@@ -13,6 +13,7 @@
 #ifndef OFFLOADTEST_SUPPORT_PIPELINE_H
 #define OFFLOADTEST_SUPPORT_PIPELINE_H
 
+#include "API/Enums.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -46,20 +47,6 @@ enum class DataFormat {
   Float64,
   Depth32,
   Bool,
-};
-
-enum class ResourceKind {
-  Buffer,
-  StructuredBuffer,
-  ByteAddressBuffer,
-  Texture2D,
-  RWBuffer,
-  RWStructuredBuffer,
-  RWByteAddressBuffer,
-  RWTexture2D,
-  ConstantBuffer,
-  Sampler,
-  SampledTexture2D,
 };
 
 enum class FilterMode { Nearest, Linear };
