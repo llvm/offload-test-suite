@@ -100,6 +100,7 @@ on:
         required: false
         default: ''
         type: string
+
 jobs:
   build:
     permissions:
