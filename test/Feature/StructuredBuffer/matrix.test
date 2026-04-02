@@ -1,0 +1,116 @@
+#--- source.hlsl
+
+// This test verifies reading/writing matrix types element-by-element.
+
+StructuredBuffer<float3x2> InA : register(t0);
+RWStructuredBuffer<float3x2> OutA : register(u2);
+
+StructuredBuffer<float3x4> InB : register(t1);
+RWStructuredBuffer<float3x4> OutB : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 a = InA[0];
+  float3x2 a_out;
+  for (int r = 0; r < 3; r++)
+    for (int c = 0; c < 2; c++)
+      a_out[r][c] = a[r][c];
+  OutA[0] = a_out;
+
+  float3x4 b = InB[0];
+  float3x4 b_out;
+  for (int r2 = 0; r2 < 3; r2++)
+    for (int c2 = 0; c2 < 4; c2++)
+      b_out[r2][c2] = b[r2][c2];
+  OutB[0] = b_out;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: InA
+    Format: Float32
+    Stride: 24
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 ]
+
+  - Name: OutA
+    Format: Float32
+    Stride: 24
+    FillSize: 24
+
+  - Name: ExpectedOutA
+    Format: Float32
+    Stride: 24
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 ]
+
+  - Name: InB
+    Format: Float32
+    Stride: 48
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+
+  - Name: OutB
+    Format: Float32
+    Stride: 48
+    FillSize: 48
+
+  - Name: ExpectedOutB
+    Format: Float32
+    Stride: 48
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+
+Results:
+  - Result: ExpectedResultA
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: OutA
+    Expected: ExpectedOutA
+
+  - Result: ExpectedResultB
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: OutB
+    Expected: ExpectedOutB
+
+DescriptorSets:
+  - Resources:
+    - Name: InA
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutA
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: InB
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutB
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1021
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

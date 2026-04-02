@@ -1,0 +1,77 @@
+#--- source.hlsl
+
+RWStructuredBuffer<float> Out1 : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  Out1[0] = 20.25;
+  Out1[1] = 5.0;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out1
+    Format: Float32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected1
+    Format: Float32
+    Stride: 4
+    Data: [ 1.5, 2.5 ]
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out1
+    Expected: Expected1
+DescriptorSets:
+  - Resources:
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+
+# CHECK: Test failed: Test1
+# CHECK: Comparison Rule: BufferFloatULP
+# CHECK: ULP: 1
+# CHECK: Expected:
+# CHECK: ---
+# CHECK: Name:            Expected1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 1.5, 2.5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK: Got:
+# CHECK: ---
+# CHECK: Name:            Out1
+# CHECK: Format:          Float32
+# CHECK: Stride:          4
+# CHECK: Data:            [ 20.25, 5 ]
+# CHECK: OutputProps:
+# CHECK: Height:          0
+# CHECK: Width:           0
+# CHECK: Depth:           0
+# CHECK:  ...
+# CHECK-NEXT: Full Hex representation of Expected Buffer Values:
+# CHECK-NEXT: [ 0x3fc00000, 0x40200000 ]
+# CHECK-NEXT: Full Hex representation of Actual Buffer Values:
+# CHECK-NEXT: [ 0x41a20000, 0x40a00000 ]

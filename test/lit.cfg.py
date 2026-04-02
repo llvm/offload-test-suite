@@ -77,6 +77,28 @@ def setWaveSizeFeaturesDirectX(config, device):
         MinSizeInt *= 2
 
 
+def hostSupportsAVX512():
+    # Check if the host CPU supports AVX-512 instructions.
+    system = platform.system()
+    if system == "Windows":
+        import ctypes
+
+        # PF_AVX512F_INSTRUCTIONS_AVAILABLE = 41
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(41))
+    elif system == "Linux":
+        # Applicable if run on WSL
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if line.startswith("flags"):
+                        return "avx512f" in line.split()
+        except (IOError, OSError):
+            return False
+        return False
+    # Extend to relevant platforms when applicable
+    return False
+
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
@@ -109,6 +131,9 @@ def setDeviceFeatures(config, device, compiler):
     if appleSilicon:
         gen = appleSilicon.group(1)
         config.available_features.add(f"AppleM{gen}")
+
+    if hostSupportsAVX512():
+        config.available_features.add("AVX512")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
     if (6, 6) <= HighestShaderModel:

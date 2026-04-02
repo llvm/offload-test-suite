@@ -130,7 +130,7 @@ static inline uint32_t getFormatSize(DataFormat Format) {
   llvm_unreachable("All cases covered.");
 }
 
-struct Buffer {
+struct CPUBuffer {
   std::string Name;
   DataFormat Format;
   int Channels;
@@ -161,8 +161,8 @@ struct Result {
   Rule ComparisonRule;
   std::string Actual;
   std::string Expected;
-  Buffer *ActualPtr = nullptr;
-  Buffer *ExpectedPtr = nullptr;
+  CPUBuffer *ActualPtr = nullptr;
+  CPUBuffer *ExpectedPtr = nullptr;
   DenormMode DM = DenormMode::Any;
   unsigned ULPT; // ULP Tolerance
   double Epsilon;
@@ -173,7 +173,7 @@ struct Resource {
   std::string Name;
   DirectXBinding DXBinding;
   std::optional<VulkanBinding> VKBinding;
-  Buffer *BufferPtr = nullptr;
+  CPUBuffer *BufferPtr = nullptr;
   Sampler *SamplerPtr = nullptr;
   bool HasCounter;
   std::optional<uint32_t> TilesMapped;
@@ -306,7 +306,7 @@ enum class RootParamKind {
 struct RootResource : public Resource {};
 
 struct RootConstant {
-  Buffer *BufferPtr;
+  CPUBuffer *BufferPtr;
   std::string Name;
 };
 
@@ -335,11 +335,11 @@ struct VertexAttribute {
 
 struct IOBindings {
   std::string VertexBuffer;
-  Buffer *VertexBufferPtr;
+  CPUBuffer *VertexBufferPtr;
   llvm::SmallVector<VertexAttribute> VertexAttributes;
 
   std::string RenderTarget;
-  Buffer *RTargetBufferPtr;
+  CPUBuffer *RTargetBufferPtr;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
@@ -402,7 +402,7 @@ struct Pipeline {
 
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
-  llvm::SmallVector<Buffer> Buffers;
+  llvm::SmallVector<CPUBuffer> Buffers;
   llvm::SmallVector<Sampler> Samplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -422,7 +422,7 @@ struct Pipeline {
     return DescriptorCount;
   }
 
-  Buffer *getBuffer(llvm::StringRef Name) {
+  CPUBuffer *getBuffer(llvm::StringRef Name) {
     for (auto &B : Buffers)
       if (Name == B.Name)
         return &B;
@@ -446,7 +446,7 @@ struct Pipeline {
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
-LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::CPUBuffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Sampler)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
@@ -467,8 +467,8 @@ template <> struct MappingTraits<offloadtest::DescriptorSet> {
   static void mapping(IO &I, offloadtest::DescriptorSet &D);
 };
 
-template <> struct MappingTraits<offloadtest::Buffer> {
-  static void mapping(IO &I, offloadtest::Buffer &R);
+template <> struct MappingTraits<offloadtest::CPUBuffer> {
+  static void mapping(IO &I, offloadtest::CPUBuffer &R);
 };
 
 template <> struct MappingTraits<offloadtest::Sampler> {

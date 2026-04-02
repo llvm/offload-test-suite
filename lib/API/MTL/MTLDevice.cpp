@@ -83,6 +83,23 @@ public:
   }
 };
 
+class MTLBuffer : public offloadtest::Buffer {
+public:
+  MTL::Buffer *Buf;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
+            size_t SizeInBytes)
+      : Buf(Buf), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  ~MTLBuffer() override {
+    if (Buf)
+      Buf->release();
+  }
+};
+
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -135,7 +152,7 @@ class MTLDevice : public offloadtest::Device {
       llvm::StringMap<uint32_t> ShaderAttrIndices;
       for (uint32_t Ai = 0; Ai < FnAttrs->count(); ++Ai) {
         auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(Ai));
-        if (A && A->active()) {
+        if (A && A->isActive()) {
           ShaderAttrIndices.insert(std::make_pair(
               llvm::StringRef(A->name()->utf8String()), A->attributeIndex()));
           llvm::errs() << "Shader attr: " << A->name()->utf8String()
@@ -424,7 +441,7 @@ class MTLDevice : public offloadtest::Device {
         MTL::RenderPassDescriptor::alloc()->init();
 
     // Setup the render target texture.
-    Buffer *RTarget = P.Bindings.RTargetBufferPtr;
+    CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
 
     const MTL::PixelFormat Format =
         getMTLFormat(RTarget->Format, RTarget->Channels);
@@ -510,7 +527,7 @@ class MTLDevice : public offloadtest::Device {
       }
     }
     if (P.isGraphics()) {
-      Buffer *RTarget = P.Bindings.RTargetBufferPtr;
+      CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
       const uint64_t Width = RTarget->OutputProps.Width;
       const uint64_t Height = RTarget->OutputProps.Height;
       const size_t ElemSize = RTarget->getElementSize();
@@ -523,7 +540,7 @@ class MTLDevice : public offloadtest::Device {
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
         const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        const unsigned char *Dst = Buf + R * RowBytes;
+        unsigned char *Dst = Buf + R * RowBytes;
         IS.FrameBufferTexture->getBytes(
             Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
       }
@@ -546,6 +563,27 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(std::string Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    MTL::ResourceOptions StorageMode;
+    switch (Desc.Location) {
+    case MemoryLocation::GpuOnly:
+      StorageMode = MTL::ResourceStorageModePrivate;
+      break;
+    case MemoryLocation::CpuToGpu:
+    case MemoryLocation::GpuToCpu:
+      StorageMode = MTL::ResourceStorageModeManaged;
+      break;
+    }
+
+    MTL::Buffer *Buf = Device->newBuffer(SizeInBytes, StorageMode);
+    if (!Buf)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal buffer.");
+    return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+  }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
