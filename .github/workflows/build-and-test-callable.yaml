@@ -61,7 +61,7 @@ on:
       run_dxdiag:
         description: "Run dxdiag"
         required: false
-        default: false
+        default: true
         type: boolean  
   workflow_call:
     inputs:
@@ -108,7 +108,7 @@ on:
       run_dxdiag:                   
         description: "Run dxdiag"
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
@@ -125,12 +125,23 @@ jobs:
           $output = Join-Path $env:RUNNER_TEMP $fileName
           dxdiag /t $output
           Write-Host "DxDiag report saved to $output"
+      - name: Check if dxdiag report exists
+        id: check_dxdiag
+        if: inputs.OS == 'windows' && inputs.run_dxdiag
+        shell: powershell
+        run: |
+          $filePath = Join-Path $env:RUNNER_TEMP "dxdiag-${{ inputs.SKU }}.txt"
+          if (Test-Path $filePath) {
+            echo "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            echo "exists=false" >> $env:GITHUB_OUTPUT
+          }
       - name: Upload dxdiag artifact
-        if: inputs.OS == 'windows' && inputs.run_dxdiag 
+        if: inputs.OS == 'windows' && inputs.run_dxdiag && steps.check_dxdiag.outputs.exists == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: dxdiag-${{ inputs.SKU }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/dxdiag-${{ inputs.SKU }}.txt 
+          name: dxdiag-${{ inputs.SKU }}
+          path: ${{ runner.temp }}/dxdiag-${{ inputs.SKU }}.txt
       - name: Checkout DXC
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
