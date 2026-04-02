@@ -129,7 +129,7 @@ jobs:
         if: inputs.OS == 'windows' && inputs.run_dxdiag 
         uses: actions/upload-artifact@v4
         with:
-          name: dxdiag-${{ inputs.SKU }}-${{ inputs.BuildType }} 
+          name: dxdiag-${{ inputs.SKU }}-${{ github.run_id }}
           path: ${{ runner.temp }}/dxdiag-${{ inputs.SKU }}.txt 
       - name: Checkout DXC
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
