@@ -10,6 +10,7 @@
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
+#include "MTLResources.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/SmallString.h"
@@ -100,6 +101,21 @@ public:
   }
 };
 
+class MTLTexture : public offloadtest::Texture {
+public:
+  MTL::Texture *Tex;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc)
+      : Tex(Tex), Name(Name), Desc(Desc) {}
+
+  ~MTLTexture() override {
+    if (Tex)
+      Tex->release();
+  }
+};
+
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -128,7 +144,9 @@ class MTLDevice : public offloadtest::Device {
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
-    MTL::Texture *FrameBufferTexture = nullptr;
+    std::shared_ptr<MTLTexture> FrameBufferTexture;
+    std::shared_ptr<MTLBuffer> FrameBufferReadback;
+    std::shared_ptr<MTLTexture> DepthStencil;
     MTL::CommandBuffer *CmdBuffer = nullptr;
   };
 
@@ -266,6 +284,12 @@ class MTLDevice : public offloadtest::Device {
             MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
         RPCA->setPixelFormat(PF);
         Desc->colorAttachments()->setObject(RPCA, 0);
+
+        // Set the depth/stencil format on the pipeline descriptor.
+        const MTL::PixelFormat DepthFmt =
+            getMetalPixelFormat(Format::D32FloatS8Uint);
+        Desc->setDepthAttachmentPixelFormat(DepthFmt);
+        Desc->setStencilAttachmentPixelFormat(DepthFmt);
       }
 
       IS.RenderPipeline = Device->newRenderPipelineState(Desc, &Error);
@@ -346,7 +370,7 @@ class MTLDevice : public offloadtest::Device {
     if (TableSize > 0) {
       IS.ArgBuffer =
           Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      uint32_t HeapIndex = 0;
+      const uint32_t HeapIndex = 0;
       for (auto &D : P.Sets) {
         for (auto &R : D.Resources) {
           if (auto Err = createDescriptor(R, IS, HeapIndex++))
@@ -434,41 +458,107 @@ class MTLDevice : public offloadtest::Device {
     return llvm::Error::success();
   }
 
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.FrameBufferTexture = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+
+    // Create a readback buffer for copying render target data to the CPU.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.FrameBufferReadback = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DepthStencil = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+    return llvm::Error::success();
+  }
+
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
     IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
+
+    if (auto Err = createRenderTarget(P, IS))
+      return Err;
+    // TODO: Always created for graphics pipelines. Consider making this
+    // conditional on the pipeline definition.
+    if (auto Err = createDepthStencil(P, IS))
+      return Err;
 
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
-    // Setup the render target texture.
-    CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
+    const uint64_t Width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
+    const uint64_t Height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
 
-    const MTL::PixelFormat Format =
-        getMTLFormat(RTarget->Format, RTarget->Channels);
-
-    const uint64_t Width = RTarget->OutputProps.Width;
-    const uint64_t Height = RTarget->OutputProps.Height;
-    MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
-        Format, Width, Height, false);
-    // Create a shared texture used for both rendering and CPU readback.
-    MTL::TextureDescriptor *SharedDesc = TDesc->copy();
-    SharedDesc->setUsage(MTL::TextureUsageRenderTarget |
-                         MTL::TextureUsageShaderRead |
-                         MTL::TextureUsageShaderWrite);
-    SharedDesc->setStorageMode(MTL::StorageModeShared);
-    IS.FrameBufferTexture = Device->newTexture(SharedDesc);
-
+    // Color attachment.
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
-    CADesc->setTexture(IS.FrameBufferTexture);
+    CADesc->setTexture(IS.FrameBufferTexture->Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
-    CADesc->setClearColor(MTL::ClearColor());
+    const auto *ColorCV = std::get_if<ClearColor>(
+        &*IS.FrameBufferTexture->Desc.OptimizedClearValue);
+    if (!ColorCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Render target clear value must be a ClearColor.");
+
+    CADesc->setClearColor(
+        MTL::ClearColor(ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A));
     CADesc->setStoreAction(MTL::StoreActionStore);
     Desc->colorAttachments()->setObject(CADesc, 0);
+
+    // Depth/stencil attachment.
+    const auto *DepthCV = std::get_if<ClearDepthStencil>(
+        &*IS.DepthStencil->Desc.OptimizedClearValue);
+    if (!DepthCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth/stencil clear value must be a ClearDepthStencil.");
+
+    auto *DADesc = Desc->depthAttachment();
+    DADesc->setTexture(IS.DepthStencil->Tex);
+    DADesc->setLoadAction(MTL::LoadActionClear);
+    DADesc->setClearDepth(DepthCV->Depth);
+    DADesc->setStoreAction(MTL::StoreActionDontCare);
+
+    auto *SADesc = Desc->stencilAttachment();
+    SADesc->setTexture(IS.DepthStencil->Tex);
+    SADesc->setLoadAction(MTL::LoadActionClear);
+    SADesc->setClearStencil(DepthCV->Stencil);
+    SADesc->setStoreAction(MTL::StoreActionDontCare);
 
     MTL::RenderCommandEncoder *CmdEncoder =
         IS.CmdBuffer->renderCommandEncoder(Desc);
 
     CmdEncoder->setRenderPipelineState(IS.RenderPipeline);
+
+    // Configure depth stencil state: depth test enabled, write all, less.
+    MTL::DepthStencilDescriptor *DSDesc =
+        MTL::DepthStencilDescriptor::alloc()->init();
+    DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
+    DSDesc->setDepthWriteEnabled(true);
+    MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
+    CmdEncoder->setDepthStencilState(DSState);
+    DSDesc->release();
+    DSState->release();
+
     // Explicitly set viewport to texture dimensions.
     CmdEncoder->setViewport(
         MTL::Viewport{0.0, 0.0, (double)Width, (double)Height, 0.0, 1.0});
@@ -482,6 +572,15 @@ class MTLDevice : public offloadtest::Device {
                                P.Bindings.getVertexCount());
 
     CmdEncoder->endEncoding();
+
+    // Blit the render target into the readback buffer for CPU access.
+    MTL::BlitCommandEncoder *Blit = IS.CmdBuffer->blitCommandEncoder();
+    const size_t ElemSize = RTarget->getElementSize();
+    const size_t RowBytes = Width * ElemSize;
+    Blit->copyFromTexture(IS.FrameBufferTexture->Tex, 0, 0,
+                          MTL::Origin(0, 0, 0), MTL::Size(Width, Height, 1),
+                          IS.FrameBufferReadback->Buf, 0, RowBytes, 0);
+    Blit->endEncoding();
 
     return llvm::Error::success();
   }
@@ -499,8 +598,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    uint32_t TextureIndex = 0;
-    uint32_t BufferIndex = 0;
+    const uint32_t TextureIndex = 0;
+    const uint32_t BufferIndex = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         assert(R.BufferPtr->ArraySize == 1 &&
@@ -533,16 +632,15 @@ class MTLDevice : public offloadtest::Device {
       const size_t ElemSize = RTarget->getElementSize();
       const size_t RowBytes = Width * ElemSize;
 
-      // Read the framebuffer one row at a time into the output buffer.
-      // Read rows from the texture bottom-to-top into the buffer top-to-bottom
-      // so the final image is upright.
+      // Read from the readback buffer. The blit copied the texture data in
+      // GPU layout order, so we flip rows here to produce an upright image.
+      const unsigned char *Src = reinterpret_cast<const unsigned char *>(
+          IS.FrameBufferReadback->Buf->contents());
       unsigned char *Buf =
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
-        const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        unsigned char *Dst = Buf + R * RowBytes;
-        IS.FrameBufferTexture->getBytes(
-            Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
+        const uint64_t SrcRow = (Height - 1) - R;
+        memcpy(Buf + R * RowBytes, Src + SrcRow * RowBytes, RowBytes);
       }
     }
     return llvm::Error::success();
@@ -567,22 +665,31 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
-    MTL::ResourceOptions StorageMode;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      StorageMode = MTL::ResourceStorageModePrivate;
-      break;
-    case MemoryLocation::CpuToGpu:
-    case MemoryLocation::GpuToCpu:
-      StorageMode = MTL::ResourceStorageModeManaged;
-      break;
-    }
-
-    MTL::Buffer *Buf = Device->newBuffer(SizeInBytes, StorageMode);
+    MTL::Buffer *Buf = Device->newBuffer(
+        SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");
     return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
+        getMetalPixelFormat(Desc.Format), Desc.Width, Desc.Height,
+        Desc.MipLevels > 1);
+    TDesc->setMipmapLevelCount(Desc.MipLevels);
+    TDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));
+    TDesc->setUsage(getMetalTextureUsage(Desc.Usage));
+
+    MTL::Texture *Tex = Device->newTexture(TDesc);
+    if (!Tex)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal texture.");
+    return std::make_shared<MTLTexture>(Tex, Name, Desc);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {

@@ -15,7 +15,10 @@
 #include "Config.h"
 
 #include "API/API.h"
+#include "API/Buffer.h"
 #include "API/Capabilities.h"
+#include "API/Texture.h"
+#include "Support/Pipeline.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 
@@ -33,27 +36,6 @@ struct Pipeline;
 struct DeviceConfig {
   bool EnableDebugLayer = false;
   bool EnableValidationLayer = false;
-};
-
-enum class MemoryLocation {
-  GpuOnly,
-  CpuToGpu,
-  GpuToCpu,
-};
-
-struct BufferCreateDesc {
-  MemoryLocation Location;
-};
-
-class Buffer {
-public:
-  virtual ~Buffer() = default;
-
-  Buffer(const Buffer &) = delete;
-  Buffer &operator=(const Buffer &) = delete;
-
-protected:
-  Buffer() = default;
 };
 
 class Queue {
@@ -80,6 +62,10 @@ public:
   virtual llvm::Expected<std::shared_ptr<Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
+
+  virtual llvm::Expected<std::shared_ptr<Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) = 0;
+
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual ~Device() = 0;
@@ -112,6 +98,16 @@ public:
   static llvm::Error initializeMtlDevices(const DeviceConfig Config);
 #endif
 };
+
+// Creates a render target texture using the format and dimensions from a
+// CPUBuffer. Does not upload the buffer's data — only uses its description to
+// configure the texture.
+llvm::Expected<std::shared_ptr<Texture>>
+createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
+
+// Creates a depth/stencil texture matching the dimensions of a render target.
+llvm::Expected<std::shared_ptr<Texture>>
+createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
 } // namespace offloadtest
 

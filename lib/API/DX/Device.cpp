@@ -37,6 +37,8 @@
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
 
+#include "DXResources.h"
+
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
@@ -289,6 +291,27 @@ public:
       : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
 };
 
+class DXTexture : public offloadtest::Texture {
+public:
+  ComPtr<ID3D12Resource> Resource;
+  // TODO:
+  // RTV/DSV views own a dedicated single-descriptor heap and are created at
+  // texture creation time. Ideally SRV/UAV views would also live here, but
+  // they currently require a shared CBV_SRV_UAV heap whose indices are
+  // determined at pipeline bind time. Moving them here would require a
+  // descriptor heap allocator, which is not yet implemented.
+  //
+  // Either an RTV or DSV descriptor, depending on Desc.Usage.
+  ComPtr<ID3D12DescriptorHeap> ViewHeap;
+  D3D12_CPU_DESCRIPTOR_HANDLE ViewHandle = {};
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  DXTexture(ComPtr<ID3D12Resource> Resource, llvm::StringRef Name,
+            TextureCreateDesc Desc)
+      : Resource(Resource), Name(Name), Desc(Desc) {}
+};
+
 class DXQueue : public offloadtest::Queue {
 public:
   ComPtr<ID3D12CommandQueue> Queue;
@@ -350,9 +373,9 @@ private:
 #endif
 
     // Resources for graphics pipelines.
-    ComPtr<ID3D12Resource> RT;
-    ComPtr<ID3D12Resource> RTReadback;
-    ComPtr<ID3D12DescriptorHeap> RTVHeap;
+    std::shared_ptr<DXTexture> RT;
+    std::shared_ptr<DXBuffer> RTReadback;
+    std::shared_ptr<DXTexture> DS;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -377,36 +400,114 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+    const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
 
-    D3D12_HEAP_TYPE HeapType = D3D12_HEAP_TYPE_DEFAULT;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      HeapType = D3D12_HEAP_TYPE_DEFAULT;
-      break;
-    case MemoryLocation::CpuToGpu:
-      HeapType = D3D12_HEAP_TYPE_UPLOAD;
-      break;
-    case MemoryLocation::GpuToCpu:
-      HeapType = D3D12_HEAP_TYPE_READBACK;
-      break;
-    }
-
+    // Readback heaps do not support UAV access.
     const D3D12_RESOURCE_FLAGS Flags =
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        HeapType == D3D12_HEAP_TYPE_READBACK
+            ? D3D12_RESOURCE_FLAG_NONE
+            : D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
 
+    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+    if (HeapType == D3D12_HEAP_TYPE_UPLOAD)
+      InitialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+    else if (HeapType == D3D12_HEAP_TYPE_READBACK)
+      InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
+
     ComPtr<ID3D12Resource> DeviceBuffer;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
                                    &HeapProps, D3D12_HEAP_FLAG_NONE,
-                                   &BufferDesc, D3D12_RESOURCE_STATE_COMMON,
-                                   nullptr, IID_PPV_ARGS(&DeviceBuffer)),
+                                   &BufferDesc, InitialState, nullptr,
+                                   IID_PPV_ARGS(&DeviceBuffer)),
                                "Failed to create buffer."))
       return Err;
 
     return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    const D3D12_HEAP_PROPERTIES HeapProps =
+        CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
+
+    D3D12_RESOURCE_DESC TexDesc = {};
+    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    TexDesc.Width = Desc.Width;
+    TexDesc.Height = Desc.Height;
+    TexDesc.DepthOrArraySize = 1;
+    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
+    TexDesc.Format = getDXGIFormat(Desc.Format);
+    TexDesc.SampleDesc.Count = 1;
+    TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    TexDesc.Flags = getDXResourceFlags(Desc.Usage);
+
+    const D3D12_CLEAR_VALUE *ClearValuePtr = nullptr;
+    D3D12_CLEAR_VALUE ClearValue = {};
+    if (Desc.OptimizedClearValue) {
+      ClearValue.Format = TexDesc.Format;
+      std::visit(
+          [&ClearValue](auto &&V) {
+            using T = std::decay_t<decltype(V)>;
+            if constexpr (std::is_same_v<T, ClearColor>) {
+              ClearValue.Color[0] = V.R;
+              ClearValue.Color[1] = V.G;
+              ClearValue.Color[2] = V.B;
+              ClearValue.Color[3] = V.A;
+            } else {
+              ClearValue.DepthStencil.Depth = V.Depth;
+              ClearValue.DepthStencil.Stencil = V.Stencil;
+            }
+          },
+          *Desc.OptimizedClearValue);
+      ClearValuePtr = &ClearValue;
+    }
+
+    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+    if ((Desc.Usage & TextureUsage::RenderTarget) != 0)
+      InitialState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    else if ((Desc.Usage & TextureUsage::DepthStencil) != 0)
+      InitialState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+
+    ComPtr<ID3D12Resource> DeviceTexture;
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &TexDesc,
+                                   InitialState, ClearValuePtr,
+                                   IID_PPV_ARGS(&DeviceTexture)),
+                               "Failed to create texture."))
+      return Err;
+
+    auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+
+    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+      HeapDesc.NumDescriptors = 1;
+      HeapDesc.Type = IsRT ? D3D12_DESCRIPTOR_HEAP_TYPE_RTV
+                           : D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+      HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      if (auto Err = HR::toError(Device->CreateDescriptorHeap(
+                                     &HeapDesc, IID_PPV_ARGS(&Tex->ViewHeap)),
+                                 IsRT ? "Failed to create RTV heap."
+                                      : "Failed to create DSV heap."))
+        return Err;
+      Tex->ViewHandle = Tex->ViewHeap->GetCPUDescriptorHandleForHeapStart();
+      if (IsRT)
+        Device->CreateRenderTargetView(DeviceTexture.Get(), nullptr,
+                                       Tex->ViewHandle);
+      else
+        Device->CreateDepthStencilView(DeviceTexture.Get(), nullptr,
+                                       Tex->ViewHandle);
+    }
+
+    return Tex;
   }
 
   static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
@@ -1357,7 +1458,7 @@ public:
         return Err;
 
     // If there is no render target, return early.
-    if (IS.RTReadback == nullptr)
+    if (!IS.RTReadback)
       return llvm::Error::success();
 
     // Map readback and copy into host buffer, accounting for row pitch and
@@ -1365,13 +1466,13 @@ public:
     // while our image writer expects bottom-left.
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
-    if (auto Err = HR::toError(IS.RTReadback->Map(0, nullptr, &Mapped),
+    if (auto Err = HR::toError(IS.RTReadback->Buffer->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
       return Err;
 
     // Query the copy footprint to get the actual padded row pitch used by the
     // copy operation.
-    const D3D12_RESOURCE_DESC RTDesc = IS.RT->GetDesc();
+    const D3D12_RESOURCE_DESC RTDesc = IS.RT->Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
     uint32_t NumRows = 0;
     uint64_t RowSizeInBytes = 0;
@@ -1396,7 +1497,7 @@ public:
       memcpy(DstRow, SrcRow, RowBytes);
     }
 
-    IS.RTReadback->Unmap(0, nullptr);
+    IS.RTReadback->Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }
 
@@ -1406,51 +1507,31 @@ public:
           std::errc::invalid_argument,
           "No render target bound for graphics pipeline.");
     const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
-    if (OutBuf.OutputProps.MipLevels != 1)
-      return llvm::createStringError(
-          std::errc::not_supported,
-          "Multiple mip levels are not yet supported for DirectX render "
-          "targets.");
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    Desc.Width = OutBuf.OutputProps.Width;
-    Desc.Height = OutBuf.OutputProps.Height;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.Format = getDXFormat(OutBuf.Format, OutBuf.Channels);
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-    D3D12_CLEAR_VALUE ClearValue = {};
-    ClearValue.Format = Desc.Format;
-    ClearValue.Color[0] = 0.0f;
-    ClearValue.Color[1] = 0.0f;
-    ClearValue.Color[2] = 0.0f;
-    ClearValue.Color[3] = 0.0f;
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
 
-    CD3DX12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &Desc,
-                                   D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                   &ClearValue, IID_PPV_ARGS(&IS.RT)),
-                               "Failed to create render target"))
-      return Err;
+    IS.RT = std::static_pointer_cast<DXTexture>(*TexOrErr);
 
     // Create readback buffer sized for the pixel data (raw bytes).
-    const uint64_t RBSize = static_cast<uint64_t>(OutBuf.size());
-    D3D12_RESOURCE_DESC const RbDesc = CD3DX12_RESOURCE_DESC::Buffer(RBSize);
-    CD3DX12_HEAP_PROPERTIES RbHeap =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
-    if (auto Err =
-            HR::toError(Device->CreateCommittedResource(
-                            &RbHeap, D3D12_HEAP_FLAG_NONE, &RbDesc,
-                            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                            IID_PPV_ARGS(&IS.RTReadback)),
-                        "Failed to create render target readback buffer"))
-      return Err;
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.RTReadback = std::static_pointer_cast<DXBuffer>(*BufOrErr);
 
+    return llvm::Error::success();
+  }
+
+  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DS = std::static_pointer_cast<DXTexture>(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -1529,8 +1610,11 @@ public:
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    PSODesc.DepthStencilState.DepthEnable = false;
+    PSODesc.DepthStencilState.DepthEnable = true;
+    PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
+    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Format);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSODesc.NumRenderTargets = 1;
@@ -1547,21 +1631,6 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    // Create descriptor heap for the render target view. We do this later and
-    // separately from other descriptors just as a convenience since we need the
-    // descriptor handle to bind the render target.
-    D3D12_DESCRIPTOR_HEAP_DESC RTVHeapDesc = {};
-    RTVHeapDesc.NumDescriptors = 1;
-    RTVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    RTVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &RTVHeapDesc, IID_PPV_ARGS(&IS.RTVHeap)),
-                               "Failed to create RTV heap"))
-      return Err;
-    const D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle =
-        IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
-    Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
-
     IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1571,7 +1640,18 @@ public:
     }
     IS.CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
+    IS.CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
+                                   &IS.DS->ViewHandle);
+
+    const auto *DepthCV =
+        std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
+    if (!DepthCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth/stencil clear value must be a ClearDepthStencil.");
+    IS.CmdList->ClearDepthStencilView(
+        IS.DS->ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
     VP.Width =
@@ -1592,7 +1672,7 @@ public:
     // Transition the render target to copy source and copy to the readback
     // buffer.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        IS.RT.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+        IS.RT->Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CmdList->ResourceBarrier(1, &Barrier);
 
@@ -1602,8 +1682,9 @@ public:
         CD3DX12_SUBRESOURCE_FOOTPRINT(
             getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
             B.OutputProps.Height, 1, B.OutputProps.Width * B.getElementSize())};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback.Get(), Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback->Buffer.Get(),
+                                               Footprint);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT->Resource.Get(), 0);
 
     IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
@@ -1708,10 +1789,16 @@ public:
       llvm::outs() << "Compute command list created.\n";
 
     } else {
-      // Create render target, readback and vertex buffer and PSO.
+      // Create render target, depth/stencil, readback and vertex buffer and
+      // PSO.
       if (auto Err = createRenderTarget(P, State))
         return Err;
       llvm::outs() << "Render target created.\n";
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
+      if (auto Err = createDepthStencil(P, State))
+        return Err;
+      llvm::outs() << "Depth stencil created.\n";
       if (auto Err = createVertexBuffer(P, State))
         return Err;
       llvm::outs() << "Vertex buffer created.\n";

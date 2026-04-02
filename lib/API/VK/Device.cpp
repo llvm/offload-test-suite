@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/Support/Error.h"
 
@@ -356,6 +357,32 @@ public:
   }
 };
 
+class VulkanTexture : public offloadtest::Texture {
+public:
+  VkDevice Dev;
+  VkImage Image;
+  VkDeviceMemory Memory;
+  // TODO:
+  // RenderTarget and DepthStencil views are created at texture creation time.
+  // Ideally Sampled/Storage image views would also live here, but they are
+  // currently created during descriptor set setup, which determines their
+  // binding layout.
+  VkImageView View = VK_NULL_HANDLE;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
+                llvm::StringRef Name, TextureCreateDesc Desc)
+      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+
+  ~VulkanTexture() override {
+    if (View)
+      vkDestroyImageView(Dev, View, nullptr);
+    vkDestroyImage(Dev, Image, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
 class VulkanQueue : public offloadtest::Queue {
 public:
   VkQueue Queue = VK_NULL_HANDLE;
@@ -453,9 +480,9 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer;
-    ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
-                                          nullptr};
-    ImageRef DepthStencil = {0, 0, 0};
+    std::shared_ptr<VulkanTexture> RenderTarget;
+    std::shared_ptr<VulkanBuffer> RTReadback;
+    std::shared_ptr<VulkanTexture> DepthStencil;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
     VkRenderPass RenderPass;
@@ -615,21 +642,6 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
-    VkMemoryPropertyFlags MemFlags = 0;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      MemFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-      break;
-    case MemoryLocation::CpuToGpu:
-      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-      break;
-    case MemoryLocation::GpuToCpu:
-      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-      break;
-    }
-
     VkBufferCreateInfo BufInfo = {};
     BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     BufInfo.size = SizeInBytes;
@@ -649,8 +661,8 @@ public:
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
-    auto MemIdx =
-        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemFlags);
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
     if (!MemIdx)
       return MemIdx.takeError();
     AllocInfo.memoryTypeIndex = *MemIdx;
@@ -665,6 +677,89 @@ public:
 
     return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
                                           Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    VkImageCreateInfo ImageInfo = {};
+    ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.extent = {Desc.Width, Desc.Height, 1};
+    ImageInfo.mipLevels = Desc.MipLevels;
+    ImageInfo.arrayLayers = 1;
+    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
+    ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkImage Image;
+    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to create image.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx) {
+      vkDestroyImage(Device, Image, nullptr);
+      return MemIdx.takeError();
+    }
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+      vkDestroyImage(Device, Image, nullptr);
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate image memory.");
+    }
+    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+      vkDestroyImage(Device, Image, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind image memory.");
+    }
+
+    auto Tex = std::make_shared<VulkanTexture>(Device, Image, DeviceMemory,
+                                               Name, Desc);
+
+    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      VkImageViewCreateInfo ViewCi = {};
+      ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      ViewCi.format = getVulkanFormat(Desc.Format);
+      ViewCi.subresourceRange.baseMipLevel = 0;
+      ViewCi.subresourceRange.levelCount = 1;
+      ViewCi.subresourceRange.baseArrayLayer = 0;
+      ViewCi.subresourceRange.layerCount = 1;
+      ViewCi.image = Image;
+      if (IsRT) {
+        ViewCi.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                             VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+        ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      } else {
+        ViewCi.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+      }
+      if (vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View)) {
+        // Tex destructor will clean up Image + Memory.
+        return llvm::createStringError(std::errc::device_or_resource_busy,
+                                       "Failed to create image view.");
+      }
+    }
+
+    return Tex;
   }
 
   const Capabilities &getCapabilities() override {
@@ -987,47 +1082,37 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+
+    // Create a host-visible staging buffer for readback.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+
+    return llvm::Error::success();
+  }
+
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    // Create an optimal image used as the depth stencil attachment
-    VkImageCreateInfo ImageCi = {};
-    ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCi.imageType = VK_IMAGE_TYPE_2D;
-    ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
-    // Use example's height and width
-    ImageCi.extent = {
-        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Width),
-        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Height),
-        1};
-    ImageCi.mipLevels = 1;
-    ImageCi.arrayLayers = 1;
-    ImageCi.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageCi.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ImageCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    ImageCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (vkCreateImage(Device, &ImageCi, nullptr, &IS.DepthStencil.Image))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Depth stencil creation failed.");
-
-    // Allocate memory for the image (device local) and bind it to our image
-    VkMemoryAllocateInfo MemAlloc{};
-    MemAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(Device, IS.DepthStencil.Image, &MemReqs);
-    MemAlloc.allocationSize = MemReqs.size;
-    llvm::Expected<uint32_t> MemIdx =
-        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
-                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (!MemIdx)
-      return MemIdx.takeError();
-
-    MemAlloc.memoryTypeIndex = *MemIdx;
-    if (vkAllocateMemory(Device, &MemAlloc, nullptr, &IS.DepthStencil.Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Depth stencil memory allocation failed.");
-    if (vkBindImageMemory(Device, IS.DepthStencil.Image, IS.DepthStencil.Memory,
-                          0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Depth stencil memory binding failed.");
+    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DepthStencil = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -1040,36 +1125,10 @@ public:
     }
 
     if (P.isGraphics()) {
-      if (!P.Bindings.RTargetBufferPtr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No RenderTarget buffer specified for graphics pipeline.");
-      Resource FrameBuffer = {ResourceKind::Texture2D,
-                              "RenderTarget",
-                              {},
-                              {},
-                              P.Bindings.RTargetBufferPtr,
-                              nullptr,
-                              false,
-                              std::nullopt,
-                              false};
-      IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
-      IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
-      IS.FrameBufferResource.ImageLayout =
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      auto ExHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, FrameBuffer.size(),
-          FrameBuffer.BufferPtr->Data[0].get());
-      if (!ExHostBuf)
-        return ExHostBuf.takeError();
-      auto ExImageRef = createImage(FrameBuffer, *ExHostBuf,
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                        VK_IMAGE_USAGE_SAMPLED_BIT |
-                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-      if (!ExImageRef)
-        return ExImageRef.takeError();
-      IS.FrameBufferResource.ResourceRefs.push_back(*ExImageRef);
+      if (auto Err = createRenderTarget(P, IS))
+        return Err;
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
 
@@ -1437,11 +1496,10 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRenderPass(Pipeline &P, InvocationState &IS) {
+  llvm::Error createRenderPass(InvocationState &IS) {
     std::array<VkAttachmentDescription, 2> Attachments = {};
 
-    Attachments[0].format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
+    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Format);
     Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1450,7 +1508,7 @@ public:
     Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    Attachments[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Format);
     Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1520,53 +1578,17 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createFrameBuffer(Pipeline &P, InvocationState &IS) {
-    std::array<VkImageView, 2> Views = {};
-    VkImageViewCreateInfo ViewCreateInfo = {};
-    ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
-    ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
-                                 VK_COMPONENT_SWIZZLE_B,
-                                 VK_COMPONENT_SWIZZLE_A};
-    ViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    ViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    ViewCreateInfo.subresourceRange.layerCount = 1;
-    ViewCreateInfo.subresourceRange.levelCount = 1;
-    ViewCreateInfo.image = IS.FrameBufferResource.ResourceRefs[0].Image.Image;
-    if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &Views[0]))
-      return llvm::createStringError(
-          std::errc::device_or_resource_busy,
-          "Failed to create frame buffer image view.");
-    IS.ImageViews.push_back(Views[0]);
-
-    VkImageViewCreateInfo DepthStencilViewCi = {};
-    DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
-    DepthStencilViewCi.subresourceRange = {};
-    DepthStencilViewCi.subresourceRange.aspectMask =
-        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    DepthStencilViewCi.subresourceRange.baseMipLevel = 0;
-    DepthStencilViewCi.subresourceRange.levelCount = 1;
-    DepthStencilViewCi.subresourceRange.baseArrayLayer = 0;
-    DepthStencilViewCi.subresourceRange.layerCount = 1;
-    DepthStencilViewCi.image = IS.DepthStencil.Image;
-    if (vkCreateImageView(Device, &DepthStencilViewCi, nullptr, &Views[1]))
-      return llvm::createStringError(
-          std::errc::device_or_resource_busy,
-          "Failed to create depth stencil image view.");
-    IS.ImageViews.push_back(Views[1]);
+  llvm::Error createFrameBuffer(InvocationState &IS) {
+    std::array<VkImageView, 2> Views = {IS.RenderTarget->View,
+                                        IS.DepthStencil->View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     FbufCreateInfo.renderPass = IS.RenderPass;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
-    FbufCreateInfo.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
+    FbufCreateInfo.width = IS.RenderTarget->Desc.Width;
+    FbufCreateInfo.height = IS.RenderTarget->Desc.Height;
     FbufCreateInfo.layers = 1;
 
     if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))
@@ -1932,6 +1954,63 @@ public:
     }
   }
 
+  // Record commands to copy a texture into a readback buffer.
+  void copyTextureToReadback(VkCommandBuffer CmdBuffer,
+                             const VulkanTexture &Tex,
+                             const VulkanBuffer &Readback,
+                             VkImageLayout OldLayout,
+                             VkAccessFlags SrcAccessMask,
+                             VkPipelineStageFlags SrcStageMask) {
+    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Format)
+                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                              : VK_IMAGE_ASPECT_COLOR_BIT;
+
+    // Transition texture to transfer source.
+    VkImageSubresourceRange SubRange = {};
+    SubRange.aspectMask = AspectMask;
+    SubRange.baseMipLevel = 0;
+    SubRange.levelCount = 1;
+    SubRange.layerCount = 1;
+
+    VkImageMemoryBarrier ImageBarrier = {};
+    ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ImageBarrier.subresourceRange = SubRange;
+    ImageBarrier.srcAccessMask = SrcAccessMask;
+    ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ImageBarrier.oldLayout = OldLayout;
+    ImageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ImageBarrier.image = Tex.Image;
+    vkCmdPipelineBarrier(CmdBuffer, SrcStageMask,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &ImageBarrier);
+
+    // Copy image to readback buffer.
+    VkBufferImageCopy Region = {};
+    Region.imageSubresource.aspectMask = AspectMask;
+    Region.imageSubresource.mipLevel = 0;
+    Region.imageSubresource.baseArrayLayer = 0;
+    Region.imageSubresource.layerCount = 1;
+    Region.imageExtent.width = Tex.Desc.Width;
+    Region.imageExtent.height = Tex.Desc.Height;
+    Region.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(CmdBuffer, Tex.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           Readback.Buffer, 1, &Region);
+
+    // Barrier to make the readback buffer visible to the host.
+    VkBufferMemoryBarrier BufBarrier = {};
+    BufBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    BufBarrier.size = VK_WHOLE_SIZE;
+    BufBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    BufBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    BufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.buffer = Readback.Buffer;
+    vkCmdPipelineBarrier(CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                         &BufBarrier, 0, nullptr);
+  }
+
   void copyResourceDataToHost(InvocationState &IS, ResourceBundle &R) {
     if (!R.isReadWrite())
       return;
@@ -2055,9 +2134,21 @@ public:
       copyResourceDataToDevice(IS, R);
 
     if (P.isGraphics()) {
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*IS.RenderTarget->Desc.OptimizedClearValue);
+      if (!ColorCV)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Render target clear value must be a ClearColor.");
+      const auto *DepthCV = std::get_if<ClearDepthStencil>(
+          &*IS.DepthStencil->Desc.OptimizedClearValue);
+      if (!DepthCV)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Depth/stencil clear value must be a ClearDepthStencil.");
       VkClearValue ClearValues[2] = {};
-      ClearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-      ClearValues[1].depthStencil = {1.0f, 0};
+      ClearValues[0].color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+      ClearValues[1].depthStencil = {DepthCV->Depth, DepthCV->Stencil};
 
       VkRenderPassBeginInfo RenderPassBeginInfo = {};
       RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -2124,7 +2215,10 @@ public:
       vkCmdDraw(IS.CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
       llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
       vkCmdEndRenderPass(IS.CmdBuffer);
-      copyResourceDataToHost(IS, IS.FrameBufferResource);
+      copyTextureToReadback(IS.CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     }
 
     for (auto &R : IS.Resources)
@@ -2179,17 +2273,15 @@ public:
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      const ResourceRef &ResRef = IS.FrameBufferResource.ResourceRefs[0];
+      Range.memory = IS.RTReadback->Memory;
 
       void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
-
-      Range.memory = ResRef.Host.Memory;
+      vkMapMemory(Device, IS.RTReadback->Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
       const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
-      vkUnmapMemory(Device, ResRef.Host.Memory);
+      vkUnmapMemory(Device, IS.RTReadback->Memory);
     }
     return llvm::Error::success();
   }
@@ -2232,15 +2324,6 @@ public:
         vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
         vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
       }
-      for (auto &ResRef : IS.FrameBufferResource.ResourceRefs) {
-        // We know the device resource is an image, so no need to check it.
-        vkDestroyImage(Device, ResRef.Image.Image, nullptr);
-        vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
-        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
-      }
-      vkDestroyImage(Device, IS.DepthStencil.Image, nullptr);
-      vkFreeMemory(Device, IS.DepthStencil.Memory, nullptr);
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
       vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }
@@ -2279,10 +2362,10 @@ public:
     if (auto Err = createResources(P, State))
       return Err;
     if (P.isGraphics()) {
-      if (auto Err = createRenderPass(P, State))
+      if (auto Err = createRenderPass(State))
         return Err;
       llvm::outs() << "Render pass created.\n";
-      if (auto Err = createFrameBuffer(P, State))
+      if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
     }
