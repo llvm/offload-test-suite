@@ -61,7 +61,7 @@ on:
       run_dxdiag:
         description: "Run dxdiag"
         required: false
-        default: true
+        default: false
         type: boolean  
   workflow_call:
     inputs:
@@ -108,7 +108,7 @@ on:
       run_dxdiag:                   
         description: "Run dxdiag"
         required: false
-        default: true
+        default: false
         type: boolean
 
 jobs:
