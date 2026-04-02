@@ -16,8 +16,10 @@
 
 #include "API/API.h"
 #include "API/Capabilities.h"
+#include "API/CommandBuffer.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/Support/Error.h"
 
 #include <memory>
 #include <string>
@@ -60,6 +62,19 @@ class Queue {
 public:
   virtual ~Queue() = 0;
 
+  /// Submit command buffers for execution and block until completion.
+  // TODO: Return a Fence instead of blocking, once the Fence abstraction
+  // from PR #1007 is available.
+  virtual llvm::Error
+  submit(llvm::SmallVector<std::unique_ptr<CommandBuffer>> CBs) = 0;
+
+  /// Convenience overload for submitting a single command buffer.
+  llvm::Error submit(std::unique_ptr<CommandBuffer> CB) {
+    llvm::SmallVector<std::unique_ptr<CommandBuffer>> CBs;
+    CBs.push_back(std::move(CB));
+    return submit(std::move(CBs));
+  }
+
 protected:
   Queue() = default;
 };
@@ -81,6 +96,12 @@ public:
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
+
+  virtual llvm::Expected<std::unique_ptr<CommandBuffer>> createCommandBuffer() {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "createCommandBuffer not implemented for this backend");
+  }
 
   virtual ~Device() = 0;
 
