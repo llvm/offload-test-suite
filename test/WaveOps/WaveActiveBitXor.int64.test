@@ -191,6 +191,9 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1058
+# XFAIL: QC && DirectX
+
 # 64 bit wave ops are not supported on metal.
 # https://github.com/llvm/offload-test-suite/issues/355
 # UNSUPPORTED: Metal
