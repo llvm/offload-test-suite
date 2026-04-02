@@ -412,11 +412,17 @@ public:
     const D3D12_RESOURCE_DESC BufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
 
+    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+    if (HeapType == D3D12_HEAP_TYPE_UPLOAD)
+      InitialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+    else if (HeapType == D3D12_HEAP_TYPE_READBACK)
+      InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
+
     ComPtr<ID3D12Resource> DeviceBuffer;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
                                    &HeapProps, D3D12_HEAP_FLAG_NONE,
-                                   &BufferDesc, D3D12_RESOURCE_STATE_COMMON,
-                                   nullptr, IID_PPV_ARGS(&DeviceBuffer)),
+                                   &BufferDesc, InitialState, nullptr,
+                                   IID_PPV_ARGS(&DeviceBuffer)),
                                "Failed to create buffer."))
       return Err;
 
@@ -463,10 +469,16 @@ public:
       ClearValuePtr = &ClearValue;
     }
 
+    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+    if ((Desc.Usage & TextureUsage::RenderTarget) != 0)
+      InitialState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    else if ((Desc.Usage & TextureUsage::DepthStencil) != 0)
+      InitialState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+
     ComPtr<ID3D12Resource> DeviceTexture;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
                                    &HeapProps, D3D12_HEAP_FLAG_NONE, &TexDesc,
-                                   D3D12_RESOURCE_STATE_COMMON, ClearValuePtr,
+                                   InitialState, ClearValuePtr,
                                    IID_PPV_ARGS(&DeviceTexture)),
                                "Failed to create texture."))
       return Err;
