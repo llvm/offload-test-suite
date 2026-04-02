@@ -4,11 +4,12 @@
 
 [numthreads(1, 1, 1)]
 void main() {
-  // Texture2D::operator[] (int2)
-  Out[0] = Tex[int2(0, 0)]; // Red
-  Out[1] = Tex[int2(1, 0)]; // Green
-  Out[2] = Tex[int2(0, 1)]; // Blue
-  Out[3] = Tex[int2(1, 1)]; // White
+  // Texture2D::mips.operator[][]
+  Out[0] = Tex.mips[0][int2(0, 0)]; // Red
+  Out[1] = Tex.mips[0][int2(1, 1)]; // White
+
+  // Test mip 1 (1x1)
+  Out[2] = Tex.mips[1][int2(0, 0)]; // Yellow
 }
 
 //--- pipeline.yaml
@@ -32,15 +33,14 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64 # 4 * sizeof(float4)
+    FillSize: 48 # 3 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 0.0, 0.0, 1.0,  # [0]
-            0.0, 1.0, 0.0, 1.0,  # [1]
-            0.0, 0.0, 1.0, 1.0,  # [2]
-            1.0, 1.0, 1.0, 1.0 ] # [3]
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # [0] Red
+            1.0, 1.0, 1.0, 1.0,  # [1] White
+            1.0, 1.0, 0.0, 1.0 ] # [2] Yellow (mip 1)
 
 DescriptorSets:
   - Resources:
@@ -54,15 +54,20 @@ DescriptorSets:
       VulkanBinding: { Binding: 1 }
 
 Results:
-  - Result: OperatorIndexTest
+  - Result: MipsOperatorIndexTest
     Rule: BufferExact
     Actual: Out
     Expected: Expected
 ...
 #--- end
 
-# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
-# XFAIL: DirectX || Metal
+# Unimplemented: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: Clang && DirectX 
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
+# XFAIL: DirectX
+
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
