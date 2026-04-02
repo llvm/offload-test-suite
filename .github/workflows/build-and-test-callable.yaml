@@ -107,7 +107,6 @@ jobs:
       checks: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
-  
       - name: Checkout DXC
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
