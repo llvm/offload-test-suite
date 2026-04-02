@@ -1089,7 +1089,7 @@ public:
           "No render target bound for graphics pipeline.");
     const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
 
-    auto TexOrErr = offloadtest::createRenderTarget(*this, RTBuf);
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
     if (!TexOrErr)
       return TexOrErr.takeError();
 
@@ -1107,7 +1107,7 @@ public:
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    auto TexOrErr = offloadtest::createDepthStencil(
+    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
@@ -2324,9 +2324,6 @@ public:
         vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
         vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
       }
-      // Render target image and readback buffer are owned by
-      // Render target, readback buffer, and depth stencil are owned by
-      // shared_ptrs (IS.RenderTarget, IS.RTReadback, IS.DepthStencil).
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
       vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }

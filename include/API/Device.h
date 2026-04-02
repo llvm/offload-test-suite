@@ -103,11 +103,11 @@ public:
 // CPUBuffer. Does not upload the buffer's data — only uses its description to
 // configure the texture.
 llvm::Expected<std::shared_ptr<Texture>>
-createRenderTarget(Device &Dev, const CPUBuffer &Buf);
+createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 
 // Creates a depth/stencil texture matching the dimensions of a render target.
 llvm::Expected<std::shared_ptr<Texture>>
-createDepthStencil(Device &Dev, uint32_t Width, uint32_t Height);
+createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
 } // namespace offloadtest
 
