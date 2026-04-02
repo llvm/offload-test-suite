@@ -2289,11 +2289,6 @@ public:
 
     if (IS.CmdPool)
       vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
-
-    if (Device) {
-      vkDestroyDevice(Device, nullptr);
-      Device = VK_NULL_HANDLE;
-    }
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
@@ -2416,6 +2411,9 @@ llvm::Error offloadtest::initializeVulkanDevices(
   VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
 #endif
 
+  const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
+      std::make_shared<VulkanInstance>(Instance, DebugMessenger);
+
   uint32_t DeviceCount = 0;
   if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
     return llvm::createStringError(std::errc::no_such_device,
@@ -2426,11 +2424,9 @@ llvm::Error offloadtest::initializeVulkanDevices(
     return llvm::createStringError(std::errc::no_such_device,
                                    "Failed to enumerate devices");
 
-  const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
-      std::make_shared<VulkanInstance>(Instance, DebugMessenger);
   for (const auto &PDev : PhysicalDevices) {
     auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
-                                            std::move(AvailableInstanceLayers));
+                                            AvailableInstanceLayers);
     if (!DeviceOrErr) {
       return DeviceOrErr.takeError();
     }
