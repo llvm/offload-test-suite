@@ -365,6 +365,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/1047
 # XFAIL: QC && DirectX
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1060
+# XFAIL: QC && Vulkan && DXC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o 
