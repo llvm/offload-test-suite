@@ -36,6 +36,7 @@ uint32_t PushConstantBlock::size() const {
 
 namespace llvm {
 namespace yaml {
+
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
@@ -52,7 +53,14 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (R.isSampler()) {
+        if (R.isSampledTexture()) {
+          R.SamplerPtr = P.getSampler(R.Name);
+          if (!R.SamplerPtr)
+            I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
+          R.BufferPtr = P.getBuffer(R.Name);
+          if (!R.BufferPtr)
+            I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+        } else if (R.isSampler()) {
           R.SamplerPtr = P.getSampler(R.Name);
           if (!R.SamplerPtr)
             I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
@@ -252,6 +260,7 @@ static void setCounters(IO &I, offloadtest::CPUBuffer &B) {
 void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
                                                   offloadtest::Sampler &S) {
   I.mapRequired("Name", S.Name);
+  I.mapOptional("Kind", S.Kind);
   I.mapOptional("MinFilter", S.MinFilter);
   I.mapOptional("MagFilter", S.MagFilter);
   I.mapOptional("Address", S.Address);
@@ -259,6 +268,20 @@ void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
   I.mapOptional("MaxLOD", S.MaxLOD);
   I.mapOptional("MipLODBias", S.MipLODBias);
   I.mapOptional("ComparisonOp", S.ComparisonOp);
+  if (!I.outputting()) {
+    if (S.Kind == SamplerKind::Sampler &&
+        S.ComparisonOp != CompareFunction::Never) {
+      I.setError("Sampler kind 'Sampler' requires ComparisonOp: Never");
+      return;
+    }
+    if (S.Kind == SamplerKind::SamplerComparison &&
+        S.ComparisonOp == CompareFunction::Never) {
+      I.setError(
+          "Sampler kind 'SamplerComparison' requires ComparisonOp other than "
+          "Never");
+      return;
+    }
+  }
 }
 
 void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,

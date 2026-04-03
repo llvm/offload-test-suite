@@ -79,8 +79,9 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
+  case ResourceKind::SampledTexture2D:
+    return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   }
   llvm_unreachable("All cases handled");
 }
@@ -149,7 +150,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
@@ -159,6 +160,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
@@ -168,8 +170,19 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an image view!");
+  }
+  llvm_unreachable("All cases handled");
+}
+
+static VkImageType getVKImageType(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
+    return VK_IMAGE_TYPE_2D;
+  default:
+    llvm_unreachable("Unsupported image kind");
   }
   llvm_unreachable("All cases handled");
 }
@@ -429,12 +442,12 @@ private:
 
     bool isImage() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-             DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+             DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     }
 
     bool isSampler() const {
-      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
-             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER;
     }
 
     bool isBuffer() const {
@@ -870,7 +883,7 @@ public:
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
@@ -929,7 +942,7 @@ public:
     SamplerInfo.anisotropyEnable = VK_FALSE;
     SamplerInfo.maxAnisotropy = 1.0f;
     SamplerInfo.compareEnable =
-        R.Kind == ResourceKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+        S.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
     SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
     SamplerInfo.minLod = S.MinLOD;
     SamplerInfo.maxLod = S.MaxLOD;
@@ -969,6 +982,17 @@ public:
         auto ExImageRef = createImage(R, *ExHostBuf);
         if (!ExImageRef)
           return ExImageRef.takeError();
+
+        // Sampled textures use combined-image-sampler descriptors and need
+        // both valid image and sampler handles.
+        if (R.isSampledTexture()) {
+          BufferRef NullHost = {0, 0};
+          auto ExSamplerRef = createSampler(R, NullHost);
+          if (!ExSamplerRef)
+            return ExSamplerRef.takeError();
+          ExImageRef->Image.Sampler = ExSamplerRef->Image.Sampler;
+        }
+
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
         auto ExDeviceBuf = createBuffer(
@@ -1015,7 +1039,7 @@ public:
     // Create an optimal image used as the depth stencil attachment
     VkImageCreateInfo ImageCi = {};
     ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCi.imageType = VK_IMAGE_TYPE_2D;
+    ImageCi.imageType = getVKImageType(ResourceKind::Texture2D);
     ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     // Use example's height and width
     ImageCi.extent = {
@@ -1548,7 +1572,7 @@ public:
     std::array<VkImageView, 2> Views = {};
     VkImageViewCreateInfo ViewCreateInfo = {};
     ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ViewCreateInfo.viewType = getImageViewType(ResourceKind::Texture2D);
     ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
                                         P.Bindings.RTargetBufferPtr->Channels);
     ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
@@ -1568,7 +1592,7 @@ public:
 
     VkImageViewCreateInfo DepthStencilViewCi = {};
     DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    DepthStencilViewCi.viewType = getImageViewType(ResourceKind::Texture2D);
     DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     DepthStencilViewCi.subresourceRange = {};
     DepthStencilViewCi.subresourceRange.aspectMask =
@@ -2233,6 +2257,11 @@ public:
           vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
         } else if (R.isSampler()) {
           vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
+        } else if (R.DescriptorType ==
+                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
+          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
+          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
         } else {
           assert(R.isImage());
           vkDestroyImage(Device, ResRef.Image.Image, nullptr);
