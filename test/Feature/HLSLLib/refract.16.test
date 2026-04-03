@@ -18,21 +18,21 @@ void main() {
   // 2D case
   half2 result2D = refract(IncidentRay2D[0], normalize(Wall2D[0]), 0.5h);
   Result2D[0] = result2D;
-  half2 result2D_constant = refract(half2(0.75, -0.5), half2(0.70710677, 0.70710677), half(0.5));
+  half2 result2D_constant = refract(half2(0.75h, -0.5h), half2(0.70710677h, 0.70710677h), half(0.5h));
   Result2D[1] = result2D_constant;
   // the below case is a case of total internal reflection, the 0 vector is expected
-  Result2D[2] = refract(half2(0.75, -0.5), half2(0.70710677, 0.70710677), 1.3h);
+  Result2D[2] = refract(half2(0.75h, -0.5h), half2(0.70710677h, 0.70710677h), 1.3h);
 
   // 3D case, using half4 for alignment
-  half4 result3D = half4(refract(IncidentRay3D[0].xyz, normalize(Wall3D[0].xyz), 0.5h), half(0.0));
+  half4 result3D = half4(refract(IncidentRay3D[0].xyz, normalize(Wall3D[0].xyz), 0.5h), half(0.0h));
   Result3D[0] = result3D;
-  half4 result3D_constant = half4(refract(half3(0.5, -0.25, 0.75), half3(0.5, 0.5, 0.70710677), 0.5h), half(0.0));
+  half4 result3D_constant = half4(refract(half3(0.5h, -0.25h, 0.75h), half3(0.5h, 0.5h, 0.70710677h), 0.5h), half(0.0h));
   Result3D[1] = result3D_constant;
 
   // 4D case
   half4 result4D = refract(IncidentRay4D[0].xyzw, normalize(Wall4D[0].xyzw), 0.5h);
   Result4D[0] = result4D;
-  half4 result4D_constant = refract(half4(0.5, -0.25, 0.75, -0.5), half4(0.5, 0.5, 0.5, 0.5), half(0.5));
+  half4 result4D_constant = refract(half4(0.5h, -0.25h, 0.75h, -0.5h), half4(0.5h, 0.5h, 0.5h, 0.5h), half(0.5h));
   Result4D[1] = result4D_constant;
 }
 
