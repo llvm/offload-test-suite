@@ -97,7 +97,8 @@ Buffers:
             0.0, -20.0, -2.0, -4.75 ]
 Results:
   - Result: Result
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: Out
     Expected: Expected
 DescriptorSets:

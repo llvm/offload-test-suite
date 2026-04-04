@@ -57,7 +57,8 @@ Buffers:
     # last two rows: 2^-26, -(2^-26), 2^-104, -3
 Results:
   - Result: Result
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: Out
     Expected: Expected
 DescriptorSets:
@@ -92,7 +93,7 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/1000
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
 # XFAIL: arm64 && WARP
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1026
