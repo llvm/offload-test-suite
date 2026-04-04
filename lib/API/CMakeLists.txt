@@ -24,7 +24,8 @@ if (APPLE)
                             "-framework MetalKit"
                             "-framework AppKit"
                             "-framework Foundation"
-                            "-framework QuartzCore")
+                            "-framework QuartzCore"
+                            ${METAL_LIBRARIES})
   list(APPEND api_headers PRIVATE ${METAL_INCLUDE_DIRS})
 endif()
 
