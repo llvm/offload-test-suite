@@ -182,6 +182,20 @@ jobs:
         with:
           comment_mode: off
           files: llvm-project/build/**/testresults.xunit.xml
+      - name: Run dxdiag (Windows only)
+        if: inputs.OS == 'windows' && failure()
+        shell: powershell
+        run: |
+          $fileName = "dxdiag.txt"
+          $output = Join-Path $env:RUNNER_TEMP $fileName
+          dxdiag /t $output | Out-Null
+          Write-Host "DxDiag report saved to $output"
+      - name: Upload dxdiag artifact
+        if: inputs.OS == 'windows' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
+          path: ${{ runner.temp }}/dxdiag.txt
       #- name: Publish Test Results
       #  uses: EnricoMi/publish-unit-test-result-action/windows@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
       #  if: always() && inputs.OS == 'windows'
