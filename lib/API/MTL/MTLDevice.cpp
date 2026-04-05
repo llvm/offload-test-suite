@@ -7,11 +7,14 @@
 
 #define IR_RUNTIME_METALCPP
 #define IR_PRIVATE_IMPLEMENTATION
+#include "metal_irconverter.h"
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
 #include "API/FormatConversion.h"
+#include "MTLDescriptorHeap.h"
 #include "MTLResources.h"
+#include "MTLTopLevelArgumentBuffer.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/ScopeExit.h"
@@ -20,6 +23,7 @@
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
+#include <memory>
 
 using namespace offloadtest;
 
@@ -32,6 +36,53 @@ static llvm::Error toError(NS::Error *Err) {
   llvm::raw_svector_ostream OS(ErrMsg);
   OS << Err->localizedDescription()->utf8String() << ": ";
   OS << Err->localizedFailureReason()->utf8String();
+  return llvm::createStringError(EC, ErrMsg);
+}
+
+static llvm::Error toError(const IRError *Err, llvm::StringRef Context) {
+  if (!Err)
+    return llvm::Error::success();
+
+  const uint32_t Code = IRErrorGetCode(Err);
+  if (IRErrorCodeNoError == Code)
+    return llvm::Error::success();
+
+  const std::error_code EC =
+      std::error_code(static_cast<int>(Code), std::generic_category());
+  llvm::SmallString<64> ErrMsg;
+  llvm::raw_svector_ostream OS(ErrMsg);
+  OS << Context << ": ";
+
+  switch (Code) {
+#define IR_ERR(x)                                                              \
+  case x:                                                                      \
+    OS << #x;                                                                  \
+    break;
+
+    IR_ERR(IRErrorCodeShaderRequiresRootSignature);
+    IR_ERR(IRErrorCodeUnrecognizedRootSignatureDescriptor);
+    IR_ERR(IRErrorCodeUnrecognizedParameterTypeInRootSignature);
+    IR_ERR(IRErrorCodeResourceNotReferencedByRootSignature);
+    IR_ERR(IRErrorCodeShaderIncompatibleWithDualSourceBlending);
+    IR_ERR(IRErrorCodeUnsupportedWaveSize);
+    IR_ERR(IRErrorCodeUnsupportedInstruction);
+    IR_ERR(IRErrorCodeCompilationError);
+    IR_ERR(IRErrorCodeFailedToSynthesizeStageInFunction);
+    IR_ERR(IRErrorCodeFailedToSynthesizeStreamOutFunction);
+    IR_ERR(IRErrorCodeFailedToSynthesizeIndirectIntersectionFunction);
+    IR_ERR(IRErrorCodeUnableToVerifyModule);
+    IR_ERR(IRErrorCodeUnableToLinkModule);
+    IR_ERR(IRErrorCodeUnrecognizedDXILHeader);
+    IR_ERR(IRErrorCodeInvalidRaytracingAttribute);
+    IR_ERR(IRErrorCodeNullHullShaderInputOutputMismatch);
+    IR_ERR(IRErrorCodeInvalidRaytracingUserAttributeSize);
+    IR_ERR(IRErrorCodeIncorrectHitgroupType);
+    IR_ERR(IRErrorCodeFP64Usage);
+    IR_ERR(IRErrorCodeUnknown);
+  default:
+    break;
+#undef IR_ERR
+  }
   return llvm::createStringError(EC, ErrMsg);
 }
 
@@ -55,7 +106,46 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   return MTL::PixelFormatInvalid;
 }
 
+static IRShaderStage getShaderStage(Stages Stage) {
+  switch (Stage) {
+  case Stages::Compute:
+    return IRShaderStageCompute;
+  case Stages::Vertex:
+    return IRShaderStageVertex;
+  case Stages::Pixel:
+    return IRShaderStageFragment;
+  }
+  llvm_unreachable("All cases handled");
+}
+
 namespace {
+struct MTLDeleter {
+  template <typename T> void operator()(T *Arg) const {
+    if (Arg)
+      Arg->release();
+  }
+};
+
+template <typename T> using MTLPtr = std::unique_ptr<T, MTLDeleter>;
+
+template <auto Fn> struct IRDeleter {
+  template <typename T> constexpr void operator()(T *Arg) const { Fn(Arg); }
+};
+
+using IRCompilerPtr = std::unique_ptr<IRCompiler, IRDeleter<IRCompilerDestroy>>;
+using IRObjectPtr = std::unique_ptr<IRObject, IRDeleter<IRObjectDestroy>>;
+using IRRootSignaturePtr =
+    std::unique_ptr<IRRootSignature, IRDeleter<IRRootSignatureDestroy>>;
+using IRMetalLibBinaryPtr =
+    std::unique_ptr<IRMetalLibBinary, IRDeleter<IRMetalLibBinaryDestroy>>;
+using IRShaderReflectionPtr =
+    std::unique_ptr<IRShaderReflection, IRDeleter<IRShaderReflectionDestroy>>;
+using IRErrorPtr = std::unique_ptr<IRError, IRDeleter<IRErrorDestroy>>;
+
+struct MetalIR {
+  IRMetalLibBinaryPtr Binary;
+  IRShaderReflectionPtr Reflection;
+};
 
 class MTLFence : public offloadtest::Fence {
 public:
@@ -243,57 +333,220 @@ class MTLDevice : public offloadtest::Device {
   MTL::Device *Device;
   MTLQueue GraphicsQueue;
 
+  struct ResourceSet {
+    MTLPtr<MTL::Resource> Resource;
+    ResourceSet(MTL::Resource *Resource) : Resource(Resource) {}
+  };
+
+  // ResourceBundle will contain one ResourceSet for a singular resource
+  // or multiple ResourceSets for resource array.
+  using ResourceBundle = llvm::SmallVector<ResourceSet>;
+  using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
+
+  struct DescriptorTable {
+    llvm::SmallVector<ResourcePair> Resources;
+  };
+
   struct InvocationState {
     InvocationState() { Pool = NS::AutoreleasePool::alloc()->init(); }
-    ~InvocationState() {
-      for (MTL::Texture *T : Textures)
-        T->release();
-      for (MTL::Buffer *B : Buffers)
-        B->release();
-
-      Pool->release();
-    }
+    ~InvocationState() { Pool->release(); }
 
     NS::AutoreleasePool *Pool = nullptr;
-    MTL::Buffer *ArgBuffer;
+    IRRootSignaturePtr RootSig;
+    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    std::unique_ptr<MTLDescriptorHeap> DescHeap;
     MTL::Buffer *VertexBuffer;
-    llvm::SmallVector<MTL::Texture *> Textures;
-    llvm::SmallVector<MTL::Buffer *> Buffers;
     std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
     std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<PipelineState> Pipeline;
+    IRShaderReflectionPtr ComputeReflection;
+
+    llvm::SmallVector<DescriptorTable> DescTables;
+    // TODO: Support RootResources?
   };
 
-  llvm::Error createDescriptor(Resource &R, InvocationState &IS,
-                               const uint32_t HeapIdx) {
-    auto *TablePtr = (IRDescriptorTableEntry *)IS.ArgBuffer->contents();
+  llvm::Error createRootSignature(const Pipeline &P, InvocationState &State) {
+    std::vector<IRRootParameter1> RootParams;
+    const uint32_t DescriptorCount = P.getDescriptorCount();
+    const std::unique_ptr<IRDescriptorRange1[]> Ranges =
+        std::unique_ptr<IRDescriptorRange1[]>(
+            new IRDescriptorRange1[DescriptorCount]);
 
-    assert(R.BufferPtr->ArraySize == 1 &&
-           "Resource arrays are not yet supported on Metal.");
+    uint32_t RangeIdx = 0;
+    for (const auto &D : P.Sets) {
+      uint32_t DescriptorIdx = 0;
+      const uint32_t StartRangeIdx = RangeIdx;
+      for (const auto &R : D.Resources) {
+        auto &Range = Ranges.get()[RangeIdx];
+        switch (getDescriptorKind(R.Kind)) {
+        case DescriptorKind::SRV:
+          Range.RangeType = IRDescriptorRangeTypeSRV;
+          break;
+        case DescriptorKind::UAV:
+          Range.RangeType = IRDescriptorRangeTypeUAV;
+          break;
+        case DescriptorKind::CBV:
+          Range.RangeType = IRDescriptorRangeTypeCBV;
+          break;
+        case DescriptorKind::SAMPLER:
+          llvm_unreachable("Not implemented yet.");
+        }
+        Range.NumDescriptors = R.getArraySize();
+        Range.BaseShaderRegister = R.DXBinding.Register;
+        Range.RegisterSpace = R.DXBinding.Space;
+        Range.OffsetInDescriptorsFromTableStart = DescriptorIdx;
+        llvm::outs() << "DescriptorRange[" << RangeIdx << "] {"
+                     << " Type=" << static_cast<uint32_t>(Range.RangeType)
+                     << ","
+                     << " NumDescriptors=" << Range.NumDescriptors << ","
+                     << " BaseShaderRegister=" << Range.BaseShaderRegister
+                     << ","
+                     << " RegisterSpace=" << Range.RegisterSpace << ","
+                     << " OffsetInDescriptorsFromTableStart="
+                     << Range.OffsetInDescriptorsFromTableStart << " }\n";
+        RangeIdx++;
+        DescriptorIdx += R.getArraySize();
+      }
+
+      auto &Param = RootParams.emplace_back();
+      Param.ParameterType = IRRootParameterTypeDescriptorTable;
+      Param.DescriptorTable.NumDescriptorRanges =
+          static_cast<uint32_t>(D.Resources.size());
+      Param.DescriptorTable.pDescriptorRanges = &Ranges.get()[StartRangeIdx];
+      Param.ShaderVisibility = IRShaderVisibilityAll;
+    }
+
+    // NOTE: Attempting to create a RS with version 1.0 seems to fail
+    // with IRErrorCodeUnrecognizedRootSignatureDescriptor, creating with 1.1
+    // instead
+    IRVersionedRootSignatureDescriptor VersionedDesc = {};
+    VersionedDesc.version = IRRootSignatureVersion_1_1;
+    auto &Desc = VersionedDesc.desc_1_1;
+    Desc.NumParameters = static_cast<uint32_t>(RootParams.size());
+    Desc.pParameters = RootParams.data();
+    Desc.NumStaticSamplers = 0;
+    Desc.pStaticSamplers = nullptr;
+    Desc.Flags = P.isGraphics()
+                     ? IRRootSignatureFlagAllowInputAssemblerInputLayout
+                     : IRRootSignatureFlagNone;
+
+    IRError *Err = nullptr;
+    IRRootSignaturePtr RootSig(
+        IRRootSignatureCreateFromDescriptor(&VersionedDesc, &Err));
+    if (!RootSig)
+      return toError(IRErrorPtr(Err).get(), "Failed to create root signature");
+
+    State.RootSig = std::move(RootSig);
+
+    auto ArgBufferOrErr =
+        MTLTopLevelArgumentBuffer::create(Device, State.RootSig.get());
+    if (!ArgBufferOrErr)
+      return ArgBufferOrErr.takeError();
+
+    State.ArgBuffer = std::move(*ArgBufferOrErr);
+    return llvm::Error::success();
+  }
+
+  llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
+    if (P.getDescriptorCount() == 0) {
+      llvm::outs()
+          << "No descriptors found, skipping descriptor heap creation.\n";
+      return llvm::Error::success();
+    }
+    const METAL_DESCRIPTOR_HEAP_DESC HeapDesc = {
+        METAL_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+        P.getDescriptorCountWithFlattenedArrays()};
+
+    auto DescHeapOrErr = MTLDescriptorHeap::create(Device, HeapDesc);
+    if (!DescHeapOrErr)
+      return DescHeapOrErr.takeError();
+
+    State.DescHeap = std::move(*DescHeapOrErr);
+    llvm::outs() << "Descriptor heap created with "
+                 << P.getDescriptorCountWithFlattenedArrays()
+                 << " descriptors.\n";
+    return llvm::Error::success();
+  }
+
+  llvm::Expected<MetalIR> convertToMetalIR(const Pipeline &P, Stages Stage,
+                                           const ShaderContainer &SC,
+                                           const InvocationState &State) {
+    IRCompilerPtr Compiler(IRCompilerCreate());
+    if (!Compiler)
+      return llvm::createStringError(std::errc::not_supported,
+                                     "Failed to create IR compiler instance.");
+
+    if (!State.RootSig)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Root signature must be created before converting to Metal IR.");
+
+    // Configure IR compiler settings
+    IRCompilerSetEntryPointName(Compiler.get(), SC.Entry.c_str());
+    IRCompilerSetGlobalRootSignature(Compiler.get(), State.RootSig.get());
+    if (P.isGraphics()) {
+      // Matches DX::Device backend:
+      // PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+      IRCompilerSetInputTopology(Compiler.get(), IRInputTopologyTriangle);
+    }
+
+    const llvm::StringRef Program = SC.Shader->getBuffer();
+    IRObject *DXIL = IRObjectCreateFromDXIL(
+        reinterpret_cast<const uint8_t *>(Program.data()), Program.size(),
+        IRBytecodeOwnershipNone);
+
+    // Compile DXIL to Metal IR
+    IRError *Err = nullptr;
+    IRObjectPtr ResultIR(
+        IRCompilerAllocCompileAndLink(Compiler.get(), nullptr, DXIL, &Err));
+    if (Err)
+      return toError(IRErrorPtr(Err).get(),
+                     "Failed to compile and link DXIL to Metal IR");
+
+    // Retrieve Metallib and shader reflection from the compiled IR object
+    const IRShaderStage ShaderStage = getShaderStage(Stage);
+    auto MetalLib = IRMetalLibBinaryPtr(IRMetalLibBinaryCreate());
+    if (!IRObjectGetMetalLibBinary(ResultIR.get(), ShaderStage,
+                                   MetalLib.get())) {
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to retrieve Metal library binary from "
+          "IR object.");
+    }
+
+    auto Reflection = IRShaderReflectionPtr(IRShaderReflectionCreate());
+    if (!IRObjectGetReflection(ResultIR.get(), ShaderStage, Reflection.get())) {
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to retrieve shader reflection from IR object.");
+    }
+
+    return MetalIR{std::move(MetalLib), std::move(Reflection)};
+  }
+
+  // Creates a Metal resource (buffer or texture) for the given Resource at the
+  // specified array index.
+  llvm::Expected<MTL::Resource *>
+  createResource(Resource &R, size_t ResourceArrayIndex = 0) {
+    const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
     if (R.isRaw()) {
       MTL::Buffer *Buf =
-          Device->newBuffer(R.BufferPtr->Data.back().get(), R.size(),
+          Device->newBuffer(B.Data[ResourceArrayIndex].get(), R.size(),
                             MTL::ResourceStorageModeManaged);
-      IRBufferView View = {};
-      View.buffer = Buf;
-      View.bufferSize = R.size();
-
-      IRDescriptorTableSetBufferView(&TablePtr[HeapIdx], &View);
-      IS.Buffers.push_back(Buf);
+      Buf->didModifyRange(NS::Range::Make(0, Buf->length()));
+      return Buf;
     } else {
-      const uint64_t Width = R.isTexture() ? R.BufferPtr->OutputProps.Width
-                                           : R.size() / R.getElementSize();
-      const uint64_t Height =
-          R.isTexture() ? R.BufferPtr->OutputProps.Height : 1;
+      const uint64_t Width =
+          R.isTexture() ? B.OutputProps.Width : R.size() / R.getElementSize();
+      const uint64_t Height = R.isTexture() ? B.OutputProps.Height : 1;
       MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
       if (R.isReadWrite())
         UsageFlags |= MTL::ResourceUsageWrite;
       MTL::TextureDescriptor *Desc = nullptr;
-      const MTL::PixelFormat Format =
-          getMTLFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+      const MTL::PixelFormat Format = getMTLFormat(B.Format, B.Channels);
       switch (R.Kind) {
       case ResourceKind::Buffer:
       case ResourceKind::RWBuffer:
@@ -319,33 +572,190 @@ class MTLDevice : public offloadtest::Device {
 
       MTL::Texture *NewTex = Device->newTexture(Desc);
       NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
-                            R.BufferPtr->Data.back().get(),
+                            B.Data[ResourceArrayIndex].get(),
                             Width * R.getElementSize());
-
-      IS.Textures.push_back(NewTex);
-
-      IRDescriptorTableSetTexture(&TablePtr[HeapIdx], NewTex, 0, 0);
+      return NewTex;
     }
+  }
 
-    return llvm::Error::success();
+  llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
+    ResourceBundle Bundle;
+
+    for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
+         ++RegOffset) {
+      llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
+                   << R.DXBinding.Register + RegOffset
+                   << ", Space = " << R.DXBinding.Space;
+      llvm::outs() << " }\n";
+
+      auto ResourceOrErr = createResource(R, RegOffset);
+      if (!ResourceOrErr)
+        return ResourceOrErr.takeError();
+
+      Bundle.emplace_back(ResourceOrErr.get());
+    }
+    return Bundle;
+  }
+
+  // TODO: counter buffer via IRRuntimeCreateAppendBufferView?
+  llvm::Expected<ResourceBundle> createUAV(Resource &R, InvocationState &IS) {
+    ResourceBundle Bundle;
+
+    for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
+         ++RegOffset) {
+      llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
+                   << R.DXBinding.Register + RegOffset
+                   << ", Space = " << R.DXBinding.Space
+                   << ", HasCounter = " << R.HasCounter;
+      llvm::outs() << " }\n";
+
+      auto ResourceOrErr = createResource(R, RegOffset);
+      if (!ResourceOrErr)
+        return ResourceOrErr.takeError();
+
+      Bundle.emplace_back(ResourceOrErr.get());
+    }
+    return Bundle;
+  }
+
+  llvm::Expected<ResourceBundle> createCBV(Resource &R, InvocationState &IS) {
+    ResourceBundle Bundle;
+
+    for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
+         ++RegOffset) {
+      llvm::outs() << "Creating CBV: { Size = " << R.size() << ", Register = b"
+                   << R.DXBinding.Register + RegOffset
+                   << ", Space = " << R.DXBinding.Space << " }\n";
+
+      auto ResourceOrErr = createResource(R, RegOffset);
+      if (!ResourceOrErr)
+        return ResourceOrErr.takeError();
+
+      Bundle.emplace_back(ResourceOrErr.get());
+    }
+    return Bundle;
+  }
+
+  void createDescriptor(Resource &R, MTL::Resource *Resource,
+                        IRDescriptorTableEntry *Entry) {
+    if (R.isRaw()) {
+      IRBufferView View = {};
+      View.buffer = static_cast<MTL::Buffer *>(Resource);
+      View.bufferSize = R.size();
+      IRDescriptorTableSetBufferView(Entry, &View);
+    } else {
+      MTL::Texture *Tex = static_cast<MTL::Texture *>(Resource);
+      IRDescriptorTableSetTexture(Entry, Tex, 0, 0);
+    }
+  }
+
+  // returns the next available HeapIdx
+  uint32_t bindSRV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                   const ResourceBundle &ResBundle) {
+    const uint32_t EltSize = R.getElementSize();
+    const uint32_t NumElts = R.size() / EltSize;
+
+    for (const ResourceSet &RS : ResBundle) {
+      llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
+                   << " NumElts = " << NumElts << "\n";
+      createDescriptor(R, RS.Resource.get(),
+                       IS.DescHeap->getEntryHandle(HeapIdx));
+      HeapIdx++;
+    }
+    return HeapIdx;
+  }
+
+  // returns the next available HeapIdx
+  uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                   const ResourceBundle &ResBundle) {
+    const uint32_t EltSize = R.getElementSize();
+    const uint32_t NumElts = R.size() / EltSize;
+    for (const ResourceSet &RS : ResBundle) {
+      llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
+                   << " NumElts = " << NumElts << "\n";
+      createDescriptor(R, RS.Resource.get(),
+                       IS.DescHeap->getEntryHandle(HeapIdx));
+      HeapIdx++;
+    }
+    return HeapIdx;
+  }
+
+  // returns the next available HeapIdx
+  uint32_t bindCBV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                   const ResourceBundle &ResBundle) {
+    for (const ResourceSet &RS : ResBundle) {
+      llvm::outs() << "CBV: HeapIdx = " << HeapIdx << " Size = " << R.size()
+                   << "\n";
+      createDescriptor(R, RS.Resource.get(),
+                       IS.DescHeap->getEntryHandle(HeapIdx));
+      HeapIdx++;
+    }
+    return HeapIdx;
   }
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    const size_t ResourceCount = P.getDescriptorCount();
-    const size_t TableSize = sizeof(IRDescriptorTableEntry) * ResourceCount;
+    auto CreateBuffer =
+        [&IS,
+         this](Resource &R,
+               llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
+      switch (getDescriptorKind(R.Kind)) {
+      case DescriptorKind::SRV: {
+        auto ExRes = createSRV(R, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        Resources.emplace_back(&R, std::move(*ExRes));
+        break;
+      }
+      case DescriptorKind::UAV: {
+        auto ExRes = createUAV(R, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        Resources.emplace_back(&R, std::move(*ExRes));
+        break;
+      }
+      case DescriptorKind::CBV: {
+        auto ExRes = createCBV(R, IS);
+        if (!ExRes)
+          return ExRes.takeError();
+        Resources.emplace_back(&R, std::move(*ExRes));
+        break;
+      }
+      case DescriptorKind::SAMPLER:
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Samplers are not yet implemented for Metal.");
+      }
+      return llvm::Error::success();
+    };
 
-    if (TableSize > 0) {
-      IS.ArgBuffer =
-          Device->newBuffer(TableSize, MTL::ResourceStorageModeManaged);
-      uint32_t HeapIndex = 0;
-      for (auto &D : P.Sets) {
-        for (auto &R : D.Resources) {
-          if (auto Err = createDescriptor(R, IS, HeapIndex++))
-            return Err;
+    for (auto &D : P.Sets) {
+      IS.DescTables.emplace_back(DescriptorTable());
+      DescriptorTable &Table = IS.DescTables.back();
+      for (auto &R : D.Resources)
+        if (auto Err = CreateBuffer(R, Table.Resources))
+          return Err;
+    }
+
+    // Bind descriptors in descriptor tables.
+    uint32_t HeapIndex = 0;
+    for (auto &T : IS.DescTables) {
+      for (auto &R : T.Resources) {
+        switch (getDescriptorKind(R.first->Kind)) {
+        case DescriptorKind::SRV:
+          HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
+          break;
+        case DescriptorKind::UAV:
+          HeapIndex = bindUAV(*(R.first), IS, HeapIndex, R.second);
+          break;
+        case DescriptorKind::CBV:
+          HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
+          break;
+        case DescriptorKind::SAMPLER:
+          llvm_unreachable("Not implemented yet.");
         }
       }
-      IS.ArgBuffer->didModifyRange(NS::Range::Make(0, IS.ArgBuffer->length()));
     }
+
     if (P.isGraphics()) {
       // Create and mark the vertex buffer as modified.
       IS.VertexBuffer = Device->newBuffer(
@@ -366,52 +776,36 @@ class MTLDevice : public offloadtest::Device {
 
     const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
     CmdEncoder->setComputePipelineState(PS->ComputePipeline);
-    CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
-    for (uint64_t I = 0; I < IS.Textures.size(); ++I)
-      CmdEncoder->useResource(IS.Textures[I],
-                              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-    for (uint64_t I = 0; I < IS.Buffers.size(); ++I)
-      CmdEncoder->useResource(IS.Buffers[I],
-                              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+    METAL_GPU_DESCRIPTOR_HANDLE Handle = {};
+    if (IS.DescHeap) {
+      IS.DescHeap->bind(CmdEncoder);
+      Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
+    }
+
+    for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
+      IS.ArgBuffer->setRootDescriptorTable(Idx, Handle);
+      Handle.Offset(P.Sets[Idx].Resources.size());
+    }
+
+    IS.ArgBuffer->bind(CmdEncoder);
+    for (const auto &Table : IS.DescTables)
+      for (const auto &ResPair : Table.Resources)
+        for (const auto &ResSet : ResPair.second)
+          CmdEncoder->useResource(ResSet.Resource.get(),
+                                  MTL::ResourceUsageRead |
+                                      MTL::ResourceUsageWrite);
 
     NS::UInteger TGS[3] = {PS->ComputePipeline->maxTotalThreadsPerThreadgroup(),
                            1, 1};
-    if (P.Shaders[0].Reflection) {
-      llvm::Expected<llvm::json::Value> E = llvm::json::parse(
-          llvm::StringRef(P.Shaders[0].Reflection->getBuffer()));
-      if (!E)
-        return E.takeError();
-      llvm::json::Value Reflection = *E;
-
-      const llvm::json::Object *ReflectionObj = Reflection.getAsObject();
-      if (!ReflectionObj)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Shader reflection must be a JSON object.");
-      auto StateIt = ReflectionObj->find("state");
-      if (StateIt == ReflectionObj->end())
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Key 'state' not found in shader reflection.");
-      const llvm::json::Object *State = StateIt->second.getAsObject();
-      auto TGSize = State->find("tg_size");
-      if (TGSize == State->end())
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Key 'tg_size' not found in shader reflection.");
-      const llvm::json::Array *TGSizeArr = TGSize->second.getAsArray();
-      if (TGSizeArr->size() != 3)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Threadgroup size in reflection must have three components.");
-      for (size_t I = 0; I < 3; ++I) {
-        auto OpVal = (*TGSizeArr)[I].getAsUINT64();
-        if (!OpVal)
-          return llvm::createStringError(std::errc::invalid_argument,
-                                         "Threadgroup size components in "
-                                         "reflection must be integers.");
-        TGS[I] = *OpVal;
+    if (IS.ComputeReflection) {
+      IRVersionedCSInfo Info;
+      if (IRShaderReflectionCopyComputeInfo(IS.ComputeReflection.get(),
+                                            IRReflectionVersion_1_0, &Info)) {
+        TGS[0] = Info.info_1_0.tg_size[0];
+        TGS[1] = Info.info_1_0.tg_size[1];
+        TGS[2] = Info.info_1_0.tg_size[2];
       }
+      IRShaderReflectionReleaseComputeInfo(&Info);
     }
 
     const llvm::ArrayRef<int> DispatchSize =
@@ -530,6 +924,21 @@ class MTLDevice : public offloadtest::Device {
     DSDesc->release();
     DSState->release();
 
+    if (IS.DescHeap) {
+      IS.DescHeap->bind(CmdEncoder);
+      // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
+      // this)
+      IS.ArgBuffer->setRootDescriptorTable(
+          0, IS.DescHeap->getGPUDescriptorHandleForHeapStart());
+    }
+    IS.ArgBuffer->bind(CmdEncoder);
+    for (const auto &Table : IS.DescTables)
+      for (const auto &ResPair : Table.Resources)
+        for (const auto &ResSet : ResPair.second)
+          CmdEncoder->useResource(ResSet.Resource.get(),
+                                  MTL::ResourceUsageRead |
+                                      MTL::ResourceUsageWrite);
+
     // Explicitly set viewport to texture dimensions.
     CmdEncoder->setViewport(
         MTL::Viewport{0.0, 0.0, (double)Width, (double)Height, 0.0, 1.0});
@@ -562,33 +971,37 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    uint32_t TextureIndex = 0;
-    uint32_t BufferIndex = 0;
-    for (auto &D : P.Sets) {
-      for (auto &R : D.Resources) {
-        assert(R.BufferPtr->ArraySize == 1 &&
-               "Resource arrays are not yet supported on Metal.");
-        if (R.isReadOnly()) {
-          if (R.isRaw())
-            ++BufferIndex;
-          else
-            ++TextureIndex;
-          continue;
-        }
+    auto MemCpyBack = [](ResourcePair &Pair) -> llvm::Error {
+      const Resource &R = *Pair.first;
+      if (!R.isReadWrite())
+        return llvm::Error::success();
+
+      const CPUBuffer &B = *R.BufferPtr;
+      auto *RSIt = Pair.second.begin();
+      auto *DataIt = B.Data.begin();
+      for (; RSIt != Pair.second.end() && DataIt != B.Data.end();
+           ++RSIt, ++DataIt) {
         if (R.isRaw()) {
-          memcpy(R.BufferPtr->Data.back().get(),
-                 IS.Buffers[BufferIndex++]->contents(), R.size());
-          continue;
+          MTL::Buffer *Buf = static_cast<MTL::Buffer *>(RSIt->Resource.get());
+          memcpy(DataIt->get(), Buf->contents(), Buf->length());
+        } else {
+          MTL::Texture *Tex = static_cast<MTL::Texture *>(RSIt->Resource.get());
+          const uint64_t Width = R.isTexture() ? B.OutputProps.Width
+                                               : R.size() / R.getElementSize();
+          const uint64_t Height = R.isTexture() ? B.OutputProps.Height : 1;
+          Tex->getBytes(DataIt->get(), Width * R.getElementSize(),
+                        MTL::Region(0, 0, Width, Height), 0);
         }
-        const uint64_t Width = R.isTexture() ? R.BufferPtr->OutputProps.Width
-                                             : R.size() / R.getElementSize();
-        const uint64_t Height =
-            R.isTexture() ? R.BufferPtr->OutputProps.Height : 1;
-        IS.Textures[TextureIndex++]->getBytes(
-            R.BufferPtr->Data.back().get(), Width * R.getElementSize(),
-            MTL::Region(0, 0, Width, Height), 0);
       }
-    }
+
+      return llvm::Error::success();
+    };
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        if (auto Err = MemCpyBack(R))
+          return Err;
+
     if (P.isGraphics()) {
       CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
       const uint64_t Width = RTarget->OutputProps.Width;
@@ -669,15 +1082,19 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineCs(llvm::StringRef Name,
+  createPipelineCs(llvm::StringRef Name, const InvocationState &IS,
                    const BindingsDesc & /*unused on metal*/,
                    ShaderContainer CS) override {
     NS::Error *Error = nullptr;
     const llvm::StringRef Program = CS.Shader->getBuffer();
-    dispatch_data_t Data = dispatch_data_create(Program.data(), Program.size(),
-                                                dispatch_get_main_queue(),
-                                                ^{
-                                                });
+
+    auto MetalIR = convertToMetalIR(P, Stages::Compute, CS, IS);
+    if (!MetalIR)
+      return MetalIR.takeError();
+
+    IS.ComputeReflection = std::move(MetalIR->Reflection);
+
+    dispatch_data_t Data = IRMetalLibGetBytecodeData(MetalIR->Binary.get());
     MTL::Library *Lib = Device->newLibrary(Data, &Error);
     if (Error)
       return toError(Error);
@@ -700,19 +1117,21 @@ public:
     return std::make_unique<MTLPipelineState>(Name, PSO);
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>> createPipelineVsPs(
-      llvm::StringRef Name, const BindingsDesc & /*unused on metal*/,
-      llvm::ArrayRef<InputLayoutDesc> InputLayout,
-      llvm::ArrayRef<Format> RTFormats, std::optional<Format> DSFormat,
-      ShaderContainer VS, ShaderContainer PS) override {
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsPs(llvm::StringRef Name, const InvocationState &IS,
+                     const BindingsDesc & /*unused on metal*/,
+                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                     llvm::ArrayRef<Format> RTFormats,
+                     std::optional<Format> DSFormat, ShaderContainer VS,
+                     ShaderContainer PS) override {
     NS::Error *Error = nullptr;
 
     // Load vertex shader.
-    const llvm::StringRef VSProgram = VS.Shader->getBuffer();
-    dispatch_data_t VSData = dispatch_data_create(
-        VSProgram.data(), VSProgram.size(), dispatch_get_main_queue(),
-        ^{
-        });
+    auto VSMetalIR = convertToMetalIR(P, Stages::Vertex, VS, IS);
+    if (!VSMetalIR)
+      return VSMetalIR.takeError();
+
+    dispatch_data_t VSData = IRMetalLibGetBytecodeData(VSMetalIR->Binary.get());
     MTL::Library *VSLib = Device->newLibrary(VSData, &Error);
     if (Error)
       return toError(Error);
@@ -728,11 +1147,11 @@ public:
     auto VSFnScope = llvm::scope_exit([&] { VSFn->release(); });
 
     // Load pixel/fragment shader.
-    const llvm::StringRef PSProgram = PS.Shader->getBuffer();
-    dispatch_data_t PSData = dispatch_data_create(
-        PSProgram.data(), PSProgram.size(), dispatch_get_main_queue(),
-        ^{
-        });
+    auto PSMetalIR = convertToMetalIR(P, Stages::Pixel, PS, IS);
+    if (!PSMetalIR)
+      return PSMetalIR.takeError();
+
+    dispatch_data_t PSData = IRMetalLibGetBytecodeData(PSMetalIR->Binary.get());
     MTL::Library *PSLib = Device->newLibrary(PSData, &Error);
     if (Error)
       return toError(Error);
@@ -852,6 +1271,12 @@ public:
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
 
+    if (auto Err = createRootSignature(P, IS))
+      return Err;
+
+    if (auto Err = createDescriptorHeap(P, IS))
+      return Err;
+
     if (auto Err = createBuffers(P, IS))
       return Err;
 
@@ -881,7 +1306,7 @@ public:
       CS.Shader = P.Shaders[0].Shader.get();
 
       auto PipelineStateOrErr =
-          createPipelineCs("Compute Pipeline State", Bindings, CS);
+          createPipelineCs("Compute Pipeline State", IS, Bindings, CS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
@@ -923,9 +1348,9 @@ public:
       llvm::SmallVector<Format> RTFormats;
       RTFormats.push_back(*FormatOrErr);
 
-      auto PipelineStateOrErr =
-          createPipelineVsPs("Graphics Pipeline State", Bindings, InputLayout,
-                             RTFormats, Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr = createPipelineVsPs(
+          "Graphics Pipeline State", IS, Bindings, InputLayout, RTFormats,
+          Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
