@@ -1,0 +1,163 @@
+#--- source.hlsl
+
+RWStructuredBuffer<bool> In : register(u0);
+RWStructuredBuffer<bool> OrTrueTrueOut : register(u1);
+RWStructuredBuffer<bool> OrTrueFalseOut : register(u2);
+RWStructuredBuffer<bool> OrTrueMixOut : register(u3);
+RWStructuredBuffer<bool> OrTrueMix2Out : register(u4);
+RWStructuredBuffer<bool> OrFalseFalseOut : register(u5);
+
+[numthreads(1,1,1)]
+void main() {
+  bool2x3 MatFalse = bool2x3(In[0], In[1], In[2],
+                            In[0], In[1], In[2]);
+  bool2x3 MatTrue = bool2x3(In[3], In[4], In[5],
+                            In[3], In[4], In[5]); 
+  bool2x3 MatMix  = bool2x3(In[0], In[1], In[2],
+                            In[3], In[4], In[5]); 
+  bool2x3 MatMix2  = bool2x3(In[3], In[4], In[5],
+                             In[0], In[1], In[2]); 
+
+  bool2x3 MatOrTrueTrue = or(MatTrue,MatTrue);
+  bool2x3 MatOrTrueFalse = or(MatTrue,MatFalse);
+  bool2x3 MatOrFalseFalse = or(MatFalse,MatFalse);
+  bool2x3 MatOrTrueMix1 = or(MatTrue,MatMix);
+  bool2x3 MatOrTrueMix2 = or(MatTrue,MatMix2);
+
+  const uint COLS = 3;          // bool2x3 => 2 rows, 3 columns
+  for(uint i = 0; i < 6; i++) {
+    uint row = i / COLS;
+    uint col = i % COLS;
+    OrTrueTrueOut[i]  = MatOrTrueTrue[row][col];
+    OrTrueFalseOut[i] = MatOrTrueFalse[row][col];
+    OrFalseFalseOut[i] = MatOrFalseFalse[row][col];
+    OrTrueMixOut[i]   = MatOrTrueMix1[row][col];
+    OrTrueMix2Out[i]  = MatOrTrueMix2[row][col];
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Data: [ 0, 0, 0, 1, 1, 1 ]
+  - Name: OrTrueTrueOut
+    Format: Int32
+    FillSize: 24
+  - Name: OrTrueTrueExpectedOut
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1 ]
+  - Name: OrTrueFalseOut
+    Format: Int32
+    FillSize: 24
+  - Name: OrTrueFalseExpectedOut
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1 ]
+  - Name: OrTrueMixOut
+    Format: Int32
+    FillSize: 24
+  - Name: OrTrueMixExpectedOut
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1 ]
+  - Name: OrTrueMix2Out
+    Format: Int32
+    FillSize: 24
+  - Name: OrTrueMix2ExpectedOut
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1 ]
+  - Name: OrFalseFalseOut
+    Format: Int32
+    FillSize: 24
+  - Name: OrFalseFalseExpectedOut
+    Format: Int32
+    Data: [ 0, 0, 0, 0, 0, 0 ]
+Results:
+  - Result: OrTrueTrueOut
+    Rule: BufferExact
+    Actual: OrTrueTrueOut
+    Expected: OrTrueTrueExpectedOut
+  - Result: OrTrueFalseOut
+    Rule: BufferExact
+    Actual: OrTrueFalseOut
+    Expected: OrTrueFalseExpectedOut
+  - Result: OrTrueMixOut
+    Rule: BufferExact
+    Actual: OrTrueMixOut
+    Expected: OrTrueMixExpectedOut
+  - Result: OrTrueMix2Out
+    Rule: BufferExact
+    Actual: OrTrueMix2Out
+    Expected: OrTrueMix2ExpectedOut
+  - Result: OrFalseFalseOut
+    Rule: BufferExact
+    Actual: OrFalseFalseOut
+    Expected: OrFalseFalseExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OrTrueTrueOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OrTrueFalseOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OrTrueMixOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OrTrueMix2Out
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OrFalseFalseOut
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8129
+# XFAIL: DXC && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/703
+# XFAIL: Clang && NV && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/704
+# XFAIL: Clang && Intel && Vulkan
+
+# Note: Metal does not support boolean matrix types. For
+# Vulkan KosmicKrisp and MoltenVK the output is always False.
+# UNSUPPORTED: Darwin
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
