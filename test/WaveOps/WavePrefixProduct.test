@@ -1,0 +1,57 @@
+#--- source.hlsl
+RWBuffer<int> value;
+
+[numthreads(4, 1, 1)]
+void main(uint3 threadID : SV_DispatchThreadID) {
+  // Lane | switch status | WavePrefixProduct(2) | WavePrefixProduct(10) | Final
+  // -----|---------------|----------------------|-----------------------|----------------
+  // 0    | active        | 1                    | 1                     | 1 * 1 * 1 = 1
+  // 1    | active        | 1 * 2                | 1 * 10                | 1 * 2 * 10 = 20
+  // 2    | inactive      | n/a                  | 1 * 10 * 10           | 1 * 100 = 100
+  // 3    | inactive      | n/a                  | 1 * 10 * 10 * 10      | 1 * 1000 = 1000
+  uint product = 1;
+  switch (value[threadID.x]) {
+    case 0:
+      product *= WavePrefixProduct(2);
+      break;
+    default:
+      break;
+  }
+  product *= WavePrefixProduct(10);
+  value[threadID.x] = product;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [ 1, 1, 1 ]
+Buffers:
+  - Name: value
+    Format: Int32
+    Data: [ 0, 0, 1, 2 ]
+  - Name: Expected
+    Format: Int32
+    Data: [ 1, 20, 100, 1000 ]
+Results:
+  - Result: Expected
+    Rule: BufferExact
+    Actual: value
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: value
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
