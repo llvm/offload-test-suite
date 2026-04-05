@@ -307,9 +307,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/156775
 # XFAIL: Clang
 
-# Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
-
 # Bug https://github.com/llvm/offload-test-suite/issues/627
 # XFAIL: QC && DirectX
 
