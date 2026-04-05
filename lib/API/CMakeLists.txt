@@ -19,7 +19,9 @@ if (OFFLOADTEST_ENABLE_D3D12)
 endif()
 
 if (APPLE)
-  list(APPEND api_sources MTL/MTLDevice.cpp)
+  list(APPEND api_sources MTL/MTLDevice.cpp
+                          MTL/MTLDescriptorHeap.cpp
+                          MTL/MTLTopLevelArgumentBuffer.cpp)
   list(APPEND api_libraries "-framework Metal"
                             "-framework MetalKit"
                             "-framework AppKit"
