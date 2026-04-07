@@ -714,7 +714,7 @@ public:
                                      "Failed to create Semaphore");
     }
 
-    return std::make_shared<VulkanFence>(Device, Semaphore, Name);
+    return std::make_unique<VulkanFence>(Device, Semaphore, Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
@@ -1243,7 +1243,6 @@ public:
     SubmitInfo.pNext = &TimelineSubmitInfo;
     SubmitInfo.commandBufferCount = 1;
     SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
-    SubmitInfo.pWaitDstStageMask = &WaitMask;
     SubmitInfo.signalSemaphoreCount = 1;
     SubmitInfo.pSignalSemaphores = &F->Semaphore;
 
@@ -2409,7 +2408,7 @@ public:
     auto FenceOrErr = this->createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    State.Fence = *FenceOrErr;
+    State.Fence = std::move(*FenceOrErr);
 
     llvm::outs() << "Physical device created.\n";
     if (auto Err = createShaderModules(P, State))

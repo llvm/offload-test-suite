@@ -604,7 +604,7 @@ public:
     if (!Event)
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create shared event.");
-    return std::make_shared<MTLFence>(Event, Name);
+    return std::make_unique<MTLFence>(Event, Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
@@ -634,7 +634,7 @@ public:
     auto FenceOrErr = this->createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    IS.Fence = *FenceOrErr;
+    IS.Fence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, IS))
       return Err;

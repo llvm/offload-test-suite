@@ -435,7 +435,7 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create event.");
 
-    return std::make_shared<DXFence>(Fence, Event, Name);
+    return std::make_unique<DXFence>(Fence, Event, Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
@@ -1717,7 +1717,7 @@ public:
     auto FenceOrErr = this->createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    State.Fence = *FenceOrErr;
+    State.Fence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, State))
       return Err;
