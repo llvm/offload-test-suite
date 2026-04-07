@@ -84,7 +84,7 @@ public:
 
   virtual Queue &getGraphicsQueue() = 0;
 
-  virtual llvm::Expected<std::shared_ptr<Fence>>
+  virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
 
   virtual llvm::Expected<std::shared_ptr<Buffer>>

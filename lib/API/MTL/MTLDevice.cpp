@@ -598,7 +598,7 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     MTL::SharedEvent *Event = Device->newSharedEvent();
     if (!Event)

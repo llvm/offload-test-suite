@@ -530,7 +530,7 @@ private:
     VkPipelineCache PipelineCache = VK_NULL_HANDLE;
     VkPipeline Pipeline = VK_NULL_HANDLE;
 
-    std::shared_ptr<Fence> Fence;
+    std::unique_ptr<Fence> Fence;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
@@ -694,7 +694,7 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     VkSemaphoreTypeCreateInfo TypeCreateInfo = {};
     TypeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;

@@ -417,7 +417,7 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Fence>>
+  llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     ComPtr<ID3D12Fence> Fence;
     if (auto Err = HR::toError(
