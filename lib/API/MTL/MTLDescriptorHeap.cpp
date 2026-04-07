@@ -1,6 +1,5 @@
-#define IR_RUNTIME_METALCPP
 #include "MTLDescriptorHeap.h"
-#include "metal_irconverter_runtime.h"
+#include "MetalIRConverter.h"
 
 using namespace offloadtest;
 
@@ -39,6 +38,11 @@ MTLDescriptorHeap::create(MTL::Device *Device,
     return llvm::createStringError(std::errc::not_enough_memory,
                                    "Failed to create MTLDescriptorHeap.");
   return std::make_unique<MTLDescriptorHeap>(Desc, Buf);
+}
+
+MTLDescriptorHeap::~MTLDescriptorHeap() {
+  if (Buffer)
+    Buffer->release();
 }
 
 MTLGPUDescriptorHandle

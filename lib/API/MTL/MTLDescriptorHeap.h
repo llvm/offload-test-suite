@@ -12,17 +12,23 @@
 #ifndef OFFLOADTEST_API_MTL_MTLDESCRIPTORHEAP_H
 #define OFFLOADTEST_API_MTL_MTLDESCRIPTORHEAP_H
 
-#include "Metal/Metal.hpp"
 #include "llvm/Support/Error.h"
 #include <memory>
 
+// Forward declarations
+namespace MTL {
+class Device;
+class Buffer;
+class RenderCommandEncoder;
+class ComputeCommandEncoder;
+} // namespace MTL
 struct IRDescriptorTableEntry;
 
 namespace offloadtest {
 struct MTLGPUDescriptorHandle {
   MTLGPUDescriptorHandle &Offset(int32_t OffsetInDescriptors);
 
-  MTL::GPUAddress Ptr;
+  uint64_t Ptr;
 };
 
 enum class MTLDescriptorHeapType {
@@ -49,10 +55,7 @@ public:
 
   MTLDescriptorHeap(const MTLDescriptorHeapDesc &Desc, MTL::Buffer *Buffer)
       : Desc(Desc), Buffer(Buffer) {}
-  ~MTLDescriptorHeap() {
-    if (Buffer)
-      Buffer->release();
-  }
+  ~MTLDescriptorHeap();
 
   MTLGPUDescriptorHandle getGPUDescriptorHandleForHeapStart() const;
 
