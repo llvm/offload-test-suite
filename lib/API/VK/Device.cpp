@@ -1154,8 +1154,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeCommandBuffer(InvocationState &IS,
-                                   VkPipelineStageFlags WaitMask = 0) {
+  llvm::Error executeCommandBuffer(InvocationState &IS) {
     if (vkEndCommandBuffer(IS.CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
@@ -1164,7 +1163,6 @@ public:
     SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     SubmitInfo.commandBufferCount = 1;
     SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
-    SubmitInfo.pWaitDstStageMask = &WaitMask;
     VkFenceCreateInfo FenceInfo = {};
     FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence Fence;
@@ -2365,7 +2363,7 @@ public:
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed compute command buffer.\n";
     if (auto Err = readBackData(P, State))
