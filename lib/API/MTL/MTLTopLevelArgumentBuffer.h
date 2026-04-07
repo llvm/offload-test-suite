@@ -65,7 +65,7 @@ public:
 
   // Binds descriptor table to the argument buffer.
   void setRootDescriptorTable(uint32_t Index,
-                              METAL_GPU_DESCRIPTOR_HANDLE BaseHandle) const;
+                              MTLGPUDescriptorHandle BaseHandle) const;
 
   // Bind the argument buffer to the render command encoder.
   void bind(MTL::RenderCommandEncoder *Encoder) const;

@@ -4,16 +4,26 @@
 
 using namespace offloadtest;
 
-METAL_GPU_DESCRIPTOR_HANDLE &
-METAL_GPU_DESCRIPTOR_HANDLE::Offset(int32_t OffsetInDescriptors) {
-  ptr = MTL::GPUAddress(int64_t(ptr) + int64_t(OffsetInDescriptors) *
+static NS::UInteger getDescriptorHeapBindPoint(MTLDescriptorHeapType Type) {
+  switch (Type) {
+  case MTLDescriptorHeapType::CBV_SRV_UAV:
+    return kIRDescriptorHeapBindPoint;
+  case MTLDescriptorHeapType::Sampler:
+    return kIRSamplerHeapBindPoint;
+  }
+  llvm_unreachable("All cases handled.");
+}
+
+MTLGPUDescriptorHandle &
+MTLGPUDescriptorHandle::Offset(int32_t OffsetInDescriptors) {
+  Ptr = MTL::GPUAddress(int64_t(Ptr) + int64_t(OffsetInDescriptors) *
                                            sizeof(IRDescriptorTableEntry));
   return *this;
 }
 
 llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
 MTLDescriptorHeap::create(MTL::Device *Device,
-                          const METAL_DESCRIPTOR_HEAP_DESC &Desc) {
+                          const MTLDescriptorHeapDesc &Desc) {
   if (!Device)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "Invalid MTL::Device pointer.");
@@ -31,9 +41,9 @@ MTLDescriptorHeap::create(MTL::Device *Device,
   return std::make_unique<MTLDescriptorHeap>(Desc, Buf);
 }
 
-METAL_GPU_DESCRIPTOR_HANDLE
+MTLGPUDescriptorHandle
 MTLDescriptorHeap::getGPUDescriptorHandleForHeapStart() const {
-  return METAL_GPU_DESCRIPTOR_HANDLE{Buffer->gpuAddress()};
+  return MTLGPUDescriptorHandle{Buffer->gpuAddress()};
 }
 
 IRDescriptorTableEntry *
@@ -45,12 +55,7 @@ MTLDescriptorHeap::getEntryHandle(uint32_t Index) const {
 void MTLDescriptorHeap::bind(MTL::RenderCommandEncoder *Encoder) {
   Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   // Dynamic resource indexing
-  const NS::UInteger BindPoint =
-      Desc.Type == METAL_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-          ? kIRDescriptorHeapBindPoint
-      : Desc.Type == METAL_DESCRIPTOR_HEAP_TYPE_SAMPLER
-          ? kIRSamplerHeapBindPoint
-          : 0; // Should not happen.
+  const NS::UInteger BindPoint = getDescriptorHeapBindPoint(Desc.Type);
   Encoder->setVertexBuffer(Buffer, 0, BindPoint);
   Encoder->setFragmentBuffer(Buffer, 0, BindPoint);
 }
@@ -58,11 +63,6 @@ void MTLDescriptorHeap::bind(MTL::RenderCommandEncoder *Encoder) {
 void MTLDescriptorHeap::bind(MTL::ComputeCommandEncoder *Encoder) {
   Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   // Dynamic resource indexing
-  const NS::UInteger BindPoint =
-      Desc.Type == METAL_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV
-          ? kIRDescriptorHeapBindPoint
-      : Desc.Type == METAL_DESCRIPTOR_HEAP_TYPE_SAMPLER
-          ? kIRSamplerHeapBindPoint
-          : 0; // Should not happen.
+  const NS::UInteger BindPoint = getDescriptorHeapBindPoint(Desc.Type);
   Encoder->setBuffer(Buffer, 0, BindPoint);
 }

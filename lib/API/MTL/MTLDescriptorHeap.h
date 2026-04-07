@@ -19,19 +19,19 @@
 struct IRDescriptorTableEntry;
 
 namespace offloadtest {
-struct METAL_GPU_DESCRIPTOR_HANDLE {
-  METAL_GPU_DESCRIPTOR_HANDLE &Offset(int32_t OffsetInDescriptors);
+struct MTLGPUDescriptorHandle {
+  MTLGPUDescriptorHandle &Offset(int32_t OffsetInDescriptors);
 
-  MTL::GPUAddress ptr;
+  MTL::GPUAddress Ptr;
 };
 
-enum METAL_DESCRIPTOR_HEAP_TYPE {
-  METAL_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-  METAL_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+enum class MTLDescriptorHeapType {
+  CBV_SRV_UAV,
+  Sampler,
 };
 
-struct METAL_DESCRIPTOR_HEAP_DESC {
-  METAL_DESCRIPTOR_HEAP_TYPE Type;
+struct MTLDescriptorHeapDesc {
+  MTLDescriptorHeapType Type;
   uint32_t NumDescriptors;
 };
 
@@ -40,21 +40,21 @@ struct METAL_DESCRIPTOR_HEAP_DESC {
 // by the argument buffer for shader resource binding with the explicit root
 // signature layout.
 class MTLDescriptorHeap {
-  METAL_DESCRIPTOR_HEAP_DESC Desc;
+  MTLDescriptorHeapDesc Desc;
   MTL::Buffer *Buffer;
 
 public:
   static llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
-  create(MTL::Device *Device, const METAL_DESCRIPTOR_HEAP_DESC &Desc);
+  create(MTL::Device *Device, const MTLDescriptorHeapDesc &Desc);
 
-  MTLDescriptorHeap(const METAL_DESCRIPTOR_HEAP_DESC &Desc, MTL::Buffer *Buffer)
+  MTLDescriptorHeap(const MTLDescriptorHeapDesc &Desc, MTL::Buffer *Buffer)
       : Desc(Desc), Buffer(Buffer) {}
   ~MTLDescriptorHeap() {
     if (Buffer)
       Buffer->release();
   }
 
-  METAL_GPU_DESCRIPTOR_HANDLE getGPUDescriptorHandleForHeapStart() const;
+  MTLGPUDescriptorHandle getGPUDescriptorHandleForHeapStart() const;
 
   IRDescriptorTableEntry *getEntryHandle(uint32_t Index) const;
 
