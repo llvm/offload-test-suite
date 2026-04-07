@@ -409,17 +409,16 @@ class MTLDevice : public offloadtest::Device {
           << "No descriptors found, skipping descriptor heap creation.\n";
       return llvm::Error::success();
     }
-    const METAL_DESCRIPTOR_HEAP_DESC HeapDesc = {
-        METAL_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        P.getDescriptorCountWithFlattenedArrays()};
+    const uint32_t DescriptorCount = P.getDescriptorCountWithFlattenedArrays();
+    const MTLDescriptorHeapDesc HeapDesc = {MTLDescriptorHeapType::CBV_SRV_UAV,
+                                            DescriptorCount};
 
     auto DescHeapOrErr = MTLDescriptorHeap::create(Device, HeapDesc);
     if (!DescHeapOrErr)
       return DescHeapOrErr.takeError();
 
     State.DescHeap = std::move(*DescHeapOrErr);
-    llvm::outs() << "Descriptor heap created with "
-                 << P.getDescriptorCountWithFlattenedArrays()
+    llvm::outs() << "Descriptor heap created with " << DescriptorCount
                  << " descriptors.\n";
     return llvm::Error::success();
   }
@@ -881,7 +880,7 @@ class MTLDevice : public offloadtest::Device {
         llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
 
     CmdEncoder->setComputePipelineState(IS.ComputePipeline);
-    METAL_GPU_DESCRIPTOR_HANDLE Handle = {};
+    MTLGPUDescriptorHandle Handle = {};
     if (IS.DescHeap) {
       IS.DescHeap->bind(CmdEncoder);
       Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();

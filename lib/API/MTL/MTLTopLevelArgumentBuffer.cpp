@@ -161,9 +161,8 @@ void MTLTopLevelArgumentBuffer::setRootUnorderedAccessView(
 }
 
 void MTLTopLevelArgumentBuffer::setRootDescriptorTable(
-    uint32_t Index, METAL_GPU_DESCRIPTOR_HANDLE BaseHandle) const {
-  setResource<IRResourceTypeTable, METAL_GPU_DESCRIPTOR_HANDLE>(Index,
-                                                                BaseHandle);
+    uint32_t Index, MTLGPUDescriptorHandle BaseHandle) const {
+  setResource<IRResourceTypeTable, MTLGPUDescriptorHandle>(Index, BaseHandle);
 }
 
 void MTLTopLevelArgumentBuffer::bind(MTL::RenderCommandEncoder *Encoder) const {
