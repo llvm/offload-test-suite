@@ -13,12 +13,7 @@
 #define OFFLOADTEST_API_MTL_MTLTOPLEVELARGUMENTBUFFER_H
 
 #include "MTLDescriptorHeap.h"
-#include "Metal/Metal.hpp"
-#include "metal_irconverter.h"
-#include "llvm/Support/Error.h"
-#include <memory>
-
-struct IRDescriptorTableEntry;
+#include "MetalIRConverter.h"
 
 namespace offloadtest {
 // Manages a Metal buffer that serves as the top-level argument buffer for
