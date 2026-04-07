@@ -13,9 +13,12 @@
 
 #include "llvm/Support/Error.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace offloadtest {
+
+class Buffer;
 
 /// Determines whether an encoder automatically inserts barriers between
 /// commands.
@@ -42,6 +45,12 @@ public:
   GPUAPI getAPI() const { return API; }
   EncoderMode getMode() const { return Mode; }
   bool isSerial() const { return Mode == EncoderMode::Serial; }
+
+  /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
+  /// \p DstOffset.
+  virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
+                                         Buffer &Dst, size_t DstOffset,
+                                         size_t Size) = 0;
 
   /// Finish recording. No further commands may be recorded after this call.
   virtual void endEncoding() = 0;

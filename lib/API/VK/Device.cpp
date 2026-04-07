@@ -662,6 +662,19 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
+    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    VkBufferCopy Region = {};
+    Region.srcOffset = SrcOffset;
+    Region.dstOffset = DstOffset;
+    Region.size = Size;
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
+    return llvm::Error::success();
+  }
+
   void barrier() override {
     CB.flushBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
