@@ -1,6 +1,4 @@
-#define IR_RUNTIME_METALCPP
 #include "MTLTopLevelArgumentBuffer.h"
-#include "metal_irconverter_runtime.h"
 
 using namespace offloadtest;
 
