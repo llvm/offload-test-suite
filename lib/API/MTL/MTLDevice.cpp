@@ -316,8 +316,9 @@ class MTLDevice : public offloadtest::Device {
                                                            Height, false);
         break;
       case ResourceKind::Sampler:
-      case ResourceKind::SamplerComparison:
         llvm_unreachable("Not implemented yet.");
+      case ResourceKind::SampledTexture2D:
+        llvm_unreachable("SampledTextures aren't supported in Metal.");
       case ResourceKind::StructuredBuffer:
       case ResourceKind::RWStructuredBuffer:
       case ResourceKind::ByteAddressBuffer:
@@ -617,33 +618,16 @@ public:
 private:
   void queryCapabilities() {}
 };
-
-class MTLContext {
-  MTLContext() = default;
-  ~MTLContext() {}
-  MTLContext(const MTLContext &) = delete;
-
-  llvm::SmallVector<std::shared_ptr<MTLDevice>> Devices;
-
-public:
-  static MTLContext &instance() {
-    static MTLContext Ctx;
-    return Ctx;
-  }
-
-  llvm::Error initialize() {
-    MTL::Device *MetalDevice = MTL::CreateSystemDefaultDevice();
-    MTL::CommandQueue *MetalQueue = MetalDevice->newCommandQueue();
-
-    auto DefaultDev = std::make_shared<MTLDevice>(MetalDevice, MetalQueue);
-    Devices.push_back(DefaultDev);
-    Device::registerDevice(std::static_pointer_cast<Device>(DefaultDev));
-    return llvm::Error::success();
-  }
-};
-
 } // namespace
 
-llvm::Error Device::initializeMtlDevices(const DeviceConfig /*Config*/) {
-  return MTLContext::instance().initialize();
+llvm::Error offloadtest::initializeMetalDevices(
+    const DeviceConfig /*Config*/,
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
+  MTL::Device *MetalDevice = MTL::CreateSystemDefaultDevice();
+  MTL::CommandQueue *MetalQueue = MetalDevice->newCommandQueue();
+
+  auto DefaultDev = std::make_unique<MTLDevice>(MetalDevice, MetalQueue);
+  Devices.push_back(std::move(DefaultDev));
+
+  return llvm::Error::success();
 }

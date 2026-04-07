@@ -20,68 +20,28 @@
 
 using namespace offloadtest;
 
-namespace {
-class DeviceContext {
-public:
-  using DeviceArray = Device::DeviceArray;
-  using DeviceIterator = Device::DeviceIterator;
-
-private:
-  DeviceArray Devices;
-
-  DeviceContext() = default;
-  ~DeviceContext() = default;
-  DeviceContext(const DeviceContext &) = delete;
-
-public:
-  static DeviceContext &instance() {
-    static DeviceContext Ctx;
-    return Ctx;
-  }
-
-  void registerDevice(std::shared_ptr<Device> D) { Devices.push_back(D); }
-  void unregisterDevices() { Devices.clear(); }
-
-  DeviceIterator begin() { return Devices.begin(); }
-
-  DeviceIterator end() { return Devices.end(); }
-};
-} // namespace
-
 Queue::~Queue() {}
 
 Device::~Device() {}
 
-void Device::registerDevice(std::shared_ptr<Device> D) {
-  DeviceContext::instance().registerDevice(D);
-}
+llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
+offloadtest::initializeDevices(const DeviceConfig Config) {
+  llvm::SmallVector<std::unique_ptr<Device>> Devices;
 
-llvm::Error Device::initialize(const DeviceConfig Config) {
 #ifdef OFFLOADTEST_ENABLE_D3D12
-  if (auto Err = initializeDXDevices(Config))
+  if (auto Err = initializeDX12Devices(Config, Devices))
     return Err;
 #endif
+
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVulkanDevices(Config))
+  if (auto Err = initializeVulkanDevices(Config, Devices))
     return Err;
-  // Validation layers have internal state which require a specific destruction
-  // ordering. Relying on the global dtor call for this is unreliable and can
-  // cause a null-deref in the validation layers during the final
-  // vkDestroyInstance. This is a known limitation of the validation layers
-  // which explicitely requires using atexit.
-  atexit(Device::cleanupVulkanDevices);
 #endif
+
 #ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = initializeMtlDevices(Config))
+  if (auto Err = initializeMetalDevices(Config, Devices))
     return Err;
 #endif
-  return llvm::Error::success();
+
+  return Devices;
 }
-
-void Device::uninitialize() { DeviceContext::instance().unregisterDevices(); }
-
-Device::DeviceIterator Device::begin() {
-  return DeviceContext::instance().begin();
-}
-
-Device::DeviceIterator Device::end() { return DeviceContext::instance().end(); }

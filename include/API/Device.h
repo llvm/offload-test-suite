@@ -86,32 +86,19 @@ public:
 
   llvm::StringRef getDescription() const { return Description; }
   llvm::StringRef getDriverName() const { return DriverName; }
-
-  static void registerDevice(std::shared_ptr<Device> D);
-  static llvm::Error initialize(const DeviceConfig Config);
-  static void uninitialize();
-
-  using DeviceArray = llvm::SmallVector<std::shared_ptr<Device>>;
-  using DeviceIterator = DeviceArray::iterator;
-  using DeviceRange = llvm::iterator_range<DeviceIterator>;
-
-  static DeviceIterator begin();
-  static DeviceIterator end();
-  static inline DeviceRange devices() { return DeviceRange(begin(), end()); }
-
-#ifdef OFFLOADTEST_ENABLE_D3D12
-  static llvm::Error initializeDXDevices(const DeviceConfig Config);
-#endif
-
-#ifdef OFFLOADTEST_ENABLE_VULKAN
-  static llvm::Error initializeVulkanDevices(const DeviceConfig Config);
-  static void cleanupVulkanDevices();
-#endif
-
-#ifdef OFFLOADTEST_ENABLE_METAL
-  static llvm::Error initializeMtlDevices(const DeviceConfig Config);
-#endif
 };
+
+llvm::Error
+initializeDX12Devices(const DeviceConfig Config,
+                      llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices);
+llvm::Error initializeVulkanDevices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices);
+llvm::Error
+initializeMetalDevices(const DeviceConfig Config,
+                       llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices);
+llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
+initializeDevices(const DeviceConfig Config);
 
 } // namespace offloadtest
 

@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "Support/Pipeline.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 
 #include <algorithm>
@@ -78,8 +79,9 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
+  case ResourceKind::SampledTexture2D:
+    return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   }
   llvm_unreachable("All cases handled");
 }
@@ -148,7 +150,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
@@ -158,6 +160,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
@@ -167,8 +170,19 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an image view!");
+  }
+  llvm_unreachable("All cases handled");
+}
+
+static VkImageType getVKImageType(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
+    return VK_IMAGE_TYPE_2D;
+  default:
+    llvm_unreachable("Unsupported image kind");
   }
   llvm_unreachable("All cases handled");
 }
@@ -334,6 +348,27 @@ static bool isExtensionSupported(
   return false;
 }
 
+struct VulkanInstance {
+  VkInstance Instance;
+  VkDebugUtilsMessengerEXT DebugMessenger;
+
+  VulkanInstance(VkInstance Instance, VkDebugUtilsMessengerEXT DebugMessenger)
+      : Instance(Instance), DebugMessenger(DebugMessenger) {}
+  VulkanInstance(const VulkanInstance &) = delete;
+  VulkanInstance(VulkanInstance &&) = delete;
+  VulkanInstance &operator=(const VulkanInstance &) = delete;
+  VulkanInstance &operator=(VulkanInstance &&) = delete;
+  ~VulkanInstance() {
+    if (DebugMessenger) {
+      auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+          Instance, "vkDestroyDebugUtilsMessengerEXT");
+      assert(Func != nullptr);
+      Func(Instance, DebugMessenger, nullptr);
+    }
+    vkDestroyInstance(Instance, nullptr);
+  }
+};
+
 namespace {
 
 class VulkanBuffer : public offloadtest::Buffer {
@@ -366,7 +401,8 @@ public:
 
 class VulkanDevice : public offloadtest::Device {
 private:
-  VkPhysicalDevice PhysicalDevice;
+  std::shared_ptr<VulkanInstance> Instance;
+  VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
   VkPhysicalDeviceProperties Props;
   VkPhysicalDeviceProperties2 Props2;
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
@@ -406,12 +442,12 @@ private:
 
     bool isImage() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-             DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+             DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     }
 
     bool isSampler() const {
-      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
-             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER;
     }
 
     bool isBuffer() const {
@@ -444,21 +480,21 @@ private:
   };
 
   struct InvocationState {
-    VkCommandPool CmdPool;
-    VkCommandBuffer CmdBuffer;
-    VkPipelineLayout PipelineLayout;
-    VkDescriptorPool Pool = nullptr;
-    VkPipelineCache PipelineCache;
-    VkPipeline Pipeline;
+    VkCommandPool CmdPool = VK_NULL_HANDLE;
+    VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
+    VkPipelineCache PipelineCache = VK_NULL_HANDLE;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
 
     // FrameBuffer associated data for offscreen rendering.
-    VkFramebuffer FrameBuffer;
+    VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
     ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
                                           nullptr};
     ImageRef DepthStencil = {0, 0, 0};
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
-    VkRenderPass RenderPass;
+    VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
 
     llvm::SmallVector<CompiledShader> Shaders;
@@ -478,8 +514,9 @@ private:
   };
 
 public:
-  static llvm::Expected<std::shared_ptr<VulkanDevice>>
-  create(VkPhysicalDevice PhysicalDevice,
+  static llvm::Expected<std::unique_ptr<VulkanDevice>>
+  create(std::shared_ptr<VulkanInstance> Instance,
+         VkPhysicalDevice PhysicalDevice,
          llvm::SmallVector<VkLayerProperties, 0> InstanceLayers) {
     VkPhysicalDeviceProperties Props;
     vkGetPhysicalDeviceProperties(PhysicalDevice, &Props);
@@ -561,16 +598,16 @@ public:
 
     const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
 
-    return std::make_shared<VulkanDevice>(PhysicalDevice, Props, Device,
-                                          std::move(GraphicsQueue),
+    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
+                                          Device, std::move(GraphicsQueue),
                                           std::move(InstanceLayers));
   }
 
-  VulkanDevice(VkPhysicalDevice P, VkPhysicalDeviceProperties Props, VkDevice D,
-               VulkanQueue Q,
+  VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
+               VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
                llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
-      : PhysicalDevice(P), Props(Props), Device(D), GraphicsQueue(std::move(Q)),
-        InstanceLayers(std::move(InstanceLayers)) {
+      : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
+        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -846,7 +883,7 @@ public:
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
@@ -905,7 +942,7 @@ public:
     SamplerInfo.anisotropyEnable = VK_FALSE;
     SamplerInfo.maxAnisotropy = 1.0f;
     SamplerInfo.compareEnable =
-        R.Kind == ResourceKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+        S.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
     SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
     SamplerInfo.minLod = S.MinLOD;
     SamplerInfo.maxLod = S.MaxLOD;
@@ -945,6 +982,17 @@ public:
         auto ExImageRef = createImage(R, *ExHostBuf);
         if (!ExImageRef)
           return ExImageRef.takeError();
+
+        // Sampled textures use combined-image-sampler descriptors and need
+        // both valid image and sampler handles.
+        if (R.isSampledTexture()) {
+          BufferRef NullHost = {0, 0};
+          auto ExSamplerRef = createSampler(R, NullHost);
+          if (!ExSamplerRef)
+            return ExSamplerRef.takeError();
+          ExImageRef->Image.Sampler = ExSamplerRef->Image.Sampler;
+        }
+
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
         auto ExDeviceBuf = createBuffer(
@@ -991,7 +1039,7 @@ public:
     // Create an optimal image used as the depth stencil attachment
     VkImageCreateInfo ImageCi = {};
     ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCi.imageType = VK_IMAGE_TYPE_2D;
+    ImageCi.imageType = getVKImageType(ResourceKind::Texture2D);
     ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     // Use example's height and width
     ImageCi.extent = {
@@ -1106,8 +1154,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeCommandBuffer(InvocationState &IS,
-                                   VkPipelineStageFlags WaitMask = 0) {
+  llvm::Error executeCommandBuffer(InvocationState &IS) {
     if (vkEndCommandBuffer(IS.CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
@@ -1116,7 +1163,6 @@ public:
     SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     SubmitInfo.commandBufferCount = 1;
     SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
-    SubmitInfo.pWaitDstStageMask = &WaitMask;
     VkFenceCreateInfo FenceInfo = {};
     FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     VkFence Fence;
@@ -1524,7 +1570,7 @@ public:
     std::array<VkImageView, 2> Views = {};
     VkImageViewCreateInfo ViewCreateInfo = {};
     ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ViewCreateInfo.viewType = getImageViewType(ResourceKind::Texture2D);
     ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
                                         P.Bindings.RTargetBufferPtr->Channels);
     ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
@@ -1544,7 +1590,7 @@ public:
 
     VkImageViewCreateInfo DepthStencilViewCi = {};
     DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    DepthStencilViewCi.viewType = getImageViewType(ResourceKind::Texture2D);
     DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
     DepthStencilViewCi.subresourceRange = {};
     DepthStencilViewCi.subresourceRange.aspectMask =
@@ -2194,7 +2240,7 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error cleanup(InvocationState &IS) {
+  void cleanup(InvocationState &IS) {
     vkQueueWaitIdle(GraphicsQueue.Queue);
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(Device, V, nullptr);
@@ -2209,6 +2255,11 @@ public:
           vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
         } else if (R.isSampler()) {
           vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
+        } else if (R.DescriptorType ==
+                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
+          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
+          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
         } else {
           assert(R.isImage());
           vkDestroyImage(Device, ResRef.Image.Image, nullptr);
@@ -2245,14 +2296,17 @@ public:
       vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }
 
-    vkDestroyPipeline(Device, IS.Pipeline, nullptr);
+    if (IS.Pipeline)
+      vkDestroyPipeline(Device, IS.Pipeline, nullptr);
 
     for (auto &S : IS.Shaders)
       vkDestroyShaderModule(Device, S.Shader, nullptr);
 
-    vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
+    if (IS.PipelineCache)
+      vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
 
-    vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
+    if (IS.PipelineLayout)
+      vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
 
     for (auto &L : IS.DescriptorSetLayouts)
       vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -2260,13 +2314,17 @@ public:
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
 
-    vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
-
-    return llvm::Error::success();
+    if (IS.CmdPool)
+      vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
+    auto CleanupState = llvm::scope_exit([&]() {
+      cleanup(State);
+      llvm::outs() << "Cleanup complete.\n";
+    });
+
     if (auto Err = createDevice(State))
       return Err;
     llvm::outs() << "Physical device created.\n";
@@ -2305,137 +2363,102 @@ public:
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed compute command buffer.\n";
     if (auto Err = readBackData(P, State))
       return Err;
     llvm::outs() << "Compute pipeline created.\n";
 
-    if (auto Err = cleanup(State))
-      return Err;
-    llvm::outs() << "Cleanup complete.\n";
-    return llvm::Error::success();
-  }
-};
-
-class VKContext {
-private:
-  VkInstance Instance = VK_NULL_HANDLE;
-  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
-  llvm::SmallVector<std::shared_ptr<VulkanDevice>> Devices;
-
-  VKContext() = default;
-  ~VKContext() { cleanup(); }
-  VKContext(const VKContext &) = delete;
-
-public:
-  static VKContext &instance() {
-    static VKContext Ctx;
-    return Ctx;
-  }
-
-  void cleanup() {
-    // Free devices before destroying the instance
-    Devices.clear();
-
-#ifndef NDEBUG
-    auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-        Instance, "vkDestroyDebugUtilsMessengerEXT");
-    if (Func != nullptr) {
-      Func(Instance, DebugMessenger, nullptr);
-    }
-#endif
-    vkDestroyInstance(Instance, NULL);
-    Instance = VK_NULL_HANDLE;
-  }
-
-  llvm::Error initialize(const DeviceConfig Config) {
-
-    // Request the highest supported API version
-    uint32_t ApiVersion = 0;
-    vkEnumerateInstanceVersion(&ApiVersion);
-
-    VkApplicationInfo AppInfo = {};
-    AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    AppInfo.pApplicationName = "OffloadTest";
-    AppInfo.apiVersion = ApiVersion;
-
-    VkInstanceCreateInfo CreateInfo = {};
-    CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    CreateInfo.pApplicationInfo = &AppInfo;
-
-    llvm::SmallVector<const char *> EnabledInstanceExtensions;
-    llvm::SmallVector<const char *> EnabledLayers;
-#if __APPLE__
-    // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
-    // extension is required, so we can just force this one on. If it fails, the
-    // whole device would fail anyways.
-    EnabledInstanceExtensions.push_back(
-        VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
-
-    const llvm::SmallVector<VkLayerProperties, 0> AvailableInstanceLayers =
-        queryInstanceLayers();
-    if (Config.EnableValidationLayer) {
-      const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
-      if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
-        EnabledLayers.push_back(ValidationLayer.data());
-    }
-    const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
-        queryInstanceExtensions(nullptr);
-    if (Config.EnableDebugLayer) {
-      const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-      if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
-        EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
-    }
-
-    CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
-    CreateInfo.enabledLayerCount = EnabledLayers.size();
-    CreateInfo.ppEnabledExtensionNames = EnabledInstanceExtensions.data();
-    CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
-
-    const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a base Vulkan device");
-    if (Res)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error: %d",
-                                     Res);
-
-#ifndef NDEBUG
-    DebugMessenger = registerDebugUtilCallback(Instance);
-#endif
-
-    uint32_t DeviceCount = 0;
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to get device count");
-    std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                   PhysicalDevices.data()))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to enumerate devices");
-    for (const auto &PDev : PhysicalDevices) {
-      auto DeviceOrErr =
-          VulkanDevice::create(PDev, std::move(AvailableInstanceLayers));
-      if (!DeviceOrErr) {
-        return DeviceOrErr.takeError();
-      }
-      const std::shared_ptr<VulkanDevice> Dev = *DeviceOrErr;
-      Devices.push_back(Dev);
-      Device::registerDevice(std::static_pointer_cast<Device>(Dev));
-    }
-
     return llvm::Error::success();
   }
 };
 } // namespace
 
-llvm::Error Device::initializeVulkanDevices(const DeviceConfig Config) {
-  return VKContext::instance().initialize(Config);
-}
+llvm::Error offloadtest::initializeVulkanDevices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
+  // Request the highest supported API version
+  uint32_t ApiVersion = 0;
+  vkEnumerateInstanceVersion(&ApiVersion);
 
-void Device::cleanupVulkanDevices() { VKContext::instance().cleanup(); }
+  VkApplicationInfo AppInfo = {};
+  AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+  AppInfo.pApplicationName = "OffloadTest";
+  AppInfo.apiVersion = ApiVersion;
+
+  VkInstanceCreateInfo CreateInfo = {};
+  CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  CreateInfo.pApplicationInfo = &AppInfo;
+
+  llvm::SmallVector<const char *> EnabledInstanceExtensions;
+  llvm::SmallVector<const char *> EnabledLayers;
+#if __APPLE__
+  // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
+  // extension is required, so we can just force this one on. If it fails, the
+  // whole device would fail anyways.
+  EnabledInstanceExtensions.push_back(
+      VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+  const llvm::SmallVector<VkLayerProperties, 0> AvailableInstanceLayers =
+      queryInstanceLayers();
+  if (Config.EnableValidationLayer) {
+    const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
+    if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
+      EnabledLayers.push_back(ValidationLayer.data());
+  }
+  const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
+      queryInstanceExtensions(nullptr);
+  if (Config.EnableDebugLayer) {
+    const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
+    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
+      EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
+  }
+
+  CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
+  CreateInfo.enabledLayerCount = EnabledLayers.size();
+  CreateInfo.ppEnabledExtensionNames = EnabledInstanceExtensions.data();
+  CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
+
+  VkInstance Instance = VK_NULL_HANDLE;
+  const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+  if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Cannot find a base Vulkan device");
+  if (Res)
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Unknown Vulkan initialization error: %d",
+                                   Res);
+
+#ifndef NDEBUG
+  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
+#else
+  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
+#endif
+
+  const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
+      std::make_shared<VulkanInstance>(Instance, DebugMessenger);
+
+  uint32_t DeviceCount = 0;
+  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Failed to get device count");
+  std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
+  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                 PhysicalDevices.data()))
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Failed to enumerate devices");
+
+  for (const auto &PDev : PhysicalDevices) {
+    auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
+                                            AvailableInstanceLayers);
+    if (!DeviceOrErr) {
+      return DeviceOrErr.takeError();
+    }
+    Devices.push_back(std::move(*DeviceOrErr));
+  }
+
+  return llvm::Error::success();
+}

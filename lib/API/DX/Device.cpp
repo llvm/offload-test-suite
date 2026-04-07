@@ -134,8 +134,9 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::RWTexture2D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     return D3D12_RESOURCE_DIMENSION_UNKNOWN;
+  case ResourceKind::SampledTexture2D:
+    llvm_unreachable("SampledTextures aren't supported in DirectX!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -160,8 +161,9 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
     return CBV;
 
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     return SAMPLER;
+  case ResourceKind::SampledTexture2D:
+    llvm_unreachable("Sampled textures aren't supported in DirectX!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -231,8 +233,9 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an SRV type!");
+  case ResourceKind::SampledTexture2D:
+    llvm_unreachable("Sampled textures aren't supported in DirectX!");
   }
   return Desc;
 }
@@ -269,8 +272,9 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   case ResourceKind::Texture2D:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not a UAV type!");
+  case ResourceKind::SampledTexture2D:
+    llvm_unreachable("Sampled textures aren't supported in DirectX!");
   }
   return Desc;
 }
@@ -409,8 +413,8 @@ public:
     return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
   }
 
-  static llvm::Expected<DXDevice> create(ComPtr<IDXCoreAdapter> Adapter,
-                                         const DeviceConfig &Config) {
+  static llvm::Expected<std::unique_ptr<offloadtest::Device>>
+  create(ComPtr<IDXCoreAdapter> Adapter, const DeviceConfig &Config) {
     ComPtr<ID3D12Device> Device;
     if (auto Err =
             HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
@@ -434,8 +438,8 @@ public:
       return GraphicsQueueOrErr.takeError();
     const DXQueue GraphicsQueue = *GraphicsQueueOrErr;
 
-    return DXDevice(Adapter, Device, std::move(GraphicsQueue),
-                    std::string(DescVec.data()));
+    return std::make_unique<DXDevice>(Adapter, Device, std::move(GraphicsQueue),
+                                      std::string(DescVec.data()));
   }
 
   const Capabilities &getCapabilities() override {
@@ -1735,7 +1739,9 @@ public:
 };
 } // namespace
 
-llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
+llvm::Error offloadtest::initializeDX12Devices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
 #ifdef _WIN32
   if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
     ComPtr<ID3D12Debug1> Debug1;
@@ -1776,8 +1782,7 @@ llvm::Error Device::initializeDXDevices(const DeviceConfig Config) {
     auto ExDevice = DXDevice::create(Adapter, Config);
     if (!ExDevice)
       return ExDevice.takeError();
-    auto ShPtr = std::make_shared<DXDevice>(*ExDevice);
-    Device::registerDevice(std::static_pointer_cast<Device>(ShPtr));
+    Devices.push_back(std::move(*ExDevice));
   }
   return llvm::Error::success();
 }
