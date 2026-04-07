@@ -236,7 +236,8 @@ llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
 
 class MTLComputeEncoder : public offloadtest::ComputeEncoder {
   MTL::CommandBuffer *CmdBuffer;
-  MTL::ComputeCommandEncoder *Encoder;
+  MTL::ComputeCommandEncoder *ComputeEnc = nullptr;
+  MTL::BlitCommandEncoder *BlitEnc = nullptr;
 
   /// Accumulated barrier scope from commands recorded since the last barrier.
   MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
@@ -246,17 +247,43 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
   void addBarrierScope(MTL::BarrierScope Scope) { PendingScope |= Scope; }
 
   void flushBarrier() {
-    if (PendingScope != MTL::BarrierScope(0)) {
-      Encoder->memoryBarrier(PendingScope);
+    if (ComputeEnc && PendingScope != MTL::BarrierScope(0)) {
+      ComputeEnc->memoryBarrier(PendingScope);
       PendingScope = MTL::BarrierScope(0);
     }
+  }
+
+  /// End the blit encoder if active, lazily (re-)create the compute encoder.
+  /// Metal requires a dedicated BlitCommandEncoder for copy operations. Metal 4
+  /// moves blit operations onto the compute encoder, removing this separation.
+  llvm::Error ensureComputeEncoder() {
+    if (ComputeEnc)
+      return llvm::Error::success();
+    endEncodingImpl();
+    ComputeEnc = CmdBuffer->computeCommandEncoder();
+    if (!ComputeEnc)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Metal compute encoder.");
+    return llvm::Error::success();
+  }
+
+  /// End the compute encoder if active, lazily create the blit encoder.
+  llvm::Error ensureBlitEncoder() {
+    if (BlitEnc)
+      return llvm::Error::success();
+    endEncodingImpl();
+    BlitEnc = CmdBuffer->blitCommandEncoder();
+    if (!BlitEnc)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Metal blit encoder.");
+    return llvm::Error::success();
   }
 
 public:
   MTLComputeEncoder(MTL::CommandBuffer *CmdBuffer,
                     MTL::ComputeCommandEncoder *Encoder)
       : ComputeEncoder(GPUAPI::Metal), CmdBuffer(CmdBuffer),
-        Encoder(Encoder) {}
+        ComputeEnc(Encoder) {}
 
   ~MTLComputeEncoder() override = default;
 
@@ -264,12 +291,14 @@ public:
     return E->getAPI() == GPUAPI::Metal;
   }
 
-  MTL::ComputeCommandEncoder *getNative() const { return Encoder; }
+  MTL::ComputeCommandEncoder *getNative() const { return ComputeEnc; }
 
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ, uint32_t ThreadsPerGroupX,
                        uint32_t ThreadsPerGroupY,
                        uint32_t ThreadsPerGroupZ) override {
+    if (auto Err = ensureComputeEncoder())
+      return Err;
     flushBarrier();
     const MTL::Size GridSize(
         static_cast<NS::UInteger>(ThreadsPerGroupX) * GroupCountX,
@@ -277,13 +306,33 @@ public:
         static_cast<NS::UInteger>(ThreadsPerGroupZ) * GroupCountZ);
     const MTL::Size GroupSize(ThreadsPerGroupX, ThreadsPerGroupY,
                               ThreadsPerGroupZ);
-    Encoder->dispatchThreads(GridSize, GroupSize);
+    ComputeEnc->dispatchThreads(GridSize, GroupSize);
     addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLSrc = static_cast<MTLBuffer &>(Src);
+    auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    BlitEnc->copyFromBuffer(MTLSrc.Buf, SrcOffset, MTLDst.Buf, DstOffset, Size);
+    addBarrierScope(MTL::BarrierScopeBuffers);
+    return llvm::Error::success();
+  }
+
   void endEncoding() override {
-    Encoder->endEncoding();
+    if (ComputeEnc) {
+      flushBarrier();
+      ComputeEnc->endEncoding();
+      ComputeEnc = nullptr;
+    }
+    if (BlitEnc) {
+      BlitEnc->endEncoding();
+      BlitEnc = nullptr;
+    }
   }
 };
 

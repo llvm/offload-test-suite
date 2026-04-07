@@ -13,9 +13,12 @@
 
 #include "llvm/Support/Error.h"
 
+#include <cstddef>
 #include <cstdint>
 
 namespace offloadtest {
+
+class Buffer;
 
 /// Base class for all command encoders. An encoder records commands into a
 /// command buffer. Call endEncoding() when done recording. Barriers are
@@ -30,6 +33,12 @@ public:
   CommandEncoder &operator=(const CommandEncoder &) = delete;
 
   GPUAPI getAPI() const { return API; }
+
+  /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
+  /// \p DstOffset.
+  virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
+                                         Buffer &Dst, size_t DstOffset,
+                                         size_t Size) = 0;
 
   /// Finish recording. No further commands may be recorded after this call.
   virtual void endEncoding() = 0;

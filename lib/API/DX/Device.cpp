@@ -600,6 +600,17 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &DXSrc = static_cast<DXBuffer &>(Src);
+    auto &DXDst = static_cast<DXBuffer &>(Dst);
+    addUAVBarrier();
+    CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
+                                 DXSrc.Buffer.Get(), SrcOffset, Size);
+    return llvm::Error::success();
+  }
+
   void endEncoding() override {
     // State remains on the command buffer for the next encoder.
   }
