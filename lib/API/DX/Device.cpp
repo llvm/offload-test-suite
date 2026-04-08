@@ -297,7 +297,11 @@ class DXFence : public offloadtest::Fence {
 public:
   std::string Name;
   ComPtr<ID3D12Fence> Fence;
+#ifdef _WIN32
   HANDLE Event;
+#else // WSL
+  int Event;
+#endif
 
   uint64_t getFenceValue() override { return Fence->GetCompletedValue(); }
 
@@ -305,15 +309,19 @@ public:
     if (Fence->GetCompletedValue() >= SignalValue)
       return llvm::Error::success();
 
+#ifdef _WIN32
     if (auto Err = HR::toError(Fence->SetEventOnCompletion(SignalValue, Event),
                                "Failed to register end event."))
       return Err;
-
-#ifdef _WIN32
     WaitForSingleObject(Event, INFINITE);
 #else // WSL
+    if (auto Err =
+            HR::toError(Fence->SetEventOnCompletion(
+                            SignalValue, reinterpret_cast<HANDLE>(Event)),
+                        "Failed to register end event."))
+      return Err;
     pollfd PollEvent;
-    PollEvent.fd = (int)Event;
+    PollEvent.fd = Event;
     PollEvent.events = POLLIN;
     PollEvent.revents = 0;
     if (poll(&PollEvent, 1, -1) == -1)
@@ -323,14 +331,18 @@ public:
     return llvm::Error::success();
   }
 
+#ifdef _WIN32
   DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
+#else // WSL
+  DXFence(ComPtr<ID3D12Fence> Fence, int Event, llvm::StringRef Name)
+#endif
       : Name(Name), Fence(Fence), Event(Event) {}
 
   ~DXFence() {
 #ifdef _WIN32
     CloseHandle(Event);
 #else // WSL
-    close((int)Event);
+    close(Event);
 #endif
   }
 };
