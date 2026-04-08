@@ -132,6 +132,28 @@ public:
   }
 };
 
+class MTLCommandBuffer : public offloadtest::CommandBuffer {
+public:
+  static constexpr GPUAPI BackendAPI = GPUAPI::Metal;
+
+  MTL::CommandBuffer *CmdBuffer = nullptr;
+
+  static llvm::Expected<std::unique_ptr<MTLCommandBuffer>>
+  create(MTL::CommandQueue *Queue) {
+    auto CB = std::unique_ptr<MTLCommandBuffer>(new MTLCommandBuffer());
+    CB->CmdBuffer = Queue->commandBuffer();
+    if (!CB->CmdBuffer)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Metal command buffer.");
+    return CB;
+  }
+
+  ~MTLCommandBuffer() override = default;
+
+private:
+  MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
+};
+
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -161,7 +183,7 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
     MTL::Texture *FrameBufferTexture = nullptr;
-    MTL::CommandBuffer *CmdBuffer = nullptr;
+    std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<offloadtest::Fence> Fence;
   };
 
@@ -401,10 +423,8 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
-
     MTL::ComputeCommandEncoder *CmdEncoder =
-        IS.CmdBuffer->computeCommandEncoder();
+        IS.CB->CmdBuffer->computeCommandEncoder();
 
     auto CloseCommandEncoder =
         llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
@@ -471,8 +491,6 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
-
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
@@ -502,7 +520,7 @@ class MTLDevice : public offloadtest::Device {
     Desc->colorAttachments()->setObject(CADesc, 0);
 
     MTL::RenderCommandEncoder *CmdEncoder =
-        IS.CmdBuffer->renderCommandEncoder(Desc);
+        IS.CB->CmdBuffer->renderCommandEncoder(Desc);
 
     CmdEncoder->setRenderPipelineState(IS.RenderPipeline);
     // Explicitly set viewport to texture dimensions.
@@ -528,14 +546,14 @@ class MTLDevice : public offloadtest::Device {
     const uint64_t CurrentCounter = FenceCounter + 1;
     auto *F = static_cast<MTLFence *>(IS.Fence.get());
 
-    IS.CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
-    IS.CmdBuffer->commit();
+    IS.CB->CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
+    IS.CB->CmdBuffer->commit();
 
     if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
       return Err;
 
     // Check and surface any errors that occurred during execution.
-    NS::Error *CBErr = IS.CmdBuffer->error();
+    NS::Error *CBErr = IS.CB->CmdBuffer->error();
     if (CBErr)
       return toError(CBErr);
 
@@ -635,8 +653,18 @@ public:
     return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
+  createCommandBuffer() override {
+    return MTLCommandBuffer::create(GraphicsQueue.Queue);
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
+
+    auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    IS.CB = std::move(*CBOrErr);
 
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)

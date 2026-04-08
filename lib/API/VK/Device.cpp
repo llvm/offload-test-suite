@@ -451,6 +451,56 @@ public:
       : Queue(Q), QueueFamilyIdx(QueueFamilyIdx) {}
 };
 
+class VulkanCommandBuffer : public offloadtest::CommandBuffer {
+public:
+  static constexpr GPUAPI BackendAPI = GPUAPI::Vulkan;
+
+  VkDevice Device = VK_NULL_HANDLE;
+  // Owned per command buffer so that recording, submission, and lifetime
+  // management of each command buffer are independently safe without external
+  // synchronization.
+  VkCommandPool CmdPool = VK_NULL_HANDLE;
+  VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+
+  static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
+  create(VkDevice Device, uint32_t QueueFamilyIdx) {
+    auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
+    CB->Device = Device;
+
+    VkCommandPoolCreateInfo CmdPoolInfo = {};
+    CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    CmdPoolInfo.queueFamilyIndex = QueueFamilyIdx;
+    CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &CB->CmdPool))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not create command pool.");
+
+    VkCommandBufferAllocateInfo CBufAllocInfo = {};
+    CBufAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    CBufAllocInfo.commandPool = CB->CmdPool;
+    CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    CBufAllocInfo.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(Device, &CBufAllocInfo, &CB->CmdBuffer))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not create command buffer.");
+
+    VkCommandBufferBeginInfo BufferInfo = {};
+    BufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not begin command buffer.");
+    return CB;
+  }
+
+  ~VulkanCommandBuffer() override {
+    if (CmdPool != VK_NULL_HANDLE)
+      vkDestroyCommandPool(Device, CmdPool, nullptr);
+  }
+
+private:
+  VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
+};
+
 class VulkanDevice : public offloadtest::Device {
 private:
   std::shared_ptr<VulkanInstance> Instance;
@@ -532,8 +582,7 @@ private:
   };
 
   struct InvocationState {
-    VkCommandPool CmdPool = VK_NULL_HANDLE;
-    VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+    std::unique_ptr<VulkanCommandBuffer> CB;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     VkDescriptorPool Pool = VK_NULL_HANDLE;
     VkPipelineCache PipelineCache = VK_NULL_HANDLE;
@@ -850,33 +899,9 @@ private:
   }
 
 public:
-  llvm::Error createDevice(InvocationState &IS) {
-    VkCommandPoolCreateInfo CmdPoolInfo = {};
-    CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    CmdPoolInfo.queueFamilyIndex = GraphicsQueue.QueueFamilyIdx;
-    CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-    if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &IS.CmdPool))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command pool.");
-    return llvm::Error::success();
-  }
-
-  llvm::Error createCommandBuffer(InvocationState &IS) {
-    VkCommandBufferAllocateInfo CBufAllocInfo = {};
-    CBufAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    CBufAllocInfo.commandPool = IS.CmdPool;
-    CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    CBufAllocInfo.commandBufferCount = 1;
-    if (vkAllocateCommandBuffers(Device, &CBufAllocInfo, &IS.CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command buffer.");
-    VkCommandBufferBeginInfo BufferInfo = {};
-    BufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(IS.CmdBuffer, &BufferInfo))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not begin command buffer.");
-    return llvm::Error::success();
+  llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
+  createCommandBuffer() override {
+    return VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -1062,8 +1087,8 @@ public:
           return ExDeviceBuf.takeError();
         VkBufferCopy Copy = {};
         Copy.size = R.size();
-        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                        &Copy);
+        vkCmdCopyBuffer(IS.CB->CmdBuffer, ExHostBuf->Buffer,
+                        ExDeviceBuf->Buffer, 1, &Copy);
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
       }
     }
@@ -1085,8 +1110,8 @@ public:
           return ExDeviceBuf.takeError();
         VkBufferCopy Copy = {};
         Copy.size = sizeof(uint32_t);
-        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                        &Copy);
+        vkCmdCopyBuffer(IS.CB->CmdBuffer, ExHostBuf->Buffer,
+                        ExDeviceBuf->Buffer, 1, &Copy);
         Bundle.CounterResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
       }
     }
@@ -1205,8 +1230,8 @@ public:
         return ExDeviceBuf.takeError();
       VkBufferCopy Copy = {};
       Copy.size = VertexBuffer.size();
-      vkCmdCopyBuffer(IS.CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                      &Copy);
+      vkCmdCopyBuffer(IS.CB->CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer,
+                      1, &Copy);
       IS.VertexBuffer = ResourceRef(*ExVHostBuf, *ExDeviceBuf);
     }
 
@@ -1218,7 +1243,7 @@ public:
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
 
-    if (vkEndCommandBuffer(IS.CmdBuffer))
+    if (vkEndCommandBuffer(IS.CB->CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
 
@@ -1233,7 +1258,7 @@ public:
     SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     SubmitInfo.pNext = &TimelineSubmitInfo;
     SubmitInfo.commandBufferCount = 1;
-    SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
+    SubmitInfo.pCommandBuffers = &IS.CB->CmdBuffer;
     SubmitInfo.signalSemaphoreCount = 1;
     SubmitInfo.pSignalSemaphores = &F->Semaphore;
 
@@ -1245,7 +1270,7 @@ public:
     if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
       return Err;
 
-    vkFreeCommandBuffers(Device, IS.CmdPool, 1, &IS.CmdBuffer);
+    vkFreeCommandBuffers(Device, IS.CB->CmdPool, 1, &IS.CB->CmdBuffer);
 
     FenceCounter = CurrentCounter;
     return llvm::Error::success();
@@ -2007,11 +2032,11 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                              nullptr, 1, &ImageBarrier);
 
-        vkCmdCopyBufferToImage(IS.CmdBuffer, ResRef.Host.Buffer,
+        vkCmdCopyBufferToImage(IS.CB->CmdBuffer, ResRef.Host.Buffer,
                                ResRef.Image.Image, VK_IMAGE_LAYOUT_GENERAL,
                                Regions.size(), Regions.data());
       }
@@ -2025,7 +2050,7 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
                              nullptr, 0, nullptr, 1, &ImageBarrier);
       }
@@ -2040,7 +2065,7 @@ public:
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
                            1, &Barrier, 0, nullptr);
     }
@@ -2071,7 +2096,8 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                              nullptr, 1, &ImageBarrier);
       }
@@ -2100,7 +2126,7 @@ public:
       }
 
       for (auto &ResRef : R.ResourceRefs)
-        vkCmdCopyImageToBuffer(IS.CmdBuffer, ResRef.Image.Image,
+        vkCmdCopyImageToBuffer(IS.CB->CmdBuffer, ResRef.Image.Image,
                                VK_IMAGE_LAYOUT_GENERAL, ResRef.Host.Buffer,
                                Regions.size(), Regions.data());
 
@@ -2113,7 +2139,7 @@ public:
       Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       for (auto &ResRef : R.ResourceRefs) {
         Barrier.buffer = ResRef.Host.Buffer;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
                              &Barrier, 0, nullptr);
       }
@@ -2129,21 +2155,22 @@ public:
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
     VkBufferCopy CopyRegion = {};
     CopyRegion.size = R.size();
     for (auto &ResRef : R.ResourceRefs)
-      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
-                      &CopyRegion);
+      vkCmdCopyBuffer(IS.CB->CmdBuffer, ResRef.Device.Buffer,
+                      ResRef.Host.Buffer, 1, &CopyRegion);
 
     VkBufferCopy CounterCopyRegion = {};
     CounterCopyRegion.size = sizeof(uint32_t);
     for (auto &ResRef : R.CounterResourceRefs)
-      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
-                      &CounterCopyRegion);
+      vkCmdCopyBuffer(IS.CB->CmdBuffer, ResRef.Device.Buffer,
+                      ResRef.Host.Buffer, 1, &CounterCopyRegion);
 
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -2152,13 +2179,13 @@ public:
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
     for (auto &ResRef : R.CounterResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
@@ -2184,7 +2211,7 @@ public:
       RenderPassBeginInfo.clearValueCount = 2;
       RenderPassBeginInfo.pClearValues = ClearValues;
 
-      vkCmdBeginRenderPass(IS.CmdBuffer, &RenderPassBeginInfo,
+      vkCmdBeginRenderPass(IS.CB->CmdBuffer, &RenderPassBeginInfo,
                            VK_SUBPASS_CONTENTS_INLINE);
 
       VkViewport Viewport = {};
@@ -2196,28 +2223,28 @@ public:
           static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
       Viewport.minDepth = 0.0f;
       Viewport.maxDepth = 1.0f;
-      vkCmdSetViewport(IS.CmdBuffer, 0, 1, &Viewport);
+      vkCmdSetViewport(IS.CB->CmdBuffer, 0, 1, &Viewport);
 
       VkRect2D Scissor = {};
       Scissor.offset = {0, 0};
       Scissor.extent.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
       Scissor.extent.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      vkCmdSetScissor(IS.CmdBuffer, 0, 1, &Scissor);
+      vkCmdSetScissor(IS.CB->CmdBuffer, 0, 1, &Scissor);
     }
 
     const VkPipelineBindPoint BindPoint = P.isGraphics()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
-    vkCmdBindPipeline(IS.CmdBuffer, BindPoint, IS.Pipeline);
+    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, IS.Pipeline);
     if (IS.DescriptorSets.size() > 0)
-      vkCmdBindDescriptorSets(IS.CmdBuffer, BindPoint, IS.PipelineLayout, 0,
+      vkCmdBindDescriptorSets(IS.CB->CmdBuffer, BindPoint, IS.PipelineLayout, 0,
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
-      vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
+      vkCmdPushConstants(IS.CB->CmdBuffer, IS.PipelineLayout,
                          getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }
@@ -2225,19 +2252,19 @@ public:
     if (P.isCompute()) {
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-      vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
+      vkCmdDispatch(IS.CB->CmdBuffer, DispatchSize[0], DispatchSize[1],
                     DispatchSize[2]);
       llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
                    << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
     } else {
       VkDeviceSize Offsets[1]{0};
       assert(IS.VertexBuffer.has_value());
-      vkCmdBindVertexBuffers(IS.CmdBuffer, 0, 1,
+      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1,
                              &IS.VertexBuffer->Device.Buffer, Offsets);
       // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
+      vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
       llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
-      vkCmdEndRenderPass(IS.CmdBuffer);
+      vkCmdEndRenderPass(IS.CB->CmdBuffer);
       copyResourceDataToHost(IS, IS.FrameBufferResource);
     }
 
@@ -2381,9 +2408,6 @@ public:
 
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
-
-    if (IS.CmdPool)
-      vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
@@ -2393,20 +2417,20 @@ public:
       llvm::outs() << "Cleanup complete.\n";
     });
 
-    if (auto Err = createDevice(State))
-      return Err;
+    auto CBOrErr =
+        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    State.CB = std::move(*CBOrErr);
+    llvm::outs() << "Command buffer created.\n";
 
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
     State.Fence = std::move(*FenceOrErr);
-
-    llvm::outs() << "Physical device created.\n";
     if (auto Err = createShaderModules(P, State))
       return Err;
     llvm::outs() << "Shader module created.\n";
-    if (auto Err = createCommandBuffer(State))
-      return Err;
     llvm::outs() << "Copy command buffer created.\n";
     if (auto Err = createResources(P, State))
       return Err;
@@ -2422,8 +2446,11 @@ public:
     if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed copy command buffer.\n";
-    if (auto Err = createCommandBuffer(State))
-      return Err;
+    auto DispatchCBOrErr =
+        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    if (!DispatchCBOrErr)
+      return DispatchCBOrErr.takeError();
+    State.CB = std::move(*DispatchCBOrErr);
     llvm::outs() << "Execute command buffer created.\n";
     if (auto Err = createDescriptorPool(P, State))
       return Err;
