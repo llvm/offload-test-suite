@@ -59,8 +59,15 @@ protected:
 class Fence {
 public:
   virtual ~Fence() = default;
+
+  Fence(const Fence &) = delete;
+  Fence &operator=(const Fence &) = delete;
+
   virtual uint64_t getFenceValue() = 0;
   virtual llvm::Error waitForCompletion(uint64_t SignalValue) = 0;
+
+protected:
+  Fence() = default;
 };
 
 class Queue {

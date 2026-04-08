@@ -294,6 +294,7 @@ public:
 };
 
 class DXFence : public offloadtest::Fence {
+public:
 #ifdef _WIN32
   DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
 #else // WSL
@@ -302,7 +303,6 @@ class DXFence : public offloadtest::Fence {
       : Name(Name), Fence(Fence), Event(Event) {
   }
 
-public:
   std::string Name;
   ComPtr<ID3D12Fence> Fence;
 #ifdef _WIN32
@@ -329,7 +329,7 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create event.");
 
-    return std::make_unique<DXFence>(DXFence(std::move(Fence), Event, Name));
+    return std::make_unique<DXFence>(Fence, Event, Name);
   }
 
   ~DXFence() {

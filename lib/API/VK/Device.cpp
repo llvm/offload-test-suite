@@ -392,10 +392,10 @@ public:
 };
 
 class VulkanFence : public offloadtest::Fence {
+public:
   VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
       : Name(Name), Device(Device), Semaphore(Semaphore) {}
 
-public:
   std::string Name;
   VkDevice Device;
   VkSemaphore Semaphore;
@@ -415,14 +415,14 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create Semaphore.");
 
-    return std::make_unique<VulkanFence>(VulkanFence(Device, Semaphore, Name));
+    return std::make_unique<VulkanFence>(Device, Semaphore, Name);
   }
 
   ~VulkanFence() { vkDestroySemaphore(Device, Semaphore, nullptr); }
 
   uint64_t getFenceValue() override {
     uint64_t Value = 0;
-    [[maybe_unused]] VkResult Ret =
+    [[maybe_unused]] const VkResult Ret =
         vkGetSemaphoreCounterValue(Device, Semaphore, &Value);
     assert(!Ret);
     return Value;

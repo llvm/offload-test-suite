@@ -84,10 +84,9 @@ public:
 };
 
 class MTLFence : public offloadtest::Fence {
+public:
   MTLFence(MTL::SharedEvent *Event, llvm::StringRef Name)
       : Name(Name), Event(Event) {}
-
-public:
   std::string Name;
   MTL::SharedEvent *Event;
 
@@ -97,7 +96,7 @@ public:
     if (!Event)
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create shared event.");
-    return std::make_unique<MTLFence>(MTLFence(Event, Name));
+    return std::make_unique<MTLFence>(Event, Name);
   }
 
   ~MTLFence() {
