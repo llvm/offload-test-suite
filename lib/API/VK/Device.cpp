@@ -392,10 +392,33 @@ public:
 };
 
 class VulkanFence : public offloadtest::Fence {
+  VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
+      : Name(Name), Device(Device), Semaphore(Semaphore) {}
+
 public:
   std::string Name;
   VkDevice Device;
   VkSemaphore Semaphore;
+
+  static llvm::Expected<std::unique_ptr<VulkanFence>>
+  create(VkDevice Device, llvm::StringRef Name) {
+    VkSemaphoreTypeCreateInfo TypeCreateInfo = {};
+    TypeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    TypeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+
+    VkSemaphoreCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    CreateInfo.pNext = &TypeCreateInfo;
+
+    VkSemaphore Semaphore = VK_NULL_HANDLE;
+    if (vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Semaphore.");
+
+    return std::make_unique<VulkanFence>(VulkanFence(Device, Semaphore, Name));
+  }
+
+  ~VulkanFence() { vkDestroySemaphore(Device, Semaphore, nullptr); }
 
   uint64_t getFenceValue() override {
     uint64_t Value = 0;
@@ -418,11 +441,6 @@ public:
 
     return llvm::Error::success();
   }
-
-  VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
-      : Name(Name), Device(Device), Semaphore(Semaphore) {}
-
-  ~VulkanFence() { vkDestroySemaphore(Device, Semaphore, nullptr); }
 };
 
 class VulkanQueue : public offloadtest::Queue {
@@ -687,20 +705,7 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
-    VkSemaphoreTypeCreateInfo TypeCreateInfo = {};
-    TypeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
-    TypeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
-
-    VkSemaphoreCreateInfo CreateInfo = {};
-    CreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    CreateInfo.pNext = &TypeCreateInfo;
-
-    VkSemaphore Semaphore = VK_NULL_HANDLE;
-    if (vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create Semaphore.");
-
-    return std::make_unique<VulkanFence>(Device, Semaphore, Name);
+    return VulkanFence::create(Device, Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>

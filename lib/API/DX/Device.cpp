@@ -294,6 +294,14 @@ public:
 };
 
 class DXFence : public offloadtest::Fence {
+#ifdef _WIN32
+  DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
+#else // WSL
+  DXFence(ComPtr<ID3D12Fence> Fence, int Event, llvm::StringRef Name)
+#endif
+      : Name(Name), Fence(Fence), Event(Event) {
+  }
+
 public:
   std::string Name;
   ComPtr<ID3D12Fence> Fence;
@@ -302,6 +310,35 @@ public:
 #else // WSL
   int Event;
 #endif
+
+  static llvm::Expected<std::unique_ptr<DXFence>> create(ID3D12Device *Device,
+                                                         llvm::StringRef Name) {
+    ComPtr<ID3D12Fence> Fence;
+    if (auto Err = HR::toError(
+            Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)),
+            "Failed to create Fence."))
+      return Err;
+
+#ifdef _WIN32
+    HANDLE Event = CreateEventA(nullptr, false, false, nullptr);
+    if (!Event)
+#else // WSL
+    int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (Event == -1)
+#endif
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create event.");
+
+    return std::make_unique<DXFence>(DXFence(std::move(Fence), Event, Name));
+  }
+
+  ~DXFence() {
+#ifdef _WIN32
+    CloseHandle(Event);
+#else // WSL
+    close(Event);
+#endif
+  }
 
   uint64_t getFenceValue() override { return Fence->GetCompletedValue(); }
 
@@ -329,21 +366,6 @@ public:
           std::error_code(errno, std::system_category()), strerror(errno));
 #endif
     return llvm::Error::success();
-  }
-
-#ifdef _WIN32
-  DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
-#else // WSL
-  DXFence(ComPtr<ID3D12Fence> Fence, int Event, llvm::StringRef Name)
-#endif
-      : Name(Name), Fence(Fence), Event(Event) {}
-
-  ~DXFence() {
-#ifdef _WIN32
-    CloseHandle(Event);
-#else // WSL
-    close(Event);
-#endif
   }
 };
 
@@ -429,23 +451,7 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
-    ComPtr<ID3D12Fence> Fence;
-    if (auto Err = HR::toError(
-            Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)),
-            "Failed to create Fence."))
-      return Err;
-
-#ifdef _WIN32
-    HANDLE Event = CreateEventA(nullptr, false, false, nullptr);
-    if (!Event)
-#else // WSL
-    int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    if (Event == -1)
-#endif
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create event.");
-
-    return std::make_unique<DXFence>(Fence, Event, Name);
+    return DXFence::create(Device.Get(), Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>

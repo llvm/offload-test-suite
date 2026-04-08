@@ -84,9 +84,26 @@ public:
 };
 
 class MTLFence : public offloadtest::Fence {
+  MTLFence(MTL::SharedEvent *Event, llvm::StringRef Name)
+      : Name(Name), Event(Event) {}
+
 public:
   std::string Name;
   MTL::SharedEvent *Event;
+
+  static llvm::Expected<std::unique_ptr<MTLFence>>
+  create(MTL::Device *Device, llvm::StringRef Name) {
+    MTL::SharedEvent *Event = Device->newSharedEvent();
+    if (!Event)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create shared event.");
+    return std::make_unique<MTLFence>(MTLFence(Event, Name));
+  }
+
+  ~MTLFence() {
+    if (Event)
+      Event->release();
+  }
 
   uint64_t getFenceValue() override { return Event->signaledValue(); }
 
@@ -95,14 +112,6 @@ public:
       return llvm::createStringError(std::errc::timed_out,
                                      "Timed out waiting on shared event.");
     return llvm::Error::success();
-  }
-
-  MTLFence(MTL::SharedEvent *Event, llvm::StringRef Name)
-      : Name(Name), Event(Event) {}
-
-  ~MTLFence() {
-    if (Event)
-      Event->release();
   }
 };
 
@@ -600,11 +609,7 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
-    MTL::SharedEvent *Event = Device->newSharedEvent();
-    if (!Event)
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create shared event.");
-    return std::make_unique<MTLFence>(Event, Name);
+    return MTLFence::create(Device, Name);
   }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
