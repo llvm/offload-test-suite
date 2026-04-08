@@ -153,7 +153,7 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Buffer *> Buffers;
     MTL::Texture *FrameBufferTexture = nullptr;
     MTL::CommandBuffer *CmdBuffer = nullptr;
-    std::shared_ptr<offloadtest::Fence> Fence;
+    std::unique_ptr<offloadtest::Fence> Fence;
   };
 
   llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
@@ -631,7 +631,7 @@ public:
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
 
-    auto FenceOrErr = this->createFence("Fence");
+    auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
     IS.Fence = std::move(*FenceOrErr);

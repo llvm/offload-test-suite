@@ -302,10 +302,8 @@ public:
   uint64_t getFenceValue() override { return Fence->GetCompletedValue(); }
 
   llvm::Error waitForCompletion(uint64_t SignalValue) override {
-
-    if (Fence->GetCompletedValue() >= SignalValue) {
+    if (Fence->GetCompletedValue() >= SignalValue)
       return llvm::Error::success();
-    }
 
     if (auto Err = HR::toError(Fence->SetEventOnCompletion(SignalValue, Event),
                                "Failed to register end event."))
@@ -326,7 +324,7 @@ public:
   }
 
   DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
-      : Fence(Fence), Event(Event), Name(Name) {}
+      : Name(Name), Fence(Fence), Event(Event) {}
 
   ~DXFence() {
 #ifdef _WIN32
@@ -390,7 +388,7 @@ private:
     ComPtr<ID3D12PipelineState> PSO;
     ComPtr<ID3D12CommandAllocator> Allocator;
     ComPtr<ID3D12GraphicsCommandList> CmdList;
-    std::shared_ptr<offloadtest::Fence> Fence;
+    std::unique_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
     ComPtr<ID3D12Resource> RT;
@@ -1714,7 +1712,7 @@ public:
       return Err;
     llvm::outs() << "Command structures created.\n";
 
-    auto FenceOrErr = this->createFence("Fence");
+    auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
     State.Fence = std::move(*FenceOrErr);

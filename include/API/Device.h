@@ -58,7 +58,7 @@ protected:
 
 class Fence {
 public:
-  virtual ~Fence() {}
+  virtual ~Fence() = default;
   virtual uint64_t getFenceValue() = 0;
   virtual llvm::Error waitForCompletion(uint64_t SignalValue) = 0;
 };
