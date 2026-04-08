@@ -468,14 +468,17 @@ public:
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
+  ComPtr<ID3D12Device> Device;
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
+  ComPtr<ID3D12CommandSignature> DispatchIndirectSig;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12Device> Device) {
     auto CB = std::unique_ptr<DXCommandBuffer>(new DXCommandBuffer());
+    CB->Device = Device;
     if (auto Err = HR::toError(
             Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                            IID_PPV_ARGS(&CB->Allocator)),
@@ -497,6 +500,23 @@ public:
   }
 
   void addPendingUAVBarrier() { PendingUAVBarrier = true; }
+
+  llvm::Error ensureDispatchIndirectSig() {
+    if (DispatchIndirectSig)
+      return llvm::Error::success();
+    D3D12_INDIRECT_ARGUMENT_DESC ArgDesc = {};
+    ArgDesc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+    D3D12_COMMAND_SIGNATURE_DESC SigDesc = {};
+    SigDesc.ByteStride = sizeof(D3D12_DISPATCH_ARGUMENTS);
+    SigDesc.NumArgumentDescs = 1;
+    SigDesc.pArgumentDescs = &ArgDesc;
+    if (auto Err = HR::toError(
+            Device->CreateCommandSignature(&SigDesc, nullptr,
+                                           IID_PPV_ARGS(&DispatchIndirectSig)),
+            "Failed to create indirect dispatch command signature."))
+      return Err;
+    return llvm::Error::success();
+  }
 
   void flushBarrier() {
     if (!PendingUAVBarrier)
@@ -588,6 +608,28 @@ public:
     auto &DXDst = static_cast<DXBuffer &>(Dst);
     CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
+    return llvm::Error::success();
+  }
+
+  llvm::Error fillBuffer(offloadtest::Buffer & /*Dst*/, size_t /*Offset*/,
+                         size_t /*Size*/, uint8_t /*Value*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "fillBuffer is not yet implemented for DirectX.");
+  }
+
+  llvm::Error dispatchIndirect(offloadtest::Buffer &ArgBuffer, size_t Offset,
+                               uint32_t /*ThreadsPerGroupX*/,
+                               uint32_t /*ThreadsPerGroupY*/,
+                               uint32_t /*ThreadsPerGroupZ*/) override {
+    // DX12 bakes threadgroup size into the pipeline; only the indirect buffer
+    // contents (group counts) are used.
+    if (auto Err = CB.ensureDispatchIndirectSig())
+      return Err;
+    addDstBarrier();
+    auto &DXBuf = static_cast<DXBuffer &>(ArgBuffer);
+    CB.CmdList->ExecuteIndirect(CB.DispatchIndirectSig.Get(), 1,
+                                DXBuf.Buffer.Get(), Offset, nullptr, 0);
     return llvm::Error::success();
   }
 

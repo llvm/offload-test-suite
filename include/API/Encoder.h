@@ -52,6 +52,11 @@ public:
                                          Buffer &Dst, size_t DstOffset,
                                          size_t Size) = 0;
 
+  /// Fill \p Size bytes of \p Dst starting at \p Offset with \p Value.
+  /// \p Offset and \p Size must be multiples of 4.
+  virtual llvm::Error fillBuffer(Buffer &Dst, size_t Offset, size_t Size,
+                                 uint8_t Value) = 0;
+
   /// Finish recording. No further commands may be recorded after this call.
   virtual void endEncoding() = 0;
 };
@@ -68,6 +73,15 @@ public:
                                uint32_t GroupCountZ, uint32_t ThreadsPerGroupX,
                                uint32_t ThreadsPerGroupY,
                                uint32_t ThreadsPerGroupZ) = 0;
+
+  /// Dispatch a compute grid indirectly. The buffer at \p Offset must contain
+  /// three uint32_t values: {GroupCountX, GroupCountY, GroupCountZ}.
+  /// ThreadsPerGroup specifies the workgroup dimensions (required by some
+  /// backends; others derive it from the pipeline state).
+  virtual llvm::Error dispatchIndirect(Buffer &ArgBuffer, size_t Offset,
+                                       uint32_t ThreadsPerGroupX,
+                                       uint32_t ThreadsPerGroupY,
+                                       uint32_t ThreadsPerGroupZ) = 0;
 
   /// Insert a memory barrier covering all outstanding scopes.
   virtual void barrier() = 0;

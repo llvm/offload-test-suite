@@ -291,6 +291,21 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error dispatchIndirect(offloadtest::Buffer &ArgBuffer, size_t Offset,
+                               uint32_t ThreadsPerGroupX,
+                               uint32_t ThreadsPerGroupY,
+                               uint32_t ThreadsPerGroupZ) override {
+    if (auto Err = ensureComputeEncoder())
+      return Err;
+    addDstBarrier(MTL::BarrierScope(MTL::BarrierScopeBuffers |
+                                    MTL::BarrierScopeTextures));
+    auto &MTLBuf = static_cast<MTLBuffer &>(ArgBuffer);
+    const MTL::Size GroupSize(ThreadsPerGroupX, ThreadsPerGroupY,
+                              ThreadsPerGroupZ);
+    ComputeEnc->dispatchThreadgroups(MTLBuf.Buf, Offset, GroupSize);
+    return llvm::Error::success();
+  }
+
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
@@ -299,6 +314,15 @@ public:
     auto &MTLSrc = static_cast<MTLBuffer &>(Src);
     auto &MTLDst = static_cast<MTLBuffer &>(Dst);
     BlitEnc->copyFromBuffer(MTLSrc.Buf, SrcOffset, MTLDst.Buf, DstOffset, Size);
+    return llvm::Error::success();
+  }
+
+  llvm::Error fillBuffer(offloadtest::Buffer &Dst, size_t Offset, size_t Size,
+                         uint8_t Value) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    BlitEnc->fillBuffer(MTLDst.Buf, NS::Range(Offset, Size), Value);
     return llvm::Error::success();
   }
 
