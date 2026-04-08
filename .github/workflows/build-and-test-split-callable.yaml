@@ -72,7 +72,7 @@ on:
         default: 'main'
         type: string
       LLVM-fork:
-        description: 'LLVM For'
+        description: 'LLVM Fork'
         required: false
         default: 'llvm'
         type: string
@@ -215,6 +215,7 @@ jobs:
               --exclude='*.obj' \
               --exclude='*.o' \
               --exclude='*.ilk' \
+              --exclude='*.pdb' \
               --exclude='CMakeFiles' \
               DXC/build/bin llvm-project/build
       - name: Upload build artifacts
