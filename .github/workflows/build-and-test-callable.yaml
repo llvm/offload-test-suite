@@ -151,6 +151,10 @@ jobs:
         shell: bash
         if: contains(inputs.TestTarget, 'clang')
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Build DXC
         run: |
             cd DXC
