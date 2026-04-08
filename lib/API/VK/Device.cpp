@@ -1026,10 +1026,10 @@ public:
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
 
-  VkDeviceSize getCopySize(InvocationState &IS, Resource &R, VkBuffer Buffer) {
+  VkDeviceSize getCopySize(Resource &R) {
     VkDeviceSize CopySize = R.size();
     if (R.IsReserved) {
-      VkDeviceSize MappedSize =
+      const VkDeviceSize MappedSize =
           static_cast<VkDeviceSize>(getNumTiles(R.TilesMapped, R.size())) *
           SparseBufferTileSize;
       if (CopySize > MappedSize)
@@ -1084,7 +1084,6 @@ public:
         llvm::Expected<BufferRef> ExDeviceBuf =
             R.IsReserved
                 ? createSparseBuffer(
-                      IS,
                       getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size(),
@@ -1097,7 +1096,7 @@ public:
           return ExDeviceBuf.takeError();
 
         VkBufferCopy Copy = {};
-        Copy.size = getCopySize(IS, R, ExDeviceBuf->Buffer);
+        Copy.size = getCopySize(R);
         vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
                         &Copy);
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
@@ -1131,7 +1130,7 @@ public:
   }
 
   llvm::Expected<BufferRef>
-  createSparseBuffer(InvocationState &IS, VkBufferUsageFlags Usage,
+  createSparseBuffer(VkBufferUsageFlags Usage,
                      VkMemoryPropertyFlags MemoryFlags, size_t Size,
                      uint32_t TilesMapped) {
     if (SparseQueue.Queue == VK_NULL_HANDLE)
