@@ -17,6 +17,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -239,6 +240,9 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
     if (!ComputeEnc)
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create Metal compute encoder.");
+    ComputeEnc->pushDebugGroup(NS::String::string(
+        isSerial() ? "ComputeEncoder (Serial)" : "ComputeEncoder (Parallel)",
+        NS::UTF8StringEncoding));
     return llvm::Error::success();
   }
 
@@ -248,6 +252,7 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
       return llvm::Error::success();
     if (ComputeEnc) {
       barrier();
+      ComputeEnc->popDebugGroup();
       ComputeEnc->endEncoding();
       ComputeEnc = nullptr;
     }
@@ -272,6 +277,29 @@ public:
 
   MTL::ComputeCommandEncoder *getNative() const { return ComputeEnc; }
 
+  MTL::CommandEncoder *getActiveEncoder() const {
+    if (ComputeEnc)
+      return ComputeEnc;
+    return BlitEnc;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (auto *Enc = getActiveEncoder())
+      Enc->pushDebugGroup(
+          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+  }
+
+  void popDebugGroup() override {
+    if (auto *Enc = getActiveEncoder())
+      Enc->popDebugGroup();
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (auto *Enc = getActiveEncoder())
+      Enc->insertDebugSignpost(
+          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+  }
+
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ, uint32_t ThreadsPerGroupX,
                        uint32_t ThreadsPerGroupY,
@@ -287,6 +315,9 @@ public:
         static_cast<NS::UInteger>(ThreadsPerGroupZ) * GroupCountZ);
     const MTL::Size GroupSize(ThreadsPerGroupX, ThreadsPerGroupY,
                               ThreadsPerGroupZ);
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
     ComputeEnc->dispatchThreads(GridSize, GroupSize);
     return llvm::Error::success();
   }
@@ -302,6 +333,8 @@ public:
     auto &MTLBuf = static_cast<MTLBuffer &>(ArgBuffer);
     const MTL::Size GroupSize(ThreadsPerGroupX, ThreadsPerGroupY,
                               ThreadsPerGroupZ);
+    insertDebugSignpost(
+        llvm::formatv("DispatchIndirect offset={0}", Offset).str());
     ComputeEnc->dispatchThreadgroups(MTLBuf.Buf, Offset, GroupSize);
     return llvm::Error::success();
   }
@@ -313,6 +346,7 @@ public:
       return Err;
     auto &MTLSrc = static_cast<MTLBuffer &>(Src);
     auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     BlitEnc->copyFromBuffer(MTLSrc.Buf, SrcOffset, MTLDst.Buf, DstOffset, Size);
     return llvm::Error::success();
   }
@@ -322,12 +356,15 @@ public:
     if (auto Err = ensureBlitEncoder())
       return Err;
     auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    insertDebugSignpost(
+        llvm::formatv("FillBuffer {0}B value=0x{1:x2}", Size, Value).str());
     BlitEnc->fillBuffer(MTLDst.Buf, NS::Range(Offset, Size), Value);
     return llvm::Error::success();
   }
 
   void barrier() override {
     if (ComputeEnc && PendingScope != MTL::BarrierScope(0)) {
+      insertDebugSignpost("Barrier");
       ComputeEnc->memoryBarrier(PendingScope);
       PendingScope = MTL::BarrierScope(0);
     }
@@ -336,6 +373,7 @@ public:
   void endEncoding() override {
     if (ComputeEnc) {
       barrier();
+      ComputeEnc->popDebugGroup();
       ComputeEnc->endEncoding();
       ComputeEnc = nullptr;
     }
@@ -354,6 +392,10 @@ MTLCommandBuffer::createComputeEncoder(EncoderMode Mode) {
     return llvm::createStringError(
         std::errc::device_or_resource_busy,
         "Failed to create Metal compute command encoder.");
+  NativeEncoder->pushDebugGroup(NS::String::string(
+      Mode == EncoderMode::Serial ? "ComputeEncoder (Serial)"
+                                  : "ComputeEncoder (Parallel)",
+      NS::UTF8StringEncoding));
   return std::make_unique<MTLComputeEncoder>(CmdBuffer, NativeEncoder, Mode);
 }
 class MTLDevice : public offloadtest::Device {

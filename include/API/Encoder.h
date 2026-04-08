@@ -11,6 +11,7 @@
 
 #include "API/API.h"
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 
 #include <cstddef>
@@ -56,6 +57,16 @@ public:
   /// \p Offset and \p Size must be multiples of 4.
   virtual llvm::Error fillBuffer(Buffer &Dst, size_t Offset, size_t Size,
                                  uint8_t Value) = 0;
+
+  /// Begin a named debug group. Visible in GPU debuggers (PIX, RenderDoc,
+  /// Xcode). Must be balanced by a corresponding popDebugGroup() call.
+  virtual void pushDebugGroup(llvm::StringRef Label) {}
+
+  /// End the most recently pushed debug group.
+  virtual void popDebugGroup() {}
+
+  /// Insert a point-in-time debug marker.
+  virtual void insertDebugSignpost(llvm::StringRef Label) {}
 
   /// Finish recording. No further commands may be recorded after this call.
   virtual void endEncoding() = 0;

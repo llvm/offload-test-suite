@@ -16,6 +16,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -511,8 +512,15 @@ public:
   VkCommandPool CmdPool = VK_NULL_HANDLE;
   VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
 
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+
   static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
-  create(VkDevice Device, uint32_t QueueFamilyIdx) {
+  create(VkDevice Device, uint32_t QueueFamilyIdx,
+         PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
+         PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel,
+         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel) {
     auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
     CB->Device = Device;
 
@@ -538,6 +546,11 @@ public:
     if (vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not begin command buffer.");
+
+    CB->CmdBeginDebugUtilsLabel = CmdBeginDebugUtilsLabel;
+    CB->CmdEndDebugUtilsLabel = CmdEndDebugUtilsLabel;
+    CB->CmdInsertDebugUtilsLabel = CmdInsertDebugUtilsLabel;
+
     return CB;
   }
 
@@ -649,6 +662,29 @@ public:
     return E->getAPI() == GPUAPI::Vulkan;
   }
 
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (!CB.CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() override {
+    if (CB.CmdEndDebugUtilsLabel)
+      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (!CB.CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
                        uint32_t /*ThreadsPerGroupY*/,
@@ -658,6 +694,9 @@ public:
     addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                   VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
 
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
     vkCmdDispatch(CB.CmdBuffer, GroupCountX, GroupCountY, GroupCountZ);
     return llvm::Error::success();
   }
@@ -673,6 +712,8 @@ public:
                   VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT |
                       VK_ACCESS_INDIRECT_COMMAND_READ_BIT);
     auto &VKBuf = static_cast<VulkanBuffer &>(ArgBuffer);
+    insertDebugSignpost(
+        llvm::formatv("DispatchIndirect offset={0}", Offset).str());
     vkCmdDispatchIndirect(CB.CmdBuffer, VKBuf.Buffer,
                           static_cast<VkDeviceSize>(Offset));
     return llvm::Error::success();
@@ -687,6 +728,7 @@ public:
     Region.srcOffset = SrcOffset;
     Region.dstOffset = DstOffset;
     Region.size = Size;
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
     return llvm::Error::success();
   }
@@ -698,18 +740,19 @@ public:
     // vkCmdFillBuffer writes repeatedly.
     const uint32_t Data = uint32_t(Value) * 0x01010101u;
     addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost(
+        llvm::formatv("FillBuffer {0}B value=0x{1:x2}", Size, Value).str());
     vkCmdFillBuffer(CB.CmdBuffer, VKDst.Buffer, Offset, Size, Data);
     return llvm::Error::success();
   }
 
   void barrier() override {
+    insertDebugSignpost("Barrier");
     CB.flushBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                     VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
   }
 
-  void endEncoding() override {
-    // State remains on the command buffer for the next encoder.
-  }
+  void endEncoding() override { popDebugGroup(); }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
@@ -719,7 +762,11 @@ VulkanCommandBuffer::createComputeEncoder(offloadtest::EncoderMode Mode) {
     flushBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
                  VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
   }
-  return std::make_unique<VKComputeEncoder>(*this, Mode);
+  auto Enc = std::make_unique<VKComputeEncoder>(*this, Mode);
+  Enc->pushDebugGroup(Mode == offloadtest::EncoderMode::Serial
+                          ? "ComputeEncoder (Serial)"
+                          : "ComputeEncoder (Parallel)");
+  return Enc;
 }
 class VulkanDevice : public offloadtest::Device {
 private:
@@ -736,6 +783,11 @@ private:
   LayerVector InstanceLayers;
   using ExtensionVector = llvm::SmallVector<VkExtensionProperties, 0>;
   ExtensionVector DeviceExtensions;
+
+  // Debug utils function pointers, resolved once per device.
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -959,6 +1011,15 @@ public:
 #endif
 
     DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
+
+    CmdBeginDebugUtilsLabel =
+        (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdBeginDebugUtilsLabelEXT");
+    CmdEndDebugUtilsLabel = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+        Device, "vkCmdEndDebugUtilsLabelEXT");
+    CmdInsertDebugUtilsLabel =
+        (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdInsertDebugUtilsLabelEXT");
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
@@ -1194,7 +1255,9 @@ private:
 public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    return VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -2682,8 +2745,9 @@ public:
       llvm::outs() << "Cleanup complete.\n";
     });
 
-    auto CBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto CBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
@@ -2707,8 +2771,9 @@ public:
     if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed copy command buffer.\n";
-    auto DispatchCBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto DispatchCBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
     if (!DispatchCBOrErr)
       return DispatchCBOrErr.takeError();
     State.CB = std::move(*DispatchCBOrErr);
