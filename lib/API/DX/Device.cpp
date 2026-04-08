@@ -43,6 +43,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Signals.h"
 
 #include <atomic>
@@ -589,6 +590,13 @@ public:
     return E->getAPI() == GPUAPI::DirectX;
   }
 
+  // D3D12 debug labels require WinPixEventRuntime for the proper event
+  // encoding.  Without it, BeginEvent/EndEvent/SetMarker with metadata type 0
+  // crash the D3D12 debug layer, so leave these as no-ops for now.
+  void pushDebugGroup(llvm::StringRef Label) override {}
+  void popDebugGroup() override {}
+  void insertDebugSignpost(llvm::StringRef Label) override {}
+
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
                        uint32_t /*ThreadsPerGroupY*/,
@@ -596,6 +604,9 @@ public:
     // DX12 bakes threadgroup size into the pipeline; only group counts are
     // used for dispatch.
     addUAVBarrier();
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
     CB.CmdList->Dispatch(GroupCountX, GroupCountY, GroupCountZ);
     return llvm::Error::success();
   }
@@ -606,19 +617,20 @@ public:
     auto &DXSrc = static_cast<DXBuffer &>(Src);
     auto &DXDst = static_cast<DXBuffer &>(Dst);
     addUAVBarrier();
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
     return llvm::Error::success();
   }
 
-  void endEncoding() override {
-    // State remains on the command buffer for the next encoder.
-  }
+  void endEncoding() override { popDebugGroup(); }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
 DXCommandBuffer::createComputeEncoder() {
-  return std::make_unique<DXComputeEncoder>(*this);
+  auto Enc = std::make_unique<DXComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
 }
 
 class DXDevice : public offloadtest::Device {

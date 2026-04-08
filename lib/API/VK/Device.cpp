@@ -17,6 +17,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -522,8 +523,15 @@ public:
   VkCommandPool CmdPool = VK_NULL_HANDLE;
   VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
 
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+
   static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
-  create(VkDevice Device, uint32_t QueueFamilyIdx) {
+  create(VkDevice Device, uint32_t QueueFamilyIdx,
+         PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
+         PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel,
+         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel) {
     auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
     CB->Device = Device;
 
@@ -551,6 +559,11 @@ public:
     if (auto Err = VK::toError(vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo),
                                "Could not begin command buffer."))
       return Err;
+
+    CB->CmdBeginDebugUtilsLabel = CmdBeginDebugUtilsLabel;
+    CB->CmdEndDebugUtilsLabel = CmdEndDebugUtilsLabel;
+    CB->CmdInsertDebugUtilsLabel = CmdInsertDebugUtilsLabel;
+
     return CB;
   }
 
@@ -625,6 +638,29 @@ public:
     return E->getAPI() == GPUAPI::Vulkan;
   }
 
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (!CB.CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() override {
+    if (CB.CmdEndDebugUtilsLabel)
+      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (!CB.CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
                        uint32_t /*ThreadsPerGroupY*/,
@@ -633,7 +669,9 @@ public:
     // used for dispatch.
     addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                   VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
-
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
     vkCmdDispatch(CB.CmdBuffer, GroupCountX, GroupCountY, GroupCountZ);
     return llvm::Error::success();
   }
@@ -648,18 +686,19 @@ public:
     Region.dstOffset = DstOffset;
     Region.size = Size;
     addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
     return llvm::Error::success();
   }
 
-  void endEncoding() override {
-    // State remains on the command buffer for the next encoder.
-  }
+  void endEncoding() override { popDebugGroup(); }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
 VulkanCommandBuffer::createComputeEncoder() {
-  return std::make_unique<VKComputeEncoder>(*this);
+  auto Enc = std::make_unique<VKComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
 }
 
 class VulkanDevice : public offloadtest::Device {
@@ -677,6 +716,11 @@ private:
   LayerVector InstanceLayers;
   using ExtensionVector = llvm::SmallVector<VkExtensionProperties, 0>;
   ExtensionVector DeviceExtensions;
+
+  // Debug utils function pointers, resolved once per device.
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -901,6 +945,15 @@ public:
 #endif
 
     DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
+
+    CmdBeginDebugUtilsLabel =
+        (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdBeginDebugUtilsLabelEXT");
+    CmdEndDebugUtilsLabel = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+        Device, "vkCmdEndDebugUtilsLabelEXT");
+    CmdInsertDebugUtilsLabel =
+        (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdInsertDebugUtilsLabelEXT");
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
@@ -1145,7 +1198,9 @@ private:
 public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    return VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -2658,8 +2713,9 @@ public:
       llvm::outs() << "Cleanup complete.\n";
     });
 
-    auto CBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto CBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
@@ -2686,8 +2742,9 @@ public:
     if (!CopyResult)
       return CopyResult.takeError();
     llvm::outs() << "Executed copy command buffer.\n";
-    auto DispatchCBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto DispatchCBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
     if (!DispatchCBOrErr)
       return DispatchCBOrErr.takeError();
     State.CB = std::move(*DispatchCBOrErr);
