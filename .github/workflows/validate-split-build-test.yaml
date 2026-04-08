@@ -1,0 +1,103 @@
+name: Validate Split Build/Test
+
+# Manual-only workflow for validating the split callable on each SKU.
+# Run this via workflow_dispatch, selecting a SKU to test.
+# Compare results against the standard build-and-test-callable.yaml runs.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      SKU:
+        description: 'Runner SKU to test'
+        required: true
+        type: choice
+        options:
+        - windows-intel
+        - windows-nvidia
+        - windows-amd
+        - windows-qc
+        - macos
+
+jobs:
+  # Run the split callable for every test target relevant to the chosen SKU
+  split-intel:
+    if: inputs.SKU == 'windows-intel'
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk, check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
+    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-intel
+      TestTarget: ${{ matrix.TestTarget }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
+  split-nvidia:
+    if: inputs.SKU == 'windows-nvidia'
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-nvidia
+      TestTarget: ${{ matrix.TestTarget }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
+  split-amd:
+    if: inputs.SKU == 'windows-amd'
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-amd
+      TestTarget: ${{ matrix.TestTarget }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
+  split-qc:
+    if: inputs.SKU == 'windows-qc'
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk, check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
+    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-qc
+      TestTarget: ${{ matrix.TestTarget }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
+  split-macos:
+    if: inputs.SKU == 'macos'
+    permissions:
+      contents: read
+      checks: write
+    strategy:
+      fail-fast: false
+      matrix:
+        TestTarget: [check-hlsl-mtl, check-hlsl-clang-mtl]
+    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    with:
+      OS: macOS
+      SKU: macos
+      TestTarget: ${{ matrix.TestTarget }}
