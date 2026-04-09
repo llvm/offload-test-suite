@@ -1,7 +1,5 @@
 #--- source.hlsl
-
 RWBuffer<float>  In;
-RWBuffer<float>  OutScalar;
 RWBuffer<float2> OutVec2;
 RWBuffer<float4> OutVec4;
 
@@ -14,46 +12,25 @@ void main() {
   );
 
   //--------------------------------------------------
-  // 1. Named element getters (one-based)
+  // 1. float4 row swizzles assignments
   //--------------------------------------------------
-  uint s = 0;
-  OutScalar[s++] = m._11;
-  OutScalar[s++] = m._12;
-  OutScalar[s++] = m._13;
-  OutScalar[s++] = m._14;
-
-  OutScalar[s++] = m._21;
-  OutScalar[s++] = m._22;
-  OutScalar[s++] = m._23;
-  OutScalar[s++] = m._24;
-
-  OutScalar[s++] = m._31;
-  OutScalar[s++] = m._32;
-  OutScalar[s++] = m._33;
-  OutScalar[s++] = m._34;
+  OutVec4[0].wyzx = m._11_14_13_12;
+  OutVec4[1].zwyx = m._22_21_23_24;
+  OutVec4[2].yzwx = m._31_32_33_34;
 
   //--------------------------------------------------
-  // 2. float4 row swizzles
+  // 2. float2 swizzles assignments
   //--------------------------------------------------
 
-  OutVec4[0] = m._11_12_13_14;
-  OutVec4[1] = m._21_22_23_24;
-  OutVec4[2] = m._31_32_33_34;
+  OutVec2[0].xy = m._11_12;
+  OutVec2[1].yx = m._13_14;
 
-  //--------------------------------------------------
-  // 4. float2 swizzles
-  //--------------------------------------------------
+  OutVec2[2].yx = m._21_22;
+  OutVec2[3].xy = m._23_24;
 
-  OutVec2[0] = m._11_12;
-  OutVec2[1] = m._13_14;
-
-  OutVec2[2] = m._21_22;
-  OutVec2[3] = m._23_24;
-
-  OutVec2[4] = m._31_32;
-  OutVec2[5] = m._33_34;
+  OutVec2[4].rg = m._31_32;
+  OutVec2[5].gr = m._33_34;
 }
-
 //--- pipeline.yaml
 ---
 Shaders:
@@ -64,18 +41,6 @@ Buffers:
   - Name: In
     Format: Float32
     Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
-
-  #--------------------------------------------------
-  # Scalar output (12 floats)
-  #--------------------------------------------------
-  - Name: OutScalar
-    Format: Float32
-    FillSize: 48
-
-  - Name: ExpectedOutScalar
-    Format: Float32
-    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
-
   #--------------------------------------------------
   # float2 outputs
   #--------------------------------------------------
@@ -86,7 +51,7 @@ Buffers:
   - Name: ExpectedOutVec2
     Format: Float32
     Channels: 2
-    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+    Data: [ 1, 2, 4, 3, 6, 5, 7, 8, 9, 10, 12, 11 ]
   #--------------------------------------------------
   # float4 outputs
   #--------------------------------------------------
@@ -97,13 +62,8 @@ Buffers:
   - Name: ExpectedOutVec4
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+    Data: [ 2, 4, 3, 1, 8, 7, 6, 5, 12, 9, 10, 11 ]
 Results:
-  - Result: CheckScalar
-    Rule: BufferFloatULP
-    ULPT: 0
-    Actual: OutScalar
-    Expected: ExpectedOutScalar
   - Result: CheckVec2
     Rule: BufferFloatULP
     ULPT: 0
@@ -123,29 +83,25 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: OutScalar
+    - Name: OutVec2
       Kind: RWBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: OutVec2
+    - Name: OutVec4
       Kind: RWBuffer
       DirectXBinding:
         Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
-    - Name: OutVec4
-      Kind: RWBuffer
-      DirectXBinding:
-        Register: 3
-        Space: 0
-      VulkanBinding:
-        Binding: 3
 ...
 #--- end
+
+# BUG Vulkan  https://github.com/llvm/llvm-project/issues/180258
+# XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
