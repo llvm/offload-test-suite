@@ -293,6 +293,82 @@ public:
       : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
 };
 
+class DXFence : public offloadtest::Fence {
+public:
+#ifdef _WIN32
+  DXFence(ComPtr<ID3D12Fence> Fence, HANDLE Event, llvm::StringRef Name)
+#else // WSL
+  DXFence(ComPtr<ID3D12Fence> Fence, int Event, llvm::StringRef Name)
+#endif
+      : Name(Name), Fence(Fence), Event(Event) {
+  }
+
+  std::string Name;
+  ComPtr<ID3D12Fence> Fence;
+#ifdef _WIN32
+  HANDLE Event;
+#else // WSL
+  int Event;
+#endif
+
+  static llvm::Expected<std::unique_ptr<DXFence>> create(ID3D12Device *Device,
+                                                         llvm::StringRef Name) {
+    ComPtr<ID3D12Fence> Fence;
+    if (auto Err = HR::toError(
+            Device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)),
+            "Failed to create Fence."))
+      return Err;
+
+#ifdef _WIN32
+    HANDLE Event = CreateEventA(nullptr, false, false, nullptr);
+    if (!Event)
+#else // WSL
+    int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (Event == -1)
+#endif
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create event.");
+
+    return std::make_unique<DXFence>(Fence, Event, Name);
+  }
+
+  ~DXFence() {
+#ifdef _WIN32
+    CloseHandle(Event);
+#else // WSL
+    close(Event);
+#endif
+  }
+
+  uint64_t getFenceValue() override { return Fence->GetCompletedValue(); }
+
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+    if (Fence->GetCompletedValue() >= SignalValue)
+      return llvm::Error::success();
+
+#ifdef _WIN32
+    if (auto Err = HR::toError(Fence->SetEventOnCompletion(SignalValue, Event),
+                               "Failed to register end event."))
+      return Err;
+    WaitForSingleObject(Event, INFINITE);
+#else // WSL
+    if (auto Err =
+            HR::toError(Fence->SetEventOnCompletion(
+                            SignalValue, reinterpret_cast<HANDLE>(Event)),
+                        "Failed to register end event."))
+      return Err;
+    pollfd PollEvent;
+    PollEvent.fd = Event;
+    PollEvent.events = POLLIN;
+    PollEvent.revents = 0;
+    if (poll(&PollEvent, 1, -1) == -1)
+      return llvm::createStringError(
+          std::error_code(errno, std::system_category()), strerror(errno));
+#endif
+    return llvm::Error::success();
+  }
+};
+
 class DXQueue : public offloadtest::Queue {
 public:
   ComPtr<ID3D12CommandQueue> Queue;
@@ -346,12 +422,7 @@ private:
     ComPtr<ID3D12PipelineState> PSO;
     ComPtr<ID3D12CommandAllocator> Allocator;
     ComPtr<ID3D12GraphicsCommandList> CmdList;
-    ComPtr<ID3D12Fence> Fence;
-#ifdef _WIN32
-    HANDLE Event;
-#else // WSL
-    int Event;
-#endif
+    std::unique_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
     ComPtr<ID3D12Resource> RT;
@@ -377,6 +448,11 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::unique_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    return DXFence::create(Device.Get(), Name);
+  }
 
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
@@ -1136,56 +1212,20 @@ public:
     IS.CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  llvm::Error createEvent(InvocationState &IS) {
-    if (auto Err = HR::toError(Device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
-                                                   IID_PPV_ARGS(&IS.Fence)),
-                               "Failed to create fence."))
-      return Err;
-#ifdef _WIN32
-    IS.Event = CreateEventA(nullptr, false, false, nullptr);
-    if (!IS.Event)
-#else // WSL
-    IS.Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-    if (IS.Event == -1)
-#endif
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create event.");
-    return llvm::Error::success();
-  }
-
   llvm::Error waitForSignal(InvocationState &IS) {
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
+    auto *F = static_cast<DXFence *>(IS.Fence.get());
 
     if (auto Err = HR::toError(
-            GraphicsQueue.Queue->Signal(IS.Fence.Get(), CurrentCounter),
+            GraphicsQueue.Queue->Signal(F->Fence.Get(), CurrentCounter),
             "Failed to add signal."))
       return Err;
 
-    if (IS.Fence->GetCompletedValue() < CurrentCounter) {
-#ifdef _WIN32
-      HANDLE Event = IS.Event;
-#else // WSL
-      HANDLE Event = reinterpret_cast<HANDLE>(IS.Event);
-#endif
-      if (auto Err =
-              HR::toError(IS.Fence->SetEventOnCompletion(CurrentCounter, Event),
-                          "Failed to register end event."))
-        return Err;
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
 
-#ifdef _WIN32
-      WaitForSingleObject(IS.Event, INFINITE);
-#else // WSL
-      pollfd PollEvent;
-      PollEvent.fd = IS.Event;
-      PollEvent.events = POLLIN;
-      PollEvent.revents = 0;
-      if (poll(&PollEvent, 1, -1) == -1)
-        return llvm::createStringError(
-            std::error_code(errno, std::system_category()), strerror(errno));
-#endif
-    }
     FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
@@ -1690,9 +1730,10 @@ public:
       return Err;
     llvm::outs() << "Command structures created.\n";
 
-    if (auto Err = createEvent(State))
-      return Err;
-    llvm::outs() << "Event prepared.\n";
+    auto FenceOrErr = createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    State.Fence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, State))
       return Err;
