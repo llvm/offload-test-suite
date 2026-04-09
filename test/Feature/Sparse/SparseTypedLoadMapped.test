@@ -52,6 +52,7 @@ DescriptorSets:
 
 # Bug: https://github.com/llvm/llvm-project/issues/191248
 # XFAIL: DirectX && Clang
+# XFAIL: Metal && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
