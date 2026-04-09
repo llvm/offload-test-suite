@@ -727,8 +727,8 @@ public:
       ElementDesc.InputSlot = 0;
       ElementDesc.AlignedByteOffset = Elem.OffsetInBytes;
       ElementDesc.InputSlotClass =
-          Elem.InstanceStepRate ? D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA
-                                : D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA;
+          Elem.InstanceStepRate ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA
+                                : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
       ElementDesc.InstanceDataStepRate = Elem.InstanceStepRate.value_or(0);
       DXInputLayout.push_back(ElementDesc);
     }
