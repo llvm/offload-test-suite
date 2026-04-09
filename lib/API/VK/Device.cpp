@@ -674,7 +674,7 @@ private:
     std::unique_ptr<VulkanCommandBuffer> CB;
     VkDescriptorPool Pool = VK_NULL_HANDLE;
 
-    std::shared_ptr<PipelineState> Pipeline;
+    std::unique_ptr<PipelineState> Pipeline;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
@@ -921,7 +921,7 @@ public:
     return Module;
   }
 
-  llvm::Expected<std::shared_ptr<PipelineState>>
+  llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                    ShaderContainer CS) override {
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
@@ -992,11 +992,11 @@ public:
     // No longer need shader modules after pipeline compilation.
     vkDestroyShaderModule(Device, CSModule, nullptr);
 
-    return std::make_shared<VulkanPipelineState>(
+    return std::make_unique<VulkanPipelineState>(
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
-  llvm::Expected<std::shared_ptr<PipelineState>>
+  llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                      llvm::ArrayRef<InputLayoutDesc> InputLayout,
                      llvm::ArrayRef<Format> RTFormats,
@@ -1222,7 +1222,7 @@ public:
     for (auto *M : ShaderModules)
       vkDestroyShaderModule(Device, M, nullptr);
 
-    return std::make_shared<VulkanPipelineState>(
+    return std::make_unique<VulkanPipelineState>(
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
@@ -2755,7 +2755,7 @@ public:
           createPipelineCs("Compute Pipeline State", BindingsDesc, CS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
-      State.Pipeline = *PipelineStateOrErr;
+      State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
     } else {
       ShaderContainer VS = {};
@@ -2799,7 +2799,7 @@ public:
           Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
-      State.Pipeline = *PipelineStateOrErr;
+      State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Graphics Pipeline created.\n";
     }
 

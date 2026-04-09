@@ -46,7 +46,7 @@ struct DeviceConfig {
   bool EnableValidationLayer = false;
 };
 
-struct DXBinding { // TODO(manon): rename
+struct DXBinding {
   uint32_t Register;
   uint32_t Space;
 };
@@ -58,7 +58,6 @@ struct InputLayoutDesc {
   std::optional<uint32_t> InstanceStepRate;
 };
 
-// TODO(manon): Come up with a good name
 struct ResourceBindingDesc {
   ResourceKind Kind;
   DXBinding DXBinding;
@@ -156,11 +155,11 @@ public:
 
   virtual Queue &getGraphicsQueue() = 0;
 
-  virtual llvm::Expected<std::shared_ptr<PipelineState>>
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                    ShaderContainer CS) = 0;
 
-  virtual llvm::Expected<std::shared_ptr<PipelineState>>
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                      llvm::ArrayRef<InputLayoutDesc> InputLayout,
                      llvm::ArrayRef<Format> RTFormats,
