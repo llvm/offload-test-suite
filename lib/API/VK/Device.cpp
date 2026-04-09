@@ -898,7 +898,6 @@ private:
 #include "VKFeatures.def"
   }
 
-private:
   llvm::Error createDevice(InvocationState &IS) {
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
