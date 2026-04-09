@@ -1999,6 +1999,7 @@ public:
         ResourceBinding.Kind = R.Kind;
         ResourceBinding.DXBinding.Register = R.DXBinding.Register;
         ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        ResourceBinding.VKBinding = R.VKBinding;
         ResourceBinding.DescriptorCount = R.getArraySize();
 
         Layout.ResourceBindings.push_back(ResourceBinding);
