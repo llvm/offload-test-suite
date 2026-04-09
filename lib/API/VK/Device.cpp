@@ -41,9 +41,7 @@ static uint32_t findQueue(const VkQueueFamilyProperties *Props, uint32_t Count,
   return InvalidQueueIndex;
 }
 
-static uint32_t getNumTiles(std::optional<uint32_t> NumTiles, size_t Size) {
-  if (NumTiles)
-    return *NumTiles;
+static uint32_t getNumTiles(size_t Size) {
   return (Size + SparseBufferTileSize - 1) / SparseBufferTileSize;
 }
 
@@ -578,16 +576,12 @@ public:
           std::errc::no_such_device,
           "No suitable queue family found for graphics and compute.");
 
-    if (SparseQueueIdx == InvalidQueueIndex)
-      return llvm::createStringError(
-          std::errc::no_such_device,
-          "No suitable queue family found for sparse "
-          "binding.");
-
     const float QueuePriority = 1.0f;
     std::vector<VkDeviceQueueCreateInfo> QueueCreateInfos;
 
     auto AddQueueCreateInfo = [&](uint32_t QFamilyIndex) {
+      if (QFamilyIndex == InvalidQueueIndex)
+        return;
       VkDeviceQueueCreateInfo QueueCreateInfo = {};
       QueueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
       QueueCreateInfo.queueFamilyIndex = QFamilyIndex;
@@ -845,7 +839,7 @@ private:
 #include "VKFeatures.def"
   }
 
-public:
+private:
   llvm::Error createDevice(InvocationState &IS) {
     VkCommandPoolCreateInfo CmdPoolInfo = {};
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1030,7 +1024,8 @@ public:
     VkDeviceSize CopySize = R.size();
     if (R.IsReserved) {
       const VkDeviceSize MappedSize =
-          static_cast<VkDeviceSize>(getNumTiles(R.TilesMapped, R.size())) *
+          static_cast<VkDeviceSize>(
+              R.TilesMapped.value_or(getNumTiles(R.size()))) *
           SparseBufferTileSize;
       if (CopySize > MappedSize)
         CopySize = MappedSize;
@@ -1087,7 +1082,7 @@ public:
                       getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size(),
-                      getNumTiles(R.TilesMapped, R.size()))
+                      R.TilesMapped.value_or(getNumTiles(R.size())))
                 : createBuffer(getFlagBits(R.Kind) |
                                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                    VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1203,20 +1198,19 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create fence for sparse bind");
 
+    auto CleanFence =
+        llvm::scope_exit([&]() { vkDestroyFence(Device, Fence, nullptr); });
+
     if (vkQueueBindSparse(SparseQueue.Queue, 1, &BindInfo, Fence) !=
         VK_SUCCESS) {
-      vkDestroyFence(Device, Fence, nullptr);
       return llvm::createStringError(std::errc::io_error,
                                      "vkQueueBindSparse failed");
     }
 
     if (vkWaitForFences(Device, 1, &Fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
-      vkDestroyFence(Device, Fence, nullptr);
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to wait for sparse bind fence");
     }
-
-    vkDestroyFence(Device, Fence, nullptr);
 
     return BufferRef{Buffer, Memory};
   }
@@ -2504,6 +2498,7 @@ public:
       vkDestroyCommandPool(Device, IS.CmdPool, nullptr);
   }
 
+public:
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
     auto CleanupState = llvm::scope_exit([&]() {
