@@ -1145,8 +1145,11 @@ public:
     DynRenderCI.colorAttachmentCount =
         static_cast<uint32_t>(ColorFormats.size());
     DynRenderCI.pColorAttachmentFormats = ColorFormats.data();
-    if (DSFormat)
+    if (DSFormat) {
       DynRenderCI.depthAttachmentFormat = getVulkanFormat(*DSFormat);
+      if (*DSFormat == Format::D32FloatS8Uint)
+        DynRenderCI.stencilAttachmentFormat = getVulkanFormat(*DSFormat);
+    }
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -2688,6 +2691,8 @@ public:
       for (auto &R : S.Resources) {
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
+        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
+        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
         ResourceBinding.VKBinding = R.VKBinding;
         ResourceBinding.DescriptorCount = R.getArraySize();
         Layout.ResourceBindings.push_back(ResourceBinding);
