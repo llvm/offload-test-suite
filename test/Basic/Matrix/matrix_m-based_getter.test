@@ -1,44 +1,73 @@
 #--- source.hlsl
+RWBuffer<float>  In;
+RWBuffer<float>  OutScalar;
+RWBuffer<float2> OutVec2;
+RWBuffer<float3> OutVec3;
+RWBuffer<float4> OutVec4;
 
-RWBuffer<int> In : register(u0);
-RWBuffer<int> Out : register(u1);
+[numthreads(1,1,1)]
+void main() {
+  float3x4 m = float3x4(
+    In[0],  In[1],  In[2],  In[3],
+    In[4],  In[5],  In[6],  In[7],
+    In[8],  In[9],  In[10], In[11]
+  );
 
-[numthreads(4,1,1)]
-void main(uint GI : SV_GroupIndex) {
-  int2x2 A;
-  switch(GI) {
-    case 0:
-      A._m00 = In[GI];
-      break;
-    case 1:
-      A._m01 = In[GI];
-      break;
-    case 2:
-      A._m10 = In[GI];
-      break;
-    case 3:
-      A._m11 = In[GI];
-      break;
-  }
+    //--------------------------------------------------
+    // 1. Named element getters (_mXY)
+    //--------------------------------------------------
+    uint s = 0;
+    OutScalar[s++] = m._m00;
+    OutScalar[s++] = m._m01;
+    OutScalar[s++] = m._m02;
+    OutScalar[s++] = m._m03;
 
-  switch(GI) {
-    case 0:
-      Out[GI] = A._m00;
-      break;
-    case 1:
-      Out[GI] = A._m01;
-      break;
-    case 2:
-      Out[GI] = A._m10;
-      break;
-    case 3:
-      Out[GI] = A._m11;
-      break;
-  }
+    OutScalar[s++] = m._m10;
+    OutScalar[s++] = m._m11;
+    OutScalar[s++] = m._m12;
+    OutScalar[s++] = m._m13;
+
+    OutScalar[s++] = m._m20;
+    OutScalar[s++] = m._m21;
+    OutScalar[s++] = m._m22;
+    OutScalar[s++] = m._m23;
+
+    //--------------------------------------------------
+    // 2. float4 row swizzles
+    //--------------------------------------------------
+
+    OutVec4[0] = m._m00_m01_m02_m03;
+    OutVec4[1] = m._m10_m11_m12_m13;
+    OutVec4[2] = m._m20_m21_m22_m23;
+
+    OutVec4[3].wxyz = m._m00_m11_m22_m23;
+    OutVec4[4].gbra = m._m03_m12_m21_m03;
+
+    //--------------------------------------------------
+    // 3. float3 swizzles
+    //--------------------------------------------------
+
+    OutVec3[0] = m._m00_m01_m02;
+    OutVec3[1] = m._m10_m11_m12;
+    OutVec3[2] = m._m20_m21_m22;
+
+    //--------------------------------------------------
+    // 4. float2 swizzles
+    //--------------------------------------------------
+
+    OutVec2[0] = m._m00_m01;
+    OutVec2[1] = m._m02_m03;
+
+    OutVec2[2] = m._m10_m11;
+    OutVec2[3] = m._m12_m13;
+
+    OutVec2[4] = m._m20_m21;
+    OutVec2[5] = m._m22_m23;
+
+
 }
 
 //--- pipeline.yaml
-
 ---
 Shaders:
   - Stage: Compute
@@ -46,19 +75,80 @@ Shaders:
     DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
-    Format: Int32
-    Data: [ 1, 2, 3, 4]
-  - Name: Out
-    Format: Int32
-    FillSize: 16
-  - Name: ExpectedOut
-    Format: Int32
-    Data: [ 1, 2, 3, 4 ]
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+
+  #--------------------------------------------------
+  # Scalar output (12 floats)
+  #--------------------------------------------------
+  - Name: OutScalar
+    Format: Float32
+    FillSize: 48
+
+  - Name: ExpectedOutScalar
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+
+  #--------------------------------------------------
+  # float2 outputs
+  #--------------------------------------------------
+  - Name: OutVec2
+    Format: Float32
+    Channels: 2
+    FillSize: 48
+  - Name: ExpectedOutVec2
+    Format: Float32
+    Channels: 2
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 ]
+
+  #--------------------------------------------------
+  # float3 outputs
+  #--------------------------------------------------
+  - Name: OutVec3
+    Format: Float32
+    Channels: 3
+    FillSize: 36
+  - Name: ExpectedOutVec3
+    Format: Float32
+    Channels: 3
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0 ]
+
+  #--------------------------------------------------
+  # float4 outputs
+  #--------------------------------------------------
+  - Name: OutVec4
+    Format: Float32
+    Channels: 4
+    FillSize: 80
+  - Name: ExpectedOutVec4
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 2.0, 3.0, 4.0, 
+            5.0, 6.0, 7.0, 8.0, 
+            9.0, 10.0, 11.0, 12.0, 
+            6.0, 11.0, 12.0, 1.0, 
+            10.0, 4.0, 7.0, 4.0]
 Results:
-  - Result: Out
-    Rule: BufferExact
-    Actual: Out
-    Expected: ExpectedOut
+  - Result: CheckScalar
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: OutScalar
+    Expected: ExpectedOutScalar
+  - Result: CheckVec2
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: OutVec2
+    Expected: ExpectedOutVec2
+  - Result: CheckVec3
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: OutVec3
+    Expected: ExpectedOutVec3
+  - Result: CheckVec4
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: OutVec4
+    Expected: ExpectedOutVec4
 DescriptorSets:
   - Resources:
     - Name: In
@@ -68,17 +158,37 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
+    - Name: OutScalar
       Kind: RWBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: OutVec2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutVec3
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutVec4
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
 ...
 #--- end
 
-# UNSUPPORTED: Clang
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
