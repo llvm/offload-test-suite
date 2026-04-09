@@ -525,7 +525,7 @@ private:
   struct InvocationState {
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     std::unique_ptr<DXCommandBuffer> CB;
-    std::shared_ptr<PipelineState> Pipeline;
+    std::unique_ptr<PipelineState> Pipeline;
     std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // Resources for graphics pipelines.
@@ -676,7 +676,7 @@ public:
                                                OutRootSignature);
   }
 
-  llvm::Expected<std::shared_ptr<PipelineState>>
+  llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                    ShaderContainer CS) override {
     ComPtr<ID3D12RootSignature> RootSig;
@@ -701,10 +701,10 @@ public:
             "Failed to create PSO."))
       return Err;
 
-    return std::make_shared<DXPipelineState>(Name, RootSig, PSO);
+    return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
   }
 
-  llvm::Expected<std::shared_ptr<PipelineState>>
+  llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                      llvm::ArrayRef<InputLayoutDesc> InputLayout,
                      llvm::ArrayRef<Format> RTFormats,
@@ -762,7 +762,7 @@ public:
             "Failed to create graphics PSO."))
       return Err;
 
-    return std::make_shared<DXPipelineState>(Name, RootSig, PSO);
+    return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -1959,7 +1959,7 @@ public:
           createPipelineCs("Compute Pipeline State", BindingsDesc, CS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
-      State.Pipeline = *PipelineStateOrErr;
+      State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
       if (auto Err = createComputeCommands(P, State))
         return Err;
@@ -2019,7 +2019,7 @@ public:
           Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
-      State.Pipeline = *PipelineStateOrErr;
+      State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Graphics Pipeline created.\n";
       if (auto Err = createGraphicsCommands(P, State))
         return Err;

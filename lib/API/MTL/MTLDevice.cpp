@@ -209,7 +209,7 @@ class MTLDevice : public offloadtest::Device {
     std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
-    std::shared_ptr<PipelineState> Pipeline;
+    std::unique_ptr<PipelineState> Pipeline;
     std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
 
@@ -630,7 +630,7 @@ public:
     return MTLCommandBuffer::create(GraphicsQueue.Queue);
   }
 
-  llvm::Expected<std::shared_ptr<PipelineState>>
+  llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name,
                    const BindingsDesc & /*unused on metal*/,
                    ShaderContainer CS) override {
@@ -661,10 +661,10 @@ public:
     if (Error)
       return toError(Error);
 
-    return std::make_shared<MTLPipelineState>(Name, PSO);
+    return std::make_unique<MTLPipelineState>(Name, PSO);
   }
 
-  llvm::Expected<std::shared_ptr<PipelineState>> createPipelineVsPs(
+  llvm::Expected<std::unique_ptr<PipelineState>> createPipelineVsPs(
       llvm::StringRef Name, const BindingsDesc & /*unused on metal*/,
       llvm::ArrayRef<InputLayoutDesc> InputLayout,
       llvm::ArrayRef<Format> RTFormats, std::optional<Format> DSFormat,
@@ -773,7 +773,7 @@ public:
     if (Error)
       return toError(Error);
 
-    return std::make_shared<MTLPipelineState>(Name, PSO);
+    return std::make_unique<MTLPipelineState>(Name, PSO);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
@@ -821,7 +821,7 @@ public:
           createPipelineCs("Compute Pipeline State", Bindings, CS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
-      IS.Pipeline = *PipelineStateOrErr;
+      IS.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
 
       if (auto Err = createComputeCommands(P, IS))
@@ -864,7 +864,7 @@ public:
           "Graphics Pipeline State", Bindings, InputLayout, RTFormats, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
-      IS.Pipeline = *PipelineStateOrErr;
+      IS.Pipeline = std::move(*PipelineStateOrErr);
 
       if (auto Err = createGraphicsCommands(P, IS))
         return Err;
