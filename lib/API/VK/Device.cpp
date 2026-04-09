@@ -1198,6 +1198,15 @@ private:
     if (!ExBuffer)
       return ExBuffer.takeError();
     VkBuffer Buffer = *ExBuffer;
+    VkDeviceMemory Memory = VK_NULL_HANDLE;
+    bool Success = false;
+    auto Cleanup = llvm::scope_exit([&]() {
+      if (!Success) {
+        if (Memory != VK_NULL_HANDLE)
+          vkFreeMemory(Device, Memory, nullptr);
+        vkDestroyBuffer(Device, Buffer, nullptr);
+      }
+    });
 
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
@@ -1225,7 +1234,7 @@ private:
     auto ExMemory = allocateMemory(Device, MappedSize, *MemIdx);
     if (!ExMemory)
       return ExMemory.takeError();
-    VkDeviceMemory Memory = *ExMemory;
+    Memory = *ExMemory;
 
     // Bind the allocated memory to the start of the buffer
     VkSparseMemoryBind Bind = {};
@@ -1271,6 +1280,7 @@ private:
                                      "Failed to wait for sparse bind fence");
     }
 
+    Success = true;
     return BufferRef{Buffer, Memory};
   }
 
