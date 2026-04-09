@@ -424,7 +424,7 @@ public:
     uint64_t Value = 0;
     [[maybe_unused]] const VkResult Ret =
         vkGetSemaphoreCounterValue(Device, Semaphore, &Value);
-    assert(!Ret);
+    assert(!Ret && "vkGetSemaphoreCounterValue failed but should never fail.");
     return Value;
   }
 
