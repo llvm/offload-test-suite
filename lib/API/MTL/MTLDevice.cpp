@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "Support/Pipeline.h"
 
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
@@ -373,6 +374,9 @@ class MTLDevice : public offloadtest::Device {
     MTL::ComputeCommandEncoder *CmdEncoder =
         IS.CmdBuffer->computeCommandEncoder();
 
+    auto CloseCommandEncoder =
+        llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
+
     CmdEncoder->setComputePipelineState(IS.ComputePipeline);
     CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
     for (uint64_t I = 0; I < IS.Textures.size(); ++I)
@@ -431,7 +435,6 @@ class MTLDevice : public offloadtest::Device {
     CmdEncoder->dispatchThreads(GridSize, GroupSize);
     CmdEncoder->memoryBarrier(MTL::BarrierScopeBuffers);
 
-    CmdEncoder->endEncoding();
     return llvm::Error::success();
   }
 
