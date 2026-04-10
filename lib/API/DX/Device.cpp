@@ -37,6 +37,8 @@
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
 
+#include "DXResources.h"
+
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
@@ -293,6 +295,27 @@ public:
       : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
 };
 
+class DXTexture : public offloadtest::Texture {
+public:
+  ComPtr<ID3D12Resource> Resource;
+  // TODO:
+  // RTV/DSV views own a dedicated single-descriptor heap and are created at
+  // texture creation time. Ideally SRV/UAV views would also live here, but
+  // they currently require a shared CBV_SRV_UAV heap whose indices are
+  // determined at pipeline bind time. Moving them here would require a
+  // descriptor heap allocator, which is not yet implemented.
+  //
+  // Either an RTV or DSV descriptor, depending on Desc.Usage.
+  ComPtr<ID3D12DescriptorHeap> ViewHeap;
+  D3D12_CPU_DESCRIPTOR_HANDLE ViewHandle = {};
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  DXTexture(ComPtr<ID3D12Resource> Resource, llvm::StringRef Name,
+            TextureCreateDesc Desc)
+      : Resource(Resource), Name(Name), Desc(Desc) {}
+};
+
 class DXFence : public offloadtest::Fence {
 public:
 #ifdef _WIN32
@@ -516,6 +539,87 @@ public:
       return Err;
 
     return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    const D3D12_HEAP_PROPERTIES HeapProps =
+        CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
+
+    D3D12_RESOURCE_DESC TexDesc = {};
+    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    TexDesc.Width = Desc.Width;
+    TexDesc.Height = Desc.Height;
+    TexDesc.DepthOrArraySize = 1;
+    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
+    TexDesc.Format = getDXGIFormat(Desc.Format);
+    TexDesc.SampleDesc.Count = 1;
+    TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    TexDesc.Flags = getDXResourceFlags(Desc.Usage);
+
+    const D3D12_CLEAR_VALUE *ClearValuePtr = nullptr;
+    D3D12_CLEAR_VALUE ClearValue = {};
+    if (Desc.OptimizedClearValue) {
+      ClearValue.Format = TexDesc.Format;
+      std::visit(
+          [&ClearValue](auto &&V) {
+            using T = std::decay_t<decltype(V)>;
+            if constexpr (std::is_same_v<T, ClearColor>) {
+              ClearValue.Color[0] = V.R;
+              ClearValue.Color[1] = V.G;
+              ClearValue.Color[2] = V.B;
+              ClearValue.Color[3] = V.A;
+            } else {
+              ClearValue.DepthStencil.Depth = V.Depth;
+              ClearValue.DepthStencil.Stencil = V.Stencil;
+            }
+          },
+          *Desc.OptimizedClearValue);
+      ClearValuePtr = &ClearValue;
+    }
+
+    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+    if ((Desc.Usage & TextureUsage::RenderTarget) != 0)
+      InitialState = D3D12_RESOURCE_STATE_RENDER_TARGET;
+    else if ((Desc.Usage & TextureUsage::DepthStencil) != 0)
+      InitialState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+
+    ComPtr<ID3D12Resource> DeviceTexture;
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &TexDesc,
+                                   InitialState, ClearValuePtr,
+                                   IID_PPV_ARGS(&DeviceTexture)),
+                               "Failed to create texture."))
+      return Err;
+
+    auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+
+    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
+      HeapDesc.NumDescriptors = 1;
+      HeapDesc.Type = IsRT ? D3D12_DESCRIPTOR_HEAP_TYPE_RTV
+                           : D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
+      HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      if (auto Err = HR::toError(Device->CreateDescriptorHeap(
+                                     &HeapDesc, IID_PPV_ARGS(&Tex->ViewHeap)),
+                                 IsRT ? "Failed to create RTV heap."
+                                      : "Failed to create DSV heap."))
+        return Err;
+      Tex->ViewHandle = Tex->ViewHeap->GetCPUDescriptorHandleForHeapStart();
+      if (IsRT)
+        Device->CreateRenderTargetView(DeviceTexture.Get(), nullptr,
+                                       Tex->ViewHandle);
+      else
+        Device->CreateDepthStencilView(DeviceTexture.Get(), nullptr,
+                                       Tex->ViewHandle);
+    }
+
+    return Tex;
   }
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>

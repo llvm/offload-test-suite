@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
@@ -387,6 +388,32 @@ public:
 
   ~VulkanBuffer() override {
     vkDestroyBuffer(Dev, Buffer, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
+class VulkanTexture : public offloadtest::Texture {
+public:
+  VkDevice Dev;
+  VkImage Image;
+  VkDeviceMemory Memory;
+  // TODO:
+  // RenderTarget and DepthStencil views are created at texture creation time.
+  // Ideally Sampled/Storage image views would also live here, but they are
+  // currently created during descriptor set setup, which determines their
+  // binding layout.
+  VkImageView View = VK_NULL_HANDLE;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
+                llvm::StringRef Name, TextureCreateDesc Desc)
+      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+
+  ~VulkanTexture() override {
+    if (View)
+      vkDestroyImageView(Dev, View, nullptr);
+    vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
 };
@@ -810,6 +837,89 @@ public:
 
     return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
                                           Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    VkImageCreateInfo ImageInfo = {};
+    ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.extent = {Desc.Width, Desc.Height, 1};
+    ImageInfo.mipLevels = Desc.MipLevels;
+    ImageInfo.arrayLayers = 1;
+    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
+    ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkImage Image;
+    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to create image.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx) {
+      vkDestroyImage(Device, Image, nullptr);
+      return MemIdx.takeError();
+    }
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+      vkDestroyImage(Device, Image, nullptr);
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate image memory.");
+    }
+    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+      vkDestroyImage(Device, Image, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind image memory.");
+    }
+
+    auto Tex = std::make_shared<VulkanTexture>(Device, Image, DeviceMemory,
+                                               Name, Desc);
+
+    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      VkImageViewCreateInfo ViewCi = {};
+      ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      ViewCi.format = getVulkanFormat(Desc.Format);
+      ViewCi.subresourceRange.baseMipLevel = 0;
+      ViewCi.subresourceRange.levelCount = 1;
+      ViewCi.subresourceRange.baseArrayLayer = 0;
+      ViewCi.subresourceRange.layerCount = 1;
+      ViewCi.image = Image;
+      if (IsRT) {
+        ViewCi.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                             VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+        ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      } else {
+        ViewCi.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+      }
+      if (vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View)) {
+        // Tex destructor will clean up Image + Memory.
+        return llvm::createStringError(std::errc::device_or_resource_busy,
+                                       "Failed to create image view.");
+      }
+    }
+
+    return Tex;
   }
 
   const Capabilities &getCapabilities() override {

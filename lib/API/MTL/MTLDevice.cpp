@@ -10,6 +10,7 @@
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
+#include "MTLResources.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/ScopeExit.h"
@@ -132,6 +133,21 @@ public:
   }
 };
 
+class MTLTexture : public offloadtest::Texture {
+public:
+  MTL::Texture *Tex;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc)
+      : Tex(Tex), Name(Name), Desc(Desc) {}
+
+  ~MTLTexture() override {
+    if (Tex)
+      Tex->release();
+  }
+};
+
 class MTLCommandBuffer : public offloadtest::CommandBuffer {
 public:
   static constexpr GPUAPI BackendAPI = GPUAPI::Metal;
@@ -182,7 +198,9 @@ class MTLDevice : public offloadtest::Device {
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
-    MTL::Texture *FrameBufferTexture = nullptr;
+    std::shared_ptr<MTLTexture> FrameBufferTexture;
+    std::shared_ptr<MTLBuffer> FrameBufferReadback;
+    std::shared_ptr<MTLTexture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<offloadtest::Fence> Fence;
   };
@@ -651,6 +669,25 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");
     return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
+        getMetalPixelFormat(Desc.Format), Desc.Width, Desc.Height,
+        Desc.MipLevels > 1);
+    TDesc->setMipmapLevelCount(Desc.MipLevels);
+    TDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));
+    TDesc->setUsage(getMetalTextureUsage(Desc.Usage));
+
+    MTL::Texture *Tex = Device->newTexture(TDesc);
+    if (!Tex)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal texture.");
+    return std::make_shared<MTLTexture>(Tex, Name, Desc);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>

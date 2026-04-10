@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 
 #include "Config.h"
 
@@ -55,3 +56,26 @@ offloadtest::initializeDevices(const DeviceConfig Config) {
     llvm::logAllUnhandledErrors(std::move(Err), llvm::errs());
   return Devices;
 }
+
+llvm::Expected<std::shared_ptr<Texture>>
+offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
+                                             const CPUBuffer &Buf) {
+  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
+  if (!TexFmtOrErr)
+    return TexFmtOrErr.takeError();
+
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::RenderTarget;
+  Desc.Format = *TexFmtOrErr;
+  Desc.Width = Buf.OutputProps.Width;
+  Desc.Height = Buf.OutputProps.Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearColor{};
+
+  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
+    return Err;
+
+  return Dev.createTexture("RenderTarget", Desc);
+}
+
