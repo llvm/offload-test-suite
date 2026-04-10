@@ -619,9 +619,8 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
-    ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
-                                          nullptr};
     ImageRef DepthStencil = {0, 0, 0};
+    std::shared_ptr<VulkanTexture> RenderTarget;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
     VkRenderPass RenderPass = VK_NULL_HANDLE;
@@ -1164,6 +1163,31 @@ public:
       return llvm::Error::success();
     }
 
+    llvm::Error createRenderTarget(Pipeline & P, InvocationState & IS) {
+      if (!P.Bindings.RTargetBufferPtr)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "No render target bound for graphics pipeline.");
+      const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
+
+      auto TexOrErr =
+          offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+      if (!TexOrErr)
+        return TexOrErr.takeError();
+
+      IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+
+      // Create a host-visible staging buffer for readback.
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::GpuToCpu;
+      auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+
+      return llvm::Error::success();
+    }
+
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
@@ -1282,36 +1306,10 @@ public:
     }
 
     if (P.isGraphics()) {
-      if (!P.Bindings.RTargetBufferPtr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No RenderTarget buffer specified for graphics pipeline.");
-      Resource FrameBuffer = {ResourceKind::Texture2D,
-                              "RenderTarget",
-                              {},
-                              {},
-                              P.Bindings.RTargetBufferPtr,
-                              nullptr,
-                              false,
-                              std::nullopt,
-                              false};
-      IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
-      IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
-      IS.FrameBufferResource.ImageLayout =
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      auto ExHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, FrameBuffer.size(),
-          FrameBuffer.BufferPtr->Data[0].get());
-      if (!ExHostBuf)
-        return ExHostBuf.takeError();
-      auto ExImageRef = createImage(FrameBuffer, *ExHostBuf,
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                        VK_IMAGE_USAGE_SAMPLED_BIT |
-                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-      if (!ExImageRef)
-        return ExImageRef.takeError();
-      IS.FrameBufferResource.ResourceRefs.push_back(*ExImageRef);
+      if (auto Err = createRenderTarget(P, IS))
+        return Err;
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
 
@@ -1686,11 +1684,10 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRenderPass(Pipeline &P, InvocationState &IS) {
+  llvm::Error createRenderPass(InvocationState &IS) {
     std::array<VkAttachmentDescription, 2> Attachments = {};
 
-    Attachments[0].format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
+    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Format);
     Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;

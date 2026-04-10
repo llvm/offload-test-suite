@@ -477,9 +477,8 @@ private:
     std::unique_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
-    ComPtr<ID3D12Resource> RT;
     ComPtr<ID3D12Resource> RTReadback;
-    ComPtr<ID3D12DescriptorHeap> RTVHeap;
+    std::shared_ptr<DXTexture> RT;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -1539,7 +1538,7 @@ public:
 
     // Query the copy footprint to get the actual padded row pitch used by the
     // copy operation.
-    const D3D12_RESOURCE_DESC RTDesc = IS.RT->GetDesc();
+    const D3D12_RESOURCE_DESC RTDesc = IS.RT->Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
     uint32_t NumRows = 0;
     uint64_t RowSizeInBytes = 0;
@@ -1574,37 +1573,12 @@ public:
           std::errc::invalid_argument,
           "No render target bound for graphics pipeline.");
     const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
-    if (OutBuf.OutputProps.MipLevels != 1)
-      return llvm::createStringError(
-          std::errc::not_supported,
-          "Multiple mip levels are not yet supported for DirectX render "
-          "targets.");
-    D3D12_RESOURCE_DESC Desc = {};
-    Desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    Desc.Width = OutBuf.OutputProps.Width;
-    Desc.Height = OutBuf.OutputProps.Height;
-    Desc.DepthOrArraySize = 1;
-    Desc.MipLevels = 1;
-    Desc.Format = getDXFormat(OutBuf.Format, OutBuf.Channels);
-    Desc.SampleDesc.Count = 1;
-    Desc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
-    Desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
 
-    D3D12_CLEAR_VALUE ClearValue = {};
-    ClearValue.Format = Desc.Format;
-    ClearValue.Color[0] = 0.0f;
-    ClearValue.Color[1] = 0.0f;
-    ClearValue.Color[2] = 0.0f;
-    ClearValue.Color[3] = 0.0f;
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
 
-    CD3DX12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &Desc,
-                                   D3D12_RESOURCE_STATE_RENDER_TARGET,
-                                   &ClearValue, IID_PPV_ARGS(&IS.RT)),
-                               "Failed to create render target"))
-      return Err;
+    IS.RT = std::static_pointer_cast<DXTexture>(*TexOrErr);
 
     // Create readback buffer sized for the pixel data (raw bytes).
     const uint64_t RBSize = static_cast<uint64_t>(OutBuf.size());
@@ -1715,21 +1689,6 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    // Create descriptor heap for the render target view. We do this later and
-    // separately from other descriptors just as a convenience since we need the
-    // descriptor handle to bind the render target.
-    D3D12_DESCRIPTOR_HEAP_DESC RTVHeapDesc = {};
-    RTVHeapDesc.NumDescriptors = 1;
-    RTVHeapDesc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_RTV;
-    RTVHeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &RTVHeapDesc, IID_PPV_ARGS(&IS.RTVHeap)),
-                               "Failed to create RTV heap"))
-      return Err;
-    const D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle =
-        IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
-    Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
-
     IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1739,7 +1698,8 @@ public:
     }
     IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CB->CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
+    IS.CB->CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
+                                   &IS.DS->ViewHandle);
 
     D3D12_VIEWPORT VP = {};
     VP.Width =
@@ -1760,7 +1720,7 @@ public:
     // Transition the render target to copy source and copy to the readback
     // buffer.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        IS.RT.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+        IS.RT->Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
 

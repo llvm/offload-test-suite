@@ -508,32 +508,43 @@ class MTLDevice : public offloadtest::Device {
     return llvm::Error::success();
   }
 
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.FrameBufferTexture = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+    return llvm::Error::success();
+  }
+
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
+    if (auto Err = createRenderTarget(P, IS))
+      return Err;
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
-    // Setup the render target texture.
-    CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
+    const uint64_t Width = IS.FrameBufferTexture->Desc.Width;
+    const uint64_t Height = IS.FrameBufferTexture->Desc.Height;
 
-    const MTL::PixelFormat Format =
-        getMTLFormat(RTarget->Format, RTarget->Channels);
-
-    const uint64_t Width = RTarget->OutputProps.Width;
-    const uint64_t Height = RTarget->OutputProps.Height;
-    MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
-        Format, Width, Height, false);
-    // Create a shared texture used for both rendering and CPU readback.
-    MTL::TextureDescriptor *SharedDesc = TDesc->copy();
-    SharedDesc->setUsage(MTL::TextureUsageRenderTarget |
-                         MTL::TextureUsageShaderRead |
-                         MTL::TextureUsageShaderWrite);
-    SharedDesc->setStorageMode(MTL::StorageModeShared);
-    IS.FrameBufferTexture = Device->newTexture(SharedDesc);
-
+    // Color attachment.
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
-    CADesc->setTexture(IS.FrameBufferTexture);
+    CADesc->setTexture(IS.FrameBufferTexture->Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
-    CADesc->setClearColor(MTL::ClearColor());
+    const auto *ColorCV = std::get_if<ClearColor>(
+        &*IS.FrameBufferTexture->Desc.OptimizedClearValue);
+    if (!ColorCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Render target clear value must be a ClearColor.");
+
+    CADesc->setClearColor(
+        MTL::ClearColor(ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A));
     CADesc->setStoreAction(MTL::StoreActionStore);
     Desc->colorAttachments()->setObject(CADesc, 0);
 
