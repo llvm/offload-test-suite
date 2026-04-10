@@ -479,6 +479,7 @@ private:
     // Resources for graphics pipelines.
     std::shared_ptr<DXTexture> RT;
     std::shared_ptr<DXBuffer> RTReadback;
+    std::shared_ptr<DXTexture> DS;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -1590,6 +1591,16 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DS = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    return llvm::Error::success();
+  }
+
   llvm::Error createVertexBuffer(Pipeline &P, InvocationState &IS) {
     if (!P.Bindings.VertexBufferPtr)
       return llvm::createStringError(
@@ -1665,8 +1676,11 @@ public:
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    PSODesc.DepthStencilState.DepthEnable = false;
+    PSODesc.DepthStencilState.DepthEnable = true;
+    PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
+    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Format);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSODesc.NumRenderTargets = 1;
@@ -1694,6 +1708,16 @@ public:
 
     IS.CB->CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
                                    &IS.DS->ViewHandle);
+
+    const auto *DepthCV =
+        std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
+    if (!DepthCV)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth/stencil clear value must be a ClearDepthStencil.");
+    IS.CmdList->ClearDepthStencilView(
+        IS.DS->ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
     VP.Width =
@@ -1834,10 +1858,16 @@ public:
       llvm::outs() << "Compute command list created.\n";
 
     } else {
-      // Create render target, readback and vertex buffer and PSO.
+      // Create render target, depth/stencil, readback and vertex buffer and
+      // PSO.
       if (auto Err = createRenderTarget(P, State))
         return Err;
       llvm::outs() << "Render target created.\n";
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
+      if (auto Err = createDepthStencil(P, State))
+        return Err;
+      llvm::outs() << "Depth stencil created.\n";
       if (auto Err = createVertexBuffer(P, State))
         return Err;
       llvm::outs() << "Vertex buffer created.\n";
