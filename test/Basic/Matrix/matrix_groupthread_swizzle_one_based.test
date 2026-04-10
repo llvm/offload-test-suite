@@ -111,8 +111,11 @@ DescriptorSets:
 ...
 #--- end
 
-# BUG Vulkan  https://github.com/llvm/llvm-project/issues/180258
+# BUG https://github.com/llvm/llvm-project/issues/180258
 # XFAIL: Vulkan && Clang
+
+# BUG https://github.com/llvm/llvm-project/issues/191511
+# XFAIL: (Metal || DirectX) && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
