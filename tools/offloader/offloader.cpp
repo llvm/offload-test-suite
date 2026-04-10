@@ -128,7 +128,6 @@ int run() {
   const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
     if (Binary.starts_with("DXBC")) {
-      // Maybe there is a better way to detect GPUAPI?
 #ifdef __APPLE__
       APIToUse = GPUAPI::Metal;
       outs() << "Using Metal API\n";
@@ -140,9 +139,6 @@ int run() {
                0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (Binary.starts_with("MTLB")) {
-      APIToUse = GPUAPI::Metal;
-      outs() << "Using Metal API\n";
     }
   }
 
