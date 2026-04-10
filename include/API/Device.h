@@ -15,6 +15,7 @@
 #include "Config.h"
 
 #include "API/API.h"
+#include "API/Buffer.h"
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "llvm/ADT/StringRef.h"
@@ -35,27 +36,6 @@ struct Pipeline;
 struct DeviceConfig {
   bool EnableDebugLayer = false;
   bool EnableValidationLayer = false;
-};
-
-enum class MemoryLocation {
-  GpuOnly,
-  CpuToGpu,
-  GpuToCpu,
-};
-
-struct BufferCreateDesc {
-  MemoryLocation Location;
-};
-
-class Buffer {
-public:
-  virtual ~Buffer() = default;
-
-  Buffer(const Buffer &) = delete;
-  Buffer &operator=(const Buffer &) = delete;
-
-protected:
-  Buffer() = default;
 };
 
 class Fence {
