@@ -1,0 +1,218 @@
+#--- source.hlsl
+RWBuffer<float>  In;
+RWStructuredBuffer<float3x4> OutScalar;
+RWStructuredBuffer<float3x4> OutVec2;
+RWStructuredBuffer<float3x4> OutVec3;
+RWStructuredBuffer<float3x4> OutVec4;
+
+[numthreads(1,1,1)]
+void main() {
+
+  //--------------------------------------------------
+  // Start with an uninitialized matrix
+  //--------------------------------------------------
+  float3x4 m_init_scalar;
+  float3x4 m_init_vec4;
+  float3x4 m_init_vec3;
+  float3x4 m_init_vec2;
+
+  //--------------------------------------------------
+  // 1. Scalar setters (_m accessors, zero-based)
+  //--------------------------------------------------
+  uint i = 0;
+
+  m_init_scalar._m00 = In[i++];
+  m_init_scalar._m01 = In[i++];
+  m_init_scalar._m02 = In[i++];
+  m_init_scalar._m03 = In[i++];
+
+  m_init_scalar._m10 = In[i++];
+  m_init_scalar._m11 = In[i++];
+  m_init_scalar._m12 = In[i++];
+  m_init_scalar._m13 = In[i++];
+
+  m_init_scalar._m20 = In[i++];
+  m_init_scalar._m21 = In[i++];
+  m_init_scalar._m22 = In[i++];
+  m_init_scalar._m23 = In[i++];
+
+  //--------------------------------------------------
+  // 2. float4 row setters
+  //--------------------------------------------------
+
+  m_init_vec4._m00_m01_m02_m03 =
+      float4(m_init_scalar._m00,
+             m_init_scalar._m01,
+             m_init_scalar._m02,
+             m_init_scalar._m03);
+
+  m_init_vec4._m10_m11_m12_m13 =
+      float4(m_init_scalar._m10,
+             m_init_scalar._m11,
+             m_init_scalar._m12,
+             m_init_scalar._m13);
+
+  m_init_vec4._m20_m21_m22_m23 =
+      float4(m_init_scalar._m20,
+             m_init_scalar._m21,
+             m_init_scalar._m22,
+             m_init_scalar._m23);
+
+  //--------------------------------------------------
+  // 3. float3 setters
+  //--------------------------------------------------
+
+  m_init_vec3._m00_m01_m02 =
+      float3(m_init_scalar._m00,
+             m_init_scalar._m01,
+             m_init_scalar._m02);
+
+  m_init_vec3._m10_m11_m12 =
+      float3(m_init_scalar._m10,
+             m_init_scalar._m11,
+             m_init_scalar._m12);
+
+  m_init_vec3._m20_m21_m22 =
+      float3(m_init_scalar._m20,
+             m_init_scalar._m21,
+             m_init_scalar._m22);
+
+  m_init_vec3._m03_m13_m23 =
+      float3(m_init_scalar._m03,
+             m_init_scalar._m13,
+             m_init_scalar._m23);
+  
+
+  //--------------------------------------------------
+  // 4. float2 setters
+  //--------------------------------------------------
+
+  m_init_vec2._m00_m01 =
+      float2(m_init_scalar._m00, m_init_scalar._m01);
+
+  m_init_vec2._m02_m03 =
+      float2(m_init_scalar._m02, m_init_scalar._m03);
+
+  m_init_vec2._m10_m11 =
+      float2(m_init_scalar._m10, m_init_scalar._m11);
+
+  m_init_vec2._m12_m13 =
+      float2(m_init_scalar._m12, m_init_scalar._m13);
+
+  m_init_vec2._m20_m21 =
+      float2(m_init_scalar._m20, m_init_scalar._m21);
+
+  m_init_vec2._m22_m23 =
+      float2(m_init_scalar._m22, m_init_scalar._m23);
+
+  //--------------------------------------------------
+  // Read back results (verification)
+  //--------------------------------------------------
+  OutScalar[0] = m_init_scalar;
+  OutVec2[0]   = m_init_vec2;
+  OutVec3[0]   = m_init_vec3;
+  OutVec4[0]   = m_init_vec4;
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Data: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  - Name: OutScalar
+    Format: Float32
+    Stride: 48
+    FillSize: 48
+  - Name: ExpectedOutScalar
+    Format: Float32
+    Stride: 48
+    Data: [ 1, 5, 9, 2, 6, 10, 3, 7, 11, 4, 8, 12 ]
+  - Name: OutVec2
+    Format: Float32
+    Stride: 48
+    FillSize: 48
+  - Name: ExpectedOutVec2
+    Format: Float32
+    Stride: 48
+    Data: [ 1, 5, 9, 2, 6, 10, 3, 7, 11, 4, 8, 12 ]
+  - Name: OutVec3
+    Format: Float32
+    Stride: 48
+    FillSize: 48
+  - Name: ExpectedOutVec3
+    Format: Float32
+    Stride: 48
+    Data: [ 1, 5, 9, 2, 6, 10, 3, 7, 11, 4, 8, 12 ]
+  - Name: OutVec4
+    Format: Float32
+    Stride: 48
+    FillSize: 48
+  - Name: ExpectedOutVec4
+    Format: Float32
+    Stride: 48
+    Data: [ 1, 5, 9, 2, 6, 10, 3, 7, 11, 4, 8, 12 ]
+Results:
+  - Result: OutScalar
+    Rule: BufferExact
+    Actual: OutScalar
+    Expected: ExpectedOutScalar
+  - Result: OutVec2
+    Rule: BufferExact
+    Actual: OutVec2
+    Expected: ExpectedOutVec2
+  - Result: OutVec3
+    Rule: BufferExact
+    Actual: OutVec3
+    Expected: ExpectedOutVec3
+  - Result: OutVec4
+    Rule: BufferExact
+    Actual: OutVec4
+    Expected: ExpectedOutVec4
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutScalar
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutVec2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutVec3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutVec4
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
