@@ -220,7 +220,7 @@ jobs:
               DXC/build/bin llvm-project/build
       - name: Upload build artifacts
         if: inputs.OS == 'windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}/build-artifacts.tar
@@ -269,7 +269,7 @@ jobs:
       # --touch ensures extracted files get current timestamps so ninja
       # sees build outputs as newer than source files (no rebuild).
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}
@@ -315,7 +315,7 @@ jobs:
           Write-Host "DxDiag report saved to $output"
       - name: Upload dxdiag artifact
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
           path: ${{ runner.temp }}/dxdiag.txt
