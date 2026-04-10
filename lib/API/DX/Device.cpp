@@ -477,8 +477,8 @@ private:
     std::unique_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
-    ComPtr<ID3D12Resource> RTReadback;
     std::shared_ptr<DXTexture> RT;
+    std::shared_ptr<DXBuffer> RTReadback;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -508,33 +508,32 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+    const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
 
-    D3D12_HEAP_TYPE HeapType = D3D12_HEAP_TYPE_DEFAULT;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      HeapType = D3D12_HEAP_TYPE_DEFAULT;
-      break;
-    case MemoryLocation::CpuToGpu:
-      HeapType = D3D12_HEAP_TYPE_UPLOAD;
-      break;
-    case MemoryLocation::GpuToCpu:
-      HeapType = D3D12_HEAP_TYPE_READBACK;
-      break;
-    }
-
+    // As per the readback heap docs
+    // > Resources in this heap must be created with
+    // > D3D12_RESOURCE_STATE_COPY_DEST, and cannot be changed away from this.
     const D3D12_RESOURCE_FLAGS Flags =
-        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        HeapType == D3D12_HEAP_TYPE_READBACK
+            ? D3D12_RESOURCE_FLAG_NONE
+            : D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
 
+    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+    if (HeapType == D3D12_HEAP_TYPE_UPLOAD)
+      InitialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+    else if (HeapType == D3D12_HEAP_TYPE_READBACK)
+      InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
+
     ComPtr<ID3D12Resource> DeviceBuffer;
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE,
-                                   &BufferDesc, D3D12_RESOURCE_STATE_COMMON,
-                                   nullptr, IID_PPV_ARGS(&DeviceBuffer)),
-                               "Failed to create buffer."))
+    if (auto Err =
+            HR::toError(Device->CreateCommittedResource(
+                            &HeapProps, D3D12_HEAP_FLAG_NONE, &BufferDesc,
+                            InitialState, nullptr, IID_PPV_ARGS(&DeviceBuffer)),
+                        "Failed to create buffer."))
       return Err;
 
     return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
@@ -1524,7 +1523,7 @@ public:
         return Err;
 
     // If there is no render target, return early.
-    if (IS.RTReadback == nullptr)
+    if (!IS.RTReadback)
       return llvm::Error::success();
 
     // Map readback and copy into host buffer, accounting for row pitch and
@@ -1532,7 +1531,7 @@ public:
     // while our image writer expects bottom-left.
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
-    if (auto Err = HR::toError(IS.RTReadback->Map(0, nullptr, &Mapped),
+    if (auto Err = HR::toError(IS.RTReadback->Buffer->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
       return Err;
 
@@ -1563,7 +1562,7 @@ public:
       memcpy(DstRow, SrcRow, RowBytes);
     }
 
-    IS.RTReadback->Unmap(0, nullptr);
+    IS.RTReadback->Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }
 
@@ -1581,17 +1580,12 @@ public:
     IS.RT = std::static_pointer_cast<DXTexture>(*TexOrErr);
 
     // Create readback buffer sized for the pixel data (raw bytes).
-    const uint64_t RBSize = static_cast<uint64_t>(OutBuf.size());
-    D3D12_RESOURCE_DESC const RbDesc = CD3DX12_RESOURCE_DESC::Buffer(RBSize);
-    CD3DX12_HEAP_PROPERTIES RbHeap =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
-    if (auto Err =
-            HR::toError(Device->CreateCommittedResource(
-                            &RbHeap, D3D12_HEAP_FLAG_NONE, &RbDesc,
-                            D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                            IID_PPV_ARGS(&IS.RTReadback)),
-                        "Failed to create render target readback buffer"))
-      return Err;
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.RTReadback = std::static_pointer_cast<DXBuffer>(*BufOrErr);
 
     return llvm::Error::success();
   }
@@ -1730,8 +1724,9 @@ public:
         CD3DX12_SUBRESOURCE_FOOTPRINT(
             getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
             B.OutputProps.Height, 1, B.OutputProps.Width * B.getElementSize())};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback.Get(), Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback->Buffer.Get(),
+                                               Footprint);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT->Resource.Get(), 0);
 
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 

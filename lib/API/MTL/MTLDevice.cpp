@@ -520,6 +520,14 @@ class MTLDevice : public offloadtest::Device {
       return TexOrErr.takeError();
 
     IS.FrameBufferTexture = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+
+    // Create a readback buffer for copying render target data to the CPU.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.FrameBufferReadback = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
     return llvm::Error::success();
   }
 
@@ -565,6 +573,15 @@ class MTLDevice : public offloadtest::Device {
                                P.Bindings.getVertexCount());
 
     CmdEncoder->endEncoding();
+
+    // Blit the render target into the readback buffer for CPU access.
+    MTL::BlitCommandEncoder *Blit = IS.CmdBuffer->blitCommandEncoder();
+    const size_t ElemSize = getFormatSize(IS.FrameBufferTexture->Desc.Format);
+    const size_t RowBytes = Width * ElemSize;
+    Blit->copyFromTexture(IS.FrameBufferTexture->Tex, 0, 0,
+                          MTL::Origin(0, 0, 0), MTL::Size(Width, Height, 1),
+                          IS.FrameBufferReadback->Buf, 0, RowBytes, 0);
+    Blit->endEncoding();
 
     return llvm::Error::success();
   }
@@ -625,16 +642,15 @@ class MTLDevice : public offloadtest::Device {
       const size_t ElemSize = RTarget->getElementSize();
       const size_t RowBytes = Width * ElemSize;
 
-      // Read the framebuffer one row at a time into the output buffer.
-      // Read rows from the texture bottom-to-top into the buffer top-to-bottom
-      // so the final image is upright.
+      // Read from the readback buffer. The blit copied the texture data in
+      // GPU layout order, so we flip rows here to produce an upright image.
+      const unsigned char *Src = reinterpret_cast<const unsigned char *>(
+          IS.FrameBufferReadback->Buf->contents());
       unsigned char *Buf =
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
-        const uint32_t SrcRow = (uint32_t)((Height - 1) - R);
-        unsigned char *Dst = Buf + R * RowBytes;
-        IS.FrameBufferTexture->getBytes(
-            Dst, RowBytes, MTL::Region(0, SrcRow, (uint32_t)Width, 1), 0);
+        const uint64_t SrcRow = (Height - 1) - R;
+        memcpy(Buf + R * RowBytes, Src + SrcRow * RowBytes, RowBytes);
       }
     }
     return llvm::Error::success();
@@ -664,18 +680,8 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
-    MTL::ResourceOptions StorageMode;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      StorageMode = MTL::ResourceStorageModePrivate;
-      break;
-    case MemoryLocation::CpuToGpu:
-    case MemoryLocation::GpuToCpu:
-      StorageMode = MTL::ResourceStorageModeManaged;
-      break;
-    }
-
-    MTL::Buffer *Buf = Device->newBuffer(SizeInBytes, StorageMode);
+    MTL::Buffer *Buf = Device->newBuffer(
+        SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");

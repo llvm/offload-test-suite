@@ -621,6 +621,7 @@ private:
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
     ImageRef DepthStencil = {0, 0, 0};
     std::shared_ptr<VulkanTexture> RenderTarget;
+    std::shared_ptr<VulkanBuffer> RTReadback;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
     VkRenderPass RenderPass = VK_NULL_HANDLE;
@@ -786,21 +787,6 @@ public:
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
-    VkMemoryPropertyFlags MemFlags = 0;
-    switch (Desc.Location) {
-    case MemoryLocation::GpuOnly:
-      MemFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-      break;
-    case MemoryLocation::CpuToGpu:
-      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-      break;
-    case MemoryLocation::GpuToCpu:
-      MemFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                 VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-      break;
-    }
-
     VkBufferCreateInfo BufInfo = {};
     BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     BufInfo.size = SizeInBytes;
@@ -820,8 +806,8 @@ public:
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
-    auto MemIdx =
-        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemFlags);
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
     if (!MemIdx)
       return MemIdx.takeError();
     AllocInfo.memoryTypeIndex = *MemIdx;
@@ -2178,6 +2164,63 @@ public:
     }
   }
 
+  // Record commands to copy a texture into a readback buffer.
+  void copyTextureToReadback(VkCommandBuffer CmdBuffer,
+                             const VulkanTexture &Tex,
+                             const VulkanBuffer &Readback,
+                             VkImageLayout OldLayout,
+                             VkAccessFlags SrcAccessMask,
+                             VkPipelineStageFlags SrcStageMask) {
+    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Format)
+                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                              : VK_IMAGE_ASPECT_COLOR_BIT;
+
+    // Transition texture to transfer source.
+    VkImageSubresourceRange SubRange = {};
+    SubRange.aspectMask = AspectMask;
+    SubRange.baseMipLevel = 0;
+    SubRange.levelCount = 1;
+    SubRange.layerCount = 1;
+
+    VkImageMemoryBarrier ImageBarrier = {};
+    ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ImageBarrier.subresourceRange = SubRange;
+    ImageBarrier.srcAccessMask = SrcAccessMask;
+    ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ImageBarrier.oldLayout = OldLayout;
+    ImageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ImageBarrier.image = Tex.Image;
+    vkCmdPipelineBarrier(CmdBuffer, SrcStageMask,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &ImageBarrier);
+
+    // Copy image to readback buffer.
+    VkBufferImageCopy Region = {};
+    Region.imageSubresource.aspectMask = AspectMask;
+    Region.imageSubresource.mipLevel = 0;
+    Region.imageSubresource.baseArrayLayer = 0;
+    Region.imageSubresource.layerCount = 1;
+    Region.imageExtent.width = Tex.Desc.Width;
+    Region.imageExtent.height = Tex.Desc.Height;
+    Region.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(CmdBuffer, Tex.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           Readback.Buffer, 1, &Region);
+
+    // Barrier to make the readback buffer visible to the host.
+    VkBufferMemoryBarrier BufBarrier = {};
+    BufBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    BufBarrier.size = VK_WHOLE_SIZE;
+    BufBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    BufBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    BufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.buffer = Readback.Buffer;
+    vkCmdPipelineBarrier(CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                         &BufBarrier, 0, nullptr);
+  }
+
   void copyResourceDataToHost(InvocationState &IS, ResourceBundle &R) {
     if (!R.isReadWrite())
       return;
@@ -2372,7 +2415,10 @@ public:
       vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
       llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
       vkCmdEndRenderPass(IS.CB->CmdBuffer);
-      copyResourceDataToHost(IS, IS.FrameBufferResource);
+      copyTextureToReadback(IS.CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     }
 
     for (auto &R : IS.Resources)
@@ -2427,17 +2473,15 @@ public:
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      const ResourceRef &ResRef = IS.FrameBufferResource.ResourceRefs[0];
+      Range.memory = IS.RTReadback->Memory;
 
       void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
-
-      Range.memory = ResRef.Host.Memory;
+      vkMapMemory(Device, IS.RTReadback->Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
       const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
-      vkUnmapMemory(Device, ResRef.Host.Memory);
+      vkUnmapMemory(Device, IS.RTReadback->Memory);
     }
     return llvm::Error::success();
   }
@@ -2484,13 +2528,6 @@ public:
         vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
         vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
         vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
-      }
-      for (auto &ResRef : IS.FrameBufferResource.ResourceRefs) {
-        // We know the device resource is an image, so no need to check it.
-        vkDestroyImage(Device, ResRef.Image.Image, nullptr);
-        vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
-        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
       vkDestroyImage(Device, IS.DepthStencil.Image, nullptr);
       vkFreeMemory(Device, IS.DepthStencil.Memory, nullptr);
@@ -2542,10 +2579,10 @@ public:
     if (auto Err = createResources(P, State))
       return Err;
     if (P.isGraphics()) {
-      if (auto Err = createRenderPass(P, State))
+      if (auto Err = createRenderPass(State))
         return Err;
       llvm::outs() << "Render pass created.\n";
-      if (auto Err = createFrameBuffer(P, State))
+      if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
     }
