@@ -1256,8 +1256,7 @@ private:
     // Use a fence to ensure binding is complete before use, though for simple
     // cases strict ordering might suffice if on same queue. Ideally we should
     // wait, but here we just submit. IS.Queue is used for commands. Note:
-    // vkQueueBindSparse requires the queue to support SPARSI_BINDING. We assume
-    // the main queue supports it.
+    // vkQueueBindSparse requires the queue to support SPARSE_BINDING.
     VkFence Fence;
     VkFenceCreateInfo FenceInfo = {};
     FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
