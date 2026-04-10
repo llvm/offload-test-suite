@@ -44,12 +44,41 @@
 
 #include <codecvt>
 #include <locale>
+#include <mutex>
 
 using namespace offloadtest;
 using Microsoft::WRL::ComPtr;
 
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
+
+static std::mutex SignalHandlerMutex;
+static llvm::SmallVector<ID3D12Device *> SignalHandlerDevices;
+
+static void dumpD3DInfoQueues(void *) {
+  std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+  for (ID3D12Device *Device : SignalHandlerDevices) {
+    ComPtr<ID3D12InfoQueue> InfoQueue;
+    HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
+    if (FAILED(HR)) {
+      llvm::errs() << "Failed to query D3D info queue\n";
+      continue;
+    }
+    for (int I = 0, E = InfoQueue->GetNumStoredMessages(); I < E; ++I) {
+      SIZE_T Len = 0;
+      HR = InfoQueue->GetMessage(I, NULL, &Len);
+      if (FAILED(HR)) {
+        llvm::errs() << "Failed to get message " << I
+                     << " from D3D info queue\n";
+      } else {
+        D3D12_MESSAGE *Msg = (D3D12_MESSAGE *)malloc(Len);
+        HR = InfoQueue->GetMessage(I, Msg, &Len);
+        llvm::errs() << "D3D: " << Msg->pDescription << "\n";
+        free(Msg);
+      }
+    }
+  }
+}
 
 #define DXFormats(FMT)                                                         \
   if (Channels == 1)                                                           \
@@ -442,7 +471,10 @@ public:
   }
   DXDevice(const DXDevice &) = default;
 
-  ~DXDevice() override = default;
+  ~DXDevice() override {
+    std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+    llvm::erase(SignalHandlerDevices, Device.Get());
+  }
 
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
@@ -497,6 +529,16 @@ public:
                                           IID_PPV_ARGS(&Device)),
                         "Failed to create D3D device"))
       return Err;
+
+    static std::once_flag SignalHandlerRegistered;
+    std::call_once(SignalHandlerRegistered, [] {
+      llvm::sys::AddSignalHandler(dumpD3DInfoQueues, nullptr);
+    });
+    {
+      std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+      SignalHandlerDevices.push_back(Device.Get());
+    }
+
     assert(
         Adapter->IsPropertySupported(DXCoreAdapterProperty::DriverDescription));
     size_t BufferSize;
@@ -1691,32 +1733,6 @@ public:
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    llvm::sys::AddSignalHandler(
-        [](void *Cookie) {
-          ID3D12Device *Device = (ID3D12Device *)Cookie;
-
-          ComPtr<ID3D12InfoQueue> InfoQueue;
-          HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
-          if (FAILED(HR)) {
-            llvm::errs() << "Failed to query D3D info queue\n";
-            return;
-          }
-          for (int I = 0, E = InfoQueue->GetNumStoredMessages(); I < E; ++I) {
-            SIZE_T Len = 0;
-            HR = InfoQueue->GetMessage(I, NULL, &Len);
-            if (FAILED(HR)) {
-              llvm::errs() << "Failed to get message " << I
-                           << " from D3D info queue\n";
-            } else {
-              D3D12_MESSAGE *Msg = (D3D12_MESSAGE *)malloc(Len);
-              HR = InfoQueue->GetMessage(I, Msg, &Len);
-              llvm::errs() << "D3D: " << Msg->pDescription << "\n";
-              free(Msg);
-            }
-          }
-        },
-        (void *)Device.Get());
-
     InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
     if (auto Err = createRootSignature(P, State))
