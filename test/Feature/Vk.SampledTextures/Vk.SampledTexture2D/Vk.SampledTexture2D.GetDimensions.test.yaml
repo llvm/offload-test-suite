@@ -1,0 +1,140 @@
+#--- compute.hlsl
+[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTex1 : register(s0);
+[[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTex2 : register(s1);
+[[vk::binding(3, 0)]] vk::SampledTexture2D<float4> SampledTex3 : register(s2); // 4x4 with 3 mips
+[[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  float width, height, levels;
+  uint uwidth, uheight, ulevels;
+
+  // SampledTex1 (4x8, 1 mip)
+  SampledTex1.GetDimensions(0, width, height, levels);
+  Out[0] = width;
+  Out[1] = height;
+  Out[2] = levels;
+
+  SampledTex1.GetDimensions(uwidth, uheight);
+  Out[3] = (float)uwidth;
+  Out[4] = (float)uheight;
+
+  // SampledTex2 (16x32, 1 mip)
+  SampledTex2.GetDimensions(0, uwidth, uheight, ulevels);
+  Out[5] = (float)uwidth;
+  Out[6] = (float)uheight;
+  Out[7] = (float)ulevels;
+
+  float w, h;
+  SampledTex2.GetDimensions(w, h);
+  Out[8] = w;
+  Out[9] = h;
+
+  // SampledTex3 (4x4, 3 mips)
+  // Mip 0: 4x4
+  SampledTex3.GetDimensions(0, width, height, levels);
+  Out[10] = width;
+  Out[11] = height;
+  Out[12] = levels;
+
+  // Mip 1: 2x2
+  SampledTex3.GetDimensions(1, uwidth, uheight, ulevels);
+  Out[13] = (float)uwidth;
+  Out[14] = (float)uheight;
+
+  // Mip 2: 1x1
+  SampledTex3.GetDimensions(2, w, h, levels);
+  Out[15] = w;
+  Out[16] = h;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: SampledTex1
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 8, Depth: 1 }
+    FillSize: 512 # 4*8*4*4
+
+  - Name: SampledTex2
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 16, Height: 32, Depth: 1 }
+    FillSize: 8192 # 16*32*4*4
+
+  - Name: SampledTex3
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
+    FillSize: 336 # (16 + 4 + 1) * 4 * 4 = 21 * 16 = 336
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 68 # 17 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 4.0, 8.0, 1.0, 4.0, 8.0,    # SampledTex1
+            16.0, 32.0, 1.0, 16.0, 32.0, # SampledTex2
+            4.0, 4.0, 3.0,               # SampledTex3 Mip 0
+            2.0, 2.0,                    # SampledTex3 Mip 1
+            1.0, 1.0 ]                   # SampledTex3 Mip 2
+
+Samplers:
+  - Name: SampledTex1
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+  - Name: SampledTex2
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+  - Name: SampledTex3
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: SampledTex1
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: SampledTex2
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: SampledTex3
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: GetDimensionsTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# Unimplemented: This is a Vulkan specific feature.
+# UNSUPPORTED: !Vulkan
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/181910
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/compute.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
