@@ -131,6 +131,8 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return D3D12_RESOURCE_DIMENSION_BUFFER;
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
   case ResourceKind::RWTexture2D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   case ResourceKind::Sampler:
@@ -149,6 +151,8 @@ static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
     return SRV;
 
   case ResourceKind::RWStructuredBuffer:
@@ -227,6 +231,9 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     Desc.Texture2D = D3D12_TEX2D_SRV{0, 1, 0, 0};
     break;
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
+    llvm_unreachable("Multisampled textures aren't supported in DirectX!");
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
@@ -270,6 +277,8 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   case ResourceKind::Buffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
     llvm_unreachable("Not a UAV type!");

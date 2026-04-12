@@ -53,6 +53,8 @@ enum class ResourceKind {
   StructuredBuffer,
   ByteAddressBuffer,
   Texture2D,
+  Texture2DMS,
+  Texture2DMSArray,
   RWBuffer,
   RWStructuredBuffer,
   RWByteAddressBuffer,
@@ -106,6 +108,8 @@ struct OutputProperties {
   int Width;
   int Depth;
   int MipLevels = 1;
+  int SampleCount = 1;
+  int ArrayLayers = 1;
 };
 
 static inline uint32_t getFormatSize(DataFormat Format) {
@@ -157,6 +161,10 @@ struct CPUBuffer {
       return Stride;
     return getSingleElementSize() * Channels;
   }
+
+  uint32_t getSampleCount() const { return OutputProps.SampleCount; }
+
+  uint32_t getArrayLayers() const { return OutputProps.ArrayLayers; }
 };
 
 struct Result {
@@ -187,6 +195,8 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DMS:
+    case ResourceKind::Texture2DMSArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -213,6 +223,8 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DMS:
+    case ResourceKind::Texture2DMSArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
       return false;
@@ -231,6 +243,8 @@ struct Resource {
     case ResourceKind::Sampler:
       return false;
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DMS:
+    case ResourceKind::Texture2DMSArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
       return true;
@@ -267,6 +281,25 @@ struct Resource {
     }
   }
 
+  bool isMultiSampledTexture() const {
+    switch (Kind) {
+    case ResourceKind::Texture2DMS:
+    case ResourceKind::Texture2DMSArray:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  bool isArrayTexture() const {
+    switch (Kind) {
+    case ResourceKind::Texture2DMSArray:
+      return true;
+    default:
+      return false;
+    }
+  }
+
   uint32_t getElementSize() const {
     assert(!isSampler() && "Samplers do not have element size");
     // ByteAddressBuffers are treated as 4-byte elements to match their memory
@@ -289,6 +322,8 @@ struct Resource {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DMS:
+    case ResourceKind::Texture2DMSArray:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -641,6 +676,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
     ENUM_CASE(Texture2D);
+    ENUM_CASE(Texture2DMS);
+    ENUM_CASE(Texture2DMSArray);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
     ENUM_CASE(RWByteAddressBuffer);
