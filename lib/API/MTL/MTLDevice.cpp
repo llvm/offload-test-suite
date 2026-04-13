@@ -450,20 +450,10 @@ class MTLDevice : public offloadtest::Device {
             "No vertex buffer specified for graphics pipeline.");
 
       const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
-
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr =
-          createBuffer("VertexBuffer", BufDesc, PVB.InterleavedSize);
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-
-      VertexBufferDesc VBDesc;
-      for (const auto &S : PVB.Streams)
-        VBDesc.Streams.push_back({S.Name, S.Fmt});
-
-      IS.VB = offloadtest::VertexBuffer{VBDesc, *BufOrErr};
+      auto VBOrErr = offloadtest::createVertexBuffer(*this, PVB);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+      IS.VB = std::move(*VBOrErr);
 
       // TODO: Currently uses a single CpuToGpu mapped buffer. On discrete GPUs
       // (DX/VK), consider using a staging buffer + copy to a GpuOnly vertex

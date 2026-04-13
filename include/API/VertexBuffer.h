@@ -32,7 +32,6 @@ struct VertexStream {
 struct VertexBufferDesc {
   llvm::SmallVector<VertexStream> Streams;
 
-  // Returns the stride in bytes (sum of all stream format sizes).
   uint32_t getStride() const {
     uint32_t Stride = 0;
     for (const auto &S : Streams)

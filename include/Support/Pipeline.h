@@ -351,7 +351,7 @@ struct RuntimeSettings {
 struct VertexStreamData {
   std::string Name; // Semantic name (e.g. POSITION, COLOR).
   Format Fmt;
-  llvm::SmallVector<double> Values; // One value per component.
+  llvm::SmallVector<double> Values;
 };
 
 // Parsed vertex buffer from the YAML VertexBuffers section. The parser
