@@ -585,7 +585,7 @@ public:
   DXComputeEncoder(DXCommandBuffer &CB, EncoderMode Mode)
       : ComputeEncoder(GPUAPI::DirectX, Mode), CB(CB) {}
 
-  ~DXComputeEncoder() override = default;
+  ~DXComputeEncoder() override { endEncoding(); }
 
   static bool classof(const CommandEncoder *E) {
     return E->getAPI() == GPUAPI::DirectX;
@@ -652,7 +652,7 @@ public:
     CB.flushBarrier();
   }
 
-  void endEncoding() override { popDebugGroup(); }
+  void endEncodingImpl() override { popDebugGroup(); }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>

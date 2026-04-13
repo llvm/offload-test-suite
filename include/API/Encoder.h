@@ -36,6 +36,12 @@ enum class EncoderMode {
 class CommandEncoder {
   GPUAPI API;
   EncoderMode Mode;
+  bool Ended = false;
+
+protected:
+  /// Backend-specific cleanup. Called exactly once, either explicitly via
+  /// endEncoding() or implicitly from the most-derived destructor.
+  virtual void endEncodingImpl() = 0;
 
 public:
   CommandEncoder(GPUAPI API, EncoderMode Mode) : API(API), Mode(Mode) {}
@@ -46,6 +52,7 @@ public:
   GPUAPI getAPI() const { return API; }
   EncoderMode getMode() const { return Mode; }
   bool isSerial() const { return Mode == EncoderMode::Serial; }
+  bool isEnded() const { return Ended; }
 
   /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
   /// \p DstOffset.
@@ -69,7 +76,15 @@ public:
   virtual void insertDebugSignpost(llvm::StringRef Label) {}
 
   /// Finish recording. No further commands may be recorded after this call.
-  virtual void endEncoding() = 0;
+  /// Idempotent: safe to call more than once. If not called explicitly, the
+  /// most-derived destructor invokes it as a safeguard against leaked open
+  /// encoders.
+  void endEncoding() {
+    if (Ended)
+      return;
+    endEncodingImpl();
+    Ended = true;
+  }
 };
 
 /// Encoder for recording compute dispatch commands.

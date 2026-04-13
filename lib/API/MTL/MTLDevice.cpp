@@ -14,7 +14,6 @@
 #include "MTLResources.h"
 #include "Support/Pipeline.h"
 
-#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -269,7 +268,7 @@ public:
       : ComputeEncoder(GPUAPI::Metal, Mode), CmdBuffer(CmdBuffer),
         ComputeEnc(Encoder) {}
 
-  ~MTLComputeEncoder() override = default;
+  ~MTLComputeEncoder() override { endEncoding(); }
 
   static bool classof(const CommandEncoder *E) {
     return E->getAPI() == GPUAPI::Metal;
@@ -370,7 +369,7 @@ public:
     }
   }
 
-  void endEncoding() override {
+  void endEncodingImpl() override {
     if (ComputeEnc) {
       barrier();
       ComputeEnc->popDebugGroup();
