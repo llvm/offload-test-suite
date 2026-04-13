@@ -2287,7 +2287,7 @@ public:
       ImageBarrier.subresourceRange.baseArrayLayer = 0;
       ImageBarrier.subresourceRange.layerCount = ArrayLayers;
 
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
                            0, nullptr, 1, &ImageBarrier);
 
@@ -2302,7 +2302,7 @@ public:
       BufferBarrier.offset = 0;
       BufferBarrier.size = VK_WHOLE_SIZE;
 
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
                            1, &BufferBarrier, 0, nullptr);
 
@@ -2351,13 +2351,14 @@ public:
       vkUpdateDescriptorSets(Device, 2, Writes, 0, nullptr);
 
       // 7. Dispatch one invocation per (x, y, layer-sample pair).
-      vkCmdBindPipeline(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, Pipeline);
-      vkCmdBindDescriptorSets(IS.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+      vkCmdBindPipeline(IS.CB->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                        Pipeline);
+      vkCmdBindDescriptorSets(IS.CB->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
                               PipelineLayout, 0, 1, &DescriptorSets[I], 0,
                               nullptr);
-      vkCmdPushConstants(IS.CmdBuffer, PipelineLayout,
+      vkCmdPushConstants(IS.CB->CmdBuffer, PipelineLayout,
                          VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PC), &PC);
-      vkCmdDispatch(IS.CmdBuffer, PC.Width, PC.Height,
+      vkCmdDispatch(IS.CB->CmdBuffer, PC.Width, PC.Height,
                     PC.SampleCount * PC.ArrayLayers);
 
       // 8. Make writes visible to later shader reads.
@@ -2367,7 +2368,7 @@ public:
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 
       vkCmdPipelineBarrier(
-          IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          IS.CB->CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
           getPipelineStageMaskForShaderStages(IS.getFullShaderStageMask()), 0,
           0, nullptr, 0, nullptr, 1, &ImageBarrier);
 
@@ -2505,10 +2506,10 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &ImageBarrier);
+        vkCmdPipelineBarrier(
+            IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            getPipelineStageMaskForShaderStages(IS.getFullShaderStageMask()), 0,
+            0, nullptr, 0, nullptr, 1, &ImageBarrier);
       }
 
       llvm::SmallVector<VkBufferImageCopy> Regions;

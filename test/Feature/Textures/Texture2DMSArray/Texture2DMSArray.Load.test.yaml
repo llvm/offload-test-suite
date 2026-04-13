@@ -78,7 +78,12 @@ Results:
 # Unimplemented: Clang + Vulkan: https://github.com/llvm/llvm-project/issues/124566
 # XFAIL: Clang && Vulkan
 
+# Intel Vulkan reports shaderStorageImageMultisample, but this test currently
+# reads sample 0 values for sample 1/2/3 after multisample upload.
+# XFAIL: Intel && Vulkan
+
 # REQUIRES: SampleCount_4
+# REQUIRES: shaderStorageImageMultisample
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
