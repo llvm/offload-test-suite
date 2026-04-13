@@ -389,6 +389,36 @@ public:
   }
 };
 
+class DXCommandBuffer : public offloadtest::CommandBuffer {
+public:
+  static constexpr GPUAPI BackendAPI = GPUAPI::DirectX;
+
+  ComPtr<ID3D12CommandAllocator> Allocator;
+  ComPtr<ID3D12GraphicsCommandList> CmdList;
+
+  static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
+  create(ComPtr<ID3D12Device> Device) {
+    auto CB = std::unique_ptr<DXCommandBuffer>(new DXCommandBuffer());
+    if (auto Err = HR::toError(
+            Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                           IID_PPV_ARGS(&CB->Allocator)),
+            "Failed to create command allocator."))
+      return Err;
+    if (auto Err = HR::toError(
+            Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                                      CB->Allocator.Get(), nullptr,
+                                      IID_PPV_ARGS(&CB->CmdList)),
+            "Failed to create command list."))
+      return Err;
+    return CB;
+  }
+
+  ~DXCommandBuffer() override = default;
+
+private:
+  DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
+};
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
@@ -420,8 +450,7 @@ private:
     ComPtr<ID3D12RootSignature> RootSig;
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     ComPtr<ID3D12PipelineState> PSO;
-    ComPtr<ID3D12CommandAllocator> Allocator;
-    ComPtr<ID3D12GraphicsCommandList> CmdList;
+    std::unique_ptr<DXCommandBuffer> CB;
     std::unique_ptr<offloadtest::Fence> Fence;
 
     // Resources for graphics pipelines.
@@ -683,19 +712,9 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createCommandStructures(InvocationState &IS) {
-    if (auto Err = HR::toError(
-            Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                           IID_PPV_ARGS(&IS.Allocator)),
-            "Failed to create command allocator."))
-      return Err;
-    if (auto Err = HR::toError(
-            Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                                      IS.Allocator.Get(), nullptr,
-                                      IID_PPV_ARGS(&IS.CmdList)),
-            "Failed to create command list."))
-      return Err;
-    return llvm::Error::success();
+  llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
+  createCommandBuffer() override {
+    return DXCommandBuffer::create(Device);
   }
 
   void addResourceUploadCommands(Resource &R, InvocationState &IS,
@@ -712,10 +731,10 @@ public:
       const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
       const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
 
-      IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
     } else
-      IS.CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
-                                   R.size());
+      IS.CB->CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
+                                       R.size());
     addUploadEndBarrier(IS, Destination, R.isReadWrite());
   }
 
@@ -1182,7 +1201,7 @@ public:
         {D3D12_RESOURCE_TRANSITION_BARRIER{
             R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
             D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST}}};
-    IS.CmdList->ResourceBarrier(1, &Barrier);
+    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
   void addUploadEndBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R,
@@ -1195,21 +1214,21 @@ public:
             D3D12_RESOURCE_STATE_COPY_DEST,
             IsUAV ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
                   : D3D12_RESOURCE_STATE_GENERIC_READ}}};
-    IS.CmdList->ResourceBarrier(1, &Barrier);
+    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
   void addReadbackBeginBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         R.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
-    IS.CmdList->ResourceBarrier(1, &Barrier);
+    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
   void addReadbackEndBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         R.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
         D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    IS.CmdList->ResourceBarrier(1, &Barrier);
+    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
   llvm::Error waitForSignal(InvocationState &IS) {
@@ -1231,11 +1250,11 @@ public:
   }
 
   llvm::Error executeCommandList(InvocationState &IS) {
-    if (auto Err =
-            HR::toError(IS.CmdList->Close(), "Failed to close command list."))
+    if (auto Err = HR::toError(IS.CB->CmdList->Close(),
+                               "Failed to close command list."))
       return Err;
 
-    ID3D12CommandList *const CmdLists[] = {IS.CmdList.Get()};
+    ID3D12CommandList *const CmdLists[] = {IS.CB->CmdList.Get()};
     GraphicsQueue.Queue->ExecuteCommandLists(1, CmdLists);
 
     return waitForSignal(IS);
@@ -1245,11 +1264,11 @@ public:
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CmdList->SetDescriptorHeaps(1, Heaps);
+      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
       Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
-    IS.CmdList->SetComputeRootSignature(IS.RootSig.Get());
-    IS.CmdList->SetPipelineState(IS.PSO.Get());
+    IS.CB->CmdList->SetComputeRootSignature(IS.RootSig.Get());
+    IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1269,14 +1288,15 @@ public:
                 "Root constant cannot refer to resource arrays.");
           const uint32_t NumValues =
               Constant.BufferPtr->size() / sizeof(uint32_t);
-          IS.CmdList->SetComputeRoot32BitConstants(
+          IS.CB->CmdList->SetComputeRoot32BitConstants(
               RootParamIndex++, NumValues,
               Constant.BufferPtr->Data.back().get(), ConstantOffset);
           ConstantOffset += NumValues;
           break;
         }
         case dx::RootParamKind::DescriptorTable:
-          IS.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
+          IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
+                                                        Handle);
           Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
           break;
         case dx::RootParamKind::RootDescriptor:
@@ -1287,17 +1307,17 @@ public:
                 "Root descriptor cannot refer to resource arrays.");
           switch (getDXKind(RootDescIt->first->Kind)) {
           case SRV:
-            IS.CmdList->SetComputeRootShaderResourceView(
+            IS.CB->CmdList->SetComputeRootShaderResourceView(
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case UAV:
-            IS.CmdList->SetComputeRootUnorderedAccessView(
+            IS.CB->CmdList->SetComputeRootUnorderedAccessView(
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case CBV:
-            IS.CmdList->SetComputeRootConstantBufferView(
+            IS.CB->CmdList->SetComputeRootConstantBufferView(
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
@@ -1313,7 +1333,7 @@ public:
       // descriptor set layout. This is to make it easier to write tests that
       // don't need complicated root signatures.
       for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-        IS.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
+        IS.CB->CmdList->SetComputeRootDescriptorTable(Idx, Handle);
         Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
       }
     }
@@ -1321,7 +1341,7 @@ public:
     const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
 
-    IS.CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
+    IS.CB->CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
@@ -1338,7 +1358,7 @@ public:
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
                                                      Footprint);
           const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
-          IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
           addReadbackEndBarrier(IS, RS.Buffer);
         }
         return;
@@ -1347,7 +1367,7 @@ public:
         if (RS.Readback == nullptr)
           continue;
         addReadbackBeginBarrier(IS, RS.Buffer);
-        IS.CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
+        IS.CB->CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
         addReadbackEndBarrier(IS, RS.Buffer);
       }
     };
@@ -1527,8 +1547,8 @@ public:
     VBView.SizeInBytes = static_cast<UINT>(VBSize);
     VBView.StrideInBytes = P.Bindings.getVertexStride();
 
-    IS.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    IS.CmdList->IASetVertexBuffers(0, 1, &VBView);
+    IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    IS.CB->CmdList->IASetVertexBuffers(0, 1, &VBView);
 
     return llvm::Error::success();
   }
@@ -1606,16 +1626,16 @@ public:
         IS.RTVHeap->GetCPUDescriptorHandleForHeapStart();
     Device->CreateRenderTargetView(IS.RT.Get(), nullptr, RTVHandle);
 
-    IS.CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
+    IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CmdList->SetDescriptorHeaps(1, Heaps);
-      IS.CmdList->SetGraphicsRootDescriptorTable(
+      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
+      IS.CB->CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
-    IS.CmdList->SetPipelineState(IS.PSO.Get());
+    IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
+    IS.CB->CmdList->OMSetRenderTargets(1, &RTVHandle, false, nullptr);
 
     D3D12_VIEWPORT VP = {};
     VP.Width =
@@ -1626,19 +1646,19 @@ public:
     VP.MaxDepth = 1.0f;
     VP.TopLeftX = 0.0f;
     VP.TopLeftY = 0.0f;
-    IS.CmdList->RSSetViewports(1, &VP);
+    IS.CB->CmdList->RSSetViewports(1, &VP);
     const D3D12_RECT Scissor = {0, 0, static_cast<LONG>(VP.Width),
                                 static_cast<LONG>(VP.Height)};
-    IS.CmdList->RSSetScissorRects(1, &Scissor);
+    IS.CB->CmdList->RSSetScissorRects(1, &Scissor);
 
-    IS.CmdList->DrawInstanced(P.Bindings.getVertexCount(), 1, 0, 0);
+    IS.CB->CmdList->DrawInstanced(P.Bindings.getVertexCount(), 1, 0, 0);
 
     // Transition the render target to copy source and copy to the readback
     // buffer.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         IS.RT.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
-    IS.CmdList->ResourceBarrier(1, &Barrier);
+    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
 
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
@@ -1649,7 +1669,7 @@ public:
     const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback.Get(), Footprint);
     const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT.Get(), 0);
 
-    IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
@@ -1666,7 +1686,7 @@ public:
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
                                                      Footprint);
           const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
-          IS.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
           addReadbackEndBarrier(IS, RS.Buffer);
         }
         return;
@@ -1675,7 +1695,7 @@ public:
         if (RS.Readback == nullptr)
           continue;
         addReadbackBeginBarrier(IS, RS.Buffer);
-        IS.CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
+        IS.CB->CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
         addReadbackEndBarrier(IS, RS.Buffer);
       }
     };
@@ -1726,9 +1746,11 @@ public:
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
 
-    if (auto Err = createCommandStructures(State))
-      return Err;
-    llvm::outs() << "Command structures created.\n";
+    auto CBOrErr = DXCommandBuffer::create(Device);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    State.CB = std::move(*CBOrErr);
+    llvm::outs() << "Command buffer created.\n";
 
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)

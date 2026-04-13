@@ -16,8 +16,10 @@
 
 #include "API/API.h"
 #include "API/Capabilities.h"
+#include "API/CommandBuffer.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/Support/Error.h"
 
 #include <memory>
 #include <string>
@@ -98,6 +100,9 @@ public:
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
+
+  virtual llvm::Expected<std::unique_ptr<CommandBuffer>>
+  createCommandBuffer() = 0;
 
   virtual ~Device() = 0;
 
