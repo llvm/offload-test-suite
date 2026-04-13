@@ -309,7 +309,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# Bug https://github.com/llvm/offload-test-suite/issues/541
+# Bug https://github.com/llvm/offload-test-suite/issues/1078
 # XFAIL: DirectX && AMD
 
 # REQUIRES: Double
