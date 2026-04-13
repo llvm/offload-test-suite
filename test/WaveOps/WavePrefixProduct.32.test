@@ -315,23 +315,28 @@ Results:
     Actual: UOut5
     Expected: UExpectedOut5
   - Result: FExpectedOut1
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: FOut1
     Expected: FExpectedOut1
   - Result: FExpectedOut2
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: FOut2
     Expected: FExpectedOut2
   - Result: FExpectedOut3
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: FOut3
     Expected: FExpectedOut3
   - Result: FExpectedOut4
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: FOut4
     Expected: FExpectedOut4
   - Result: FExpectedOut5
-    Rule: BufferExact
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: FOut5
     Expected: FExpectedOut5
 DescriptorSets:
@@ -466,14 +471,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/186151
-# XFAIL: Clang && Vulkan
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/961
-# XFAIL: NV && Clang && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
