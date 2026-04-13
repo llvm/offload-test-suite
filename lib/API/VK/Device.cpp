@@ -1149,31 +1149,6 @@ public:
       return llvm::Error::success();
     }
 
-    llvm::Error createRenderTarget(Pipeline & P, InvocationState & IS) {
-      if (!P.Bindings.RTargetBufferPtr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No render target bound for graphics pipeline.");
-      const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
-
-      auto TexOrErr =
-          offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
-      if (!TexOrErr)
-        return TexOrErr.takeError();
-
-      IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
-
-      // Create a host-visible staging buffer for readback.
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::GpuToCpu;
-      auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
-
-      return llvm::Error::success();
-    }
-
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
@@ -1236,6 +1211,30 @@ public:
       }
     }
     IS.Resources.push_back(Bundle);
+    return llvm::Error::success();
+  }
+
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+
+    // Create a host-visible staging buffer for readback.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+
     return llvm::Error::success();
   }
 
