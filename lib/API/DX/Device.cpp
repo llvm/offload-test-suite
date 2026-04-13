@@ -1707,7 +1707,7 @@ public:
     IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
     IS.CB->CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
-                                   &IS.DS->ViewHandle);
+                                       &IS.DS->ViewHandle);
 
     const auto *DepthCV =
         std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
@@ -1715,7 +1715,7 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
-    IS.CmdList->ClearDepthStencilView(
+    IS.CB->CmdList->ClearDepthStencilView(
         IS.DS->ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
