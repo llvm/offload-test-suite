@@ -632,7 +632,7 @@ public:
   VKComputeEncoder(VulkanCommandBuffer &CB)
       : ComputeEncoder(GPUAPI::Vulkan), CB(CB) {}
 
-  ~VKComputeEncoder() override = default;
+  ~VKComputeEncoder() override { endEncoding(); }
 
   static bool classof(const CommandEncoder *E) {
     return E->getAPI() == GPUAPI::Vulkan;
@@ -691,7 +691,7 @@ public:
     return llvm::Error::success();
   }
 
-  void endEncoding() override { popDebugGroup(); }
+  void endEncodingImpl() override { popDebugGroup(); }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>

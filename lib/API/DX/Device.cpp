@@ -584,7 +584,7 @@ public:
   DXComputeEncoder(DXCommandBuffer &CB)
       : ComputeEncoder(GPUAPI::DirectX), CB(CB) {}
 
-  ~DXComputeEncoder() override = default;
+  ~DXComputeEncoder() override { endEncoding(); }
 
   static bool classof(const CommandEncoder *E) {
     return E->getAPI() == GPUAPI::DirectX;
@@ -623,7 +623,7 @@ public:
     return llvm::Error::success();
   }
 
-  void endEncoding() override { popDebugGroup(); }
+  void endEncodingImpl() override { popDebugGroup(); }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>

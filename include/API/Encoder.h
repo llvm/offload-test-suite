@@ -26,6 +26,12 @@ class Buffer;
 /// automatically inserted between commands.
 class CommandEncoder {
   GPUAPI API;
+  bool Ended = false;
+
+protected:
+  /// Backend-specific cleanup. Called exactly once, either explicitly via
+  /// endEncoding() or implicitly from the most-derived destructor.
+  virtual void endEncodingImpl() = 0;
 
 public:
   explicit CommandEncoder(GPUAPI API) : API(API) {}
@@ -34,6 +40,7 @@ public:
   CommandEncoder &operator=(const CommandEncoder &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  bool isEnded() const { return Ended; }
 
   /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
   /// \p DstOffset.
@@ -52,7 +59,15 @@ public:
   virtual void insertDebugSignpost(llvm::StringRef Label) {}
 
   /// Finish recording. No further commands may be recorded after this call.
-  virtual void endEncoding() = 0;
+  /// Idempotent: safe to call more than once. If not called explicitly, the
+  /// most-derived destructor invokes it as a safeguard against leaked open
+  /// encoders.
+  void endEncoding() {
+    if (Ended)
+      return;
+    endEncodingImpl();
+    Ended = true;
+  }
 };
 
 /// Encoder for recording compute dispatch commands.
