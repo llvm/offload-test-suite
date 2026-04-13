@@ -16,8 +16,10 @@
 
 #include "API/API.h"
 #include "API/Capabilities.h"
+#include "API/CommandBuffer.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
+#include "llvm/Support/Error.h"
 
 #include <memory>
 #include <string>
@@ -56,6 +58,20 @@ protected:
   Buffer() = default;
 };
 
+class Fence {
+public:
+  virtual ~Fence() = default;
+
+  Fence(const Fence &) = delete;
+  Fence &operator=(const Fence &) = delete;
+
+  virtual uint64_t getFenceValue() = 0;
+  virtual llvm::Error waitForCompletion(uint64_t SignalValue) = 0;
+
+protected:
+  Fence() = default;
+};
+
 class Queue {
 public:
   virtual ~Queue() = 0;
@@ -77,10 +93,16 @@ public:
 
   virtual Queue &getGraphicsQueue() = 0;
 
+  virtual llvm::Expected<std::unique_ptr<Fence>>
+  createFence(llvm::StringRef Name) = 0;
+
   virtual llvm::Expected<std::shared_ptr<Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
   virtual void printExtra(llvm::raw_ostream &OS) {}
+
+  virtual llvm::Expected<std::unique_ptr<CommandBuffer>>
+  createCommandBuffer() = 0;
 
   virtual ~Device() = 0;
 

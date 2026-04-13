@@ -241,7 +241,7 @@ devices = yaml.safe_load(query_string)
 target_device = None
 # Find the right device to configure against
 pattern = re.compile(GPUName, re.IGNORECASE)
-for device in devices["Devices"]:
+for device in devices.get("Devices", []):
     is_warp = "Microsoft Basic Render Driver" in device["Description"]
     is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:

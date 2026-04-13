@@ -14,8 +14,8 @@
 #include "Config.h"
 
 #include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 
-#include <cstdlib>
 #include <memory>
 
 using namespace offloadtest;
@@ -27,21 +27,31 @@ Device::~Device() {}
 llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
 offloadtest::initializeDevices(const DeviceConfig Config) {
   llvm::SmallVector<std::unique_ptr<Device>> Devices;
+  llvm::Error Err = llvm::Error::success();
 
 #ifdef OFFLOADTEST_ENABLE_D3D12
-  if (auto Err = initializeDX12Devices(Config, Devices))
-    return Err;
+  if (auto E = initializeDX12Devices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVulkanDevices(Config, Devices))
-    return Err;
+  if (auto E = initializeVulkanDevices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
 #endif
 
 #ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = initializeMetalDevices(Config, Devices))
-    return Err;
+  if (auto E = initializeMetalDevices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
 #endif
 
+  if (Devices.empty()) {
+    if (Err)
+      return std::move(Err);
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "No GPU devices found.");
+  }
+  // Log errors from backends that failed while others succeeded.
+  if (Err)
+    llvm::logAllUnhandledErrors(std::move(Err), llvm::errs());
   return Devices;
 }

@@ -1,4 +1,4 @@
-#--- vertex.hlsl
+#--- source.hlsl
 struct VSInput {
   float3 Pos : POSITION;
 };
@@ -13,32 +13,29 @@ VSOutput mainVS(VSInput input) {
   return output;
 }
 
-#--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
-[[vk::binding(1, 0)]] SamplerState Samp : register(s0);
-[[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTex : register(s0);
+[[vk::binding(1, 0)]] RWBuffer<float> Out : register(u0);
 
-float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+float4 mainPS(VSOutput input) : SV_Target {
   // Use SV_Position (pixel coordinates) to simulate the grid logic.
   // Input position is [-1, 1], mapped to viewport 2x2.
   // Pixel centers will be at (0.5, 0.5), (1.5, 0.5), etc.
-  
-  uint2 GTid = (uint2)Pos.xy;
+  uint2 GTid = (uint2)input.Pos.xy;
 
   // Case 1: Derivative = 0.5. Texture Size = 4.
   // LOD = log2(0.5 * 4) = 1.0
   float2 uv0 = 0.25 + float2(GTid.xy) * 0.5;
-  
+
   // Case 2: Derivative = 2.0. Texture Size = 4.
   // LOD = log2(2.0 * 4) = 3.0.
-  // Note: Since the texture has 3 mip levels (0, 1, 2), 
+  // Note: Since the texture has 3 mip levels (0, 1, 2),
   // the clamped LOD will be 2.0.
   float2 uv1 = 0.25 + float2(GTid.xy) * 2.0;
 
-  float lod0 = Tex.CalculateLevelOfDetail(Samp, uv0);
-  float lod1 = Tex.CalculateLevelOfDetail(Samp, uv1);
-  float lod2 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv0);
-  float lod3 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv1);
+  float lod0 = SampledTex.CalculateLevelOfDetail(uv0);
+  float lod1 = SampledTex.CalculateLevelOfDetail(uv1);
+  float lod2 = SampledTex.CalculateLevelOfDetailUnclamped(uv0);
+  float lod3 = SampledTex.CalculateLevelOfDetailUnclamped(uv1);
 
   if (all(GTid.xy == 0)) {
     Out[0] = lod0;
@@ -58,7 +55,7 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: SampledTex
     Format: Float32
     Channels: 4
     OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
@@ -97,25 +94,21 @@ Bindings:
   RenderTarget: RT
 
 Samplers:
-  - Name: Samp
+  - Name: SampledTex
     MinFilter: Linear
     MagFilter: Linear
     Address: Clamp
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
-      Kind: Texture2D
+    - Name: SampledTex
+      Kind: SampledTexture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: Samp
-      Kind: Sampler
-      DirectXBinding: { Register: 0, Space: 0 }
-      VulkanBinding: { Binding: 1 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
-      VulkanBinding: { Binding: 2 }
+      VulkanBinding: { Binding: 1 }
 
 Results:
   - Result: LODTest
@@ -126,10 +119,13 @@ Results:
 ...
 #--- end
 
-# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
-# XFAIL: DirectX || Metal
+# Unimplemented: This is a Vulkan specific feature.
+# UNSUPPORTED: !Vulkan
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/181910
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/source.hlsl
+# RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

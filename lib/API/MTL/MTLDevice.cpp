@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "Support/Pipeline.h"
 
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
@@ -83,6 +84,37 @@ public:
   }
 };
 
+class MTLFence : public offloadtest::Fence {
+public:
+  MTLFence(MTL::SharedEvent *Event, llvm::StringRef Name)
+      : Name(Name), Event(Event) {}
+  std::string Name;
+  MTL::SharedEvent *Event;
+
+  static llvm::Expected<std::unique_ptr<MTLFence>>
+  create(MTL::Device *Device, llvm::StringRef Name) {
+    MTL::SharedEvent *Event = Device->newSharedEvent();
+    if (!Event)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create shared event.");
+    return std::make_unique<MTLFence>(Event, Name);
+  }
+
+  ~MTLFence() {
+    if (Event)
+      Event->release();
+  }
+
+  uint64_t getFenceValue() override { return Event->signaledValue(); }
+
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+    if (!Event->waitUntilSignaledValue(SignalValue, UINT64_MAX))
+      return llvm::createStringError(std::errc::timed_out,
+                                     "Timed out waiting on shared event.");
+    return llvm::Error::success();
+  }
+};
+
 class MTLBuffer : public offloadtest::Buffer {
 public:
   MTL::Buffer *Buf;
@@ -98,6 +130,28 @@ public:
     if (Buf)
       Buf->release();
   }
+};
+
+class MTLCommandBuffer : public offloadtest::CommandBuffer {
+public:
+  static constexpr GPUAPI BackendAPI = GPUAPI::Metal;
+
+  MTL::CommandBuffer *CmdBuffer = nullptr;
+
+  static llvm::Expected<std::unique_ptr<MTLCommandBuffer>>
+  create(MTL::CommandQueue *Queue) {
+    auto CB = std::unique_ptr<MTLCommandBuffer>(new MTLCommandBuffer());
+    CB->CmdBuffer = Queue->commandBuffer();
+    if (!CB->CmdBuffer)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Metal command buffer.");
+    return CB;
+  }
+
+  ~MTLCommandBuffer() override = default;
+
+private:
+  MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
 
 class MTLDevice : public offloadtest::Device {
@@ -129,7 +183,8 @@ class MTLDevice : public offloadtest::Device {
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
     MTL::Texture *FrameBufferTexture = nullptr;
-    MTL::CommandBuffer *CmdBuffer = nullptr;
+    std::unique_ptr<MTLCommandBuffer> CB;
+    std::unique_ptr<offloadtest::Fence> Fence;
   };
 
   llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
@@ -368,10 +423,11 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
-
     MTL::ComputeCommandEncoder *CmdEncoder =
-        IS.CmdBuffer->computeCommandEncoder();
+        IS.CB->CmdBuffer->computeCommandEncoder();
+
+    auto CloseCommandEncoder =
+        llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
 
     CmdEncoder->setComputePipelineState(IS.ComputePipeline);
     CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
@@ -431,13 +487,10 @@ class MTLDevice : public offloadtest::Device {
     CmdEncoder->dispatchThreads(GridSize, GroupSize);
     CmdEncoder->memoryBarrier(MTL::BarrierScopeBuffers);
 
-    CmdEncoder->endEncoding();
     return llvm::Error::success();
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    IS.CmdBuffer = GraphicsQueue.Queue->commandBuffer();
-
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
@@ -467,7 +520,7 @@ class MTLDevice : public offloadtest::Device {
     Desc->colorAttachments()->setObject(CADesc, 0);
 
     MTL::RenderCommandEncoder *CmdEncoder =
-        IS.CmdBuffer->renderCommandEncoder(Desc);
+        IS.CB->CmdBuffer->renderCommandEncoder(Desc);
 
     CmdEncoder->setRenderPipelineState(IS.RenderPipeline);
     // Explicitly set viewport to texture dimensions.
@@ -488,14 +541,23 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error executeCommands(InvocationState &IS) {
-    IS.CmdBuffer->commit();
-    IS.CmdBuffer->waitUntilCompleted();
+    // This is a hack but it works since this is all single threaded code.
+    static uint64_t FenceCounter = 0;
+    const uint64_t CurrentCounter = FenceCounter + 1;
+    auto *F = static_cast<MTLFence *>(IS.Fence.get());
+
+    IS.CB->CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
+    IS.CB->CmdBuffer->commit();
+
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
 
     // Check and surface any errors that occurred during execution.
-    NS::Error *CBErr = IS.CmdBuffer->error();
+    NS::Error *CBErr = IS.CB->CmdBuffer->error();
     if (CBErr)
       return toError(CBErr);
 
+    FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
 
@@ -565,6 +627,11 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  llvm::Expected<std::unique_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    return MTLFence::create(Device, Name);
+  }
+
   llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
@@ -586,8 +653,23 @@ public:
     return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
+  createCommandBuffer() override {
+    return MTLCommandBuffer::create(GraphicsQueue.Queue);
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
+
+    auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    IS.CB = std::move(*CBOrErr);
+
+    auto FenceOrErr = createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    IS.Fence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, IS))
       return Err;
