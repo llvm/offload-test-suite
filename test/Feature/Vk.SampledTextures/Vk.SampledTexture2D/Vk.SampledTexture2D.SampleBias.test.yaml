@@ -105,20 +105,17 @@ Buffers:
     FillSize: 64
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
 
+VertexBuffers:
   - Name: VB
-    Format: Float32
-    Channels: 3
-    Data: [-1.0, -1.0, 0.0,
-            3.0, -1.0, 0.0,
-           -1.0,  3.0, 0.0]
+    Streams:
+      - Name: POSITION
+        Format: RGB32Float
+        Data: [-1.0, -1.0, 0.0,
+                3.0, -1.0, 0.0,
+               -1.0,  3.0, 0.0]
 
 Bindings:
   VertexBuffer: VB
-  VertexAttributes:
-    - Format: Float32
-      Channels: 3
-      Offset: 0
-      Name: POSITION
   RenderTarget: RT
 
 Samplers:
