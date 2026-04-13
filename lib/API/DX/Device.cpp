@@ -299,8 +299,8 @@ class DXTexture : public offloadtest::Texture {
 public:
   ComPtr<ID3D12Resource> Resource;
   // TODO:
-  // RTV/DSV views own a dedicated single-descriptor heap and are created at
-  // texture creation time. Ideally SRV/UAV views would also live here, but
+  // RTV/DSV own a dedicated single-descriptor heap and are created at
+  // texture creation time. Ideally SRVs/UAVs would also live here, but
   // they currently require a shared CBV_SRV_UAV heap whose indices are
   // determined at pipeline bind time. Moving them here would require a
   // descriptor heap allocator, which is not yet implemented.
@@ -511,9 +511,6 @@ public:
                size_t SizeInBytes) override {
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
 
-    // As per the readback heap docs
-    // > Resources in this heap must be created with
-    // > D3D12_RESOURCE_STATE_COPY_DEST, and cannot be changed away from this.
     const D3D12_RESOURCE_FLAGS Flags =
         HeapType == D3D12_HEAP_TYPE_READBACK
             ? D3D12_RESOURCE_FLAG_NONE
@@ -527,6 +524,9 @@ public:
     if (HeapType == D3D12_HEAP_TYPE_UPLOAD)
       InitialState = D3D12_RESOURCE_STATE_GENERIC_READ;
     else if (HeapType == D3D12_HEAP_TYPE_READBACK)
+      // As per the readback heap docs
+      // > Resources in this heap must be created with
+      // > D3D12_RESOURCE_STATE_COPY_DEST, and cannot be changed away from this.
       InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
 
     ComPtr<ID3D12Resource> DeviceBuffer;
