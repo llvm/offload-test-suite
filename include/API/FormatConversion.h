@@ -137,7 +137,7 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
         "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
         "levels %d.",
         Desc.MipLevels, Buf.OutputProps.MipLevels);
-  const uint32_t TexelSize = getFormatSize(Desc.Format);
+  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Format);
   if (Buf.Stride > 0 && static_cast<uint32_t>(Buf.Stride) != TexelSize)
     return llvm::createStringError(
         std::errc::invalid_argument,

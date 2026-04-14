@@ -92,7 +92,7 @@ inline llvm::StringRef getFormatName(Format Format) {
 }
 
 // Returns the size in bytes of a single texel/element for the given format.
-inline uint32_t getFormatSize(Format Format) {
+inline uint32_t getFormatSizeInBytes(Format Format) {
   switch (Format) {
   case Format::R16Sint:
   case Format::R16Uint:

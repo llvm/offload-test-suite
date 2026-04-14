@@ -629,7 +629,8 @@ class MTLDevice : public offloadtest::Device {
 
     // Blit the render target into the readback buffer for CPU access.
     MTL::BlitCommandEncoder *Blit = IS.CB->CmdBuffer->blitCommandEncoder();
-    const size_t ElemSize = getFormatSize(IS.FrameBufferTexture->Desc.Format);
+    const size_t ElemSize =
+        getFormatSizeInBytes(IS.FrameBufferTexture->Desc.Format);
     const size_t RowBytes = Width * ElemSize;
     Blit->copyFromTexture(IS.FrameBufferTexture->Tex, 0, 0,
                           MTL::Origin(0, 0, 0), MTL::Size(Width, Height, 1),
