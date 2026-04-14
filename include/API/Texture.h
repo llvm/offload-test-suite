@@ -141,7 +141,7 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
 
 class Texture {
 public:
-  virtual ~Texture() = default;
+  virtual ~Texture();
 
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;

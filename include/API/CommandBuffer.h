@@ -23,7 +23,7 @@ class CommandBuffer {
 
 public:
   explicit CommandBuffer(GPUAPI API) : API(API) {}
-  virtual ~CommandBuffer() = default;
+  virtual ~CommandBuffer();
   CommandBuffer(const CommandBuffer &) = delete;
   CommandBuffer &operator=(const CommandBuffer &) = delete;
 

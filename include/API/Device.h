@@ -42,7 +42,7 @@ struct DeviceConfig {
 
 class Fence {
 public:
-  virtual ~Fence() = default;
+  virtual ~Fence();
 
   Fence(const Fence &) = delete;
   Fence &operator=(const Fence &) = delete;
