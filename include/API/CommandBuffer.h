@@ -6,6 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// Defines the CommandBuffer base class for recording and submitting GPU work.
+// Each backend (DirectX, Vulkan, Metal) provides a concrete subclass that
+// wraps the native command recording objects. LLVM-style RTTI is provided for
+// downcasting to the backend-specific type.
 //
 //===----------------------------------------------------------------------===//
 
