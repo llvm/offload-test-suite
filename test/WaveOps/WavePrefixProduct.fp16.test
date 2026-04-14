@@ -173,6 +173,12 @@ DescriptorSets:
 
 # REQUIRES: Half
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1083
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1084
+# XFAIL: NV && Clang && DirectX
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
