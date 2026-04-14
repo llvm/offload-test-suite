@@ -480,7 +480,9 @@ public:
 
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static constexpr GPUAPI BackendAPI = GPUAPI::Vulkan;
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::Vulkan;
+  }
 
   VkDevice Device = VK_NULL_HANDLE;
   // Owned per command buffer so that recording, submission, and lifetime

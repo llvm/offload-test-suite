@@ -18,29 +18,18 @@
 
 #include "API/API.h"
 
-#include <cassert>
-
 namespace offloadtest {
 
 class CommandBuffer {
-  GPUAPI API;
+  GPUAPI Kind;
 
 public:
-  explicit CommandBuffer(GPUAPI API) : API(API) {}
+  explicit CommandBuffer(GPUAPI Kind) : Kind(Kind) {}
   virtual ~CommandBuffer();
   CommandBuffer(const CommandBuffer &) = delete;
   CommandBuffer &operator=(const CommandBuffer &) = delete;
 
-  GPUAPI getAPI() const { return API; }
-
-  template <typename T> T &as() {
-    assert(API == T::BackendAPI && "CommandBuffer backend mismatch");
-    return static_cast<T &>(*this);
-  }
-  template <typename T> const T &as() const {
-    assert(API == T::BackendAPI && "CommandBuffer backend mismatch");
-    return static_cast<const T &>(*this);
-  }
+  GPUAPI getKind() const { return Kind; }
 };
 
 } // namespace offloadtest

@@ -150,7 +150,9 @@ public:
 
 class MTLCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static constexpr GPUAPI BackendAPI = GPUAPI::Metal;
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::Metal;
+  }
 
   MTL::CommandBuffer *CmdBuffer = nullptr;
 

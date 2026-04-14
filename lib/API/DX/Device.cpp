@@ -414,7 +414,9 @@ public:
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static constexpr GPUAPI BackendAPI = GPUAPI::DirectX;
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::DirectX;
+  }
 
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
