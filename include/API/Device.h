@@ -120,8 +120,8 @@ llvm::Expected<std::shared_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
 // Creates a VertexBuffer from a ParsedVertexBuffer.
-llvm::Expected<VertexBuffer>
-createVertexBuffer(Device &Dev, const ParsedVertexBuffer &PVB);
+llvm::Expected<VertexBuffer> createVertexBuffer(Device &Dev,
+                                                const ParsedVertexBuffer &PVB);
 
 } // namespace offloadtest
 
