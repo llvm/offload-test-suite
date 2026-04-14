@@ -22,6 +22,9 @@
 #include <system_error>
 #include <vulkan/vulkan.h>
 
+#include "multisample/Texture2DMSArrayUpload.spv.inc"
+#include "multisample/Texture2DMSUpload.spv.inc"
+
 using namespace offloadtest;
 
 #define VKFormats(FMT, BITS)                                                   \
@@ -68,6 +71,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
   case ResourceKind::RWTexture2D:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -148,6 +153,8 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
@@ -159,9 +166,12 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
 static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
+  case ResourceKind::Texture2DMSArray:
+    return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
@@ -178,6 +188,8 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DMS:
+  case ResourceKind::Texture2DMSArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_TYPE_2D;
@@ -185,6 +197,97 @@ static VkImageType getVKImageType(const ResourceKind RK) {
     llvm_unreachable("Unsupported image kind");
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkSampleCountFlagBits getVKSamples(uint32_t SampleCount) {
+  switch (SampleCount) {
+  case 1:
+    return VK_SAMPLE_COUNT_1_BIT;
+  case 2:
+    return VK_SAMPLE_COUNT_2_BIT;
+  case 4:
+    return VK_SAMPLE_COUNT_4_BIT;
+  case 8:
+    return VK_SAMPLE_COUNT_8_BIT;
+  case 16:
+    return VK_SAMPLE_COUNT_16_BIT;
+  case 32:
+    return VK_SAMPLE_COUNT_32_BIT;
+  case 64:
+    return VK_SAMPLE_COUNT_64_BIT;
+  default:
+    llvm_unreachable("Unsupported sample count.");
+  }
+}
+
+struct MultiSampledUploadProgram {
+  const uint32_t *Spirv = nullptr;
+  size_t SpirvSize = 0;
+  VkImageViewType ViewType = VK_IMAGE_VIEW_TYPE_MAX_ENUM;
+};
+
+static uint32_t getImageArrayLayers(const ResourceKind RK, const CPUBuffer &B) {
+  switch (RK) {
+  case ResourceKind::Texture2DMSArray:
+    return B.getArrayLayers();
+  default:
+    return 1;
+  }
+}
+
+static llvm::Expected<MultiSampledUploadProgram>
+getMultiSampledUploadProgram(const ResourceKind RK, const CPUBuffer &B) {
+  switch (RK) {
+  case ResourceKind::Texture2DMS:
+    if (B.Format == DataFormat::Float32 && B.Channels == 4) {
+      return MultiSampledUploadProgram{Texture2DMSUploadSpirv,
+                                       sizeof(Texture2DMSUploadSpirv),
+                                       VK_IMAGE_VIEW_TYPE_2D};
+    }
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Unsupported Texture2DMS upload format: expected Float32x4, got "
+        "format=%d channels=%d",
+        static_cast<int>(B.Format), B.Channels);
+  case ResourceKind::Texture2DMSArray:
+    if (B.Format == DataFormat::Float32 && B.Channels == 4) {
+      return MultiSampledUploadProgram{Texture2DMSArrayUploadSpirv,
+                                       sizeof(Texture2DMSArrayUploadSpirv),
+                                       VK_IMAGE_VIEW_TYPE_2D_ARRAY};
+    }
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Unsupported Texture2DMSArray upload format: expected Float32x4, got "
+        "format=%d channels=%d",
+        static_cast<int>(B.Format), B.Channels);
+  default:
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Unsupported multisampled texture kind in Vulkan upload helper: %d",
+        static_cast<int>(RK));
+  }
+}
+
+static VkPipelineStageFlags
+getPipelineStageMaskForShaderStages(uint32_t ShaderStageMask) {
+  VkPipelineStageFlags StageMask = 0;
+  if (ShaderStageMask & VK_SHADER_STAGE_COMPUTE_BIT)
+    StageMask |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  if (ShaderStageMask & VK_SHADER_STAGE_VERTEX_BIT)
+    StageMask |= VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+  if (ShaderStageMask & VK_SHADER_STAGE_FRAGMENT_BIT)
+    StageMask |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  return StageMask == 0 ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : StageMask;
+}
+
+static bool supportsSampleCount(VkSampleCountFlags SupportedCounts,
+                                VkSampleCountFlagBits RequestedCount) {
+  return (SupportedCounts & RequestedCount) != 0;
+}
+
+static VkImageUsageFlags getMultiSampledTextureUsageFlags() {
+  return VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+         VK_IMAGE_USAGE_STORAGE_BIT;
 }
 
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
@@ -538,9 +641,10 @@ private:
   };
 
   struct ResourceBundle {
-    ResourceBundle(VkDescriptorType DescriptorType, uint64_t Size,
-                   CPUBuffer *BufferPtr)
-        : DescriptorType(DescriptorType), Size(Size), BufferPtr(BufferPtr) {}
+    ResourceBundle(ResourceKind Kind, VkDescriptorType DescriptorType,
+                   uint64_t Size, CPUBuffer *BufferPtr)
+        : Kind(Kind), DescriptorType(DescriptorType), Size(Size),
+          BufferPtr(BufferPtr) {}
 
     bool isImage() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
@@ -567,6 +671,7 @@ private:
 
     uint32_t size() const { return BufferPtr->size(); }
 
+    ResourceKind Kind;
     VkDescriptorType DescriptorType;
     uint64_t Size;
     CPUBuffer *BufferPtr;
@@ -592,8 +697,8 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
-    ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
-                                          nullptr};
+    ResourceBundle FrameBufferResource = {
+        ResourceKind::Texture2D, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0, nullptr};
     ImageRef DepthStencil = {0, 0, 0};
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
@@ -606,6 +711,10 @@ private:
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
     llvm::SmallVector<VkImageView> ImageViews;
+    llvm::SmallVector<VkDescriptorPool> TempDescriptorPools;
+    llvm::SmallVector<VkPipelineLayout> TempPipelineLayouts;
+    llvm::SmallVector<VkPipeline> TempPipelines;
+    llvm::SmallVector<VkShaderModule> TempShaderModules;
 
     uint32_t getFullShaderStageMask() {
       if (0 != ShaderStageMask)
@@ -896,6 +1005,36 @@ private:
       std::make_pair(#Name, makeCapability<bool>(#Name, Features14.Name)));
 #endif
 #include "VKFeatures.def"
+
+    VkImageFormatProperties MultiSampledTextureProps = {};
+    const VkResult MultiSampledTextureQueryResult =
+        vkGetPhysicalDeviceImageFormatProperties(
+            PhysicalDevice, getVKFormat(DataFormat::Float32, 4),
+            VK_IMAGE_TYPE_2D, VK_IMAGE_TILING_OPTIMAL,
+            getMultiSampledTextureUsageFlags(), 0, &MultiSampledTextureProps);
+
+    constexpr struct {
+      const char *FeatureName;
+      VkSampleCountFlagBits SampleCount;
+    } SampleCountFeatures[] = {
+        {"SampleCount_1", VK_SAMPLE_COUNT_1_BIT},
+        {"SampleCount_2", VK_SAMPLE_COUNT_2_BIT},
+        {"SampleCount_4", VK_SAMPLE_COUNT_4_BIT},
+        {"SampleCount_8", VK_SAMPLE_COUNT_8_BIT},
+        {"SampleCount_16", VK_SAMPLE_COUNT_16_BIT},
+        {"SampleCount_32", VK_SAMPLE_COUNT_32_BIT},
+        {"SampleCount_64", VK_SAMPLE_COUNT_64_BIT},
+    };
+
+    for (const auto &SampleCountFeature : SampleCountFeatures) {
+      const bool Supported =
+          MultiSampledTextureQueryResult == VK_SUCCESS &&
+          supportsSampleCount(MultiSampledTextureProps.sampleCounts,
+                              SampleCountFeature.SampleCount);
+      Caps.insert(std::make_pair(
+          SampleCountFeature.FeatureName,
+          makeCapability<bool>(SampleCountFeature.FeatureName, Supported)));
+    }
   }
 
 public:
@@ -970,8 +1109,8 @@ public:
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
-    ImageCreateInfo.arrayLayers = 1;
-    ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageCreateInfo.arrayLayers = getImageArrayLayers(R.Kind, B);
+    ImageCreateInfo.samples = getVKSamples(B.OutputProps.SampleCount);
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     // Set initial layout of the image to undefined
@@ -979,11 +1118,18 @@ public:
     ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
                               static_cast<uint32_t>(B.OutputProps.Height), 1};
     if (UsageOverride == 0) {
-      ImageCreateInfo.usage =
-          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-          (R.isReadWrite()
-               ? (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-               : VK_IMAGE_USAGE_SAMPLED_BIT);
+      ImageCreateInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+      if (R.isReadWrite())
+        ImageCreateInfo.usage |=
+            VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+      else
+        ImageCreateInfo.usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+
+      // Multisampled texture upload is performed through a temporary compute
+      // pipeline that writes the image as a storage image before the test
+      // shaders read it.
+      if (R.isMultiSampledTexture())
+        ImageCreateInfo.usage |= VK_IMAGE_USAGE_STORAGE_BIT;
     } else {
       ImageCreateInfo.usage = UsageOverride;
     }
@@ -1044,7 +1190,7 @@ public:
   llvm::Error createResource(Resource &R, InvocationState &IS) {
     // Samplers don't have backing data buffers, so handle them separately
     if (R.isSampler()) {
-      ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
+      ResourceBundle Bundle{R.Kind, getDescriptorType(R.Kind), 0, nullptr};
       BufferRef HostBuf = {0, 0};
       auto ExSamplerRef = createSampler(R, HostBuf);
       if (!ExSamplerRef)
@@ -1054,11 +1200,17 @@ public:
       return llvm::Error::success();
     }
 
-    ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
+    ResourceBundle Bundle{R.Kind, getDescriptorType(R.Kind), R.size(),
+                          R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
-      auto ExHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
+      VkBufferUsageFlags HostUsage =
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+      if (R.isMultiSampledTexture())
+        HostUsage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+      auto ExHostBuf =
+          createBuffer(HostUsage, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(),
+                       ResData.get());
       if (!ExHostBuf)
         return ExHostBuf.takeError();
 
@@ -1469,7 +1621,8 @@ public:
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-          ViewCreateInfo.subresourceRange.layerCount = 1;
+          ViewCreateInfo.subresourceRange.layerCount =
+              getImageArrayLayers(R.Kind, *R.BufferPtr);
           ViewCreateInfo.subresourceRange.levelCount =
               R.BufferPtr->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
@@ -1984,11 +2137,265 @@ public:
     return llvm::Error::success();
   }
 
-  void copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
+  llvm::Error copyMultiSampledTextureToDevice(InvocationState &IS,
+                                              ResourceBundle &R) {
+    const CPUBuffer &B = *R.BufferPtr;
+    auto UploadProgramOrErr = getMultiSampledUploadProgram(R.Kind, B);
+    if (!UploadProgramOrErr)
+      return UploadProgramOrErr.takeError();
+    const MultiSampledUploadProgram &UploadProgram = *UploadProgramOrErr;
+    const uint32_t ArrayLayers = getImageArrayLayers(R.Kind, B);
+
+    struct PushConstants {
+      uint32_t Width;
+      uint32_t Height;
+      uint32_t SampleCount;
+      uint32_t ArrayLayers;
+    };
+
+    // 1. Create descriptor set layout:
+    //    binding 0 = storage image
+    //    binding 1 = storage buffer
+    VkDescriptorSetLayoutBinding Bindings[2] = {};
+    Bindings[0].binding = 0;
+    Bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    Bindings[0].descriptorCount = 1;
+    Bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    Bindings[1].binding = 1;
+    Bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    Bindings[1].descriptorCount = 1;
+    Bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo LayoutCI = {};
+    LayoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    LayoutCI.bindingCount = 2;
+    LayoutCI.pBindings = Bindings;
+
+    VkDescriptorSetLayout Layout = VK_NULL_HANDLE;
+    if (vkCreateDescriptorSetLayout(Device, &LayoutCI, nullptr, &Layout)) {
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create multisample upload descriptor set layout.");
+    }
+
+    VkPushConstantRange PushRange = {};
+    PushRange.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    PushRange.offset = 0;
+    PushRange.size = sizeof(PushConstants);
+
+    VkPipelineLayoutCreateInfo PipelineLayoutCI = {};
+    PipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    PipelineLayoutCI.setLayoutCount = 1;
+    PipelineLayoutCI.pSetLayouts = &Layout;
+    PipelineLayoutCI.pushConstantRangeCount = 1;
+    PipelineLayoutCI.pPushConstantRanges = &PushRange;
+
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (vkCreatePipelineLayout(Device, &PipelineLayoutCI, nullptr,
+                               &PipelineLayout))
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create multisample upload pipeline layout.");
+
+    // 2. Create compute shader module from embedded SPIR-V.
+    VkShaderModuleCreateInfo ShaderCI = {};
+    ShaderCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ShaderCI.codeSize = UploadProgram.SpirvSize;
+    ShaderCI.pCode = UploadProgram.Spirv;
+
+    VkShaderModule Shader = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(Device, &ShaderCI, nullptr, &Shader))
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to create multisample upload shader.");
+
+    VkComputePipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    PipelineCI.stage.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    PipelineCI.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    PipelineCI.stage.module = Shader;
+    PipelineCI.stage.pName = "main";
+    PipelineCI.layout = PipelineLayout;
+
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (vkCreateComputePipelines(Device, VK_NULL_HANDLE, 1, &PipelineCI,
+                                 nullptr, &Pipeline)) {
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create multisample upload pipeline.");
+    }
+
+    // 3. Pool + sets, one set per resource instance.
+    VkDescriptorPoolSize PoolSizes[2] = {};
+    PoolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    PoolSizes[0].descriptorCount = R.ResourceRefs.size();
+    PoolSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    PoolSizes[1].descriptorCount = R.ResourceRefs.size();
+
+    VkDescriptorPoolCreateInfo PoolCI = {};
+    PoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    PoolCI.poolSizeCount = 2;
+    PoolCI.pPoolSizes = PoolSizes;
+    PoolCI.maxSets = R.ResourceRefs.size();
+
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
+    if (vkCreateDescriptorPool(Device, &PoolCI, nullptr, &Pool)) {
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create multisample upload descriptor pool.");
+    }
+
+    llvm::SmallVector<VkDescriptorSetLayout> Layouts(R.ResourceRefs.size(),
+                                                     Layout);
+    llvm::SmallVector<VkDescriptorSet> DescriptorSets(R.ResourceRefs.size());
+
+    VkDescriptorSetAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    AllocInfo.descriptorPool = Pool;
+    AllocInfo.descriptorSetCount = Layouts.size();
+    AllocInfo.pSetLayouts = Layouts.data();
+
+    if (vkAllocateDescriptorSets(Device, &AllocInfo, DescriptorSets.data())) {
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to allocate multisample upload descriptor sets.");
+    }
+
+    const PushConstants PC = {
+        static_cast<uint32_t>(B.OutputProps.Width),
+        static_cast<uint32_t>(B.OutputProps.Height),
+        static_cast<uint32_t>(B.OutputProps.SampleCount),
+        ArrayLayers,
+    };
+
+    for (size_t I = 0; I < R.ResourceRefs.size(); ++I) {
+      auto &ResRef = R.ResourceRefs[I];
+
+      // 4. Transition image to GENERAL for storage writes.
+      VkImageMemoryBarrier ImageBarrier = {};
+      ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      ImageBarrier.srcAccessMask = 0;
+      ImageBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      ImageBarrier.oldLayout = R.ImageLayout;
+      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+      ImageBarrier.image = ResRef.Image.Image;
+      ImageBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      ImageBarrier.subresourceRange.baseMipLevel = 0;
+      ImageBarrier.subresourceRange.levelCount = 1;
+      ImageBarrier.subresourceRange.baseArrayLayer = 0;
+      ImageBarrier.subresourceRange.layerCount = ArrayLayers;
+
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           0, nullptr, 1, &ImageBarrier);
+
+      // 5. Make host staging buffer visible to compute.
+      VkBufferMemoryBarrier BufferBarrier = {};
+      BufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+      BufferBarrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+      BufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      BufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      BufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      BufferBarrier.buffer = ResRef.Host.Buffer;
+      BufferBarrier.offset = 0;
+      BufferBarrier.size = VK_WHOLE_SIZE;
+
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
+                           1, &BufferBarrier, 0, nullptr);
+
+      // 6. Create image view for the multisampled image.
+      VkImageViewCreateInfo ViewCI = {};
+      ViewCI.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      ViewCI.image = ResRef.Image.Image;
+      ViewCI.viewType = UploadProgram.ViewType;
+      ViewCI.format = getVKFormat(B.Format, B.Channels);
+      ViewCI.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      ViewCI.subresourceRange.baseMipLevel = 0;
+      ViewCI.subresourceRange.levelCount = 1;
+      ViewCI.subresourceRange.baseArrayLayer = 0;
+      ViewCI.subresourceRange.layerCount = ArrayLayers;
+
+      VkImageView ImageView = VK_NULL_HANDLE;
+      if (vkCreateImageView(Device, &ViewCI, nullptr, &ImageView))
+        return llvm::createStringError(
+            std::errc::device_or_resource_busy,
+            "Failed to create multisample upload image view.");
+
+      VkDescriptorImageInfo ImageInfo = {};
+      ImageInfo.imageView = ImageView;
+      ImageInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+      VkDescriptorBufferInfo BufferInfo = {};
+      BufferInfo.buffer = ResRef.Host.Buffer;
+      BufferInfo.offset = 0;
+      BufferInfo.range = VK_WHOLE_SIZE;
+
+      VkWriteDescriptorSet Writes[2] = {};
+      Writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      Writes[0].dstSet = DescriptorSets[I];
+      Writes[0].dstBinding = 0;
+      Writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+      Writes[0].descriptorCount = 1;
+      Writes[0].pImageInfo = &ImageInfo;
+
+      Writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      Writes[1].dstSet = DescriptorSets[I];
+      Writes[1].dstBinding = 1;
+      Writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      Writes[1].descriptorCount = 1;
+      Writes[1].pBufferInfo = &BufferInfo;
+
+      vkUpdateDescriptorSets(Device, 2, Writes, 0, nullptr);
+
+      // 7. Dispatch one invocation per (x, y, layer-sample pair).
+      vkCmdBindPipeline(IS.CB->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                        Pipeline);
+      vkCmdBindDescriptorSets(IS.CB->CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              PipelineLayout, 0, 1, &DescriptorSets[I], 0,
+                              nullptr);
+      vkCmdPushConstants(IS.CB->CmdBuffer, PipelineLayout,
+                         VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PC), &PC);
+      vkCmdDispatch(IS.CB->CmdBuffer, PC.Width, PC.Height,
+                    PC.SampleCount * PC.ArrayLayers);
+
+      // 8. Make writes visible to later shader reads.
+      ImageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+      ImageBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+      ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+      vkCmdPipelineBarrier(
+          IS.CB->CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          getPipelineStageMaskForShaderStages(IS.getFullShaderStageMask()), 0,
+          0, nullptr, 0, nullptr, 1, &ImageBarrier);
+
+      // Must keep this alive until cleanup.
+      IS.ImageViews.push_back(ImageView);
+    }
+
+    R.ImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    // Must also keep these alive until cleanup.
+    IS.DescriptorSetLayouts.push_back(Layout);
+    IS.TempDescriptorPools.push_back(Pool);
+    IS.TempPipelineLayouts.push_back(PipelineLayout);
+    IS.TempPipelines.push_back(Pipeline);
+    IS.TempShaderModules.push_back(Shader);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
     if (R.isSampler())
-      return;
+      return llvm::Error::success();
     if (R.isImage()) {
+      if (R.BufferPtr->getSampleCount() > 1) {
+        return copyMultiSampledTextureToDevice(IS, R);
+      }
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const uint32_t ArrayLayers = getImageArrayLayers(R.Kind, B);
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -1998,7 +2405,7 @@ public:
                                                  : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
+        Region.imageSubresource.layerCount = ArrayLayers;
         Region.imageExtent.width =
             std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
         Region.imageExtent.height =
@@ -2009,7 +2416,7 @@ public:
         Regions.push_back(Region);
         CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
                          Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
+                         ArrayLayers * B.getElementSize();
       }
 
       VkImageSubresourceRange SubRange = {};
@@ -2018,7 +2425,7 @@ public:
                                 : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      SubRange.layerCount = ArrayLayers;
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -2050,11 +2457,12 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-                             nullptr, 0, nullptr, 1, &ImageBarrier);
+        vkCmdPipelineBarrier(
+            IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            getPipelineStageMaskForShaderStages(IS.getFullShaderStageMask()), 0,
+            0, nullptr, 0, nullptr, 1, &ImageBarrier);
       }
-      return;
+      return llvm::Error::success();
     }
     VkBufferMemoryBarrier Barrier = {};
     Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
@@ -2069,6 +2477,7 @@ public:
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
                            1, &Barrier, 0, nullptr);
     }
+    return llvm::Error::success();
   }
 
   void copyResourceDataToHost(InvocationState &IS, ResourceBundle &R) {
@@ -2076,13 +2485,14 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const uint32_t ArrayLayers = getImageArrayLayers(R.Kind, B);
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = B.Format == DataFormat::Depth32
                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
                                 : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      SubRange.layerCount = ArrayLayers;
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -2096,10 +2506,10 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &ImageBarrier);
+        vkCmdPipelineBarrier(
+            IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            getPipelineStageMaskForShaderStages(IS.getFullShaderStageMask()), 0,
+            0, nullptr, 0, nullptr, 1, &ImageBarrier);
       }
 
       llvm::SmallVector<VkBufferImageCopy> Regions;
@@ -2111,7 +2521,7 @@ public:
                                                  : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
+        Region.imageSubresource.layerCount = ArrayLayers;
         Region.imageExtent.width =
             std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
         Region.imageExtent.height =
@@ -2122,7 +2532,7 @@ public:
         Regions.push_back(Region);
         CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
                          Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
+                         ArrayLayers * B.getElementSize() * B.getSampleCount();
       }
 
       for (auto &ResRef : R.ResourceRefs)
@@ -2193,7 +2603,8 @@ public:
 
   llvm::Error createCommands(Pipeline &P, InvocationState &IS) {
     for (auto &R : IS.Resources)
-      copyResourceDataToDevice(IS, R);
+      if (auto Err = copyResourceDataToDevice(IS, R))
+        return Err;
 
     if (P.isGraphics()) {
       VkClearValue ClearValues[2] = {};
@@ -2342,6 +2753,18 @@ public:
 
     for (auto &V : IS.ImageViews)
       vkDestroyImageView(Device, V, nullptr);
+
+    for (auto &P : IS.TempPipelines)
+      vkDestroyPipeline(Device, P, nullptr);
+
+    for (auto &S : IS.TempShaderModules)
+      vkDestroyShaderModule(Device, S, nullptr);
+
+    for (auto &L : IS.TempPipelineLayouts)
+      vkDestroyPipelineLayout(Device, L, nullptr);
+
+    for (auto &P : IS.TempDescriptorPools)
+      vkDestroyDescriptorPool(Device, P, nullptr);
 
     for (auto &R : IS.Resources) {
       for (auto &ResRef : R.ResourceRefs) {

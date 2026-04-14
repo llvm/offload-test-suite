@@ -1,0 +1,90 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DMSArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  Out[0] = Tex.Load(int3(0, 0, 0), 0);
+  Out[1] = Tex.Load(int3(1, 0, 1), 1);
+  Out[2] = Tex.Load(int3(0, 0, 0), 2);
+  Out[3] = Tex.Load(int3(1, 0, 1), 3);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, SampleCount: 4, ArrayLayers: 2 }
+    Data: [
+        0.25, 0.0, 0.0, 1.0,  # layer 0, texel (0,0), sample 0
+        0.5, 0.0, 0.0, 1.0,  # layer 0, texel (0,0), sample 1
+        0.75, 0.0, 0.0, 1.0, # layer 0, texel (0,0), sample 2
+        1.0, 0.0, 0.0, 1.0,  # layer 0, texel (0,0), sample 3
+        0.0, 0.25, 0.0, 1.0,  # layer 0, texel (1,0), sample 0
+        0.0, 0.5, 0.0, 1.0,  # layer 0, texel (1,0), sample 1
+        0.0, 0.75, 0.0, 1.0, # layer 0, texel (1,0), sample 2
+        0.0, 1.0, 0.0, 1.0,  # layer 0, texel (1,0), sample 3
+        0.0, 0.0, 0.25, 1.0,  # layer 1, texel (0,0), sample 0
+        0.0, 0.0, 0.5, 1.0,  # layer 1, texel (0,0), sample 1
+        0.0, 0.0, 0.75, 1.0, # layer 1, texel (0,0), sample 2
+        0.0, 0.0, 1.0, 1.0,  # layer 1, texel (0,0), sample 3
+        0.25, 0.25, 0.25, 1.0,  # layer 1, texel (1,0), sample 0
+        0.5, 0.5, 0.5, 1.0,  # layer 1, texel (1,0), sample 1
+        0.75, 0.75, 0.75, 1.0, # layer 1, texel (1,0), sample 2
+        1.0, 1.0, 1.0, 1.0 ] # layer 1, texel (1,0), sample 3
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.25, 0.0, 0.0, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            0.75, 0.0, 0.0, 1.0,
+            1.0, 1.0, 1.0, 1.0 ]
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DMSArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results:
+  - Result: LoadArrayTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: DirectX || Metal
+
+# Unimplemented: Clang + Vulkan: https://github.com/llvm/llvm-project/issues/124566
+# XFAIL: Clang && Vulkan
+
+# Intel Vulkan reports shaderStorageImageMultisample, but this test currently
+# reads sample 0 values for sample 1/2/3 after multisample upload.
+# XFAIL: Intel && Vulkan
+
+# REQUIRES: SampleCount_4
+# REQUIRES: shaderStorageImageMultisample
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

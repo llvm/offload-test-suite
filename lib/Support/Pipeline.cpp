@@ -69,6 +69,28 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           if (!R.BufferPtr)
             I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
         }
+
+        if (R.isMultiSampledTexture() && R.BufferPtr) {
+          if (R.BufferPtr->OutputProps.SampleCount < 2)
+            I.setError(Twine(
+                "Multisampled textures must have SampleCount greater than 2"));
+          if (R.BufferPtr->OutputProps.MipLevels > 1)
+            I.setError(Twine("Multisampled textures cannot have mip levels"));
+        }
+
+        if (R.BufferPtr && R.BufferPtr->OutputProps.ArrayLayers > 1 &&
+            !R.isArrayTexture())
+          I.setError(Twine("Only array textures can have ArrayLayers greater "
+                           "than 1"));
+
+        if (R.isArrayTexture() && R.BufferPtr &&
+            R.BufferPtr->OutputProps.ArrayLayers < 1)
+          I.setError(Twine("Array textures must have at least one layer"));
+
+        if (R.BufferPtr && R.BufferPtr->OutputProps.SampleCount > 1 &&
+            !R.isMultiSampledTexture())
+          I.setError(Twine("Only multisampled textures can have SampleCount "
+                           "greater than 1"));
       }
     }
 
@@ -352,9 +374,11 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
     uint32_t W = B.OutputProps.Width;
     uint32_t H = B.OutputProps.Height;
     uint32_t D = B.OutputProps.Depth;
+    const uint32_t Samples = B.OutputProps.SampleCount;
+    const uint32_t ArrayLayers = B.OutputProps.ArrayLayers;
     const uint32_t ElementSize = B.getElementSize();
     for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-      ExpectedSize += W * H * D * ElementSize;
+      ExpectedSize += W * H * D * ArrayLayers * Samples * ElementSize;
       W = std::max(1u, W / 2);
       H = std::max(1u, H / 2);
       D = std::max(1u, D / 2);
@@ -467,6 +491,8 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
   I.mapOptional("MipLevels", P.MipLevels, 1);
+  I.mapOptional("SampleCount", P.SampleCount, 1);
+  I.mapOptional("ArrayLayers", P.ArrayLayers, 1);
 }
 
 void MappingTraits<offloadtest::dx::RootResource>::mapping(

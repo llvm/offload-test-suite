@@ -169,6 +169,10 @@ def setDeviceFeatures(config, device, compiler):
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
 
+        for FeatureName, FeatureValue in device["Features"].items():
+            if re.fullmatch(r"SampleCount_\d+", FeatureName) and FeatureValue:
+                config.available_features.add(FeatureName)
+
 
 offloader_args = []
 if config.offloadtest_test_warp:
