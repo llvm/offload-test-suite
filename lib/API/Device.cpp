@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 
 #include "Config.h"
 
@@ -54,4 +55,41 @@ offloadtest::initializeDevices(const DeviceConfig Config) {
   if (Err)
     llvm::logAllUnhandledErrors(std::move(Err), llvm::errs());
   return Devices;
+}
+
+llvm::Expected<std::shared_ptr<Texture>>
+offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
+                                             const CPUBuffer &Buf) {
+  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
+  if (!TexFmtOrErr)
+    return TexFmtOrErr.takeError();
+
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::RenderTarget;
+  Desc.Format = *TexFmtOrErr;
+  Desc.Width = Buf.OutputProps.Width;
+  Desc.Height = Buf.OutputProps.Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearColor{};
+
+  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
+    return Err;
+
+  return Dev.createTexture("RenderTarget", Desc);
+}
+
+llvm::Expected<std::shared_ptr<Texture>>
+offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
+                                             uint32_t Height) {
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::DepthStencil;
+  Desc.Format = Format::D32FloatS8Uint;
+  Desc.Width = Width;
+  Desc.Height = Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
+
+  return Dev.createTexture("DepthStencil", Desc);
 }
