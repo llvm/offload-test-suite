@@ -368,7 +368,7 @@ struct ParsedVertexBuffer {
   uint32_t getStride() const {
     uint32_t Stride = 0;
     for (const auto &S : Streams)
-      Stride += getFormatSize(S.Fmt);
+      Stride += getFormatSizeInBytes(S.Fmt);
     return Stride;
   }
 

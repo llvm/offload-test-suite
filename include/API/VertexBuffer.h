@@ -35,7 +35,7 @@ struct VertexBufferDesc {
   uint32_t getStride() const {
     uint32_t Stride = 0;
     for (const auto &S : Streams)
-      Stride += getFormatSize(S.Fmt);
+      Stride += getFormatSizeInBytes(S.Fmt);
     return Stride;
   }
 
@@ -44,7 +44,7 @@ struct VertexBufferDesc {
     assert(Index < Streams.size() && "Stream index out of bounds");
     uint32_t Offset = 0;
     for (uint32_t I = 0; I < Index; ++I)
-      Offset += getFormatSize(Streams[I].Fmt);
+      Offset += getFormatSizeInBytes(Streams[I].Fmt);
     return Offset;
   }
 };

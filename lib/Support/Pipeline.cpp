@@ -122,12 +122,10 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                  std::to_string(DescriptorTableCount));
 
     if (!P.Bindings.VertexBuffer.empty()) {
-      P.Bindings.VertexBufferPtr =
-          P.getVertexBuffer(P.Bindings.VertexBuffer);
+      P.Bindings.VertexBufferPtr = P.getVertexBuffer(P.Bindings.VertexBuffer);
       if (!P.Bindings.VertexBufferPtr)
         I.setError(Twine("Referenced vertex buffer ") +
-                   P.Bindings.VertexBuffer +
-                   " not found in VertexBuffers!");
+                   P.Bindings.VertexBuffer + " not found in VertexBuffers!");
     }
 
     if (!P.Bindings.RenderTarget.empty()) {
@@ -497,14 +495,13 @@ void MappingTraits<offloadtest::ParsedVertexBuffer>::mapping(
     for (uint32_t V = 0; V < VertexCount; ++V) {
       uint32_t StreamOffset = 0;
       for (const auto &Stream : VB.Streams) {
-        const uint32_t Components =
-            offloadtest::getComponentCount(Stream.Fmt);
+        const uint32_t Components = offloadtest::getComponentCount(Stream.Fmt);
         char *Dst = VB.InterleavedData.get() + V * Stride + StreamOffset;
         for (uint32_t C = 0; C < Components; ++C) {
           double Value = Stream.Values[V * Components + C];
           Dst += writeComponent(Dst, Value, Stream.Fmt);
         }
-        StreamOffset += offloadtest::getFormatSize(Stream.Fmt);
+        StreamOffset += offloadtest::getFormatSizeInBytes(Stream.Fmt);
       }
     }
   }
