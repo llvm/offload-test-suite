@@ -56,7 +56,7 @@ static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12Device *> SignalHandlerDevices;
 
 static void dumpD3DInfoQueues(void *) {
-  std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+  const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
   for (ID3D12Device *Device : SignalHandlerDevices) {
     ComPtr<ID3D12InfoQueue> InfoQueue;
     HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
@@ -472,7 +472,7 @@ public:
   DXDevice(const DXDevice &) = default;
 
   ~DXDevice() override {
-    std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+    const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
     llvm::erase(SignalHandlerDevices, Device.Get());
   }
 
@@ -535,7 +535,7 @@ public:
       llvm::sys::AddSignalHandler(dumpD3DInfoQueues, nullptr);
     });
     {
-      std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+      const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
       SignalHandlerDevices.push_back(Device.Get());
     }
 
