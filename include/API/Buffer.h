@@ -22,7 +22,7 @@ struct BufferCreateDesc {
 
 class Buffer {
 public:
-  virtual ~Buffer() = default;
+  virtual ~Buffer();
 
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;

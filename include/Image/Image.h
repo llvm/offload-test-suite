@@ -30,7 +30,7 @@ namespace offloadtest {
 
 class ImageComparatorBase {
 public:
-  virtual ~ImageComparatorBase() {}
+  virtual ~ImageComparatorBase();
   virtual void processPixel(Color L, Color R) = 0;
   virtual void print(llvm::raw_ostream &OS) {}
   virtual bool result() { return true; }

@@ -21,7 +21,15 @@
 
 using namespace offloadtest;
 
+Buffer::~Buffer() {}
+
+CommandBuffer::~CommandBuffer() {}
+
+Fence::~Fence() {}
+
 Queue::~Queue() {}
+
+Texture::~Texture() {}
 
 Device::~Device() {}
 

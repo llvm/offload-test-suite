@@ -25,6 +25,8 @@
 
 using namespace offloadtest;
 
+ImageComparatorBase::~ImageComparatorBase() {}
+
 template <typename DstType, typename SrcType>
 static void translatePixelData(Image &Dst, ImageRef Src, bool ForWrite) {
   const uint64_t Pixels = Dst.getHeight() * Dst.getWidth();
