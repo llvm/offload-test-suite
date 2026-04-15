@@ -1,0 +1,74 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture2D::mips.operator[][]
+  Out[0] = Tex.mips[0][int2(0, 0)]; // Red
+  Out[1] = Tex.mips[0][int2(1, 1)]; // White
+
+  // Test mip 1 (1x1)
+  Out[2] = Tex.mips[1][int2(0, 0)]; // Yellow
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Mip 0 (2x2)
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1x1) - Yellow
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 48 # 3 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # [0] Red
+            1.0, 1.0, 1.0, 1.0,  # [1] White
+            1.0, 1.0, 0.0, 1.0 ] # [2] Yellow (mip 1)
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results:
+  - Result: MipsOperatorIndexTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: Clang && DirectX 
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
+# XFAIL: DirectX
+
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

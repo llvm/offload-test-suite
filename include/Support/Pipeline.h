@@ -59,7 +59,7 @@ enum class ResourceKind {
   RWTexture2D,
   ConstantBuffer,
   Sampler,
-  SamplerComparison,
+  SampledTexture2D,
 };
 
 enum class FilterMode { Nearest, Linear };
@@ -77,6 +77,8 @@ enum class CompareFunction {
   Always
 };
 
+enum class SamplerKind { Sampler, SamplerComparison };
+
 struct Sampler {
   std::string Name;
   FilterMode MinFilter = FilterMode::Linear;
@@ -86,6 +88,7 @@ struct Sampler {
   float MaxLOD = std::numeric_limits<float>::max();
   float MipLODBias = 0.0f;
   CompareFunction ComparisonOp = CompareFunction::Never;
+  SamplerKind Kind = SamplerKind::Sampler;
 };
 
 struct DirectXBinding {
@@ -186,7 +189,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
+    case ResourceKind::SampledTexture2D:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -201,7 +204,6 @@ struct Resource {
   bool isSampler() const {
     switch (Kind) {
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
       return true;
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
@@ -212,6 +214,7 @@ struct Resource {
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::SampledTexture2D:
       return false;
     }
   }
@@ -226,10 +229,10 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
       return false;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::SampledTexture2D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -249,6 +252,15 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  bool isSampledTexture() const {
+    switch (Kind) {
+    case ResourceKind::SampledTexture2D:
       return true;
     default:
       return false;
@@ -279,7 +291,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
+    case ResourceKind::SampledTexture2D:
       return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -591,6 +603,15 @@ template <> struct ScalarEnumerationTraits<offloadtest::CompareFunction> {
   }
 };
 
+template <> struct ScalarEnumerationTraits<offloadtest::SamplerKind> {
+  static void enumeration(IO &I, offloadtest::SamplerKind &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::SamplerKind::Val)
+    ENUM_CASE(Sampler);
+    ENUM_CASE(SamplerComparison);
+#undef ENUM_CASE
+  }
+};
+
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   static void enumeration(IO &I, offloadtest::DataFormat &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataFormat::Val)
@@ -626,7 +647,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(RWTexture2D);
     ENUM_CASE(ConstantBuffer);
     ENUM_CASE(Sampler);
-    ENUM_CASE(SamplerComparison);
+    ENUM_CASE(SampledTexture2D);
 #undef ENUM_CASE
   }
 };

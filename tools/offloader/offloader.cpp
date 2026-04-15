@@ -91,7 +91,7 @@ int main(int ArgC, char **ArgV) {
 
   if (run())
     return 1;
-  Device::uninitialize();
+
   return 0;
 }
 
@@ -104,8 +104,13 @@ static bool matchesRegexIgnoreCase(StringRef GPUDescription,
 int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   const DeviceConfig Config = {Debug, Validation};
-  logAllUnhandledErrors(Device::initialize(Config), errs(),
-                        "gpu-exec: warning: ");
+  auto DevicesOrErr = initializeDevices(Config);
+  if (!DevicesOrErr) {
+    logAllUnhandledErrors(DevicesOrErr.takeError(), errs(),
+                          "gpu-exec: error: ");
+    return 1;
+  }
+  auto Devices = std::move(*DevicesOrErr);
 
   const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
@@ -152,12 +157,12 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
-  if (Device::devices().empty()) {
+  if (Devices.empty()) {
     errs() << "No device available.";
     return 1;
   }
 
-  for (const auto &D : Device::devices()) {
+  for (const auto &D : Devices) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
