@@ -1,0 +1,677 @@
+[
+  {
+    "file": "expression_init.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "forward_struct_layers_resource.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_addition.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_addition.hlsl:13:16: error: invalid operands to binary expression ('RWByteAddressBuffer' and 'RWByteAddressBuffer')\n   13 |",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_addition.hlsl:13:16: error: scalar, vector, or matrix expected\n    return buf + buf;\n               ^"
+  },
+  {
+    "file": "local_resource_aggregate_init.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_alias_chain.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_alias_global.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_arithmetic.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_arithmetic.hlsl:15:15: error: invalid operands to binary expression ('RWByteAddressBuffer' and 'int')\n   15 |     buf = buf",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_arithmetic.hlsl:15:15: error: scalar, vector, or matrix expected\n    buf = buf + 1;\n              ^\nD:\\llvm-project\\clang\\t"
+  },
+  {
+    "file": "local_resource_array.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_array_copy.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_array_dynamic_index.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_array_oob.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_array_oob.hlsl:15:31: warning: array index 5 is past the end of the array (that has type 'RWByteAddressBuffer[4]') [-Warray",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_array_oob.hlsl:15:31: error: array index 5 is out of bounds\n    RWByteAddressBuffer buf = gBufArray[5];\n                   "
+  },
+  {
+    "file": "local_resource_array_partial_init.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_array_size_one.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_as_structured_buffer_element.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_as_structured_buffer_element.hlsl:13:5: error: constraints not satisfied for class template 'RWStructuredBuffer' [with elem",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_as_structured_buffer_element.hlsl:13:24: error: object 'RWByteAddressBuffer' is not allowed in builtin template parameters\n"
+  },
+  {
+    "file": "local_resource_assign_wrong_type.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_assign_wrong_type.hlsl:16:9: error: no viable overloaded '='\n   16 |     buf = sb;\n      |     ~~~ ^ ~~\nnote: candidate fun",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_assign_wrong_type.hlsl:16:9: error: cannot convert from 'RWStructuredBuffer<uint>' to 'RWByteAddressBuffer'\n    buf = sb;\n "
+  },
+  {
+    "file": "local_resource_bindless_array.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_bindless_selection.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_block_lifetime.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_cast_sampler_to_buffer.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_cast_sampler_to_buffer.hlsl:14:6: error: no matching conversion for C-style cast from 'SamplerState' to 'RWByteAddressBuffe",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_cast_sampler_to_buffer.hlsl:14:6: error: cannot convert from 'SamplerState' to 'RWByteAddressBuffer'\n    ((RWByteAddressBuf"
+  },
+  {
+    "file": "local_resource_cast_to_uint.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_cast_to_uint.hlsl:13:12: error: cannot convert 'RWByteAddressBuffer' to 'uint' (aka 'unsigned int') without a conversion op",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_cast_to_uint.hlsl:13:12: error: cannot convert from 'RWByteAddressBuffer' to 'uint'\n    return (uint)buf;\n           ^"
+  },
+  {
+    "file": "local_resource_chained_call.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_comma_init.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_comma_init.hlsl:16:32: warning: left operand of comma operator has no effect [-Wunused-value]\n   16 |     RWByteAddressBuff",
+    "dxc": "diag",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_compare.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_compare.hlsl:15:14: error: invalid operands to binary expression ('RWByteAddressBuffer' and 'RWByteAddressBuffer')\n   15 | ",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_compare.hlsl:15:14: error: operator cannot be used with built-in type 'RWByteAddressBuffer'\n    return a == b;\n            "
+  },
+  {
+    "file": "local_resource_conditional_init.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_conditional_init.hlsl:16:9: error: local resource not guaranteed to map to unique global resource.\n    if (tid.x > 0)\n     "
+  },
+  {
+    "file": "local_resource_const_param.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_const_reassign.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_const_reassign.hlsl:16:11: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global resource",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_const_reassign.hlsl:16:9: error: cannot assign to variable 'buf' with const-qualified type 'const RWByteAddressBuffer'\n    "
+  },
+  {
+    "file": "local_resource_copy_between_locals.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_deep_phi.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_deep_phi.hlsl:18:15: warning: assignment of 'b ? gBuf0 : gBuf1' to local resource 'buf' is not to the same unique global re",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_default_init_store.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_default_init_store.hlsl:14:5: error: local resource not guaranteed to map to unique global resource.\n    buf.Store(tid.x * "
+  },
+  {
+    "file": "local_resource_default_param.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_default_param.hlsl:12:62: error: missing default argument on parameter 'offset'\n   12 | uint Fail_DefaultParam(RWByteAddres",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_default_param.hlsl:12:62: error: missing default argument on parameter 'offset'\nuint Fail_DefaultParam(RWByteAddressBuffer "
+  },
+  {
+    "file": "local_resource_different_types.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_do_while_reassign.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_do_while_reassign.hlsl:18:15: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global resou",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_early_return_reassign.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_early_return_reassign.hlsl:21:11: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global r",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_forward_through_functions.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_from_function_return.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_inout_param.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_loop_array_index.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_loop_carried.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_loop_carried.hlsl:18:15: warning: assignment of 'gBufArray[i & 3]' to local resource 'buf' is not to the same unique global",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_mixed_struct.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_multi_decl.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_multiple_uses.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_nested_blocks_reassign.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_nested_blocks_reassign.hlsl:20:19: warning: assignment of 'gBuf2' to local resource 'buf' is not to the same unique global ",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_nested_loops.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_out_param.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_overload.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_read_only.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_reassign_different_global.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_reassign_different_global.hlsl:17:11: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique glob",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_self_assign.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_shadow_inner_scope.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_static_const.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_static_const.hlsl:20:16: error: no matching member function for call to 'Load'\n   20 |     return buf.Load(idx * 4);\n      ",
+    "dxc": "diag",
+    "dxc_rc": 2158624797,
+    "dxc_out": "Internal Compiler error: llvm::cast<X>() argument of incompatible type!"
+  },
+  {
+    "file": "local_resource_static_local.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "diag",
+    "dxc_rc": 2158624797,
+    "dxc_out": "Internal Compiler error: llvm::cast<X>() argument of incompatible type!"
+  },
+  {
+    "file": "local_resource_struct_method.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_struct_return.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_structured_buffer.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_swap.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_switch_default.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_switch_default.hlsl:20:23: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global resource",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_switch_fallthrough.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_switch_fallthrough.hlsl:20:23: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global reso",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_switch_reassign.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_switch_reassign.hlsl:20:23: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global resourc",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_template_function.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_ternary_lvalue.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "diag",
+    "dxc_rc": 3758096385,
+    "dxc_out": "Internal compiler error: LLVM Assert"
+  },
+  {
+    "file": "local_resource_to_bool.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_to_bool.hlsl:14:12: error: no viable conversion from returned value of type 'RWByteAddressBuffer' to function return type '",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_to_bool.hlsl:14:12: error: cannot initialize return object of type 'bool' with an lvalue of type 'RWByteAddressBuffer'\n    "
+  },
+  {
+    "file": "local_resource_unreachable_reassign.hlsl",
+    "clang": "diag",
+    "clang_rc": 0,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_unreachable_reassign.hlsl:21:11: warning: assignment of 'gBuf1' to local resource 'buf' is not to the same unique global re",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_volatile.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_volatile.hlsl:17:9: error: no matching member function for call to 'Store'\n   17 |     buf.Store(tid.x * 4, 42);\n      |   ",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "local_resource_with_wave_intrinsic.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Note: shader requires additional functionality:\n;       Wave level operations\n;\n;\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- -"
+  },
+  {
+    "file": "local_resource_zero_init.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_zero_init.hlsl:14:31: error: too few initializers in list for type 'RWByteAddressBuffer' (expected 1 but found 0)\n   14 |  ",
+    "dxc": "diag",
+    "dxc_rc": 2147500037,
+    "dxc_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\local_resource_zero_init.hlsl:14:31: error: too few elements in vector initialization (expected 1 element, have 0)\n    RWByteAddressBuffer"
+  },
+  {
+    "file": "local_struct_resource_member.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "loop_var.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "nested_struct_resource_member.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "return_local_resource_initialized.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "return_local_resource_uninitialized.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "struct_array_with_resource_member.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "struct_resource_member_reassign.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "struct_with_resource_array_member.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  },
+  {
+    "file": "use_groupshared_direct_store.hlsl",
+    "clang": "diag",
+    "clang_rc": 1,
+    "clang_out": "D:\\llvm-project\\clang\\test\\SemaHLSL\\Resources\\Local-Resources\\use_groupshared_direct_store.hlsl:18:15: error: no matching member function for call to 'Store'\n   18 |     sharedBuf.Store(idx * 4, 1);\n ",
+    "dxc": "diag",
+    "dxc_rc": 2158624797,
+    "dxc_out": "Internal Compiler error: llvm::cast<X>() argument of incompatible type!"
+  },
+  {
+    "file": "use_local_resource_uninitialized.hlsl",
+    "clang": "clean",
+    "clang_rc": 0,
+    "clang_out": "",
+    "dxc": "clean",
+    "dxc_rc": 0,
+    "dxc_out": ";\n; Input signature:\n;\n; Name                 Index   Mask Register SysValue  Format   Used\n; -------------------- ----- ------ -------- -------- ------- ------\n; no parameters\n;\n; Output signature:\n;"
+  }
+]
