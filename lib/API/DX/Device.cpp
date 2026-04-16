@@ -479,9 +479,9 @@ private:
     std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // Resources for graphics pipelines.
-    std::shared_ptr<DXTexture> RT;
-    std::shared_ptr<DXBuffer> RTReadback;
-    std::shared_ptr<DXTexture> DS;
+    std::unique_ptr<DXTexture> RT;
+    std::unique_ptr<DXBuffer> RTReadback;
+    std::unique_ptr<DXTexture> DS;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -508,7 +508,7 @@ public:
     return DXFence::create(Device.Get(), Name);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
@@ -539,10 +539,10 @@ public:
                         "Failed to create buffer."))
       return Err;
 
-    return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+    return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
@@ -596,7 +596,7 @@ public:
                                "Failed to create texture."))
       return Err;
 
-    auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+    auto Tex = std::make_unique<DXTexture>(DeviceTexture, Name, Desc);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -1580,7 +1580,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RT = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    IS.RT.reset(static_cast<DXTexture *>(TexOrErr->release()));
 
     // Create readback buffer sized for the pixel data (raw bytes).
     BufferCreateDesc BufDesc = {};
@@ -1588,7 +1588,7 @@ public:
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.RTReadback = std::static_pointer_cast<DXBuffer>(*BufOrErr);
+    IS.RTReadback.reset(static_cast<DXBuffer *>(BufOrErr->release()));
 
     return llvm::Error::success();
   }
@@ -1599,7 +1599,7 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DS = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    IS.DS.reset(static_cast<DXTexture *>(TexOrErr->release()));
     return llvm::Error::success();
   }
 

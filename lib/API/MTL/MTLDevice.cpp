@@ -200,9 +200,9 @@ class MTLDevice : public offloadtest::Device {
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
-    std::shared_ptr<MTLTexture> FrameBufferTexture;
-    std::shared_ptr<MTLBuffer> FrameBufferReadback;
-    std::shared_ptr<MTLTexture> DepthStencil;
+    std::unique_ptr<MTLTexture> FrameBufferTexture;
+    std::unique_ptr<MTLBuffer> FrameBufferReadback;
+    std::unique_ptr<MTLTexture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
@@ -527,7 +527,7 @@ class MTLDevice : public offloadtest::Device {
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.FrameBufferTexture = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+    IS.FrameBufferTexture.reset(static_cast<MTLTexture *>(TexOrErr->release()));
 
     // Create a readback buffer for copying render target data to the CPU.
     BufferCreateDesc BufDesc = {};
@@ -535,7 +535,7 @@ class MTLDevice : public offloadtest::Device {
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.FrameBufferReadback = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
+    IS.FrameBufferReadback.reset(static_cast<MTLBuffer *>(BufOrErr->release()));
 
     return llvm::Error::success();
   }
@@ -546,7 +546,7 @@ class MTLDevice : public offloadtest::Device {
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DepthStencil = std::static_pointer_cast<MTLTexture>(*TexOrErr);
+    IS.DepthStencil.reset(static_cast<MTLTexture *>(TexOrErr->release()));
     return llvm::Error::success();
   }
 
@@ -733,7 +733,7 @@ public:
     return MTLFence::create(Device, Name);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     MTL::Buffer *Buf = Device->newBuffer(
@@ -741,10 +741,10 @@ public:
     if (!Buf)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");
-    return std::make_shared<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+    return std::make_unique<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
@@ -760,7 +760,7 @@ public:
     if (!Tex)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
-    return std::make_shared<MTLTexture>(Tex, Name, Desc);
+    return std::make_unique<MTLTexture>(Tex, Name, Desc);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>

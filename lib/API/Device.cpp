@@ -65,7 +65,7 @@ offloadtest::initializeDevices(const DeviceConfig Config) {
   return Devices;
 }
 
-llvm::Expected<std::shared_ptr<Texture>>
+llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
                                              const CPUBuffer &Buf) {
   auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
@@ -87,7 +87,7 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
   return Dev.createTexture("RenderTarget", Desc);
 }
 
-llvm::Expected<std::shared_ptr<Texture>>
+llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
                                              uint32_t Height) {
   TextureCreateDesc Desc = {};

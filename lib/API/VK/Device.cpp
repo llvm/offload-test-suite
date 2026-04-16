@@ -621,9 +621,9 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
-    std::shared_ptr<VulkanTexture> RenderTarget;
-    std::shared_ptr<VulkanBuffer> RTReadback;
-    std::shared_ptr<VulkanTexture> DepthStencil;
+    std::unique_ptr<VulkanTexture> RenderTarget;
+    std::unique_ptr<VulkanBuffer> RTReadback;
+    std::unique_ptr<VulkanTexture> DepthStencil;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
     VkRenderPass RenderPass = VK_NULL_HANDLE;
@@ -786,7 +786,7 @@ public:
     return VulkanFence::create(Device, Name);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     VkBufferCreateInfo BufInfo = {};
@@ -822,11 +822,11 @@ public:
       return llvm::createStringError(std::errc::io_error,
                                      "Failed to bind device buffer memory.");
 
-    return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
+    return std::make_unique<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
                                           Name, Desc, SizeInBytes);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
@@ -876,7 +876,7 @@ public:
                                      "Failed to bind image memory.");
     }
 
-    auto Tex = std::make_shared<VulkanTexture>(Device, Image, DeviceMemory,
+    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
                                                Name, Desc);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
@@ -1227,7 +1227,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+    IS.RenderTarget.reset(static_cast<VulkanTexture *>(TexOrErr->release()));
 
     // Create a host-visible staging buffer for readback.
     BufferCreateDesc BufDesc = {};
@@ -1235,7 +1235,7 @@ public:
     auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+    IS.RTReadback.reset(static_cast<VulkanBuffer *>(BufOrErr->release()));
 
     return llvm::Error::success();
   }
@@ -1246,7 +1246,7 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DepthStencil = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+    IS.DepthStencil.reset(static_cast<VulkanTexture *>(TexOrErr->release()));
     return llvm::Error::success();
   }
 
