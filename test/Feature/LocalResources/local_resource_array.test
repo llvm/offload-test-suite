@@ -1,0 +1,49 @@
+#--- source.hlsl
+
+// Test that a basic local resource array works with constant indexing.
+
+RWByteAddressBuffer Out : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer arr[2];
+    arr[0] = Out;
+    arr[0].Store(0, 42);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,60 @@
+#--- source.hlsl
+// Test that a local read-only ByteAddressBuffer (SRV) can load data correctly.
+ByteAddressBuffer gInput : register(t0);
+RWByteAddressBuffer gOutput : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    ByteAddressBuffer local = gInput;
+    uint val = local.Load(0);
+    gOutput.Store(0, val);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gInput
+    Format: Int32
+    Stride: 4
+    Data: [42]
+  - Name: gOutput
+    Format: Int32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedGOutput
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gOutput
+    Expected: ExpectedGOutput
+DescriptorSets:
+  - Resources:
+    - Name: gInput
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gOutput
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: TODO - Offloader infrastructure fails to map result when SRV (ByteAddressBuffer) is present in pipeline
+# XFAIL: *
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
