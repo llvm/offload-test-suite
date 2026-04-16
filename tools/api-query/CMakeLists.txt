@@ -8,3 +8,9 @@ if (APPLE AND OFFLOADTEST_ENABLE_VULKAN)
   set_property(TARGET api-query APPEND_STRING PROPERTY
                LINK_FLAGS " -Wl,-rpath,${_Vulkan_LIB_DIR} ")
 endif()
+
+if (APPLE)
+  get_filename_component(_MetalIRConverter_LIB_DIR ${METAL_IRCONVERTER_LIBRARY} DIRECTORY)
+  set_property(TARGET api-query APPEND_STRING PROPERTY
+               LINK_FLAGS " -Wl,-rpath,${_MetalIRConverter_LIB_DIR} ")
+endif()
