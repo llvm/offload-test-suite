@@ -476,7 +476,7 @@ private:
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     ComPtr<ID3D12PipelineState> PSO;
     std::unique_ptr<DXCommandBuffer> CB;
-    std::unique_ptr<offloadtest::Fence> Fence;
+    std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // Resources for graphics pipelines.
     std::shared_ptr<DXTexture> RT;
@@ -556,7 +556,7 @@ public:
     TexDesc.Height = Desc.Height;
     TexDesc.DepthOrArraySize = 1;
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
-    TexDesc.Format = getDXGIFormat(Desc.Format);
+    TexDesc.Format = getDXGIFormat(Desc.Fmt);
     TexDesc.SampleDesc.Count = 1;
     TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     TexDesc.Flags = getDXResourceFlags(Desc.Usage);
@@ -1340,14 +1340,14 @@ public:
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
-    auto *F = static_cast<DXFence *>(IS.Fence.get());
+    auto *F = static_cast<DXFence *>(IS.CompletionFence.get());
 
     if (auto Err = HR::toError(
             GraphicsQueue.Queue->Signal(F->Fence.Get(), CurrentCounter),
             "Failed to add signal."))
       return Err;
 
-    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
       return Err;
 
     FenceCounter = CurrentCounter;
@@ -1682,7 +1682,7 @@ public:
     PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
     PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
-    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Format);
+    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Fmt);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSODesc.NumRenderTargets = 1;
@@ -1840,7 +1840,7 @@ public:
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    State.Fence = std::move(*FenceOrErr);
+    State.CompletionFence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, State))
       return Err;
