@@ -14,6 +14,7 @@
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 
 #include <algorithm>
@@ -374,6 +375,10 @@ namespace {
 
 class VulkanBuffer : public offloadtest::Buffer {
 public:
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getKind() == GPUAPI::Vulkan;
+  }
+
   VkDevice Dev; // Needed for clean-up
   VkBuffer Buffer;
   VkDeviceMemory Memory;
@@ -383,8 +388,8 @@ public:
 
   VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
                llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
-      : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
-        SizeInBytes(SizeInBytes) {}
+      : offloadtest::Buffer(GPUAPI::Vulkan), Dev(Dev), Buffer(Buffer),
+        Memory(Memory), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
 
   ~VulkanBuffer() override {
     vkDestroyBuffer(Dev, Buffer, nullptr);
@@ -394,6 +399,10 @@ public:
 
 class VulkanTexture : public offloadtest::Texture {
 public:
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getKind() == GPUAPI::Vulkan;
+  }
+
   VkDevice Dev;
   VkImage Image;
   VkDeviceMemory Memory;
@@ -408,7 +417,8 @@ public:
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
                 llvm::StringRef Name, TextureCreateDesc Desc)
-      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+      : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
+        Memory(Memory), Name(Name), Desc(Desc) {}
 
   ~VulkanTexture() override {
     if (View)
@@ -621,9 +631,9 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
-    std::unique_ptr<VulkanTexture> RenderTarget;
-    std::unique_ptr<VulkanBuffer> RTReadback;
-    std::unique_ptr<VulkanTexture> DepthStencil;
+    std::unique_ptr<offloadtest::Texture> RenderTarget;
+    std::unique_ptr<offloadtest::Buffer> RTReadback;
+    std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
     VkRenderPass RenderPass = VK_NULL_HANDLE;
@@ -1227,7 +1237,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RenderTarget.reset(static_cast<VulkanTexture *>(TexOrErr->release()));
+    IS.RenderTarget = std::move(*TexOrErr);
 
     // Create a host-visible staging buffer for readback.
     BufferCreateDesc BufDesc = {};
@@ -1235,7 +1245,7 @@ public:
     auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.RTReadback.reset(static_cast<VulkanBuffer *>(BufOrErr->release()));
+    IS.RTReadback = std::move(*BufOrErr);
 
     return llvm::Error::success();
   }
@@ -1246,7 +1256,7 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DepthStencil.reset(static_cast<VulkanTexture *>(TexOrErr->release()));
+    IS.DepthStencil = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -1638,9 +1648,12 @@ public:
   }
 
   llvm::Error createRenderPass(InvocationState &IS) {
+    auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
+    auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+
     std::array<VkAttachmentDescription, 2> Attachments = {};
 
-    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Fmt);
+    Attachments[0].format = getVulkanFormat(RT.Desc.Fmt);
     Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1649,7 +1662,7 @@ public:
     Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Fmt);
+    Attachments[1].format = getVulkanFormat(DS.Desc.Fmt);
     Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1720,16 +1733,18 @@ public:
   }
 
   llvm::Error createFrameBuffer(InvocationState &IS) {
-    std::array<VkImageView, 2> Views = {IS.RenderTarget->View,
-                                        IS.DepthStencil->View};
+    auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
+    auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+
+    std::array<VkImageView, 2> Views = {RT.View, DS.View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     FbufCreateInfo.renderPass = IS.RenderPass;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = IS.RenderTarget->Desc.Width;
-    FbufCreateInfo.height = IS.RenderTarget->Desc.Height;
+    FbufCreateInfo.width = RT.Desc.Width;
+    FbufCreateInfo.height = RT.Desc.Height;
     FbufCreateInfo.layers = 1;
 
     if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))
@@ -2277,14 +2292,17 @@ public:
       copyResourceDataToDevice(IS, R);
 
     if (P.isGraphics()) {
+      auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
+      auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+
       const auto *ColorCV =
-          std::get_if<ClearColor>(&*IS.RenderTarget->Desc.OptimizedClearValue);
+          std::get_if<ClearColor>(&*RT.Desc.OptimizedClearValue);
       if (!ColorCV)
         return llvm::createStringError(
             std::errc::invalid_argument,
             "Render target clear value must be a ClearColor.");
-      const auto *DepthCV = std::get_if<ClearDepthStencil>(
-          &*IS.DepthStencil->Desc.OptimizedClearValue);
+      const auto *DepthCV =
+          std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
       if (!DepthCV)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -2358,7 +2376,9 @@ public:
       vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
       llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
       vkCmdEndRenderPass(IS.CB->CmdBuffer);
-      copyTextureToReadback(IS.CB->CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
+      copyTextureToReadback(IS.CB->CmdBuffer,
+                            llvm::cast<VulkanTexture>(*IS.RenderTarget),
+                            llvm::cast<VulkanBuffer>(*IS.RTReadback),
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
@@ -2412,19 +2432,21 @@ public:
 
     // Copy back the frame buffer data if this was a graphics pipeline.
     if (P.isGraphics()) {
+      auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
+
       VkMappedMemoryRange Range = {};
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      Range.memory = IS.RTReadback->Memory;
+      Range.memory = Readback.Memory;
 
       void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(Device, IS.RTReadback->Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
+      vkMapMemory(Device, Readback.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
       const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
-      vkUnmapMemory(Device, IS.RTReadback->Memory);
+      vkUnmapMemory(Device, Readback.Memory);
     }
     return llvm::Error::success();
   }

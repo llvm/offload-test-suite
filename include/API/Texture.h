@@ -12,6 +12,7 @@
 #ifndef OFFLOADTEST_API_TEXTURE_H
 #define OFFLOADTEST_API_TEXTURE_H
 
+#include "API/API.h"
 #include "API/Resources.h"
 
 #include "llvm/ADT/BitmaskEnum.h"
@@ -140,14 +141,15 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
 }
 
 class Texture {
-public:
-  virtual ~Texture();
+  GPUAPI Kind;
 
+public:
+  explicit Texture(GPUAPI Kind) : Kind(Kind) {}
+  virtual ~Texture();
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;
 
-protected:
-  Texture() = default;
+  GPUAPI getKind() const { return Kind; }
 };
 
 } // namespace offloadtest

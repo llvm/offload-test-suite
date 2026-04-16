@@ -14,6 +14,7 @@
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/ScopeExit.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
@@ -118,6 +119,10 @@ public:
 
 class MTLBuffer : public offloadtest::Buffer {
 public:
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getKind() == GPUAPI::Metal;
+  }
+
   MTL::Buffer *Buf;
   std::string Name;
   BufferCreateDesc Desc;
@@ -125,7 +130,8 @@ public:
 
   MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
             size_t SizeInBytes)
-      : Buf(Buf), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+      : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
 
   ~MTLBuffer() override {
     if (Buf)
@@ -135,12 +141,16 @@ public:
 
 class MTLTexture : public offloadtest::Texture {
 public:
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getKind() == GPUAPI::Metal;
+  }
+
   MTL::Texture *Tex;
   std::string Name;
   TextureCreateDesc Desc;
 
   MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc)
-      : Tex(Tex), Name(Name), Desc(Desc) {}
+      : offloadtest::Texture(GPUAPI::Metal), Tex(Tex), Name(Name), Desc(Desc) {}
 
   ~MTLTexture() override {
     if (Tex)
@@ -200,9 +210,9 @@ class MTLDevice : public offloadtest::Device {
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
-    std::unique_ptr<MTLTexture> FrameBufferTexture;
-    std::unique_ptr<MTLBuffer> FrameBufferReadback;
-    std::unique_ptr<MTLTexture> DepthStencil;
+    std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
+    std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
+    std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
@@ -527,7 +537,7 @@ class MTLDevice : public offloadtest::Device {
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.FrameBufferTexture.reset(static_cast<MTLTexture *>(TexOrErr->release()));
+    IS.FrameBufferTexture = std::move(*TexOrErr);
 
     // Create a readback buffer for copying render target data to the CPU.
     BufferCreateDesc BufDesc = {};
@@ -535,7 +545,7 @@ class MTLDevice : public offloadtest::Device {
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.FrameBufferReadback.reset(static_cast<MTLBuffer *>(BufOrErr->release()));
+    IS.FrameBufferReadback = std::move(*BufOrErr);
 
     return llvm::Error::success();
   }
@@ -546,7 +556,7 @@ class MTLDevice : public offloadtest::Device {
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DepthStencil.reset(static_cast<MTLTexture *>(TexOrErr->release()));
+    IS.DepthStencil = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -558,18 +568,22 @@ class MTLDevice : public offloadtest::Device {
     if (auto Err = createDepthStencil(P, IS))
       return Err;
 
+    auto &FBTex = llvm::cast<MTLTexture>(*IS.FrameBufferTexture);
+    auto &DS = llvm::cast<MTLTexture>(*IS.DepthStencil);
+    auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
+
     MTL::RenderPassDescriptor *Desc =
         MTL::RenderPassDescriptor::alloc()->init();
 
-    const uint64_t Width = IS.FrameBufferTexture->Desc.Width;
-    const uint64_t Height = IS.FrameBufferTexture->Desc.Height;
+    const uint64_t Width = FBTex.Desc.Width;
+    const uint64_t Height = FBTex.Desc.Height;
 
     // Color attachment.
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
-    CADesc->setTexture(IS.FrameBufferTexture->Tex);
+    CADesc->setTexture(FBTex.Tex);
     CADesc->setLoadAction(MTL::LoadActionClear);
-    const auto *ColorCV = std::get_if<ClearColor>(
-        &*IS.FrameBufferTexture->Desc.OptimizedClearValue);
+    const auto *ColorCV =
+        std::get_if<ClearColor>(&*FBTex.Desc.OptimizedClearValue);
     if (!ColorCV)
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -581,21 +595,21 @@ class MTLDevice : public offloadtest::Device {
     Desc->colorAttachments()->setObject(CADesc, 0);
 
     // Depth/stencil attachment.
-    const auto *DepthCV = std::get_if<ClearDepthStencil>(
-        &*IS.DepthStencil->Desc.OptimizedClearValue);
+    const auto *DepthCV =
+        std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
     if (!DepthCV)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
 
     auto *DADesc = Desc->depthAttachment();
-    DADesc->setTexture(IS.DepthStencil->Tex);
+    DADesc->setTexture(DS.Tex);
     DADesc->setLoadAction(MTL::LoadActionClear);
     DADesc->setClearDepth(DepthCV->Depth);
     DADesc->setStoreAction(MTL::StoreActionDontCare);
 
     auto *SADesc = Desc->stencilAttachment();
-    SADesc->setTexture(IS.DepthStencil->Tex);
+    SADesc->setTexture(DS.Tex);
     SADesc->setLoadAction(MTL::LoadActionClear);
     SADesc->setClearStencil(DepthCV->Stencil);
     SADesc->setStoreAction(MTL::StoreActionDontCare);
@@ -631,12 +645,11 @@ class MTLDevice : public offloadtest::Device {
 
     // Blit the render target into the readback buffer for CPU access.
     MTL::BlitCommandEncoder *Blit = IS.CB->CmdBuffer->blitCommandEncoder();
-    const size_t ElemSize =
-        getFormatSizeInBytes(IS.FrameBufferTexture->Desc.Fmt);
+    const size_t ElemSize = getFormatSizeInBytes(FBTex.Desc.Fmt);
     const size_t RowBytes = Width * ElemSize;
-    Blit->copyFromTexture(IS.FrameBufferTexture->Tex, 0, 0,
-                          MTL::Origin(0, 0, 0), MTL::Size(Width, Height, 1),
-                          IS.FrameBufferReadback->Buf, 0, RowBytes, 0);
+    Blit->copyFromTexture(FBTex.Tex, 0, 0, MTL::Origin(0, 0, 0),
+                          MTL::Size(Width, Height, 1), FBReadback.Buf, 0,
+                          RowBytes, 0);
     Blit->endEncoding();
 
     return llvm::Error::success();
@@ -700,8 +713,9 @@ class MTLDevice : public offloadtest::Device {
 
       // Read from the readback buffer. The blit copied the texture data in
       // GPU layout order, so we flip rows here to produce an upright image.
-      const unsigned char *Src = reinterpret_cast<const unsigned char *>(
-          IS.FrameBufferReadback->Buf->contents());
+      auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
+      const unsigned char *Src =
+          reinterpret_cast<const unsigned char *>(FBReadback.Buf->contents());
       unsigned char *Buf =
           reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
       for (uint64_t R = 0; R < Height; ++R) {
