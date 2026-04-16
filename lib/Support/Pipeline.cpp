@@ -498,7 +498,7 @@ void MappingTraits<offloadtest::ParsedVertexBuffer>::mapping(
         const uint32_t Components = offloadtest::getComponentCount(Stream.Fmt);
         char *Dst = VB.InterleavedData.get() + V * Stride + StreamOffset;
         for (uint32_t C = 0; C < Components; ++C) {
-          double Value = Stream.Values[V * Components + C];
+          const double Value = Stream.Values[V * Components + C];
           Dst += writeComponent(Dst, Value, Stream.Fmt);
         }
         StreamOffset += offloadtest::getFormatSizeInBytes(Stream.Fmt);
