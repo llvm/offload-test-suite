@@ -52,8 +52,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: TODO - Offloader infrastructure fails to map result when SRV (ByteAddressBuffer) is present in pipeline
-# XFAIL: *
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
