@@ -19,7 +19,6 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/Texture.h"
-#include "API/VertexBuffer.h"
 #include "Support/Pipeline.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
@@ -118,10 +117,6 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 // Creates a depth/stencil texture matching the dimensions of a render target.
 llvm::Expected<std::shared_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
-
-// Creates a VertexBuffer from a ParsedVertexBuffer.
-llvm::Expected<VertexBuffer> createVertexBuffer(Device &Dev,
-                                                const ParsedVertexBuffer &PVB);
 
 } // namespace offloadtest
 

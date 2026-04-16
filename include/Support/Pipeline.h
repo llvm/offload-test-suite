@@ -16,9 +16,11 @@
 #include "API/Resources.h"
 
 #include "llvm/ADT/SmallVector.h"
+
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
+#include <cassert>
 #include <limits>
 #include <memory>
 #include <string>
@@ -370,6 +372,15 @@ struct ParsedVertexBuffer {
     for (const auto &S : Streams)
       Stride += getFormatSizeInBytes(S.Fmt);
     return Stride;
+  }
+
+  // Returns the byte offset of the stream at the given index.
+  uint32_t getOffset(uint32_t Index) const {
+    assert(Index < Streams.size() && "Stream index out of bounds");
+    uint32_t Offset = 0;
+    for (uint32_t I = 0; I < Index; ++I)
+      Offset += getFormatSizeInBytes(Streams[I].Fmt);
+    return Offset;
   }
 
   uint32_t getVertexCount() const {

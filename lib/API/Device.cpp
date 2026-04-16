@@ -11,7 +11,6 @@
 
 #include "API/Device.h"
 #include "API/FormatConversion.h"
-#include "API/VertexBuffer.h"
 
 #include "Config.h"
 
@@ -86,26 +85,6 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
     return Err;
 
   return Dev.createTexture("RenderTarget", Desc);
-}
-
-llvm::Expected<VertexBuffer>
-offloadtest::createVertexBuffer(Device &Dev, const ParsedVertexBuffer &PVB) {
-  BufferCreateDesc BufDesc = {};
-  BufDesc.Location = MemoryLocation::CpuToGpu;
-  BufDesc.Usage = BufferUsage::VertexBuffer;
-  auto BufOrErr =
-      Dev.createBuffer("VertexBuffer", BufDesc, PVB.InterleavedSize);
-  if (!BufOrErr)
-    return BufOrErr.takeError();
-
-  VertexBufferDesc VBDesc;
-  for (const auto &S : PVB.Streams)
-    VBDesc.Streams.push_back({S.Name, S.Fmt});
-
-  // TODO: Generalize VB data copy so that we can deduplicate that from each
-  // backend.
-
-  return VertexBuffer{VBDesc, *BufOrErr};
 }
 
 llvm::Expected<std::shared_ptr<Texture>>

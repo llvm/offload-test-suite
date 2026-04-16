@@ -11,7 +11,6 @@
 
 #include "API/Device.h"
 #include "API/FormatConversion.h"
-#include "API/VertexBuffer.h"
 #include "MTLResources.h"
 #include "Support/Pipeline.h"
 
@@ -200,7 +199,7 @@ class MTLDevice : public offloadtest::Device {
     MTL::ComputePipelineState *ComputePipeline = nullptr;
     MTL::RenderPipelineState *RenderPipeline = nullptr;
     MTL::Buffer *ArgBuffer;
-    std::optional<offloadtest::VertexBuffer> VB;
+    std::shared_ptr<MTLBuffer> VB;
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
@@ -216,13 +215,13 @@ class MTLDevice : public offloadtest::Device {
     if (!IS.VB)
       return llvm::Error::success();
 
-    const VertexBufferDesc &VBDesc = IS.VB->Desc;
+    const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
 
     NS::Array *FnAttrs = Fn->vertexAttributes();
     if (!FnAttrs)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Vertex shader has no vertex attributes.");
-    if (FnAttrs->count() != VBDesc.Streams.size())
+    if (FnAttrs->count() != PVB.Streams.size())
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Mismatch between vertex shader attribute count and pipeline "
@@ -242,8 +241,8 @@ class MTLDevice : public offloadtest::Device {
     }
 
     IS.VertexDescriptor = MTL::VertexDescriptor::alloc()->init();
-    for (uint32_t I = 0; I < VBDesc.Streams.size(); ++I) {
-      const VertexStream &S = VBDesc.Streams[I];
+    for (uint32_t I = 0; I < PVB.Streams.size(); ++I) {
+      const VertexStreamData &S = PVB.Streams[I];
       llvm::SmallString<32> AttrName(S.Name);
       llvm::transform(AttrName, AttrName.begin(), tolower);
       // Append a zero since we're only supporting one attribute per name.
@@ -252,7 +251,7 @@ class MTLDevice : public offloadtest::Device {
       MTL::VertexAttributeDescriptor *VADesc =
           MTL::VertexAttributeDescriptor::alloc()->init();
       VADesc->setBufferIndex(0);
-      VADesc->setOffset(VBDesc.getOffset(I));
+      VADesc->setOffset(PVB.getOffset(I));
       VADesc->setFormat(getMetalVertexFormat(S.Fmt));
       IS.VertexDescriptor->attributes()->setObject(VADesc,
                                                    ShaderAttrIndices[AttrName]);
@@ -260,7 +259,7 @@ class MTLDevice : public offloadtest::Device {
 
     MTL::VertexBufferLayoutDescriptor *LDesc =
         MTL::VertexBufferLayoutDescriptor::alloc()->init();
-    LDesc->setStride(VBDesc.getStride());
+    LDesc->setStride(PVB.getStride());
     LDesc->setStepRate(1);
     LDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
     IS.VertexDescriptor->layouts()->setObject(LDesc, 0);
@@ -450,19 +449,23 @@ class MTLDevice : public offloadtest::Device {
             "No vertex buffer specified for graphics pipeline.");
 
       const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
-      auto VBOrErr = offloadtest::createVertexBuffer(*this, PVB);
-      if (!VBOrErr)
-        return VBOrErr.takeError();
-      IS.VB = std::move(*VBOrErr);
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::CpuToGpu;
+      BufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr =
+          createBuffer("VertexBuffer", BufDesc, PVB.InterleavedSize);
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.VB = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
 
       // TODO: Currently uses a single CpuToGpu mapped buffer. On discrete GPUs
       // (DX/VK), consider using a staging buffer + copy to a GpuOnly vertex
       // buffer for optimal GPU read performance. On Apple Silicon this is
       // unnecessary due to unified memory.
-      auto *MTLBuf = static_cast<MTLBuffer *>(IS.VB->Data.get());
-      const size_t BufSize = IS.VB->Data->getSizeInBytes();
-      memcpy(MTLBuf->Buf->contents(), PVB.InterleavedData.get(), BufSize);
-      MTLBuf->Buf->didModifyRange(NS::Range::Make(0, BufSize));
+      const size_t BufSize = IS.VB->getSizeInBytes();
+      memcpy(IS.VB->Buf->contents(), PVB.InterleavedData.get(), BufSize);
+      IS.VB->Buf->didModifyRange(NS::Range::Make(0, BufSize));
     }
     return llvm::Error::success();
   }
@@ -645,11 +648,10 @@ class MTLDevice : public offloadtest::Device {
     if (!IS.VB)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Vertex buffer not initialized.");
-    CmdEncoder->setVertexBuffer(
-        static_cast<MTLBuffer *>(IS.VB->Data.get())->Buf, 0, 0);
+    CmdEncoder->setVertexBuffer(IS.VB->Buf, 0, 0);
 
     CmdEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0),
-                               IS.VB->getVertexCount());
+                               P.Bindings.VertexBufferPtr->getVertexCount());
 
     CmdEncoder->endEncoding();
 

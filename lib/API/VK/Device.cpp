@@ -11,7 +11,6 @@
 
 #include "API/Device.h"
 #include "API/FormatConversion.h"
-#include "API/VertexBuffer.h"
 #include "Support/Pipeline.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
@@ -628,7 +627,7 @@ private:
     std::shared_ptr<VulkanTexture> RenderTarget;
     std::shared_ptr<VulkanBuffer> RTReadback;
     std::shared_ptr<VulkanTexture> DepthStencil;
-    std::optional<offloadtest::VertexBuffer> VB = std::nullopt;
+    std::shared_ptr<VulkanBuffer> VB;
 
     VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
@@ -1285,20 +1284,24 @@ public:
             "No vertex buffer specified for graphics pipeline.");
 
       const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
-      auto VBOrErr = offloadtest::createVertexBuffer(*this, PVB);
-      if (!VBOrErr)
-        return VBOrErr.takeError();
-      IS.VB = std::move(*VBOrErr);
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::CpuToGpu;
+      BufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr =
+          createBuffer("VertexBuffer", BufDesc, PVB.InterleavedSize);
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.VB = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
 
       // TODO: Currently uses a single CpuToGpu mapped buffer. For optimal GPU
       // performance on discrete GPUs, use a staging buffer + copy to a GpuOnly
       // vertex buffer instead.
-      auto *VKBuf = static_cast<VulkanBuffer *>(IS.VB->Data.get());
-      const size_t BufSize = IS.VB->Data->getSizeInBytes();
+      const size_t BufSize = IS.VB->getSizeInBytes();
       void *Mapped = nullptr;
-      vkMapMemory(Device, VKBuf->Memory, 0, BufSize, 0, &Mapped);
+      vkMapMemory(Device, IS.VB->Memory, 0, BufSize, 0, &Mapped);
       memcpy(Mapped, PVB.InterleavedData.get(), BufSize);
-      vkUnmapMemory(Device, VKBuf->Memory);
+      vkUnmapMemory(Device, IS.VB->Memory);
     }
 
     return llvm::Error::success();
@@ -1964,25 +1967,25 @@ public:
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     MultisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    // Build vertex input state from the vertex buffer description.
+    // Build vertex input state from the parsed vertex buffer streams.
     if (!IS.VB)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Vertex buffer not initialized.");
-    const VertexBufferDesc &VBDesc = IS.VB->Desc;
+    const ParsedVertexBuffer &PVB = *P.Bindings.VertexBufferPtr;
 
     VkVertexInputBindingDescription VertexInputBinding{};
     VertexInputBinding.binding = 0;
-    VertexInputBinding.stride = VBDesc.getStride();
+    VertexInputBinding.stride = PVB.getStride();
     VertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
     llvm::SmallVector<VkVertexInputAttributeDescription> Attributes;
-    for (uint32_t I = 0; I < VBDesc.Streams.size(); ++I) {
-      const VertexStream &S = VBDesc.Streams[I];
+    for (uint32_t I = 0; I < PVB.Streams.size(); ++I) {
+      const VertexStreamData &S = PVB.Streams[I];
       VkVertexInputAttributeDescription VkVA = {};
       VkVA.location = I;
       VkVA.binding = 0;
       VkVA.format = getVulkanFormat(S.Fmt);
-      VkVA.offset = VBDesc.getOffset(I);
+      VkVA.offset = PVB.getOffset(I);
       Attributes.push_back(VkVA);
     }
 
@@ -2363,12 +2366,12 @@ public:
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Vertex buffer not initialized.");
       VkDeviceSize Offsets[1]{0};
-      VkBuffer VBHandle =
-          static_cast<VulkanBuffer *>(IS.VB->Data.get())->Buffer;
+      VkBuffer VBHandle = IS.VB->Buffer;
       vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
+      const uint32_t VertexCount = P.Bindings.VertexBufferPtr->getVertexCount();
       // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CB->CmdBuffer, IS.VB->getVertexCount(), 1, 0, 0);
-      llvm::outs() << "Drew " << IS.VB->getVertexCount() << " vertices.\n";
+      vkCmdDraw(IS.CB->CmdBuffer, VertexCount, 1, 0, 0);
+      llvm::outs() << "Drew " << VertexCount << " vertices.\n";
       vkCmdEndRenderPass(IS.CB->CmdBuffer);
       copyTextureToReadback(IS.CB->CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
