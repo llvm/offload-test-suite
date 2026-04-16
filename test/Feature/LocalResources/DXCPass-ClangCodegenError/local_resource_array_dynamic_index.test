@@ -29,23 +29,20 @@ Buffers:
       - [0]
       - [0]
       - [0]
-  - Name: ExpectedBuf0
+  - Name: ExpectedBufArray
     Format: Int32
     Stride: 4
-    Data: [42]
-  - Name: ExpectedBuf1
-    Format: Int32
-    Stride: 4
-    Data: [0]
+    ArraySize: 4
+    Data:
+      - [42]
+      - [0]
+      - [0]
+      - [0]
 Results:
-  - Result: Buf0Check
+  - Result: BufCheck
     Rule: BufferExact
-    Actual: gBufArray[0]
-    Expected: ExpectedBuf0
-  - Result: Buf1Check
-    Rule: BufferExact
-    Actual: gBufArray[1]
-    Expected: ExpectedBuf1
+    Actual: gBufArray
+    Expected: ExpectedBufArray
 DescriptorSets:
   - Resources:
     - Name: gBufArray
@@ -58,8 +55,14 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: TODO - Clang DXIL Legalizer assertion failure on dynamically-indexed local resource arrays
-# XFAIL: Clang
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192538
+# XFAIL: Clang && DirectX
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8379
+# XFAIL: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

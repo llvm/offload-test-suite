@@ -1,15 +1,15 @@
 #--- source.hlsl
 // Test that a conditionally initialized local resource works correctly.
+// DXC rejects this because it cannot prove the local resource maps to a
+// unique global resource through the conditional branch.
 RWByteAddressBuffer gBuf : register(u0);
 
-[numthreads(4,1,1)]
+[numthreads(1,1,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
     RWByteAddressBuffer buf;
-    if (tid.x > 0)
+    if (tid.x == 0)
         buf = gBuf;
-    else
-        return;
-    buf.Store(tid.x * 4, 42);
+    buf.Store(0, 42);
 }
 //--- pipeline.yaml
 ---
@@ -21,11 +21,11 @@ Buffers:
   - Name: gBuf
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0]
+    Data: [0]
   - Name: ExpectedGBuf
     Format: Int32
     Stride: 4
-    Data: [0, 42, 42, 42]
+    Data: [42]
 Results:
   - Result: Test0
     Rule: BufferExact
@@ -43,8 +43,14 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: https://github.com/llvm/llvm-project/issues/192542
+# XFAIL: DXC && Vulkan
+
 # Bug: TODO - DXC codegen error: local resource not guaranteed to map to unique global resource
 # XFAIL: DXC
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

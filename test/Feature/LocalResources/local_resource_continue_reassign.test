@@ -66,8 +66,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: TODO - DXC codegen error: local resource not guaranteed to map to unique global resource
-# XFAIL: DXC
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192542
+# XFAIL: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

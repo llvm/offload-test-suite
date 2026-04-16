@@ -46,7 +46,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: TODO - Clang doesn't mark RWByteAddressBuffer::Load as const, so calling Load on a const RWByteAddressBuffer param fails
+# Bug: https://github.com/llvm/llvm-project/issues/192557
 # XFAIL: Clang
 
 # RUN: split-file %s %t
