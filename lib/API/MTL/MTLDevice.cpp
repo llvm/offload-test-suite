@@ -14,8 +14,8 @@
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/ScopeExit.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
