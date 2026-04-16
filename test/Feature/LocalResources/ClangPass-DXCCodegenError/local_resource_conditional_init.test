@@ -1,0 +1,51 @@
+#--- source.hlsl
+// Test that a conditionally initialized local resource works correctly.
+RWByteAddressBuffer gBuf : register(u0);
+
+[numthreads(4,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer buf;
+    if (tid.x > 0)
+        buf = gBuf;
+    else
+        return;
+    buf.Store(tid.x * 4, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf
+    Format: Int32
+    Stride: 4
+    Data: [0, 0, 0, 0]
+  - Name: ExpectedGBuf
+    Format: Int32
+    Stride: 4
+    Data: [0, 42, 42, 42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf
+    Expected: ExpectedGBuf
+DescriptorSets:
+  - Resources:
+    - Name: gBuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Bug: TODO - DXC codegen error: local resource not guaranteed to map to unique global resource
+# XFAIL: DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

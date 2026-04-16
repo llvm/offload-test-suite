@@ -1,0 +1,76 @@
+#--- source.hlsl
+// Test that loop-carried reassignment from global resource array elements works correctly.
+RWByteAddressBuffer gBuf0 : register(u0);
+RWByteAddressBuffer gBufArray[4] : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer buf = gBuf0;
+    for (uint i = 0; i < 3; i++)
+        buf = gBufArray[i];
+    buf.Store(0, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: gBufArray
+    Format: Int32
+    Stride: 4
+    ArraySize: 4
+    Data:
+      - [0]
+      - [0]
+      - [0]
+      - [0]
+  - Name: ExpectedGBufArray
+    Format: Int32
+    Stride: 4
+    ArraySize: 4
+    Data:
+      - [0]
+      - [0]
+      - [42]
+      - [0]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf0
+    Expected: ExpectedGBuf0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: gBufArray
+    Expected: ExpectedGBufArray
+DescriptorSets:
+  - Resources:
+    - Name: gBuf0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gBufArray
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

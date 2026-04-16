@@ -1,0 +1,47 @@
+#--- source.hlsl
+// Test that an array of structs with resource members works with constant indexing.
+RWByteAddressBuffer gBuf : register(u0);
+
+struct BufStruct { RWByteAddressBuffer buf; };
+
+[numthreads(1,1,1)]
+void main() {
+    BufStruct s[2];
+    s[0].buf = gBuf;
+    s[0].buf.Store(0, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf
+    Expected: ExpectedGBuf
+DescriptorSets:
+  - Resources:
+    - Name: gBuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
