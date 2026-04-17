@@ -74,6 +74,8 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::R32Float;
     case 2:
       return Format::RG32Float;
+    case 3:
+      return Format::RGB32Float;
     case 4:
       return Format::RGBA32Float;
     }
