@@ -119,7 +119,7 @@ public:
 class MTLBuffer : public offloadtest::Buffer {
 public:
   static bool classof(const offloadtest::Buffer *B) {
-    return B->getKind() == GPUAPI::Metal;
+    return B->getAPI() == GPUAPI::Metal;
   }
 
   MTL::Buffer *Buf;
@@ -141,7 +141,7 @@ public:
 class MTLTexture : public offloadtest::Texture {
 public:
   static bool classof(const offloadtest::Texture *T) {
-    return T->getKind() == GPUAPI::Metal;
+    return T->getAPI() == GPUAPI::Metal;
   }
 
   MTL::Texture *Tex;

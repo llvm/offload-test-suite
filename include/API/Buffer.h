@@ -24,17 +24,17 @@ struct BufferCreateDesc {
 };
 
 class Buffer {
-  GPUAPI Kind;
+  GPUAPI API;
 
 public:
   virtual ~Buffer();
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;
 
-  GPUAPI getKind() const { return Kind; }
+  GPUAPI getAPI() const { return API; }
 
 protected:
-  explicit Buffer(GPUAPI Kind) : Kind(Kind) {}
+  explicit Buffer(GPUAPI API) : API(API) {}
 };
 
 } // namespace offloadtest

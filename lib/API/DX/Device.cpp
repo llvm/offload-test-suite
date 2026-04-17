@@ -286,7 +286,7 @@ namespace {
 class DXBuffer : public offloadtest::Buffer {
 public:
   static bool classof(const offloadtest::Buffer *B) {
-    return B->getKind() == GPUAPI::DirectX;
+    return B->getAPI() == GPUAPI::DirectX;
   }
 
   ComPtr<ID3D12Resource> Buffer;
@@ -303,7 +303,7 @@ public:
 class DXTexture : public offloadtest::Texture {
 public:
   static bool classof(const offloadtest::Texture *T) {
-    return T->getKind() == GPUAPI::DirectX;
+    return T->getAPI() == GPUAPI::DirectX;
   }
 
   ComPtr<ID3D12Resource> Resource;

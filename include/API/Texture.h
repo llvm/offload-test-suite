@@ -142,17 +142,17 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
 }
 
 class Texture {
-  GPUAPI Kind;
+  GPUAPI API;
 
 public:
   virtual ~Texture();
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;
 
-  GPUAPI getKind() const { return Kind; }
+  GPUAPI getAPI() const { return API; }
 
 protected:
-  explicit Texture(GPUAPI Kind) : Kind(Kind) {}
+  explicit Texture(GPUAPI API) : API(API) {}
 };
 
 } // namespace offloadtest

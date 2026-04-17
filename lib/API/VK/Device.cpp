@@ -375,7 +375,7 @@ namespace {
 class VulkanBuffer : public offloadtest::Buffer {
 public:
   static bool classof(const offloadtest::Buffer *B) {
-    return B->getKind() == GPUAPI::Vulkan;
+    return B->getAPI() == GPUAPI::Vulkan;
   }
 
   VkDevice Dev; // Needed for clean-up
@@ -399,7 +399,7 @@ public:
 class VulkanTexture : public offloadtest::Texture {
 public:
   static bool classof(const offloadtest::Texture *T) {
-    return T->getKind() == GPUAPI::Vulkan;
+    return T->getAPI() == GPUAPI::Vulkan;
   }
 
   VkDevice Dev;
