@@ -497,8 +497,8 @@ public:
       : Queue(Q), QueueFamilyIdx(QueueFamilyIdx), Device(Device),
         SubmitFence(std::move(SubmitFence)) {}
 
-  llvm::Error submit(
-      llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs)
+  llvm::Expected<offloadtest::SubmitResult>
+  submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
 };
 
@@ -1343,7 +1343,8 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error executeCommandBuffer(InvocationState &IS) {
+  llvm::Expected<offloadtest::SubmitResult>
+  executeCommandBuffer(InvocationState &IS) {
     return GraphicsQueue.submit(std::move(IS.CB));
   }
 
@@ -2464,7 +2465,11 @@ public:
   }
 
   void cleanup(InvocationState &IS) {
-    vkQueueWaitIdle(GraphicsQueue.Queue);
+    // Wait for all in-flight submissions to complete before destroying
+    // resources. On the happy path the caller already waited, but this
+    // handles early-return error paths.
+    llvm::consumeError(GraphicsQueue.SubmitFence->waitForCompletion(
+        GraphicsQueue.FenceCounter));
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(Device, V, nullptr);
 
@@ -2558,8 +2563,11 @@ public:
       llvm::outs() << "Frame buffer created.\n";
     }
     llvm::outs() << "Memory buffers created.\n";
-    if (auto Err = executeCommandBuffer(State))
-      return Err;
+    // No explicit wait: the next submit's GPU-side timeline semaphore
+    // dependency ensures the copy completes before the dispatch runs.
+    auto CopyResult = executeCommandBuffer(State);
+    if (!CopyResult)
+      return CopyResult.takeError();
     llvm::outs() << "Executed copy command buffer.\n";
     auto DispatchCBOrErr =
         VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
@@ -2579,9 +2587,12 @@ public:
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State))
-      return Err;
+    auto DispatchResult = executeCommandBuffer(State);
+    if (!DispatchResult)
+      return DispatchResult.takeError();
     llvm::outs() << "Executed compute command buffer.\n";
+    if (auto Err = DispatchResult->waitForCompletion())
+      return Err;
     if (auto Err = readBackData(P, State))
       return Err;
     llvm::outs() << "Compute pipeline created.\n";
@@ -2591,8 +2602,8 @@ public:
 };
 } // namespace
 
-llvm::Error VulkanQueue::submit(
-    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
   llvm::SmallVector<VkCommandBuffer> CmdBuffers;
   CmdBuffers.reserve(CBs.size());
 
@@ -2634,11 +2645,7 @@ llvm::Error VulkanQueue::submit(
                       "Failed to submit to queue."))
     return Err;
 
-  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
-  if (auto Err = SubmitFence->waitForCompletion(SignalValue))
-    return Err;
-
-  return llvm::Error::success();
+  return offloadtest::SubmitResult{SubmitFence.get(), SignalValue};
 }
 
 llvm::Error offloadtest::initializeVulkanDevices(

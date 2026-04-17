@@ -462,8 +462,8 @@ public:
     return DXQueue(CmdQueue, std::move(*FenceOrErr));
   }
 
-  llvm::Error submit(
-      llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs)
+  llvm::Expected<offloadtest::SubmitResult>
+  submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
 };
 
@@ -1024,18 +1024,15 @@ public:
         &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
 
     // Synchronize after UpdateTileMappings, which is a queue operation (not
-    // recorded into a command list). Use a dedicated fence to avoid
-    // conflicting signal values with the queue's SubmitFence.
-    auto FenceOrErr = DXFence::create(Device.Get(), "TileMappingFence");
-    if (!FenceOrErr)
-      return FenceOrErr.takeError();
-
-    if (auto Err =
-            HR::toError(CommandQueue->Signal((*FenceOrErr)->Fence.Get(), 1),
-                        "Failed to add signal."))
+    // recorded into a command list).
+    const uint64_t CurrentCounter = ++GraphicsQueue.FenceCounter;
+    if (auto Err = HR::toError(
+            CommandQueue->Signal(GraphicsQueue.SubmitFence->Fence.Get(),
+                                 CurrentCounter),
+            "Failed to add signal."))
       return Err;
 
-    return (*FenceOrErr)->waitForCompletion(1);
+    return GraphicsQueue.SubmitFence->waitForCompletion(CurrentCounter);
   }
 
   llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
@@ -1474,7 +1471,8 @@ public:
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  llvm::Error executeCommandList(InvocationState &IS) {
+  llvm::Expected<offloadtest::SubmitResult>
+  executeCommandList(InvocationState &IS) {
     return GraphicsQueue.submit(std::move(IS.CB));
   }
 
@@ -1969,9 +1967,12 @@ public:
       llvm::outs() << "Graphics command list created complete.\n";
     }
 
-    if (auto Err = executeCommandList(State))
-      return Err;
+    auto SubmitResult = executeCommandList(State);
+    if (!SubmitResult)
+      return SubmitResult.takeError();
     llvm::outs() << "Compute commands executed.\n";
+    if (auto Err = SubmitResult->waitForCompletion())
+      return Err;
     if (auto Err = readBack(P, State))
       return Err;
     llvm::outs() << "Read data back.\n";
@@ -1981,8 +1982,8 @@ public:
 };
 } // namespace
 
-llvm::Error DXQueue::submit(
-    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+llvm::Expected<offloadtest::SubmitResult> DXQueue::submit(
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
   llvm::SmallVector<ID3D12CommandList *> CmdLists;
   CmdLists.reserve(CBs.size());
 
@@ -2011,11 +2012,7 @@ llvm::Error DXQueue::submit(
                       "Failed to add signal."))
     return Err;
 
-  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
-  if (auto Err = SubmitFence->waitForCompletion(CurrentCounter))
-    return Err;
-
-  return llvm::Error::success();
+  return offloadtest::SubmitResult{SubmitFence.get(), CurrentCounter};
 }
 
 llvm::Error offloadtest::initializeDX12Devices(
