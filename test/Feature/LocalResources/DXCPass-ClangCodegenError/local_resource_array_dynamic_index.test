@@ -62,7 +62,9 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # Bug: https://github.com/llvm/llvm-project/issues/192538
-# XFAIL: Clang && DirectX
+# Metal is included because it uses the DXIL backend (Metal IR Converter takes
+# DXIL as input), so it hits the same DXILLegalizePass assertion as DirectX.
+# XFAIL: Clang && (DirectX || Metal)
 
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8379
 # XFAIL: DXC && Vulkan
