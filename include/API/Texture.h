@@ -17,6 +17,7 @@
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 
 #include <cstdint>
@@ -144,12 +145,14 @@ class Texture {
   GPUAPI Kind;
 
 public:
-  explicit Texture(GPUAPI Kind) : Kind(Kind) {}
   virtual ~Texture();
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;
 
   GPUAPI getKind() const { return Kind; }
+
+protected:
+  explicit Texture(GPUAPI Kind) : Kind(Kind) {}
 };
 
 } // namespace offloadtest

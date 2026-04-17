@@ -15,6 +15,8 @@
 #include "API/API.h"
 #include "API/Resources.h"
 
+#include "llvm/Support/Casting.h"
+
 namespace offloadtest {
 
 struct BufferCreateDesc {
@@ -25,12 +27,14 @@ class Buffer {
   GPUAPI Kind;
 
 public:
-  explicit Buffer(GPUAPI Kind) : Kind(Kind) {}
   virtual ~Buffer();
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;
 
   GPUAPI getKind() const { return Kind; }
+
+protected:
+  explicit Buffer(GPUAPI Kind) : Kind(Kind) {}
 };
 
 } // namespace offloadtest

@@ -41,7 +41,6 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Signals.h"
 
