@@ -179,6 +179,9 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1084
 # XFAIL: NV && Clang && DirectX
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1102
+# XFAIL: AMD && DirectX
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
