@@ -2,7 +2,7 @@
 //
 // Foundation/NSTypes.hpp
 //
-// Copyright 2020-2023 Apple Inc.
+// Copyright 2020-2024 Apple Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,21 +29,23 @@
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-namespace NS {
+namespace NS
+{
 using TimeInterval = double;
 
 using Integer = std::intptr_t;
 using UInteger = std::uintptr_t;
 
-const Integer IntegerMax = INTPTR_MAX;
-const Integer IntegerMin = INTPTR_MIN;
+const Integer  IntegerMax = INTPTR_MAX;
+const Integer  IntegerMin = INTPTR_MIN;
 const UInteger UIntegerMax = UINTPTR_MAX;
 
-struct OperatingSystemVersion {
-  Integer majorVersion;
-  Integer minorVersion;
-  Integer patchVersion;
+struct OperatingSystemVersion
+{
+    Integer majorVersion;
+    Integer minorVersion;
+    Integer patchVersion;
 } _NS_PACKED;
-} // namespace NS
+}
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------

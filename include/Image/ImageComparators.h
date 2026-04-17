@@ -113,7 +113,7 @@ class ImageComparatorDiffImage : public ImageComparatorBase {
   llvm::StringRef OutputFilename;
 
 public:
-  virtual ~ImageComparatorDiffImage() {}
+  ~ImageComparatorDiffImage() override;
   ImageComparatorDiffImage(uint32_t Height, uint32_t Width, llvm::StringRef OF)
       : DiffImg(Height, Width, 4, 3, true), OutputFilename(OF) {
     DiffPtr = reinterpret_cast<float *>(DiffImg.data());

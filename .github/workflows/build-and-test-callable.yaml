@@ -151,6 +151,10 @@ jobs:
         shell: bash
         if: contains(inputs.TestTarget, 'clang')
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Build DXC
         run: |
             cd DXC
@@ -182,6 +186,20 @@ jobs:
         with:
           comment_mode: off
           files: llvm-project/build/**/testresults.xunit.xml
+      - name: Run dxdiag (Windows only)
+        if: inputs.OS == 'windows' && failure()
+        shell: powershell
+        run: |
+          $fileName = "dxdiag.txt"
+          $output = Join-Path $env:RUNNER_TEMP $fileName
+          dxdiag /t $output | Out-Null
+          Write-Host "DxDiag report saved to $output"
+      - name: Upload dxdiag artifact
+        if: inputs.OS == 'windows' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
+          path: ${{ runner.temp }}/dxdiag.txt
       #- name: Publish Test Results
       #  uses: EnricoMi/publish-unit-test-result-action/windows@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
       #  if: always() && inputs.OS == 'windows'

@@ -10,76 +10,94 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 
 #include "Config.h"
 
 #include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 
-#include <cstdlib>
 #include <memory>
 
 using namespace offloadtest;
 
-namespace {
-class DeviceContext {
-public:
-  using DeviceArray = Device::DeviceArray;
-  using DeviceIterator = Device::DeviceIterator;
+Buffer::~Buffer() {}
 
-private:
-  DeviceArray Devices;
+CommandBuffer::~CommandBuffer() {}
 
-  DeviceContext() = default;
-  ~DeviceContext() = default;
-  DeviceContext(const DeviceContext &) = delete;
+Fence::~Fence() {}
 
-public:
-  static DeviceContext &instance() {
-    static DeviceContext Ctx;
-    return Ctx;
-  }
+Queue::~Queue() {}
 
-  void registerDevice(std::shared_ptr<Device> D) { Devices.push_back(D); }
-  void unregisterDevices() { Devices.clear(); }
-
-  DeviceIterator begin() { return Devices.begin(); }
-
-  DeviceIterator end() { return Devices.end(); }
-};
-} // namespace
+Texture::~Texture() {}
 
 Device::~Device() {}
 
-void Device::registerDevice(std::shared_ptr<Device> D) {
-  DeviceContext::instance().registerDevice(D);
-}
+llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
+offloadtest::initializeDevices(const DeviceConfig Config) {
+  llvm::SmallVector<std::unique_ptr<Device>> Devices;
+  llvm::Error Err = llvm::Error::success();
 
-llvm::Error Device::initialize(const DeviceConfig Config) {
 #ifdef OFFLOADTEST_ENABLE_D3D12
-  if (auto Err = initializeDXDevices(Config))
-    return Err;
+  if (auto E = initializeDX12Devices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
 #endif
+
 #ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVKDevices(Config))
-    return Err;
-  // Validation layers have internal state which require a specific destruction
-  // ordering. Relying on the global dtor call for this is unreliable and can
-  // cause a null-deref in the validation layers during the final
-  // vkDestroyInstance. This is a known limitation of the validation layers
-  // which explicitely requires using atexit.
-  atexit(Device::cleanupVKDevices);
+  if (auto E = initializeVulkanDevices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
 #endif
+
 #ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = initializeMtlDevices(Config))
-    return Err;
+  if (auto E = initializeMetalDevices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
 #endif
-  return llvm::Error::success();
+
+  if (Devices.empty()) {
+    if (Err)
+      return std::move(Err);
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "No GPU devices found.");
+  }
+  // Log errors from backends that failed while others succeeded.
+  if (Err)
+    llvm::logAllUnhandledErrors(std::move(Err), llvm::errs());
+  return Devices;
 }
 
-void Device::uninitialize() { DeviceContext::instance().unregisterDevices(); }
+llvm::Expected<std::shared_ptr<Texture>>
+offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
+                                             const CPUBuffer &Buf) {
+  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
+  if (!TexFmtOrErr)
+    return TexFmtOrErr.takeError();
 
-Device::DeviceIterator Device::begin() {
-  return DeviceContext::instance().begin();
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::RenderTarget;
+  Desc.Format = *TexFmtOrErr;
+  Desc.Width = Buf.OutputProps.Width;
+  Desc.Height = Buf.OutputProps.Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearColor{};
+
+  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
+    return Err;
+
+  return Dev.createTexture("RenderTarget", Desc);
 }
 
-Device::DeviceIterator Device::end() { return DeviceContext::instance().end(); }
+llvm::Expected<std::shared_ptr<Texture>>
+offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
+                                             uint32_t Height) {
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::DepthStencil;
+  Desc.Format = Format::D32FloatS8Uint;
+  Desc.Width = Width;
+  Desc.Height = Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
+
+  return Dev.createTexture("DepthStencil", Desc);
+}

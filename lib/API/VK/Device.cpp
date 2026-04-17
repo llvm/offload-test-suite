@@ -11,7 +11,9 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 
 #include <algorithm>
@@ -78,8 +80,9 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
+  case ResourceKind::SampledTexture2D:
+    return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
   }
   llvm_unreachable("All cases handled");
 }
@@ -148,7 +151,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
+  case ResourceKind::SampledTexture2D:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
@@ -158,6 +161,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
@@ -167,8 +171,19 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
-  case ResourceKind::SamplerComparison:
     llvm_unreachable("Not an image view!");
+  }
+  llvm_unreachable("All cases handled");
+}
+
+static VkImageType getVKImageType(const ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::SampledTexture2D:
+    return VK_IMAGE_TYPE_2D;
+  default:
+    llvm_unreachable("Unsupported image kind");
   }
   llvm_unreachable("All cases handled");
 }
@@ -268,20 +283,268 @@ getMemoryIndex(VkPhysicalDevice Device, uint32_t MemoryTypeBits,
                                  "Could not identify appropriate memory.");
 }
 
+static llvm::SmallVector<VkLayerProperties, 0> queryInstanceLayers() {
+  uint32_t LayerCount;
+  vkEnumerateInstanceLayerProperties(&LayerCount, nullptr);
+
+  llvm::SmallVector<VkLayerProperties, 0> Layers;
+  if (LayerCount == 0)
+    return Layers;
+
+  Layers.resize(LayerCount);
+  vkEnumerateInstanceLayerProperties(&LayerCount, Layers.data());
+
+  return Layers;
+}
+
+static bool
+isLayerSupported(const llvm::SmallVector<VkLayerProperties, 0> &Layers,
+                 llvm::StringRef QueryName) {
+  for (auto &Layer : Layers) {
+    if (Layer.layerName == QueryName)
+      return true;
+  }
+  return false;
+}
+
+static llvm::SmallVector<VkExtensionProperties, 0>
+queryInstanceExtensions(const char *InstanceLayer) {
+  uint32_t ExtCount;
+  vkEnumerateInstanceExtensionProperties(InstanceLayer, &ExtCount, nullptr);
+
+  llvm::SmallVector<VkExtensionProperties, 0> Extensions;
+  if (ExtCount == 0)
+    return Extensions;
+
+  Extensions.resize(ExtCount);
+  vkEnumerateInstanceExtensionProperties(nullptr, &ExtCount, Extensions.data());
+
+  return Extensions;
+}
+
+static llvm::SmallVector<VkExtensionProperties, 0>
+queryDeviceExtensions(VkPhysicalDevice PhysicalDevice) {
+  uint32_t ExtCount;
+  vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
+                                       nullptr);
+
+  llvm::SmallVector<VkExtensionProperties, 0> Extensions;
+  if (ExtCount == 0)
+    return Extensions;
+
+  Extensions.resize(ExtCount);
+  vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &ExtCount,
+                                       Extensions.data());
+
+  return Extensions;
+}
+
+static bool isExtensionSupported(
+    const llvm::SmallVector<VkExtensionProperties, 0> &Extensions,
+    llvm::StringRef QueryName) {
+  for (const auto &Ext : Extensions) {
+    if (Ext.extensionName == QueryName)
+      return true;
+  }
+  return false;
+}
+
+struct VulkanInstance {
+  VkInstance Instance;
+  VkDebugUtilsMessengerEXT DebugMessenger;
+
+  VulkanInstance(VkInstance Instance, VkDebugUtilsMessengerEXT DebugMessenger)
+      : Instance(Instance), DebugMessenger(DebugMessenger) {}
+  VulkanInstance(const VulkanInstance &) = delete;
+  VulkanInstance(VulkanInstance &&) = delete;
+  VulkanInstance &operator=(const VulkanInstance &) = delete;
+  VulkanInstance &operator=(VulkanInstance &&) = delete;
+  ~VulkanInstance() {
+    if (DebugMessenger) {
+      auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
+          Instance, "vkDestroyDebugUtilsMessengerEXT");
+      assert(Func != nullptr);
+      Func(Instance, DebugMessenger, nullptr);
+    }
+    vkDestroyInstance(Instance, nullptr);
+  }
+};
+
 namespace {
 
-class VKDevice : public offloadtest::Device {
+class VulkanBuffer : public offloadtest::Buffer {
+public:
+  VkDevice Dev; // Needed for clean-up
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  std::string Name;
+  BufferCreateDesc Desc;
+  size_t SizeInBytes;
+
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
+      : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
+
+  ~VulkanBuffer() override {
+    vkDestroyBuffer(Dev, Buffer, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
+class VulkanTexture : public offloadtest::Texture {
+public:
+  VkDevice Dev;
+  VkImage Image;
+  VkDeviceMemory Memory;
+  // TODO:
+  // RenderTarget and DepthStencil views are created at texture creation time.
+  // Ideally Sampled/Storage image views would also live here, but they are
+  // currently created during descriptor set setup, which determines their
+  // binding layout.
+  VkImageView View = VK_NULL_HANDLE;
+  std::string Name;
+  TextureCreateDesc Desc;
+
+  VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
+                llvm::StringRef Name, TextureCreateDesc Desc)
+      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+
+  ~VulkanTexture() override {
+    if (View)
+      vkDestroyImageView(Dev, View, nullptr);
+    vkDestroyImage(Dev, Image, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+};
+
+class VulkanFence : public offloadtest::Fence {
+public:
+  VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
+      : Name(Name), Device(Device), Semaphore(Semaphore) {}
+
+  std::string Name;
+  VkDevice Device;
+  VkSemaphore Semaphore;
+
+  static llvm::Expected<std::unique_ptr<VulkanFence>>
+  create(VkDevice Device, llvm::StringRef Name) {
+    VkSemaphoreTypeCreateInfo TypeCreateInfo = {};
+    TypeCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO;
+    TypeCreateInfo.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+
+    VkSemaphoreCreateInfo CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+    CreateInfo.pNext = &TypeCreateInfo;
+
+    VkSemaphore Semaphore = VK_NULL_HANDLE;
+    if (vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Semaphore.");
+
+    return std::make_unique<VulkanFence>(Device, Semaphore, Name);
+  }
+
+  ~VulkanFence() { vkDestroySemaphore(Device, Semaphore, nullptr); }
+
+  uint64_t getFenceValue() override {
+    uint64_t Value = 0;
+    [[maybe_unused]] const VkResult Ret =
+        vkGetSemaphoreCounterValue(Device, Semaphore, &Value);
+    assert(!Ret && "vkGetSemaphoreCounterValue failed but should never fail.");
+    return Value;
+  }
+
+  llvm::Error waitForCompletion(uint64_t SignalValue) override {
+    VkSemaphoreWaitInfo WaitInfo = {};
+    WaitInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO;
+    WaitInfo.semaphoreCount = 1;
+    WaitInfo.pSemaphores = &Semaphore;
+    WaitInfo.pValues = &SignalValue;
+
+    if (vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to wait on Semaphore.");
+
+    return llvm::Error::success();
+  }
+};
+
+class VulkanQueue : public offloadtest::Queue {
+public:
+  VkQueue Queue = VK_NULL_HANDLE;
+  uint32_t QueueFamilyIdx = 0;
+  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx)
+      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx) {}
+};
+
+class VulkanCommandBuffer : public offloadtest::CommandBuffer {
+public:
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::Vulkan;
+  }
+
+  VkDevice Device = VK_NULL_HANDLE;
+  // Owned per command buffer so that recording, submission, and lifetime
+  // management of each command buffer are independently safe without external
+  // synchronization.
+  VkCommandPool CmdPool = VK_NULL_HANDLE;
+  VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
+
+  static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
+  create(VkDevice Device, uint32_t QueueFamilyIdx) {
+    auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
+    CB->Device = Device;
+
+    VkCommandPoolCreateInfo CmdPoolInfo = {};
+    CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    CmdPoolInfo.queueFamilyIndex = QueueFamilyIdx;
+    CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &CB->CmdPool))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not create command pool.");
+
+    VkCommandBufferAllocateInfo CBufAllocInfo = {};
+    CBufAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    CBufAllocInfo.commandPool = CB->CmdPool;
+    CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    CBufAllocInfo.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(Device, &CBufAllocInfo, &CB->CmdBuffer))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not create command buffer.");
+
+    VkCommandBufferBeginInfo BufferInfo = {};
+    BufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    if (vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not begin command buffer.");
+    return CB;
+  }
+
+  ~VulkanCommandBuffer() override {
+    if (CmdPool != VK_NULL_HANDLE)
+      vkDestroyCommandPool(Device, CmdPool, nullptr);
+  }
+
 private:
-  VkPhysicalDevice Device;
+  VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
+};
+
+class VulkanDevice : public offloadtest::Device {
+private:
+  std::shared_ptr<VulkanInstance> Instance;
+  VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
   VkPhysicalDeviceProperties Props;
   VkPhysicalDeviceProperties2 Props2;
   VkPhysicalDeviceFloatControlsProperties FloatControlProp;
   VkPhysicalDeviceDriverProperties DriverProps;
+  VkDevice Device = VK_NULL_HANDLE;
+  VulkanQueue GraphicsQueue;
   Capabilities Caps;
-  using LayerVector = std::vector<VkLayerProperties>;
-  LayerVector Layers;
-  using ExtensionVector = std::vector<VkExtensionProperties>;
-  ExtensionVector Extensions;
+  using LayerVector = llvm::SmallVector<VkLayerProperties, 0>;
+  LayerVector InstanceLayers;
+  using ExtensionVector = llvm::SmallVector<VkExtensionProperties, 0>;
+  ExtensionVector DeviceExtensions;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -305,17 +568,17 @@ private:
 
   struct ResourceBundle {
     ResourceBundle(VkDescriptorType DescriptorType, uint64_t Size,
-                   Buffer *BufferPtr)
+                   CPUBuffer *BufferPtr)
         : DescriptorType(DescriptorType), Size(Size), BufferPtr(BufferPtr) {}
 
     bool isImage() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE ||
-             DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+             DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE ||
+             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     }
 
     bool isSampler() const {
-      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER ||
-             DescriptorType == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+      return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER;
     }
 
     bool isBuffer() const {
@@ -335,7 +598,7 @@ private:
 
     VkDescriptorType DescriptorType;
     uint64_t Size;
-    Buffer *BufferPtr;
+    CPUBuffer *BufferPtr;
     VkImageLayout ImageLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     llvm::SmallVector<ResourceRef> ResourceRefs;
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
@@ -348,23 +611,22 @@ private:
   };
 
   struct InvocationState {
-    VkDevice Device;
-    VkQueue Queue;
-    VkCommandPool CmdPool;
-    VkCommandBuffer CmdBuffer;
-    VkPipelineLayout PipelineLayout;
-    VkDescriptorPool Pool = nullptr;
-    VkPipelineCache PipelineCache;
-    VkPipeline Pipeline;
+    std::unique_ptr<VulkanCommandBuffer> CB;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
+    VkPipelineCache PipelineCache = VK_NULL_HANDLE;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+
+    std::unique_ptr<Fence> Fence;
 
     // FrameBuffer associated data for offscreen rendering.
-    VkFramebuffer FrameBuffer;
-    ResourceBundle FrameBufferResource = {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 0,
-                                          nullptr};
-    ImageRef DepthStencil = {0, 0, 0};
+    VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
+    std::shared_ptr<VulkanTexture> RenderTarget;
+    std::shared_ptr<VulkanBuffer> RTReadback;
+    std::shared_ptr<VulkanTexture> DepthStencil;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
-    VkRenderPass RenderPass;
+    VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
 
     llvm::SmallVector<CompiledShader> Shaders;
@@ -384,19 +646,115 @@ private:
   };
 
 public:
-  VKDevice(VkPhysicalDevice D) : Device(D) {
-    vkGetPhysicalDeviceProperties(Device, &Props);
+  static llvm::Expected<std::unique_ptr<VulkanDevice>>
+  create(std::shared_ptr<VulkanInstance> Instance,
+         VkPhysicalDevice PhysicalDevice,
+         llvm::SmallVector<VkLayerProperties, 0> InstanceLayers) {
+    VkPhysicalDeviceProperties Props;
+    vkGetPhysicalDeviceProperties(PhysicalDevice, &Props);
+
+    // Find a queue family that supports both graphics and compute.
+    uint32_t QueueCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &QueueCount,
+                                             nullptr);
+    if (QueueCount == 0)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "No queue families reported.");
+
+    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps(
+        new VkQueueFamilyProperties[QueueCount]);
+    vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice, &QueueCount,
+                                             QueueFamilyProps.get());
+
+    std::optional<uint32_t> SelectedIdx;
+    for (uint32_t I = 0; I < QueueCount; ++I) {
+      const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
+      // Prefer family supporting both GRAPHICS and COMPUTE
+      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
+        SelectedIdx = static_cast<int>(I);
+        break;
+      }
+    }
+
+    if (!SelectedIdx)
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "No suitable queue family found.");
+
+    const uint32_t QueueFamilyIdx = *SelectedIdx;
+
+    VkDeviceQueueCreateInfo QueueInfo = {};
+    const float QueuePriority = 1.0f;
+    QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    QueueInfo.queueFamilyIndex = QueueFamilyIdx;
+    QueueInfo.queueCount = 1;
+    QueueInfo.pQueuePriorities = &QueuePriority;
+
+    VkDeviceCreateInfo DeviceInfo = {};
+    DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+    DeviceInfo.queueCreateInfoCount = 1;
+    DeviceInfo.pQueueCreateInfos = &QueueInfo;
+
+    VkPhysicalDeviceFeatures2 Features{};
+    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+    VkPhysicalDeviceVulkan11Features Features11{};
+    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
+    VkPhysicalDeviceVulkan12Features Features12{};
+    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
+    VkPhysicalDeviceVulkan13Features Features13{};
+    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
+#ifdef VK_VERSION_1_4
+    VkPhysicalDeviceVulkan14Features Features14{};
+    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
+#endif
+
+    Features.pNext = &Features11;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+      Features11.pNext = &Features12;
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+      Features12.pNext = &Features13;
+#ifdef VK_VERSION_1_4
+    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+      Features13.pNext = &Features14;
+#endif
+    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+
+    DeviceInfo.pEnabledFeatures = &Features.features;
+    DeviceInfo.pNext = Features.pNext;
+
+    VkDevice Device = VK_NULL_HANDLE;
+    if (vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device))
+      return llvm::createStringError(std::errc::no_such_device,
+                                     "Could not create Vulkan logical device.");
+    VkQueue DeviceQueue = VK_NULL_HANDLE;
+    vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
+
+    const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
+
+    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
+                                          Device, std::move(GraphicsQueue),
+                                          std::move(InstanceLayers));
+  }
+
+  VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
+               VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
+               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
+      : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
+        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
+
     FloatControlProp.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT_CONTROLS_PROPERTIES;
     FloatControlProp.pNext = nullptr;
+
     DriverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
     DriverProps.pNext = &FloatControlProp;
+
     Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     Props2.pNext = &DriverProps;
-    vkGetPhysicalDeviceProperties2(Device, &Props2);
+    vkGetPhysicalDeviceProperties2(PhysicalDevice, &Props2);
+
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
@@ -406,13 +764,150 @@ public:
     // adapter-regex matching.
     Description += " (" + DriverName + ")";
 #endif
-  }
-  VKDevice(const VKDevice &) = default;
 
-  ~VKDevice() override = default;
+    DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
+  }
+  VulkanDevice(const VulkanDevice &) = delete;
+
+  ~VulkanDevice() override {
+    if (Device != VK_NULL_HANDLE) {
+      vkDeviceWaitIdle(Device);
+      vkDestroyDevice(Device, nullptr);
+    }
+  }
 
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+
+  Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::unique_ptr<offloadtest::Fence>>
+  createFence(llvm::StringRef Name) override {
+    return VulkanFence::create(Device, Name);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  createBuffer(std::string Name, BufferCreateDesc &Desc,
+               size_t SizeInBytes) override {
+    VkBufferCreateInfo BufInfo = {};
+    BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    BufInfo.size = SizeInBytes;
+    BufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer DeviceBuffer;
+    if (vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create device buffer.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx)
+      return MemIdx.takeError();
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory))
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate device memory.");
+    if (vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind device buffer memory.");
+
+    return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
+                                          Name, Desc, SizeInBytes);
+  }
+
+  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+    if (auto Err = validateTextureCreateDesc(Desc))
+      return Err;
+
+    VkImageCreateInfo ImageInfo = {};
+    ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.extent = {Desc.Width, Desc.Height, 1};
+    ImageInfo.mipLevels = Desc.MipLevels;
+    ImageInfo.arrayLayers = 1;
+    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
+    ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkImage Image;
+    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to create image.");
+
+    VkMemoryRequirements MemReqs;
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
+
+    VkMemoryAllocateInfo AllocInfo = {};
+    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    AllocInfo.allocationSize = MemReqs.size;
+    auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                                 getVulkanMemoryFlags(Desc.Location));
+    if (!MemIdx) {
+      vkDestroyImage(Device, Image, nullptr);
+      return MemIdx.takeError();
+    }
+    AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkDeviceMemory DeviceMemory;
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+      vkDestroyImage(Device, Image, nullptr);
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate image memory.");
+    }
+    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+      vkDestroyImage(Device, Image, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to bind image memory.");
+    }
+
+    auto Tex = std::make_shared<VulkanTexture>(Device, Image, DeviceMemory,
+                                               Name, Desc);
+
+    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
+    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
+    if (IsRT || IsDS) {
+      VkImageViewCreateInfo ViewCi = {};
+      ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      ViewCi.format = getVulkanFormat(Desc.Format);
+      ViewCi.subresourceRange.baseMipLevel = 0;
+      ViewCi.subresourceRange.levelCount = 1;
+      ViewCi.subresourceRange.baseArrayLayer = 0;
+      ViewCi.subresourceRange.layerCount = 1;
+      ViewCi.image = Image;
+      if (IsRT) {
+        ViewCi.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                             VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+        ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      } else {
+        ViewCi.subresourceRange.aspectMask =
+            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+      }
+      if (vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View)) {
+        // Tex destructor will clean up Image + Memory.
+        return llvm::createStringError(std::errc::device_or_resource_busy,
+                                       "Failed to create image view.");
+      }
+    }
+
+    return Tex;
+  }
 
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
@@ -420,37 +915,9 @@ public:
     return Caps;
   }
 
-  const LayerVector &getLayers() {
-    if (Layers.empty())
-      queryLayers();
-    return Layers;
-  }
-
-  bool isLayerSupported(llvm::StringRef QueryName) {
-    for (auto Layer : getLayers()) {
-      if (Layer.layerName == QueryName)
-        return true;
-    }
-    return false;
-  }
-
-  const ExtensionVector &getExtensions() {
-    if (Extensions.empty())
-      queryExtensions();
-    return Extensions;
-  }
-
-  bool isExtensionSupported(llvm::StringRef QueryName) {
-    for (const auto &Ext : getExtensions()) {
-      if (Ext.extensionName == QueryName)
-        return true;
-    }
-    return false;
-  }
-
   void printExtra(llvm::raw_ostream &OS) override {
     OS << "  Layers:\n";
-    for (auto Layer : getLayers()) {
+    for (auto &Layer : InstanceLayers) {
       uint64_t Sz = strnlen(Layer.layerName, VK_MAX_EXTENSION_NAME_SIZE);
       OS << "  - LayerName: " << llvm::StringRef(Layer.layerName, Sz) << "\n";
       OS << "    SpecVersion: " << Layer.specVersion << "\n";
@@ -460,7 +927,7 @@ public:
     }
 
     OS << "  Extensions:\n";
-    for (const auto &Ext : getExtensions()) {
+    for (const auto &Ext : DeviceExtensions) {
       OS << "  - ExtensionName: " << llvm::StringRef(Ext.extensionName) << "\n";
       OS << "    SpecVersion: " << Ext.specVersion << "\n";
     }
@@ -493,7 +960,7 @@ private:
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
       Features13.pNext = &Features14;
 #endif
-    vkGetPhysicalDeviceFeatures2(Device, &Features);
+    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
         "APIMajorVersion",
@@ -528,136 +995,13 @@ private:
 #include "VKFeatures.def"
   }
 
-  void queryLayers() {
-    assert(Layers.empty() && "Should not be called twice!");
-    uint32_t LayerCount;
-    vkEnumerateInstanceLayerProperties(&LayerCount, nullptr);
-
-    if (LayerCount == 0)
-      return;
-
-    Layers.insert(Layers.begin(), LayerCount, VkLayerProperties());
-    vkEnumerateInstanceLayerProperties(&LayerCount, Layers.data());
-  }
-
-  void queryExtensions() {
-    assert(Extensions.empty() && "Should not be called twice!");
-    uint32_t ExtCount;
-    vkEnumerateDeviceExtensionProperties(Device, nullptr, &ExtCount, nullptr);
-
-    if (ExtCount == 0)
-      return;
-
-    Extensions.insert(Extensions.begin(), ExtCount, VkExtensionProperties());
-    vkEnumerateDeviceExtensionProperties(Device, nullptr, &ExtCount,
-                                         Extensions.data());
-  }
-
 public:
-  llvm::Error createDevice(InvocationState &IS) {
-
-    // Find a queue family that supports both graphics and compute.
-    uint32_t QueueCount = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount, nullptr);
-    if (QueueCount == 0)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "No queue families reported.");
-
-    const std::unique_ptr<VkQueueFamilyProperties[]> QueueFamilyProps(
-        new VkQueueFamilyProperties[QueueCount]);
-    vkGetPhysicalDeviceQueueFamilyProperties(Device, &QueueCount,
-                                             QueueFamilyProps.get());
-
-    int SelectedIdx = -1;
-    for (uint32_t I = 0; I < QueueCount; ++I) {
-      const VkQueueFlags Flags = QueueFamilyProps[I].queueFlags;
-      // Prefer family supporting both GRAPHICS and COMPUTE
-      if ((Flags & VK_QUEUE_GRAPHICS_BIT) && (Flags & VK_QUEUE_COMPUTE_BIT)) {
-        SelectedIdx = static_cast<int>(I);
-        break;
-      }
-    }
-
-    if (SelectedIdx == -1)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "No suitable queue family found.");
-
-    const uint32_t QueueIdx = static_cast<uint32_t>(SelectedIdx);
-
-    VkDeviceQueueCreateInfo QueueInfo = {};
-    const float QueuePriority = 1.0f;
-    QueueInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-    QueueInfo.queueFamilyIndex = QueueIdx;
-    QueueInfo.queueCount = 1;
-    QueueInfo.pQueuePriorities = &QueuePriority;
-
-    VkDeviceCreateInfo DeviceInfo = {};
-    DeviceInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-    DeviceInfo.queueCreateInfoCount = 1;
-    DeviceInfo.pQueueCreateInfos = &QueueInfo;
-
-    VkPhysicalDeviceFeatures2 Features{};
-    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-    VkPhysicalDeviceVulkan11Features Features11{};
-    Features11.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES;
-    VkPhysicalDeviceVulkan12Features Features12{};
-    Features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
-    VkPhysicalDeviceVulkan13Features Features13{};
-    Features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
-#ifdef VK_VERSION_1_4
-    VkPhysicalDeviceVulkan14Features Features14{};
-    Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
-#endif
-
-    Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
-      Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
-      Features12.pNext = &Features13;
-#ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
-      Features13.pNext = &Features14;
-#endif
-    vkGetPhysicalDeviceFeatures2(Device, &Features);
-
-    DeviceInfo.pEnabledFeatures = &Features.features;
-    DeviceInfo.pNext = Features.pNext;
-
-    if (vkCreateDevice(Device, &DeviceInfo, nullptr, &IS.Device))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Could not create Vulkan logical device.");
-    vkGetDeviceQueue(IS.Device, QueueIdx, 0, &IS.Queue);
-
-    VkCommandPoolCreateInfo CmdPoolInfo = {};
-    CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    CmdPoolInfo.queueFamilyIndex = QueueIdx;
-    CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-    if (vkCreateCommandPool(IS.Device, &CmdPoolInfo, nullptr, &IS.CmdPool))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command pool.");
-    return llvm::Error::success();
+  llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
+  createCommandBuffer() override {
+    return VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
   }
 
-  llvm::Error createCommandBuffer(InvocationState &IS) {
-    VkCommandBufferAllocateInfo CBufAllocInfo = {};
-    CBufAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    CBufAllocInfo.commandPool = IS.CmdPool;
-    CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    CBufAllocInfo.commandBufferCount = 1;
-    if (vkAllocateCommandBuffers(IS.Device, &CBufAllocInfo, &IS.CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command buffer.");
-    VkCommandBufferBeginInfo BufferInfo = {};
-    BufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(IS.CmdBuffer, &BufferInfo))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not begin command buffer.");
-    return llvm::Error::success();
-  }
-
-  llvm::Expected<BufferRef> createBuffer(InvocationState &IS,
-                                         VkBufferUsageFlags Usage,
+  llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
                                          VkMemoryPropertyFlags MemoryFlags,
                                          size_t Size, void *Data = nullptr) {
     VkBuffer Buffer;
@@ -668,29 +1012,29 @@ public:
     BufferInfo.usage = Usage;
     BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(IS.Device, &BufferInfo, nullptr, &Buffer))
+    if (vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Could not create buffer.");
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(IS.Device, Buffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
 
     llvm::Expected<uint32_t> MemIdx =
-        getMemoryIndex(Device, MemReqs.memoryTypeBits, MemoryFlags);
+        getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemoryFlags);
     if (!MemIdx)
       return MemIdx.takeError();
 
     AllocInfo.memoryTypeIndex = *MemIdx;
 
-    if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Memory allocation failed.");
     if (Data) {
       void *Dst = nullptr;
-      if (vkMapMemory(IS.Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
+      if (vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
         return llvm::createStringError(std::errc::not_enough_memory,
                                        "Failed to map memory.");
       memcpy(Dst, Data, Size);
@@ -700,28 +1044,27 @@ public:
       Range.memory = Memory;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      vkFlushMappedMemoryRanges(IS.Device, 1, &Range);
+      vkFlushMappedMemoryRanges(Device, 1, &Range);
 
-      vkUnmapMemory(IS.Device, Memory);
+      vkUnmapMemory(Device, Memory);
     }
 
-    if (vkBindBufferMemory(IS.Device, Buffer, Memory, 0))
+    if (vkBindBufferMemory(Device, Buffer, Memory, 0))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to bind buffer to memory.");
 
     return BufferRef{Buffer, Memory};
   }
 
-  llvm::Expected<ResourceRef> createImage(InvocationState &IS, Resource &R,
-                                          BufferRef &Host,
+  llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
-    const offloadtest::Buffer &B = *R.BufferPtr;
+    const offloadtest::CPUBuffer &B = *R.BufferPtr;
     if (B.Format == DataFormat::Depth32 && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCreateInfo.imageType = VK_IMAGE_TYPE_2D;
+    ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
@@ -743,31 +1086,30 @@ public:
     }
 
     VkImage Image;
-    if (vkCreateImage(IS.Device, &ImageCreateInfo, nullptr, &Image))
+    if (vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image))
       return llvm::createStringError(std::errc::io_error,
                                      "Failed to create image.");
 
     VkSampler Sampler = 0;
 
     VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(IS.Device, Image, &MemReqs);
+    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
 
     VkDeviceMemory Memory;
-    if (vkAllocateMemory(IS.Device, &AllocInfo, nullptr, &Memory))
+    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Image memory allocation failed.");
-    if (vkBindImageMemory(IS.Device, Image, Memory, 0))
+    if (vkBindImageMemory(Device, Image, Memory, 0))
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Image memory binding failed.");
 
     return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
   }
 
-  llvm::Expected<ResourceRef> createSampler(InvocationState &IS, Resource &R,
-                                            BufferRef &Host) {
+  llvm::Expected<ResourceRef> createSampler(Resource &R, BufferRef &Host) {
     VkSamplerCreateInfo SamplerInfo = {};
     SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     const Sampler &S = *R.SamplerPtr;
@@ -781,7 +1123,7 @@ public:
     SamplerInfo.anisotropyEnable = VK_FALSE;
     SamplerInfo.maxAnisotropy = 1.0f;
     SamplerInfo.compareEnable =
-        R.Kind == ResourceKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+        S.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
     SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
     SamplerInfo.minLod = S.MinLOD;
     SamplerInfo.maxLod = S.MaxLOD;
@@ -789,7 +1131,7 @@ public:
     SamplerInfo.unnormalizedCoordinates = VK_FALSE;
 
     VkSampler Sampler;
-    if (vkCreateSampler(IS.Device, &SamplerInfo, nullptr, &Sampler))
+    if (vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create sampler.");
 
@@ -801,7 +1143,7 @@ public:
     if (R.isSampler()) {
       ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
       BufferRef HostBuf = {0, 0};
-      auto ExSamplerRef = createSampler(IS, R, HostBuf);
+      auto ExSamplerRef = createSampler(R, HostBuf);
       if (!ExSamplerRef)
         return ExSamplerRef.takeError();
       Bundle.ResourceRefs.push_back(*ExSamplerRef);
@@ -812,20 +1154,29 @@ public:
     ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
     for (auto &ResData : R.BufferPtr->Data) {
       auto ExHostBuf = createBuffer(
-          IS,
           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
       if (!ExHostBuf)
         return ExHostBuf.takeError();
 
       if (R.isTexture()) {
-        auto ExImageRef = createImage(IS, R, *ExHostBuf);
+        auto ExImageRef = createImage(R, *ExHostBuf);
         if (!ExImageRef)
           return ExImageRef.takeError();
+
+        // Sampled textures use combined-image-sampler descriptors and need
+        // both valid image and sampler handles.
+        if (R.isSampledTexture()) {
+          BufferRef NullHost = {0, 0};
+          auto ExSamplerRef = createSampler(R, NullHost);
+          if (!ExSamplerRef)
+            return ExSamplerRef.takeError();
+          ExImageRef->Image.Sampler = ExSamplerRef->Image.Sampler;
+        }
+
         Bundle.ResourceRefs.push_back(*ExImageRef);
       } else {
         auto ExDeviceBuf = createBuffer(
-            IS,
             getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
@@ -833,16 +1184,15 @@ public:
           return ExDeviceBuf.takeError();
         VkBufferCopy Copy = {};
         Copy.size = R.size();
-        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                        &Copy);
+        vkCmdCopyBuffer(IS.CB->CmdBuffer, ExHostBuf->Buffer,
+                        ExDeviceBuf->Buffer, 1, &Copy);
         Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
       }
     }
     if (R.HasCounter) {
       for (uint32_t I = 0; I < R.getArraySize(); ++I) {
         uint32_t CounterValue = 0;
-        auto ExHostBuf = createBuffer(IS,
-                                      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
+        auto ExHostBuf = createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                           VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
                                       sizeof(uint32_t), &CounterValue);
@@ -850,7 +1200,6 @@ public:
           return ExHostBuf.takeError();
 
         auto ExDeviceBuf = createBuffer(
-            IS,
             getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
             VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sizeof(uint32_t));
@@ -858,8 +1207,8 @@ public:
           return ExDeviceBuf.takeError();
         VkBufferCopy Copy = {};
         Copy.size = sizeof(uint32_t);
-        vkCmdCopyBuffer(IS.CmdBuffer, ExHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                        &Copy);
+        vkCmdCopyBuffer(IS.CB->CmdBuffer, ExHostBuf->Buffer,
+                        ExDeviceBuf->Buffer, 1, &Copy);
         Bundle.CounterResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
       }
     }
@@ -867,47 +1216,37 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
+    if (!P.Bindings.RTargetBufferPtr)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "No render target bound for graphics pipeline.");
+    const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
+
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+
+    IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+
+    // Create a host-visible staging buffer for readback.
+    BufferCreateDesc BufDesc = {};
+    BufDesc.Location = MemoryLocation::GpuToCpu;
+    auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+    IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+
+    return llvm::Error::success();
+  }
+
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    // Create an optimal image used as the depth stencil attachment
-    VkImageCreateInfo ImageCi = {};
-    ImageCi.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCi.imageType = VK_IMAGE_TYPE_2D;
-    ImageCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
-    // Use example's height and width
-    ImageCi.extent = {
-        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Width),
-        static_cast<uint32_t>(P.Bindings.RTargetBufferPtr->OutputProps.Height),
-        1};
-    ImageCi.mipLevels = 1;
-    ImageCi.arrayLayers = 1;
-    ImageCi.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageCi.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ImageCi.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    ImageCi.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (vkCreateImage(IS.Device, &ImageCi, nullptr, &IS.DepthStencil.Image))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Depth stencil creation failed.");
-
-    // Allocate memory for the image (device local) and bind it to our image
-    VkMemoryAllocateInfo MemAlloc{};
-    MemAlloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(IS.Device, IS.DepthStencil.Image, &MemReqs);
-    MemAlloc.allocationSize = MemReqs.size;
-    llvm::Expected<uint32_t> MemIdx = getMemoryIndex(
-        Device, MemReqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (!MemIdx)
-      return MemIdx.takeError();
-
-    MemAlloc.memoryTypeIndex = *MemIdx;
-    if (vkAllocateMemory(IS.Device, &MemAlloc, nullptr,
-                         &IS.DepthStencil.Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Depth stencil memory allocation failed.");
-    if (vkBindImageMemory(IS.Device, IS.DepthStencil.Image,
-                          IS.DepthStencil.Memory, 0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Depth stencil memory binding failed.");
+    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
+        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+    if (!TexOrErr)
+      return TexOrErr.takeError();
+    IS.DepthStencil = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -920,37 +1259,10 @@ public:
     }
 
     if (P.isGraphics()) {
-      if (!P.Bindings.RTargetBufferPtr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No RenderTarget buffer specified for graphics pipeline.");
-      Resource FrameBuffer = {ResourceKind::Texture2D,
-                              "RenderTarget",
-                              {},
-                              {},
-                              P.Bindings.RTargetBufferPtr,
-                              nullptr,
-                              false,
-                              std::nullopt,
-                              false};
-      IS.FrameBufferResource.Size = P.Bindings.RTargetBufferPtr->size();
-      IS.FrameBufferResource.BufferPtr = P.Bindings.RTargetBufferPtr;
-      IS.FrameBufferResource.ImageLayout =
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      auto ExHostBuf = createBuffer(
-          IS,
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, FrameBuffer.size(),
-          FrameBuffer.BufferPtr->Data[0].get());
-      if (!ExHostBuf)
-        return ExHostBuf.takeError();
-      auto ExImageRef = createImage(IS, FrameBuffer, *ExHostBuf,
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
-                                        VK_IMAGE_USAGE_SAMPLED_BIT |
-                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-      if (!ExImageRef)
-        return ExImageRef.takeError();
-      IS.FrameBufferResource.ResourceRefs.push_back(*ExImageRef);
+      if (auto Err = createRenderTarget(P, IS))
+        return Err;
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
 
@@ -967,56 +1279,61 @@ public:
                                      false,
                                      std::nullopt,
                                      false};
-      auto ExVHostBuf =
-          createBuffer(IS, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VertexBuffer.size(),
-                       VertexBuffer.BufferPtr->Data[0].get());
+      auto ExVHostBuf = createBuffer(
+          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+          VertexBuffer.size(), VertexBuffer.BufferPtr->Data[0].get());
       if (!ExVHostBuf)
         return ExVHostBuf.takeError();
       auto ExDeviceBuf = createBuffer(
-          IS,
           VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
           VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer.size());
       if (!ExDeviceBuf)
         return ExDeviceBuf.takeError();
       VkBufferCopy Copy = {};
       Copy.size = VertexBuffer.size();
-      vkCmdCopyBuffer(IS.CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer, 1,
-                      &Copy);
+      vkCmdCopyBuffer(IS.CB->CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer,
+                      1, &Copy);
       IS.VertexBuffer = ResourceRef(*ExVHostBuf, *ExDeviceBuf);
     }
 
     return llvm::Error::success();
   }
 
-  llvm::Error executeCommandBuffer(InvocationState &IS,
-                                   VkPipelineStageFlags WaitMask = 0) {
-    if (vkEndCommandBuffer(IS.CmdBuffer))
+  llvm::Error executeCommandBuffer(InvocationState &IS) {
+    // This is a hack but it works since this is all single threaded code.
+    static uint64_t FenceCounter = 0;
+    const uint64_t CurrentCounter = FenceCounter + 1;
+
+    if (vkEndCommandBuffer(IS.CB->CmdBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
 
+    auto *F = static_cast<VulkanFence *>(IS.Fence.get());
+
+    VkTimelineSemaphoreSubmitInfo TimelineSubmitInfo = {};
+    TimelineSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+    TimelineSubmitInfo.signalSemaphoreValueCount = 1;
+    TimelineSubmitInfo.pSignalSemaphoreValues = &CurrentCounter;
+
     VkSubmitInfo SubmitInfo = {};
     SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    SubmitInfo.pNext = &TimelineSubmitInfo;
     SubmitInfo.commandBufferCount = 1;
-    SubmitInfo.pCommandBuffers = &IS.CmdBuffer;
-    SubmitInfo.pWaitDstStageMask = &WaitMask;
-    VkFenceCreateInfo FenceInfo = {};
-    FenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    VkFence Fence;
-    if (vkCreateFence(IS.Device, &FenceInfo, nullptr, &Fence))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create fence.");
+    SubmitInfo.pCommandBuffers = &IS.CB->CmdBuffer;
+    SubmitInfo.signalSemaphoreCount = 1;
+    SubmitInfo.pSignalSemaphores = &F->Semaphore;
 
     // Submit to the queue
-    if (vkQueueSubmit(IS.Queue, 1, &SubmitInfo, Fence))
+    if (vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to submit to queue.");
-    if (vkWaitForFences(IS.Device, 1, &Fence, VK_TRUE, UINT64_MAX))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed waiting for fence.");
 
-    vkDestroyFence(IS.Device, Fence, nullptr);
-    vkFreeCommandBuffers(IS.Device, IS.CmdPool, 1, &IS.CmdBuffer);
+    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+      return Err;
+
+    vkFreeCommandBuffers(Device, IS.CB->CmdPool, 1, &IS.CB->CmdBuffer);
+
+    FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
 
@@ -1060,7 +1377,7 @@ public:
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
-      if (vkCreateDescriptorPool(IS.Device, &PoolCreateInfo, nullptr, &IS.Pool))
+      if (vkCreateDescriptorPool(Device, &PoolCreateInfo, nullptr, &IS.Pool))
         return llvm::createStringError(std::errc::device_or_resource_busy,
                                        "Failed to create descriptor pool.");
     }
@@ -1102,7 +1419,7 @@ public:
       LayoutCreateInfo.pBindings = Bindings.data();
       llvm::outs() << "Binding " << Bindings.size() << " descriptors.\n";
       VkDescriptorSetLayout Layout;
-      if (vkCreateDescriptorSetLayout(IS.Device, &LayoutCreateInfo, nullptr,
+      if (vkCreateDescriptorSetLayout(Device, &LayoutCreateInfo, nullptr,
                                       &Layout))
         return llvm::createStringError(
             std::errc::device_or_resource_busy,
@@ -1125,7 +1442,7 @@ public:
     PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
     PipelineCreateInfo.pPushConstantRanges = Ranges.data();
 
-    if (vkCreatePipelineLayout(IS.Device, &PipelineCreateInfo, nullptr,
+    if (vkCreatePipelineLayout(Device, &PipelineCreateInfo, nullptr,
                                &IS.PipelineLayout))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create pipeline layout.");
@@ -1143,7 +1460,7 @@ public:
                              IS.DescriptorSetLayouts.size(), VkDescriptorSet());
     llvm::outs() << "Num Descriptor sets: " << IS.DescriptorSetLayouts.size()
                  << "\n";
-    if (vkAllocateDescriptorSets(IS.Device, &DSAllocInfo,
+    if (vkAllocateDescriptorSets(Device, &DSAllocInfo,
                                  IS.DescriptorSets.data()))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to allocate descriptor sets.");
@@ -1220,7 +1537,7 @@ public:
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
             VkImageView View = {0};
-            if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &View))
+            if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create image view.");
             const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
@@ -1246,7 +1563,7 @@ public:
           IndexOfFirstBufferDataInArray = BufferViews.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.buffer = ResRef.Device.Buffer;
-            if (vkCreateBufferView(IS.Device, &ViewCreateInfo, nullptr, &View))
+            if (vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View))
               return llvm::createStringError(std::errc::device_or_resource_busy,
                                              "Failed to create buffer view.");
             IS.BufferViews.push_back(View);
@@ -1298,7 +1615,7 @@ public:
            "size of buffer infos does not match expected count");
 
     llvm::outs() << "WriteDescriptors: " << WriteDescriptors.size() << "\n";
-    vkUpdateDescriptorSets(IS.Device, WriteDescriptors.size(),
+    vkUpdateDescriptorSets(Device, WriteDescriptors.size(),
                            WriteDescriptors.data(), 0, nullptr);
     return llvm::Error::success();
   }
@@ -1312,8 +1629,7 @@ public:
       ShaderCreateInfo.pCode =
           reinterpret_cast<const uint32_t *>(Program.data());
       CompiledShader CS = {Shader.Stage, Shader.Entry, 0};
-      if (vkCreateShaderModule(IS.Device, &ShaderCreateInfo, nullptr,
-                               &CS.Shader))
+      if (vkCreateShaderModule(Device, &ShaderCreateInfo, nullptr, &CS.Shader))
         return llvm::createStringError(std::errc::not_supported,
                                        "Failed to create shader module.");
       IS.Shaders.emplace_back(CS);
@@ -1321,11 +1637,10 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRenderPass(Pipeline &P, InvocationState &IS) {
+  llvm::Error createRenderPass(InvocationState &IS) {
     std::array<VkAttachmentDescription, 2> Attachments = {};
 
-    Attachments[0].format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
+    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Format);
     Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1334,7 +1649,7 @@ public:
     Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    Attachments[1].format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Format);
     Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -1398,63 +1713,26 @@ public:
     RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
     RPCI.pDependencies = Dependencies.data();
 
-    if (vkCreateRenderPass(IS.Device, &RPCI, nullptr, &IS.RenderPass))
+    if (vkCreateRenderPass(Device, &RPCI, nullptr, &IS.RenderPass))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create render pass.");
     return llvm::Error::success();
   }
 
-  llvm::Error createFrameBuffer(Pipeline &P, InvocationState &IS) {
-    std::array<VkImageView, 2> Views = {};
-    VkImageViewCreateInfo ViewCreateInfo = {};
-    ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    ViewCreateInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    ViewCreateInfo.format = getVKFormat(P.Bindings.RTargetBufferPtr->Format,
-                                        P.Bindings.RTargetBufferPtr->Channels);
-    ViewCreateInfo.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
-                                 VK_COMPONENT_SWIZZLE_B,
-                                 VK_COMPONENT_SWIZZLE_A};
-    ViewCreateInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    ViewCreateInfo.subresourceRange.baseMipLevel = 0;
-    ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-    ViewCreateInfo.subresourceRange.layerCount = 1;
-    ViewCreateInfo.subresourceRange.levelCount = 1;
-    ViewCreateInfo.image = IS.FrameBufferResource.ResourceRefs[0].Image.Image;
-    if (vkCreateImageView(IS.Device, &ViewCreateInfo, nullptr, &Views[0]))
-      return llvm::createStringError(
-          std::errc::device_or_resource_busy,
-          "Failed to create frame buffer image view.");
-    IS.ImageViews.push_back(Views[0]);
-
-    VkImageViewCreateInfo DepthStencilViewCi = {};
-    DepthStencilViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    DepthStencilViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    DepthStencilViewCi.format = VK_FORMAT_D32_SFLOAT_S8_UINT;
-    DepthStencilViewCi.subresourceRange = {};
-    DepthStencilViewCi.subresourceRange.aspectMask =
-        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    DepthStencilViewCi.subresourceRange.baseMipLevel = 0;
-    DepthStencilViewCi.subresourceRange.levelCount = 1;
-    DepthStencilViewCi.subresourceRange.baseArrayLayer = 0;
-    DepthStencilViewCi.subresourceRange.layerCount = 1;
-    DepthStencilViewCi.image = IS.DepthStencil.Image;
-    if (vkCreateImageView(IS.Device, &DepthStencilViewCi, nullptr, &Views[1]))
-      return llvm::createStringError(
-          std::errc::device_or_resource_busy,
-          "Failed to create depth stencil image view.");
-    IS.ImageViews.push_back(Views[1]);
+  llvm::Error createFrameBuffer(InvocationState &IS) {
+    std::array<VkImageView, 2> Views = {IS.RenderTarget->View,
+                                        IS.DepthStencil->View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     FbufCreateInfo.renderPass = IS.RenderPass;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
-    FbufCreateInfo.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
+    FbufCreateInfo.width = IS.RenderTarget->Desc.Width;
+    FbufCreateInfo.height = IS.RenderTarget->Desc.Height;
     FbufCreateInfo.layers = 1;
 
-    if (vkCreateFramebuffer(IS.Device, &FbufCreateInfo, nullptr,
-                            &IS.FrameBuffer))
+    if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create frame buffer.");
     return llvm::Error::success();
@@ -1562,7 +1840,7 @@ public:
   llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
     VkPipelineCacheCreateInfo CacheCreateInfo = {};
     CacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    if (vkCreatePipelineCache(IS.Device, &CacheCreateInfo, nullptr,
+    if (vkCreatePipelineCache(Device, &CacheCreateInfo, nullptr,
                               &IS.PipelineCache))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create pipeline cache.");
@@ -1609,7 +1887,7 @@ public:
       PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
       PipelineCreateInfo.stage = StageInfo;
       PipelineCreateInfo.layout = IS.PipelineLayout;
-      if (vkCreateComputePipelines(IS.Device, IS.PipelineCache, 1,
+      if (vkCreateComputePipelines(Device, IS.PipelineCache, 1,
                                    &PipelineCreateInfo, nullptr, &IS.Pipeline))
         return llvm::createStringError(std::errc::device_or_resource_busy,
                                        "Failed to create pipeline.");
@@ -1722,7 +2000,7 @@ public:
     PipelineCreateInfo.renderPass = IS.RenderPass;
     PipelineCreateInfo.layout = IS.PipelineLayout;
 
-    if (vkCreateGraphicsPipelines(IS.Device, IS.PipelineCache, 1,
+    if (vkCreateGraphicsPipelines(Device, IS.PipelineCache, 1,
                                   &PipelineCreateInfo, nullptr, &IS.Pipeline))
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create graphics pipeline.");
@@ -1734,7 +2012,7 @@ public:
     if (R.isSampler())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -1778,11 +2056,11 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                              nullptr, 1, &ImageBarrier);
 
-        vkCmdCopyBufferToImage(IS.CmdBuffer, ResRef.Host.Buffer,
+        vkCmdCopyBufferToImage(IS.CB->CmdBuffer, ResRef.Host.Buffer,
                                ResRef.Image.Image, VK_IMAGE_LAYOUT_GENERAL,
                                Regions.size(), Regions.data());
       }
@@ -1796,7 +2074,7 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
                              nullptr, 0, nullptr, 1, &ImageBarrier);
       }
@@ -1811,17 +2089,74 @@ public:
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
                            1, &Barrier, 0, nullptr);
     }
+  }
+
+  // Record commands to copy a texture into a readback buffer.
+  void copyTextureToReadback(VkCommandBuffer CmdBuffer,
+                             const VulkanTexture &Tex,
+                             const VulkanBuffer &Readback,
+                             VkImageLayout OldLayout,
+                             VkAccessFlags SrcAccessMask,
+                             VkPipelineStageFlags SrcStageMask) {
+    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Format)
+                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                              : VK_IMAGE_ASPECT_COLOR_BIT;
+
+    // Transition texture to transfer source.
+    VkImageSubresourceRange SubRange = {};
+    SubRange.aspectMask = AspectMask;
+    SubRange.baseMipLevel = 0;
+    SubRange.levelCount = 1;
+    SubRange.layerCount = 1;
+
+    VkImageMemoryBarrier ImageBarrier = {};
+    ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    ImageBarrier.subresourceRange = SubRange;
+    ImageBarrier.srcAccessMask = SrcAccessMask;
+    ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    ImageBarrier.oldLayout = OldLayout;
+    ImageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    ImageBarrier.image = Tex.Image;
+    vkCmdPipelineBarrier(CmdBuffer, SrcStageMask,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &ImageBarrier);
+
+    // Copy image to readback buffer.
+    VkBufferImageCopy Region = {};
+    Region.imageSubresource.aspectMask = AspectMask;
+    Region.imageSubresource.mipLevel = 0;
+    Region.imageSubresource.baseArrayLayer = 0;
+    Region.imageSubresource.layerCount = 1;
+    Region.imageExtent.width = Tex.Desc.Width;
+    Region.imageExtent.height = Tex.Desc.Height;
+    Region.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(CmdBuffer, Tex.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           Readback.Buffer, 1, &Region);
+
+    // Barrier to make the readback buffer visible to the host.
+    VkBufferMemoryBarrier BufBarrier = {};
+    BufBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+    BufBarrier.size = VK_WHOLE_SIZE;
+    BufBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    BufBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+    BufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    BufBarrier.buffer = Readback.Buffer;
+    vkCmdPipelineBarrier(CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
+                         &BufBarrier, 0, nullptr);
   }
 
   void copyResourceDataToHost(InvocationState &IS, ResourceBundle &R) {
     if (!R.isReadWrite())
       return;
     if (R.isImage()) {
-      const offloadtest::Buffer &B = *R.BufferPtr;
+      const offloadtest::CPUBuffer &B = *R.BufferPtr;
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = B.Format == DataFormat::Depth32
                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
@@ -1842,7 +2177,8 @@ public:
 
       for (auto &ResRef : R.ResourceRefs) {
         ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                              VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
                              nullptr, 1, &ImageBarrier);
       }
@@ -1871,7 +2207,7 @@ public:
       }
 
       for (auto &ResRef : R.ResourceRefs)
-        vkCmdCopyImageToBuffer(IS.CmdBuffer, ResRef.Image.Image,
+        vkCmdCopyImageToBuffer(IS.CB->CmdBuffer, ResRef.Image.Image,
                                VK_IMAGE_LAYOUT_GENERAL, ResRef.Host.Buffer,
                                Regions.size(), Regions.data());
 
@@ -1884,7 +2220,7 @@ public:
       Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       for (auto &ResRef : R.ResourceRefs) {
         Barrier.buffer = ResRef.Host.Buffer;
-        vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
                              &Barrier, 0, nullptr);
       }
@@ -1900,21 +2236,22 @@ public:
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer,
+                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                            VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
     VkBufferCopy CopyRegion = {};
     CopyRegion.size = R.size();
     for (auto &ResRef : R.ResourceRefs)
-      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
-                      &CopyRegion);
+      vkCmdCopyBuffer(IS.CB->CmdBuffer, ResRef.Device.Buffer,
+                      ResRef.Host.Buffer, 1, &CopyRegion);
 
     VkBufferCopy CounterCopyRegion = {};
     CounterCopyRegion.size = sizeof(uint32_t);
     for (auto &ResRef : R.CounterResourceRefs)
-      vkCmdCopyBuffer(IS.CmdBuffer, ResRef.Device.Buffer, ResRef.Host.Buffer, 1,
-                      &CounterCopyRegion);
+      vkCmdCopyBuffer(IS.CB->CmdBuffer, ResRef.Device.Buffer,
+                      ResRef.Host.Buffer, 1, &CounterCopyRegion);
 
     Barrier.size = VK_WHOLE_SIZE;
     Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -1923,13 +2260,13 @@ public:
     Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     for (auto &ResRef : R.ResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
     for (auto &ResRef : R.CounterResourceRefs) {
       Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
+      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
                            VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
                            &Barrier, 0, nullptr);
     }
@@ -1940,9 +2277,21 @@ public:
       copyResourceDataToDevice(IS, R);
 
     if (P.isGraphics()) {
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*IS.RenderTarget->Desc.OptimizedClearValue);
+      if (!ColorCV)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Render target clear value must be a ClearColor.");
+      const auto *DepthCV = std::get_if<ClearDepthStencil>(
+          &*IS.DepthStencil->Desc.OptimizedClearValue);
+      if (!DepthCV)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Depth/stencil clear value must be a ClearDepthStencil.");
       VkClearValue ClearValues[2] = {};
-      ClearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-      ClearValues[1].depthStencil = {1.0f, 0};
+      ClearValues[0].color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+      ClearValues[1].depthStencil = {DepthCV->Depth, DepthCV->Stencil};
 
       VkRenderPassBeginInfo RenderPassBeginInfo = {};
       RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1955,7 +2304,7 @@ public:
       RenderPassBeginInfo.clearValueCount = 2;
       RenderPassBeginInfo.pClearValues = ClearValues;
 
-      vkCmdBeginRenderPass(IS.CmdBuffer, &RenderPassBeginInfo,
+      vkCmdBeginRenderPass(IS.CB->CmdBuffer, &RenderPassBeginInfo,
                            VK_SUBPASS_CONTENTS_INLINE);
 
       VkViewport Viewport = {};
@@ -1967,28 +2316,28 @@ public:
           static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
       Viewport.minDepth = 0.0f;
       Viewport.maxDepth = 1.0f;
-      vkCmdSetViewport(IS.CmdBuffer, 0, 1, &Viewport);
+      vkCmdSetViewport(IS.CB->CmdBuffer, 0, 1, &Viewport);
 
       VkRect2D Scissor = {};
       Scissor.offset = {0, 0};
       Scissor.extent.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
       Scissor.extent.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      vkCmdSetScissor(IS.CmdBuffer, 0, 1, &Scissor);
+      vkCmdSetScissor(IS.CB->CmdBuffer, 0, 1, &Scissor);
     }
 
     const VkPipelineBindPoint BindPoint = P.isGraphics()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
-    vkCmdBindPipeline(IS.CmdBuffer, BindPoint, IS.Pipeline);
+    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, IS.Pipeline);
     if (IS.DescriptorSets.size() > 0)
-      vkCmdBindDescriptorSets(IS.CmdBuffer, BindPoint, IS.PipelineLayout, 0,
+      vkCmdBindDescriptorSets(IS.CB->CmdBuffer, BindPoint, IS.PipelineLayout, 0,
                               IS.DescriptorSets.size(),
                               IS.DescriptorSets.data(), 0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
-      vkCmdPushConstants(IS.CmdBuffer, IS.PipelineLayout,
+      vkCmdPushConstants(IS.CB->CmdBuffer, IS.PipelineLayout,
                          getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }
@@ -1996,20 +2345,23 @@ public:
     if (P.isCompute()) {
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-      vkCmdDispatch(IS.CmdBuffer, DispatchSize[0], DispatchSize[1],
+      vkCmdDispatch(IS.CB->CmdBuffer, DispatchSize[0], DispatchSize[1],
                     DispatchSize[2]);
       llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
                    << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
     } else {
       VkDeviceSize Offsets[1]{0};
       assert(IS.VertexBuffer.has_value());
-      vkCmdBindVertexBuffers(IS.CmdBuffer, 0, 1,
+      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1,
                              &IS.VertexBuffer->Device.Buffer, Offsets);
       // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
+      vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
       llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
-      vkCmdEndRenderPass(IS.CmdBuffer);
-      copyResourceDataToHost(IS, IS.FrameBufferResource);
+      vkCmdEndRenderPass(IS.CB->CmdBuffer);
+      copyTextureToReadback(IS.CB->CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
+                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     }
 
     for (auto &R : IS.Resources)
@@ -2035,24 +2387,24 @@ public:
         for (; ResRefIt != ResourceRef.end() && DataIt != DataSet.end();
              ++ResRefIt, ++DataIt) {
           void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-          vkMapMemory(IS.Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
+          vkMapMemory(Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
                       &Mapped);
           Range.memory = ResRefIt->Host.Memory;
-          vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+          vkInvalidateMappedMemoryRanges(Device, 1, &Range);
           memcpy(DataIt->get(), Mapped, R.size());
-          vkUnmapMemory(IS.Device, ResRefIt->Host.Memory);
+          vkUnmapMemory(Device, ResRefIt->Host.Memory);
         }
         if (R.HasCounter) {
           R.BufferPtr->Counters.clear();
           for (uint32_t I = 0; I < R.getArraySize(); ++I) {
             uint32_t *Mapped = nullptr; // NOLINT(misc-const-correctness)
             auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
-            vkMapMemory(IS.Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
+            vkMapMemory(Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
                         (void **)&Mapped);
             Range.memory = CounterRef.Host.Memory;
-            vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
+            vkInvalidateMappedMemoryRanges(Device, 1, &Range);
             R.BufferPtr->Counters.push_back(*Mapped);
-            vkUnmapMemory(IS.Device, CounterRef.Host.Memory);
+            vkUnmapMemory(Device, CounterRef.Host.Memory);
           }
         }
       }
@@ -2064,110 +2416,114 @@ public:
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      const ResourceRef &ResRef = IS.FrameBufferResource.ResourceRefs[0];
+      Range.memory = IS.RTReadback->Memory;
 
       void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(IS.Device, ResRef.Host.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
+      vkMapMemory(Device, IS.RTReadback->Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
+      vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      Range.memory = ResRef.Host.Memory;
-      vkInvalidateMappedMemoryRanges(IS.Device, 1, &Range);
-
-      const Buffer &B = *P.Bindings.RTargetBufferPtr;
+      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
       memcpy(B.Data[0].get(), Mapped, B.size());
-      vkUnmapMemory(IS.Device, ResRef.Host.Memory);
+      vkUnmapMemory(Device, IS.RTReadback->Memory);
     }
     return llvm::Error::success();
   }
 
-  llvm::Error cleanup(InvocationState &IS) {
-    vkQueueWaitIdle(IS.Queue);
+  void cleanup(InvocationState &IS) {
+    vkQueueWaitIdle(GraphicsQueue.Queue);
     for (auto &V : IS.BufferViews)
-      vkDestroyBufferView(IS.Device, V, nullptr);
+      vkDestroyBufferView(Device, V, nullptr);
 
     for (auto &V : IS.ImageViews)
-      vkDestroyImageView(IS.Device, V, nullptr);
+      vkDestroyImageView(Device, V, nullptr);
 
     for (auto &R : IS.Resources) {
       for (auto &ResRef : R.ResourceRefs) {
         if (R.isBuffer()) {
-          vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
-          vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
+          vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
+          vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
         } else if (R.isSampler()) {
-          vkDestroySampler(IS.Device, ResRef.Image.Sampler, nullptr);
+          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
+        } else if (R.DescriptorType ==
+                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
+          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
+          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
+          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
         } else {
           assert(R.isImage());
-          vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
-          vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
+          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
+          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
         }
-        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
       for (auto &ResRef : R.CounterResourceRefs) {
-        vkDestroyBuffer(IS.Device, ResRef.Device.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Device.Memory, nullptr);
-        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
+        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
+        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
     }
 
     if (IS.getFullShaderStageMask() != VK_SHADER_STAGE_COMPUTE_BIT) {
       if (IS.VertexBuffer.has_value()) {
-        vkDestroyBuffer(IS.Device, IS.VertexBuffer->Device.Buffer, nullptr);
-        vkFreeMemory(IS.Device, IS.VertexBuffer->Device.Memory, nullptr);
-        vkDestroyBuffer(IS.Device, IS.VertexBuffer->Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, IS.VertexBuffer->Host.Memory, nullptr);
+        vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
+        vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
+        vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
+        vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
       }
-      for (auto &ResRef : IS.FrameBufferResource.ResourceRefs) {
-        // We know the device resource is an image, so no need to check it.
-        vkDestroyImage(IS.Device, ResRef.Image.Image, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Image.Memory, nullptr);
-        vkDestroyBuffer(IS.Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(IS.Device, ResRef.Host.Memory, nullptr);
-      }
-      vkDestroyImage(IS.Device, IS.DepthStencil.Image, nullptr);
-      vkFreeMemory(IS.Device, IS.DepthStencil.Memory, nullptr);
-      vkDestroyFramebuffer(IS.Device, IS.FrameBuffer, nullptr);
-      vkDestroyRenderPass(IS.Device, IS.RenderPass, nullptr);
+      vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
+      vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
     }
 
-    vkDestroyPipeline(IS.Device, IS.Pipeline, nullptr);
+    if (IS.Pipeline)
+      vkDestroyPipeline(Device, IS.Pipeline, nullptr);
 
     for (auto &S : IS.Shaders)
-      vkDestroyShaderModule(IS.Device, S.Shader, nullptr);
+      vkDestroyShaderModule(Device, S.Shader, nullptr);
 
-    vkDestroyPipelineCache(IS.Device, IS.PipelineCache, nullptr);
+    if (IS.PipelineCache)
+      vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
 
-    vkDestroyPipelineLayout(IS.Device, IS.PipelineLayout, nullptr);
+    if (IS.PipelineLayout)
+      vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
 
     for (auto &L : IS.DescriptorSetLayouts)
-      vkDestroyDescriptorSetLayout(IS.Device, L, nullptr);
+      vkDestroyDescriptorSetLayout(Device, L, nullptr);
 
     if (IS.Pool)
-      vkDestroyDescriptorPool(IS.Device, IS.Pool, nullptr);
-
-    vkDestroyCommandPool(IS.Device, IS.CmdPool, nullptr);
-    vkDestroyDevice(IS.Device, nullptr);
-    return llvm::Error::success();
+      vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState State;
-    if (auto Err = createDevice(State))
-      return Err;
-    llvm::outs() << "Physical device created.\n";
+    auto CleanupState = llvm::scope_exit([&]() {
+      cleanup(State);
+      llvm::outs() << "Cleanup complete.\n";
+    });
+
+    auto CBOrErr =
+        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    State.CB = std::move(*CBOrErr);
+    llvm::outs() << "Command buffer created.\n";
+
+    auto FenceOrErr = createFence("Fence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    State.Fence = std::move(*FenceOrErr);
     if (auto Err = createShaderModules(P, State))
       return Err;
     llvm::outs() << "Shader module created.\n";
-    if (auto Err = createCommandBuffer(State))
-      return Err;
     llvm::outs() << "Copy command buffer created.\n";
     if (auto Err = createResources(P, State))
       return Err;
     if (P.isGraphics()) {
-      if (auto Err = createRenderPass(P, State))
+      if (auto Err = createRenderPass(State))
         return Err;
       llvm::outs() << "Render pass created.\n";
-      if (auto Err = createFrameBuffer(P, State))
+      if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
     }
@@ -2175,8 +2531,11 @@ public:
     if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed copy command buffer.\n";
-    if (auto Err = createCommandBuffer(State))
-      return Err;
+    auto DispatchCBOrErr =
+        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    if (!DispatchCBOrErr)
+      return DispatchCBOrErr.takeError();
+    State.CB = std::move(*DispatchCBOrErr);
     llvm::outs() << "Execute command buffer created.\n";
     if (auto Err = createDescriptorPool(P, State))
       return Err;
@@ -2190,153 +2549,102 @@ public:
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State, VK_PIPELINE_STAGE_TRANSFER_BIT))
+    if (auto Err = executeCommandBuffer(State))
       return Err;
     llvm::outs() << "Executed compute command buffer.\n";
     if (auto Err = readBackData(P, State))
       return Err;
     llvm::outs() << "Compute pipeline created.\n";
 
-    if (auto Err = cleanup(State))
-      return Err;
-    llvm::outs() << "Cleanup complete.\n";
-    return llvm::Error::success();
-  }
-};
-
-class VKContext {
-private:
-  VkInstance Instance = VK_NULL_HANDLE;
-  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
-  llvm::SmallVector<std::shared_ptr<VKDevice>> Devices;
-
-  VKContext() = default;
-  ~VKContext() { cleanup(); }
-  VKContext(const VKContext &) = delete;
-
-public:
-  static VKContext &instance() {
-    static VKContext Ctx;
-    return Ctx;
-  }
-
-  void cleanup() {
-#ifndef NDEBUG
-    auto Func = (PFN_vkDestroyDebugUtilsMessengerEXT)vkGetInstanceProcAddr(
-        Instance, "vkDestroyDebugUtilsMessengerEXT");
-    if (Func != nullptr) {
-      Func(Instance, DebugMessenger, nullptr);
-    }
-#endif
-    vkDestroyInstance(Instance, NULL);
-    Instance = VK_NULL_HANDLE;
-  }
-
-  llvm::Error initialize(const DeviceConfig Config) {
-    // Create a Vulkan 1.1 instance to determine the API version
-    VkApplicationInfo AppInfo = {};
-    AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    AppInfo.pApplicationName = "OffloadTest";
-    // TODO: We should set this based on a command line flag, and simplify the
-    // code below to error if the requested version isn't supported.
-    AppInfo.apiVersion = VK_API_VERSION_1_1;
-
-    VkInstanceCreateInfo CreateInfo = {};
-    CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    CreateInfo.pApplicationInfo = &AppInfo;
-
-    llvm::SmallVector<const char *> Extensions;
-    llvm::SmallVector<const char *> Layers;
-#if __APPLE__
-    // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
-    // extension is required, so we can just force this one on. If it fails, the
-    // whole device would fail anyways.
-    Extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-    CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
-#endif
-
-    CreateInfo.ppEnabledExtensionNames = Extensions.data();
-    CreateInfo.enabledExtensionCount = Extensions.size();
-
-    VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a base Vulkan device");
-    if (Res)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error: %d",
-                                     Res);
-
-    uint32_t DeviceCount = 0;
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to get device count");
-    std::vector<VkPhysicalDevice> PhysicalDevicesTmp(DeviceCount);
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                   PhysicalDevicesTmp.data()))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to enumerate devices");
-    {
-      auto TmpDev = std::make_shared<VKDevice>(PhysicalDevicesTmp[0]);
-      AppInfo.apiVersion = TmpDev->getProps().apiVersion;
-
-      if (Config.EnableValidationLayer) {
-        const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
-        if (TmpDev->isLayerSupported(ValidationLayer))
-          Layers.push_back(ValidationLayer.data());
-      }
-
-      if (Config.EnableDebugLayer) {
-        const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-        if (TmpDev->isExtensionSupported(DebugUtilsExtensionName))
-          Extensions.push_back(DebugUtilsExtensionName.data());
-      }
-
-      CreateInfo.ppEnabledLayerNames = Layers.data();
-      CreateInfo.enabledLayerCount = Layers.size();
-      CreateInfo.ppEnabledExtensionNames = Extensions.data();
-      CreateInfo.enabledExtensionCount = Extensions.size();
-    }
-    vkDestroyInstance(Instance, NULL);
-    Instance = VK_NULL_HANDLE;
-
-    // This second creation shouldn't ever fail, but it tries to create the
-    // highest supported device version.
-    Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-    if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Cannot find a compatible Vulkan device");
-    if (Res)
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Unknown Vulkan initialization error %d",
-                                     Res);
-
-#ifndef NDEBUG
-    DebugMessenger = registerDebugUtilCallback(Instance);
-#endif
-
-    DeviceCount = 0;
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to get device count");
-    std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
-    if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                   PhysicalDevices.data()))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Failed to enumerate devices");
-    for (const auto &Dev : PhysicalDevices) {
-      auto NewDev = std::make_shared<VKDevice>(Dev);
-      Devices.push_back(NewDev);
-      Device::registerDevice(std::static_pointer_cast<Device>(NewDev));
-    }
-
     return llvm::Error::success();
   }
 };
 } // namespace
 
-llvm::Error Device::initializeVKDevices(const DeviceConfig Config) {
-  return VKContext::instance().initialize(Config);
-}
+llvm::Error offloadtest::initializeVulkanDevices(
+    const DeviceConfig Config,
+    llvm::SmallVectorImpl<std::unique_ptr<Device>> &Devices) {
+  // Request the highest supported API version
+  uint32_t ApiVersion = 0;
+  vkEnumerateInstanceVersion(&ApiVersion);
 
-void Device::cleanupVKDevices() { VKContext::instance().cleanup(); }
+  VkApplicationInfo AppInfo = {};
+  AppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+  AppInfo.pApplicationName = "OffloadTest";
+  AppInfo.apiVersion = ApiVersion;
+
+  VkInstanceCreateInfo CreateInfo = {};
+  CreateInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  CreateInfo.pApplicationInfo = &AppInfo;
+
+  llvm::SmallVector<const char *> EnabledInstanceExtensions;
+  llvm::SmallVector<const char *> EnabledLayers;
+#if __APPLE__
+  // If we build Vulkan support for Apple platforms the VK_KHR_PORTABILITY
+  // extension is required, so we can just force this one on. If it fails, the
+  // whole device would fail anyways.
+  EnabledInstanceExtensions.push_back(
+      VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  CreateInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+#endif
+
+  const llvm::SmallVector<VkLayerProperties, 0> AvailableInstanceLayers =
+      queryInstanceLayers();
+  if (Config.EnableValidationLayer) {
+    const llvm::StringRef ValidationLayer = "VK_LAYER_KHRONOS_validation";
+    if (isLayerSupported(AvailableInstanceLayers, ValidationLayer))
+      EnabledLayers.push_back(ValidationLayer.data());
+  }
+  const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
+      queryInstanceExtensions(nullptr);
+  if (Config.EnableDebugLayer) {
+    const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
+    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
+      EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
+  }
+
+  CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
+  CreateInfo.enabledLayerCount = EnabledLayers.size();
+  CreateInfo.ppEnabledExtensionNames = EnabledInstanceExtensions.data();
+  CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
+
+  VkInstance Instance = VK_NULL_HANDLE;
+  const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
+  if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Cannot find a base Vulkan device");
+  if (Res)
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Unknown Vulkan initialization error: %d",
+                                   Res);
+
+#ifndef NDEBUG
+  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
+#else
+  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
+#endif
+
+  const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
+      std::make_shared<VulkanInstance>(Instance, DebugMessenger);
+
+  uint32_t DeviceCount = 0;
+  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Failed to get device count");
+  std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
+  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                 PhysicalDevices.data()))
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "Failed to enumerate devices");
+
+  for (const auto &PDev : PhysicalDevices) {
+    auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
+                                            AvailableInstanceLayers);
+    if (!DeviceOrErr) {
+      return DeviceOrErr.takeError();
+    }
+    Devices.push_back(std::move(*DeviceOrErr));
+  }
+
+  return llvm::Error::success();
+}

@@ -59,7 +59,7 @@ enum class ResourceKind {
   RWTexture2D,
   ConstantBuffer,
   Sampler,
-  SamplerComparison,
+  SampledTexture2D,
 };
 
 enum class FilterMode { Nearest, Linear };
@@ -77,6 +77,8 @@ enum class CompareFunction {
   Always
 };
 
+enum class SamplerKind { Sampler, SamplerComparison };
+
 struct Sampler {
   std::string Name;
   FilterMode MinFilter = FilterMode::Linear;
@@ -86,6 +88,7 @@ struct Sampler {
   float MaxLOD = std::numeric_limits<float>::max();
   float MipLODBias = 0.0f;
   CompareFunction ComparisonOp = CompareFunction::Never;
+  SamplerKind Kind = SamplerKind::Sampler;
 };
 
 struct DirectXBinding {
@@ -130,7 +133,7 @@ static inline uint32_t getFormatSize(DataFormat Format) {
   llvm_unreachable("All cases covered.");
 }
 
-struct Buffer {
+struct CPUBuffer {
   std::string Name;
   DataFormat Format;
   int Channels;
@@ -161,8 +164,8 @@ struct Result {
   Rule ComparisonRule;
   std::string Actual;
   std::string Expected;
-  Buffer *ActualPtr = nullptr;
-  Buffer *ExpectedPtr = nullptr;
+  CPUBuffer *ActualPtr = nullptr;
+  CPUBuffer *ExpectedPtr = nullptr;
   DenormMode DM = DenormMode::Any;
   unsigned ULPT; // ULP Tolerance
   double Epsilon;
@@ -173,7 +176,7 @@ struct Resource {
   std::string Name;
   DirectXBinding DXBinding;
   std::optional<VulkanBinding> VKBinding;
-  Buffer *BufferPtr = nullptr;
+  CPUBuffer *BufferPtr = nullptr;
   Sampler *SamplerPtr = nullptr;
   bool HasCounter;
   std::optional<uint32_t> TilesMapped;
@@ -186,7 +189,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
+    case ResourceKind::SampledTexture2D:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -201,7 +204,6 @@ struct Resource {
   bool isSampler() const {
     switch (Kind) {
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
       return true;
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
@@ -212,6 +214,7 @@ struct Resource {
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::SampledTexture2D:
       return false;
     }
   }
@@ -226,10 +229,10 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
       return false;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::SampledTexture2D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -249,6 +252,15 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  bool isSampledTexture() const {
+    switch (Kind) {
+    case ResourceKind::SampledTexture2D:
       return true;
     default:
       return false;
@@ -279,7 +291,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
-    case ResourceKind::SamplerComparison:
+    case ResourceKind::SampledTexture2D:
       return false;
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -306,7 +318,7 @@ enum class RootParamKind {
 struct RootResource : public Resource {};
 
 struct RootConstant {
-  Buffer *BufferPtr;
+  CPUBuffer *BufferPtr;
   std::string Name;
 };
 
@@ -335,11 +347,11 @@ struct VertexAttribute {
 
 struct IOBindings {
   std::string VertexBuffer;
-  Buffer *VertexBufferPtr;
+  CPUBuffer *VertexBufferPtr;
   llvm::SmallVector<VertexAttribute> VertexAttributes;
 
   std::string RenderTarget;
-  Buffer *RTargetBufferPtr;
+  CPUBuffer *RTargetBufferPtr;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
@@ -402,7 +414,7 @@ struct Pipeline {
 
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
-  llvm::SmallVector<Buffer> Buffers;
+  llvm::SmallVector<CPUBuffer> Buffers;
   llvm::SmallVector<Sampler> Samplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
@@ -422,7 +434,7 @@ struct Pipeline {
     return DescriptorCount;
   }
 
-  Buffer *getBuffer(llvm::StringRef Name) {
+  CPUBuffer *getBuffer(llvm::StringRef Name) {
     for (auto &B : Buffers)
       if (Name == B.Name)
         return &B;
@@ -446,7 +458,7 @@ struct Pipeline {
 
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
-LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Buffer)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::CPUBuffer)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Sampler)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
@@ -467,8 +479,8 @@ template <> struct MappingTraits<offloadtest::DescriptorSet> {
   static void mapping(IO &I, offloadtest::DescriptorSet &D);
 };
 
-template <> struct MappingTraits<offloadtest::Buffer> {
-  static void mapping(IO &I, offloadtest::Buffer &R);
+template <> struct MappingTraits<offloadtest::CPUBuffer> {
+  static void mapping(IO &I, offloadtest::CPUBuffer &R);
 };
 
 template <> struct MappingTraits<offloadtest::Sampler> {
@@ -591,6 +603,15 @@ template <> struct ScalarEnumerationTraits<offloadtest::CompareFunction> {
   }
 };
 
+template <> struct ScalarEnumerationTraits<offloadtest::SamplerKind> {
+  static void enumeration(IO &I, offloadtest::SamplerKind &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::SamplerKind::Val)
+    ENUM_CASE(Sampler);
+    ENUM_CASE(SamplerComparison);
+#undef ENUM_CASE
+  }
+};
+
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   static void enumeration(IO &I, offloadtest::DataFormat &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataFormat::Val)
@@ -626,7 +647,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(RWTexture2D);
     ENUM_CASE(ConstantBuffer);
     ENUM_CASE(Sampler);
-    ENUM_CASE(SamplerComparison);
+    ENUM_CASE(SampledTexture2D);
 #undef ENUM_CASE
   }
 };

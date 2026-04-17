@@ -103,7 +103,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/780
-# XFAIL: QC && DirectX && DXC
+# XFAIL: QC && DirectX
 
 # REQUIRES: Int64
 # RUN: split-file %s %t

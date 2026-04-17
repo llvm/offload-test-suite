@@ -1,0 +1,89 @@
+//===- DXResources.h - DirectX Resource Helpers ---------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+//
+//===----------------------------------------------------------------------===//
+
+#ifndef OFFLOADTEST_API_DXRESOURCES_H
+#define OFFLOADTEST_API_DXRESOURCES_H
+
+#include "API/Device.h"
+
+#include <d3d12.h>
+#include <dxgiformat.h>
+
+namespace offloadtest {
+
+inline D3D12_HEAP_TYPE getDXHeapType(MemoryLocation Location) {
+  switch (Location) {
+  case MemoryLocation::GpuOnly:
+    return D3D12_HEAP_TYPE_DEFAULT;
+  case MemoryLocation::CpuToGpu:
+    return D3D12_HEAP_TYPE_UPLOAD;
+  case MemoryLocation::GpuToCpu:
+    return D3D12_HEAP_TYPE_READBACK;
+  }
+  llvm_unreachable("All MemoryLocation cases handled");
+}
+
+inline DXGI_FORMAT getDXGIFormat(Format Format) {
+  switch (Format) {
+  case Format::R16Sint:
+    return DXGI_FORMAT_R16_SINT;
+  case Format::R16Uint:
+    return DXGI_FORMAT_R16_UINT;
+  case Format::RG16Sint:
+    return DXGI_FORMAT_R16G16_SINT;
+  case Format::RG16Uint:
+    return DXGI_FORMAT_R16G16_UINT;
+  case Format::RGBA16Sint:
+    return DXGI_FORMAT_R16G16B16A16_SINT;
+  case Format::RGBA16Uint:
+    return DXGI_FORMAT_R16G16B16A16_UINT;
+  case Format::R32Sint:
+    return DXGI_FORMAT_R32_SINT;
+  case Format::R32Uint:
+    return DXGI_FORMAT_R32_UINT;
+  case Format::R32Float:
+    return DXGI_FORMAT_R32_FLOAT;
+  case Format::RG32Sint:
+    return DXGI_FORMAT_R32G32_SINT;
+  case Format::RG32Uint:
+    return DXGI_FORMAT_R32G32_UINT;
+  case Format::RG32Float:
+    return DXGI_FORMAT_R32G32_FLOAT;
+  case Format::RGB32Float:
+    return DXGI_FORMAT_R32G32B32_FLOAT;
+  case Format::RGBA32Sint:
+    return DXGI_FORMAT_R32G32B32A32_SINT;
+  case Format::RGBA32Uint:
+    return DXGI_FORMAT_R32G32B32A32_UINT;
+  case Format::RGBA32Float:
+    return DXGI_FORMAT_R32G32B32A32_FLOAT;
+  case Format::D32Float:
+    return DXGI_FORMAT_D32_FLOAT;
+  case Format::D32FloatS8Uint:
+    return DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+  }
+  llvm_unreachable("All Format cases handled");
+}
+
+inline D3D12_RESOURCE_FLAGS getDXResourceFlags(TextureUsage Usage) {
+  D3D12_RESOURCE_FLAGS Flags = D3D12_RESOURCE_FLAG_NONE;
+  if ((Usage & TextureUsage::Storage) != 0)
+    Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  if ((Usage & TextureUsage::RenderTarget) != 0)
+    Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+  if ((Usage & TextureUsage::DepthStencil) != 0)
+    Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  return Flags;
+}
+
+} // namespace offloadtest
+
+#endif // OFFLOADTEST_API_DXRESOURCES_H
