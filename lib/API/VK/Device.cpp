@@ -490,6 +490,16 @@ public:
   VkDevice Device = VK_NULL_HANDLE;
   std::unique_ptr<VulkanFence> SubmitFence;
   uint64_t FenceCounter = 0;
+  // Batches of command buffers submitted to the GPU that may still be
+  // in-flight.  VulkanCommandBuffer's destructor destroys the VkCommandPool,
+  // which would invalidate any still-pending command buffers.  Each batch
+  // records the fence value it signals so we can non-blockingly query
+  // progress and release completed batches.
+  struct InFlightBatch {
+    uint64_t FenceValue;
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs;
+  };
+  llvm::SmallVector<InFlightBatch> InFlightBatches;
 
   VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx, VkDevice Device,
               std::unique_ptr<VulkanFence> SubmitFence)
@@ -555,12 +565,20 @@ private:
 
 llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
     llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
+  // Non-blocking: query how far the GPU has progressed and release
+  // command buffers from completed submissions.
+  {
+    const uint64_t Completed = SubmitFence->getFenceValue();
+    llvm::erase_if(InFlightBatches, [Completed](const InFlightBatch &B) {
+      return B.FenceValue <= Completed;
+    });
+  }
+
   llvm::SmallVector<VkCommandBuffer> CmdBuffers;
   CmdBuffers.reserve(CBs.size());
 
-  // Wait on the previous submit's fence value before executing this batch,
-  // so that back-to-back submits don't overlap on the GPU. Waiting for a
-  // value that is already signaled (including 0 on first submit) is a no-op.
+  // GPU-side wait so that back-to-back submits don't overlap on the GPU.
+  // Waiting for a value that is already signaled (including 0) is a no-op.
   const uint64_t WaitValue = FenceCounter;
   const uint64_t SignalValue = ++FenceCounter;
   const VkPipelineStageFlags WaitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -594,6 +612,9 @@ llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
   if (vkQueueSubmit(Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
     return llvm::createStringError(std::errc::device_or_resource_busy,
                                    "Failed to submit to queue.");
+
+  // Keep submitted command buffers alive until the GPU is done with them.
+  InFlightBatches.push_back({SignalValue, std::move(CBs)});
 
   return offloadtest::SubmitResult{SubmitFence.get(), SignalValue};
 }
@@ -841,6 +862,9 @@ public:
   ~VulkanDevice() override {
     if (Device != VK_NULL_HANDLE) {
       vkDeviceWaitIdle(Device);
+      // Release in-flight command buffers before destroying the device,
+      // since their destructors call vkDestroyCommandPool on the VkDevice.
+      GraphicsQueue.InFlightBatches.clear();
       // Destroy the queue's fence before the device, since the fence
       // references the VkDevice for vkDestroySemaphore.
       GraphicsQueue.SubmitFence.reset();
