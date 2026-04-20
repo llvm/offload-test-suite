@@ -277,7 +277,14 @@ jobs:
         shell: bash
         run: |
             cd $GITHUB_WORKSPACE
-            tar xf $RUNNER_TEMP/build-artifacts.tar --touch
+            tar xf $RUNNER_TEMP/build-artifacts.tar
+      - name: Refresh artifact timestamps
+        shell: powershell
+        run: |
+          # Touch all extracted build outputs so ninja sees them as newer
+          # than source files and skips rebuilding.
+          Get-ChildItem -Recurse -File DXC\build\bin, llvm-project\build |
+            ForEach-Object { $_.LastWriteTime = Get-Date }
 
       - name: Setup Windows x64
         if: runner.arch != 'ARM64'
