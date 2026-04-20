@@ -115,6 +115,15 @@ public:
   std::unique_ptr<MTLFence> SubmitFence;
   uint64_t FenceCounter = 0;
 
+  // Batches of command buffers submitted to the GPU that may still be
+  // in-flight.  Each batch records the fence value it signals so we can
+  // non-blockingly query progress and release completed batches.
+  struct InFlightBatch {
+    uint64_t FenceValue;
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs;
+  };
+  llvm::SmallVector<InFlightBatch> InFlightBatches;
+
   MTLQueue(MTL::CommandQueue *Queue, std::unique_ptr<MTLFence> SubmitFence)
       : Queue(Queue), SubmitFence(std::move(SubmitFence)) {}
   ~MTLQueue() override {
@@ -194,6 +203,15 @@ private:
 
 llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
     llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
+  // Non-blocking: query how far the GPU has progressed and release
+  // command buffers from completed submissions.
+  {
+    const uint64_t Completed = SubmitFence->getFenceValue();
+    llvm::erase_if(InFlightBatches, [Completed](const InFlightBatch &B) {
+      return B.FenceValue <= Completed;
+    });
+  }
+
   // Metal serial queues guarantee that command buffers execute in commit order,
   // so no explicit wait on prior work is needed here.
   const uint64_t SignalValue = ++FenceCounter;
@@ -205,6 +223,9 @@ llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
       MCB.CmdBuffer->encodeSignalEvent(SubmitFence->Event, SignalValue);
     MCB.CmdBuffer->commit();
   }
+
+  // Keep submitted command buffers alive until the GPU is done with them.
+  InFlightBatches.push_back({SignalValue, std::move(CBs)});
 
   return offloadtest::SubmitResult{SubmitFence.get(), SignalValue};
 }
