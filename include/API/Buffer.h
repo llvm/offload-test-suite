@@ -34,7 +34,7 @@ public:
   GPUAPI getAPI() const { return API; }
 
 protected:
-  explicit Buffer(GPUAPI API) : API(API) {}
+  explicit Buffer(GPUAPI API);
 };
 
 } // namespace offloadtest
