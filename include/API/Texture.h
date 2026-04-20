@@ -152,7 +152,7 @@ public:
   GPUAPI getAPI() const { return API; }
 
 protected:
-  explicit Texture(GPUAPI API);
+  explicit Texture(GPUAPI API) : API(API) {}
 };
 
 } // namespace offloadtest

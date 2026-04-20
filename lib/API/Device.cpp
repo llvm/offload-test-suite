@@ -21,8 +21,6 @@
 
 using namespace offloadtest;
 
-Buffer::Buffer(GPUAPI API) : API(API) {}
-
 Buffer::~Buffer() {}
 
 CommandBuffer::~CommandBuffer() {}
@@ -30,8 +28,6 @@ CommandBuffer::~CommandBuffer() {}
 Fence::~Fence() {}
 
 Queue::~Queue() {}
-
-Texture::Texture(GPUAPI API) : API(API) {}
 
 Texture::~Texture() {}
 
