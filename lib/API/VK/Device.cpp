@@ -396,6 +396,32 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    void *Ptr = nullptr;
+    if (vkMapMemory(Dev, Memory, 0, SizeInBytes, 0, &Ptr) != VK_SUCCESS)
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to map buffer.");
+    // HOST_CACHED memory (GpuToCpu) needs explicit invalidation so the CPU
+    // sees the GPU-side writes.
+    if (Desc.Location == MemoryLocation::GpuToCpu) {
+      VkMappedMemoryRange Range = {};
+      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      Range.memory = Memory;
+      Range.offset = 0;
+      Range.size = VK_WHOLE_SIZE;
+      vkInvalidateMappedMemoryRanges(Dev, 1, &Range);
+    }
+    return Ptr;
+  }
+
+  llvm::Error unmap() override {
+    vkUnmapMemory(Dev, Memory);
+    return llvm::Error::success();
+  }
+
   ~VulkanBuffer() override {
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
@@ -690,7 +716,7 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
-    std::shared_ptr<VulkanBuffer> VB;
+    std::unique_ptr<offloadtest::Buffer> VB;
 
     uint32_t ShaderStageMask = 0;
 
@@ -1767,24 +1793,12 @@ public:
         return llvm::createStringError(
             std::errc::invalid_argument,
             "No Vertex buffer specified for graphics pipeline.");
-      const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
 
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr = createBuffer("VertexBuffer", BufDesc, VB.size());
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.VB = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
-
-      // TODO: Currently uses a single CpuToGpu mapped buffer. For optimal GPU
-      // performance on discrete GPUs, use a staging buffer + copy to a GpuOnly
-      // vertex buffer instead.
-      const size_t BufSize = IS.VB->getSizeInBytes();
-      void *Mapped = nullptr;
-      vkMapMemory(Device, IS.VB->Memory, 0, BufSize, 0, &Mapped);
-      memcpy(Mapped, VB.Data[0].get(), BufSize);
-      vkUnmapMemory(Device, IS.VB->Memory);
+      auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
+          *this, *P.Bindings.VertexBufferPtr);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+      IS.VB = std::move(*VBOrErr);
     }
 
     return llvm::Error::success();
@@ -2567,7 +2581,7 @@ public:
     } else {
       VkDeviceSize Offsets[1]{0};
       assert(IS.VB);
-      VkBuffer VBHandle = IS.VB->Buffer;
+      VkBuffer VBHandle = llvm::cast<VulkanBuffer>(*IS.VB).Buffer;
       vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
       // instanceCount must be >=1 to draw; previously was 0 which draws nothing
       vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);

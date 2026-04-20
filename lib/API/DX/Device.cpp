@@ -345,6 +345,22 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    void *Ptr = nullptr;
+    if (auto Err =
+            HR::toError(Buffer->Map(0, nullptr, &Ptr), "Failed to map buffer."))
+      return std::move(Err);
+    return Ptr;
+  }
+
+  llvm::Error unmap() override {
+    Buffer->Unmap(0, nullptr);
+    return llvm::Error::success();
+  }
+
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::DirectX;
   }
@@ -628,7 +644,7 @@ private:
     std::unique_ptr<offloadtest::Texture> RT;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DS;
-    std::optional<offloadtest::VertexBuffer> VB;
+    std::unique_ptr<offloadtest::Buffer> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
@@ -1871,30 +1887,17 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No vertex buffer bound for graphics pipeline.");
-    const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
-    const uint64_t VBSize = VB.size();
 
-    BufferCreateDesc BufDesc = {};
-    BufDesc.Location = MemoryLocation::CpuToGpu;
-    BufDesc.Usage = BufferUsage::VertexBuffer;
-    auto BufOrErr = createBuffer("VertexBuffer", BufDesc, VBSize);
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-    IS.VB = std::static_pointer_cast<DXBuffer>(*BufOrErr);
+    auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
+        *this, *P.Bindings.VertexBufferPtr);
+    if (!VBOrErr)
+      return VBOrErr.takeError();
+    IS.VB = std::move(*VBOrErr);
 
-    // TODO: Currently uses a single CpuToGpu mapped buffer. For optimal GPU
-    // performance on discrete GPUs, use a staging buffer + copy to a GpuOnly
-    // vertex buffer instead.
-    void *Ptr = nullptr;
-    if (auto Err = HR::toError(IS.VB->Buffer->Map(0, nullptr, &Ptr),
-                               "Failed to map vertex buffer"))
-      return Err;
-    memcpy(Ptr, VB.Data[0].get(), VBSize);
-    IS.VB->Buffer->Unmap(0, nullptr);
-
+    auto &VBBuf = llvm::cast<DXBuffer>(*IS.VB);
     D3D12_VERTEX_BUFFER_VIEW VBView = {};
-    VBView.BufferLocation = IS.VB->Buffer->GetGPUVirtualAddress();
-    VBView.SizeInBytes = static_cast<UINT>(VBSize);
+    VBView.BufferLocation = VBBuf.Buffer->GetGPUVirtualAddress();
+    VBView.SizeInBytes = static_cast<UINT>(IS.VB->getSizeInBytes());
     VBView.StrideInBytes = P.Bindings.getVertexStride();
 
     IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

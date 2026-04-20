@@ -159,6 +159,22 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    return Buf->contents();
+  }
+
+  llvm::Error unmap() override {
+    // Managed storage (CpuToGpu) requires an explicit didModifyRange to
+    // propagate CPU-side writes to the GPU. Shared storage (GpuToCpu) is
+    // coherent and needs no action.
+    if (Desc.Location == MemoryLocation::CpuToGpu)
+      Buf->didModifyRange(NS::Range::Make(0, SizeInBytes));
+    return llvm::Error::success();
+  }
+
   ~MTLBuffer() override {
     if (Buf)
       Buf->release();
@@ -258,7 +274,7 @@ class MTLDevice : public offloadtest::Device {
 
     NS::AutoreleasePool *Pool = nullptr;
     MTL::Buffer *ArgBuffer;
-    std::shared_ptr<MTLBuffer> VB;
+    std::unique_ptr<offloadtest::Buffer> VB;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
     std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
@@ -353,23 +369,12 @@ class MTLDevice : public offloadtest::Device {
         return llvm::createStringError(
             std::errc::invalid_argument,
             "No vertex buffer specified for graphics pipeline.");
-      const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
 
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr = createBuffer("VertexBuffer", BufDesc, VB.size());
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.VB = std::static_pointer_cast<MTLBuffer>(*BufOrErr);
-
-      // TODO: Currently uses a single CpuToGpu mapped buffer. On discrete GPUs
-      // (DX/VK), consider using a staging buffer + copy to a GpuOnly vertex
-      // buffer for optimal GPU read performance. On Apple Silicon this is
-      // unnecessary due to unified memory.
-      const size_t BufSize = IS.VB->getSizeInBytes();
-      memcpy(IS.VB->Buf->contents(), VB.Data[0].get(), BufSize);
-      IS.VB->Buf->didModifyRange(NS::Range::Make(0, BufSize));
+      auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
+          *this, *P.Bindings.VertexBufferPtr);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+      IS.VB = std::move(*VBOrErr);
     }
     return llvm::Error::success();
   }
@@ -555,7 +560,7 @@ class MTLDevice : public offloadtest::Device {
 
     // Bind vertex buffer at slot 0 to match the vertex descriptor which
     // references buffer index 0.
-    CmdEncoder->setVertexBuffer(IS.VB->Buf, 0, 0);
+    CmdEncoder->setVertexBuffer(llvm::cast<MTLBuffer>(*IS.VB).Buf, 0, 0);
 
     CmdEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0),
                                P.Bindings.getVertexCount());
