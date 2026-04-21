@@ -662,11 +662,7 @@ public:
   }
 
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
-                       uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
-                       uint32_t /*ThreadsPerGroupY*/,
-                       uint32_t /*ThreadsPerGroupZ*/) override {
-    // Vulkan bakes threadgroup size into the pipeline; only group counts are
-    // used for dispatch.
+                       uint32_t GroupCountZ) override {
     addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                   VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
@@ -2547,7 +2543,7 @@ public:
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
       if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
-                                      DispatchSize[2], 1, 1, 1))
+                                      DispatchSize[2]))
         return Err;
       Encoder.endEncoding();
       llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "

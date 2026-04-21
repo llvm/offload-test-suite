@@ -239,6 +239,11 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
   MTL::ComputeCommandEncoder *ComputeEnc = nullptr;
   MTL::BlitCommandEncoder *BlitEnc = nullptr;
 
+  /// Threadgroup size from shader reflection (the numthreads() attribute
+  /// persisted in the transpiled Metallib). Must be set via
+  /// setThreadGroupSize() before dispatching.
+  MTL::Size ThreadsPerGroup = {1, 1, 1};
+
   /// Accumulated barrier scope from commands recorded since the last barrier.
   MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
 
@@ -295,6 +300,13 @@ public:
 
   MTL::ComputeCommandEncoder *getNative() const { return ComputeEnc; }
 
+  /// Set the threadgroup size for subsequent dispatch calls. The values must
+  /// come from shader reflection (the numthreads() attribute in the HLSL
+  /// source, persisted in the transpiled Metallib).
+  void setThreadGroupSize(NS::UInteger X, NS::UInteger Y, NS::UInteger Z) {
+    ThreadsPerGroup = MTL::Size(X, Y, Z);
+  }
+
   MTL::CommandEncoder *getActiveEncoder() const {
     if (ComputeEnc)
       return ComputeEnc;
@@ -319,22 +331,17 @@ public:
   }
 
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
-                       uint32_t GroupCountZ, uint32_t ThreadsPerGroupX,
-                       uint32_t ThreadsPerGroupY,
-                       uint32_t ThreadsPerGroupZ) override {
+                       uint32_t GroupCountZ) override {
     if (auto Err = ensureComputeEncoder())
       return Err;
     flushBarrier();
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
                                       GroupCountY, GroupCountZ)
                             .str());
-    const MTL::Size GridSize(
-        static_cast<NS::UInteger>(ThreadsPerGroupX) * GroupCountX,
-        static_cast<NS::UInteger>(ThreadsPerGroupY) * GroupCountY,
-        static_cast<NS::UInteger>(ThreadsPerGroupZ) * GroupCountZ);
-    const MTL::Size GroupSize(ThreadsPerGroupX, ThreadsPerGroupY,
-                              ThreadsPerGroupZ);
-    ComputeEnc->dispatchThreads(GridSize, GroupSize);
+    const MTL::Size GridSize(ThreadsPerGroup.width * GroupCountX,
+                             ThreadsPerGroup.height * GroupCountY,
+                             ThreadsPerGroup.depth * GroupCountZ);
+    ComputeEnc->dispatchThreads(GridSize, ThreadsPerGroup);
     addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
     return llvm::Error::success();
   }
@@ -708,11 +715,12 @@ class MTLDevice : public offloadtest::Device {
         TGS[I] = *OpVal;
       }
     }
+    Encoder.setThreadGroupSize(TGS[0], TGS[1], TGS[2]);
 
     const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-    if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
-                                    DispatchSize[2], TGS[0], TGS[1], TGS[2]))
+    if (auto Err =
+            Encoder.dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]))
       return Err;
     Encoder.endEncoding();
     return llvm::Error::success();
