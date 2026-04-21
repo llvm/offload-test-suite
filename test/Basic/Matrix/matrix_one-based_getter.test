@@ -147,9 +147,6 @@ DescriptorSets:
 ...
 #--- end
 
-# BUG Vulkan https://github.com/llvm/offload-test-suite/issues/1091
-# XFAIL: Vulkan && Clang
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
