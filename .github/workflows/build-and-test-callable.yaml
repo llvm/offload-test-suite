@@ -53,6 +53,12 @@ on:
         - windows-amd
         - windows-intel
         - windows-nvidia
+        - windows-qc
+      SplitBuild:
+        description: 'Split build and test into separate jobs (build on any runner, test on GPU runner)'
+        required: false
+        default: false
+        type: boolean
       LLVM-ExtraCMakeArgs:
         description: 'Extra CMake Args for LLVM'
         required: false
@@ -71,7 +77,7 @@ on:
         default: 'main'
         type: string
       LLVM-fork:
-        description: 'LLVM For'
+        description: 'LLVM Fork'
         required: false
         default: 'llvm'
         type: string
@@ -86,6 +92,11 @@ on:
       SKU:
         required: true
         type: string
+      SplitBuild:
+        description: 'Split build and test into separate jobs'
+        required: false
+        default: false
+        type: boolean
       BuildType:
         description: 'Build Config'
         required: false
@@ -105,7 +116,18 @@ jobs:
   build:
     permissions:
       checks: write
-    runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
+    # When SplitBuild is true, build on any available runner of
+    # the right architecture. Otherwise, build on the GPU runner.
+    runs-on: >-
+      ${{ fromJSON(
+        inputs.SplitBuild != true
+          && format('["self-hosted", "hlsl-{0}"]', inputs.SKU)
+        || inputs.SKU == 'windows-qc'
+          && '["self-hosted", "ARM64", "Windows"]'
+        || inputs.SKU == 'macos'
+          && '["self-hosted", "hlsl-macos"]'
+        || '["self-hosted", "Windows", "X64"]'
+      ) }}
     steps:
       - name: Checkout DXC
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -131,6 +153,7 @@ jobs:
           fetch-depth: 1
       - name: Checkout Golden Images
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        if: inputs.SplitBuild != true
         with:
           repository: llvm/offload-golden-images
           ref: main
@@ -170,6 +193,136 @@ jobs:
             cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
             ninja hlsl-test-depends
       - name: Dump GPU Info
+        if: inputs.SplitBuild != true
+        run: |
+            cd llvm-project
+            cd build
+            ./bin/api-query
+      - name: Run HLSL Tests
+        if: inputs.SplitBuild != true
+        run: |
+            cd llvm-project
+            cd build
+            ninja check-hlsl-unit
+            ninja ${{ inputs.TestTarget }}
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
+        if: >-
+          always() && inputs.OS == 'macOS'
+          && inputs.SplitBuild != true
+        with:
+          comment_mode: off
+          files: llvm-project/build/**/testresults.xunit.xml
+      - name: Run dxdiag (Windows only)
+        if: >-
+          inputs.OS == 'windows' && failure()
+          && inputs.SplitBuild != true
+        shell: powershell
+        run: |
+          $fileName = "dxdiag.txt"
+          $output = Join-Path $env:RUNNER_TEMP $fileName
+          dxdiag /t $output | Out-Null
+          Write-Host "DxDiag report saved to $output"
+      - name: Upload dxdiag artifact
+        if: >-
+          inputs.OS == 'windows' && failure()
+          && inputs.SplitBuild != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
+          path: ${{ runner.temp }}/dxdiag.txt
+
+      # When SplitBuild is true, package and upload build
+      # artifacts for the test job.
+      - name: Package build artifacts
+        if: inputs.SplitBuild == true
+        shell: bash
+        run: |
+            cd $GITHUB_WORKSPACE
+            tar cf $RUNNER_TEMP/build-artifacts.tar \
+              --exclude='*.obj' \
+              --exclude='*.o' \
+              --exclude='*.ilk' \
+              --exclude='*.pdb' \
+              --exclude='CMakeFiles' \
+              DXC/build/bin llvm-project/build
+      - name: Upload build artifacts
+        if: inputs.SplitBuild == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ runner.temp }}/build-artifacts.tar
+          retention-days: 1
+
+  test:
+    if: inputs.SplitBuild == true
+    needs: build
+    permissions:
+      checks: write
+    runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
+    steps:
+      - name: Checkout DXC
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: Microsoft/DirectXShaderCompiler
+          ref: ${{ inputs.DXC-branch }}
+          path: DXC
+          fetch-depth: 1
+          submodules: true
+      - name: Checkout LLVM
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.LLVM-fork }}/llvm-project
+          ref: ${{ inputs.LLVM-branch }}
+          path: llvm-project
+          fetch-depth: 1
+      - name: Checkout OffloadTest
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: llvm/offload-test-suite
+          ref: ${{ inputs.OffloadTest-branch }}
+          path: OffloadTest
+          fetch-depth: 1
+      - name: Checkout Golden Images
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: llvm/offload-golden-images
+          ref: main
+          path: golden-images
+          fetch-depth: 1
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ runner.temp }}
+      - name: Extract build artifacts
+        shell: bash
+        run: |
+            cd $GITHUB_WORKSPACE
+            tar xf $RUNNER_TEMP/build-artifacts.tar
+      - name: Refresh artifact timestamps
+        shell: python
+        run: |
+          import pathlib
+          for d in ['DXC/build/bin', 'llvm-project/build']:
+              for f in pathlib.Path(d).rglob('*'):
+                  if f.is_file():
+                      f.touch()
+      - name: Setup Windows x64
+        if: inputs.OS == 'windows' && runner.arch != 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Setup Windows ARM64
+        if: inputs.OS == 'windows' && runner.arch == 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Dump GPU Info
         run: |
             cd llvm-project
             cd build
@@ -200,9 +353,3 @@ jobs:
         with:
           name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
           path: ${{ runner.temp }}/dxdiag.txt
-      #- name: Publish Test Results
-      #  uses: EnricoMi/publish-unit-test-result-action/windows@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
-      #  if: always() && inputs.OS == 'windows'
-      #  with:
-      #    comment_mode: off
-      #    files: llvm-project/build/**/testresults.xunit.xml
