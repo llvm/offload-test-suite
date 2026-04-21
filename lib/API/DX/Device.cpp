@@ -44,6 +44,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Signals.h"
 
+#include <atomic>
 #include <codecvt>
 #include <locale>
 #include <mutex>
@@ -319,6 +320,11 @@ public:
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
+  // Staging descriptors, allocated from the device's central non-shader-visible
+  // CBV_SRV_UAV heap. A zero ptr means no descriptor.
+  D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = {};
+  D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle = {};
+
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
@@ -332,16 +338,17 @@ public:
 class DXTexture : public offloadtest::Texture {
 public:
   ComPtr<ID3D12Resource> Resource;
+
   // TODO:
-  // RTV/DSV own a dedicated single-descriptor heap and are created at
-  // texture creation time. Ideally SRVs/UAVs would also live here, but
-  // they currently require a shared CBV_SRV_UAV heap whose indices are
-  // determined at pipeline bind time. Moving them here would require a
-  // descriptor heap allocator, which is not yet implemented.
-  //
+  // Ideally SRVs/UAVs would also live here, but they currently require a
+  // shared CBV_SRV_UAV heap whose indices are determined at pipeline bind time.
+  // Moving them here would require a descriptor heap allocator, which is not
+  // yet implemented.
   // Either an RTV or DSV descriptor, depending on Desc.Usage.
-  ComPtr<ID3D12DescriptorHeap> ViewHeap;
-  D3D12_CPU_DESCRIPTOR_HANDLE ViewHandle = {};
+  // A zero ptr means no descriptor was created for that view type.
+  D3D12_CPU_DESCRIPTOR_HANDLE RTVHandle = {};
+  D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
+
   std::string Name;
   TextureCreateDesc Desc;
 
@@ -483,12 +490,59 @@ private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
 };
 
+struct DescriptorAllocator {
+  ComPtr<ID3D12DescriptorHeap> Heap;
+  std::atomic<uint32_t> NextIndex{0};
+  uint32_t DescIncSize;
+  uint32_t Capacity;
+
+  static llvm::Expected<DescriptorAllocator>
+  create(ID3D12Device *Device, D3D12_DESCRIPTOR_HEAP_TYPE Type,
+         uint32_t Capacity) {
+    ComPtr<ID3D12DescriptorHeap> Heap;
+    const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
+        Type, Capacity, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
+    if (auto Err = HR::toError(
+            Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
+            "Failed to create staging descriptor heap."))
+      return Err;
+    const uint32_t DescIncSize = Device->GetDescriptorHandleIncrementSize(Type);
+    return DescriptorAllocator(Heap, DescIncSize, Capacity);
+  }
+
+  llvm::Expected<D3D12_CPU_DESCRIPTOR_HANDLE> allocate() {
+    // TODO(manon): Use a better allocator that can also free descriptors.
+    const uint32_t Index = NextIndex.fetch_add(1, std::memory_order_relaxed);
+    if (Index >= Capacity)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Staging descriptor heap exhausted.");
+    D3D12_CPU_DESCRIPTOR_HANDLE Handle =
+        Heap->GetCPUDescriptorHandleForHeapStart();
+    Handle.ptr += Index * DescIncSize;
+    return Handle;
+  }
+
+  DescriptorAllocator(DescriptorAllocator &&Other)
+      : Heap(std::move(Other.Heap)),
+        NextIndex(Other.NextIndex.load(std::memory_order_relaxed)),
+        DescIncSize(Other.DescIncSize), Capacity(Other.Capacity) {}
+  DescriptorAllocator &operator=(DescriptorAllocator &&) = delete;
+  DescriptorAllocator(const DescriptorAllocator &) = delete;
+  DescriptorAllocator &operator=(const DescriptorAllocator &) = delete;
+
+  DescriptorAllocator(ComPtr<ID3D12DescriptorHeap> Heap, uint32_t DescIncSize,
+                      uint32_t Capacity)
+      : Heap(Heap), DescIncSize(DescIncSize), Capacity(Capacity) {}
+};
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12Device> Device;
   DXQueue GraphicsQueue;
   Capabilities Caps;
+  DescriptorAllocator RTVAllocator;
+  DescriptorAllocator DSVAllocator;
 
   struct ResourceSet {
     ComPtr<ID3D12Resource> Upload;
@@ -529,11 +583,15 @@ private:
 
 public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
+           DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
            std::string Desc)
-      : Adapter(A), Device(D), GraphicsQueue(Q) {
+      : Adapter(A), Device(D), GraphicsQueue(Q),
+        RTVAllocator(std::move(RTVAllocator)),
+        DSVAllocator(std::move(DSVAllocator)) {
     Description = Desc;
   }
-  DXDevice(const DXDevice &) = default;
+  DXDevice(const DXDevice &) = delete;
+  DXDevice &operator=(const DXDevice &) = delete;
 
   ~DXDevice() override {
     const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
@@ -642,24 +700,21 @@ public:
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
-    if (IsRT || IsDS) {
-      D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {};
-      HeapDesc.NumDescriptors = 1;
-      HeapDesc.Type = IsRT ? D3D12_DESCRIPTOR_HEAP_TYPE_RTV
-                           : D3D12_DESCRIPTOR_HEAP_TYPE_DSV;
-      HeapDesc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-      if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                     &HeapDesc, IID_PPV_ARGS(&Tex->ViewHeap)),
-                                 IsRT ? "Failed to create RTV heap."
-                                      : "Failed to create DSV heap."))
-        return Err;
-      Tex->ViewHandle = Tex->ViewHeap->GetCPUDescriptorHandleForHeapStart();
-      if (IsRT)
-        Device->CreateRenderTargetView(DeviceTexture.Get(), nullptr,
-                                       Tex->ViewHandle);
-      else
-        Device->CreateDepthStencilView(DeviceTexture.Get(), nullptr,
-                                       Tex->ViewHandle);
+    if (IsRT) {
+      auto HandleOrErr = RTVAllocator.allocate();
+      if (!HandleOrErr)
+        return HandleOrErr.takeError();
+      Tex->RTVHandle = *HandleOrErr;
+      Device->CreateRenderTargetView(DeviceTexture.Get(), nullptr,
+                                     Tex->RTVHandle);
+    }
+    if (IsDS) {
+      auto HandleOrErr = DSVAllocator.allocate();
+      if (!HandleOrErr)
+        return HandleOrErr.takeError();
+      Tex->DSVHandle = *HandleOrErr;
+      Device->CreateDepthStencilView(DeviceTexture.Get(), nullptr,
+                                     Tex->DSVHandle);
     }
 
     return Tex;
@@ -700,8 +755,19 @@ public:
       return GraphicsQueueOrErr.takeError();
     const DXQueue GraphicsQueue = *GraphicsQueueOrErr;
 
-    return std::make_unique<DXDevice>(Adapter, Device, std::move(GraphicsQueue),
-                                      std::string(DescVec.data()));
+    auto RTVHeapOrErr = DescriptorAllocator::create(
+        Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 256);
+    if (!RTVHeapOrErr)
+      return RTVHeapOrErr.takeError();
+
+    auto DSVHeapOrErr = DescriptorAllocator::create(
+        Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 256);
+    if (!DSVHeapOrErr)
+      return DSVHeapOrErr.takeError();
+
+    return std::make_unique<DXDevice>(
+        Adapter, Device, std::move(GraphicsQueue), std::move(*RTVHeapOrErr),
+        std::move(*DSVHeapOrErr), std::string(DescVec.data()));
   }
 
   const Capabilities &getCapabilities() override {
@@ -1767,8 +1833,7 @@ public:
     }
     IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CB->CmdList->OMSetRenderTargets(1, &RT.ViewHandle, false,
-                                       &DS.ViewHandle);
+    IS.CB->CmdList->OMSetRenderTargets(1, &RT.RTVHandle, false, &DS.DSVHandle);
 
     const auto *DepthCV =
         std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
@@ -1777,7 +1842,7 @@ public:
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
     IS.CB->CmdList->ClearDepthStencilView(
-        DS.ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        DS.DSVHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
