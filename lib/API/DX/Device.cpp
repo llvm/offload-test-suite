@@ -599,11 +599,7 @@ public:
   void insertDebugSignpost(llvm::StringRef Label) override {}
 
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
-                       uint32_t GroupCountZ, uint32_t /*ThreadsPerGroupX*/,
-                       uint32_t /*ThreadsPerGroupY*/,
-                       uint32_t /*ThreadsPerGroupZ*/) override {
-    // DX12 bakes threadgroup size into the pipeline; only group counts are
-    // used for dispatch.
+                       uint32_t GroupCountZ) override {
     addDstBarrier();
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
                                       GroupCountY, GroupCountZ)
@@ -630,12 +626,8 @@ public:
         "fillBuffer is not yet implemented for DirectX.");
   }
 
-  llvm::Error dispatchIndirect(offloadtest::Buffer &ArgBuffer, size_t Offset,
-                               uint32_t /*ThreadsPerGroupX*/,
-                               uint32_t /*ThreadsPerGroupY*/,
-                               uint32_t /*ThreadsPerGroupZ*/) override {
-    // DX12 bakes threadgroup size into the pipeline; only the indirect buffer
-    // contents (group counts) are used.
+  llvm::Error dispatchIndirect(offloadtest::Buffer &ArgBuffer,
+                               size_t Offset) override {
     if (auto Err = CB.ensureDispatchIndirectSig())
       return Err;
     addDstBarrier();
@@ -1662,7 +1654,7 @@ public:
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
       if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
-                                      DispatchSize[2], 1, 1, 1))
+                                      DispatchSize[2]))
         return Err;
       Encoder.endEncoding();
     }

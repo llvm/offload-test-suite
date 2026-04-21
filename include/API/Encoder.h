@@ -92,22 +92,16 @@ class ComputeEncoder : public CommandEncoder {
 public:
   using CommandEncoder::CommandEncoder;
 
-  /// Dispatch a compute grid. ThreadsPerGroup specifies the workgroup
-  /// dimensions; GroupCount specifies how many groups to launch in each
-  /// dimension. Total threads = ThreadsPerGroup * GroupCount per axis.
+  /// Dispatch a compute grid. GroupCount specifies how many workgroups to
+  /// launch in each dimension. The workgroup size is derived from the bound
+  /// pipeline state (e.g. the shader's numthreads attribute).
   virtual llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
-                               uint32_t GroupCountZ, uint32_t ThreadsPerGroupX,
-                               uint32_t ThreadsPerGroupY,
-                               uint32_t ThreadsPerGroupZ) = 0;
+                               uint32_t GroupCountZ) = 0;
 
   /// Dispatch a compute grid indirectly. The buffer at \p Offset must contain
-  /// three uint32_t values: {GroupCountX, GroupCountY, GroupCountZ}.
-  /// ThreadsPerGroup specifies the workgroup dimensions (required by some
-  /// backends; others derive it from the pipeline state).
-  virtual llvm::Error dispatchIndirect(Buffer &ArgBuffer, size_t Offset,
-                                       uint32_t ThreadsPerGroupX,
-                                       uint32_t ThreadsPerGroupY,
-                                       uint32_t ThreadsPerGroupZ) = 0;
+  /// three uint32_t values: {GroupCountX, GroupCountY, GroupCountZ}. The
+  /// workgroup size is derived from the bound pipeline state.
+  virtual llvm::Error dispatchIndirect(Buffer &ArgBuffer, size_t Offset) = 0;
 
   /// Insert a memory barrier covering all outstanding scopes.
   virtual void barrier() = 0;
