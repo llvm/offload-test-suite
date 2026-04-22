@@ -617,7 +617,7 @@ private:
     VkPipelineCache PipelineCache = VK_NULL_HANDLE;
     VkPipeline Pipeline = VK_NULL_HANDLE;
 
-    std::unique_ptr<Fence> Fence;
+    std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
@@ -834,7 +834,7 @@ public:
     VkImageCreateInfo ImageInfo = {};
     ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.format = getVulkanFormat(Desc.Fmt);
     ImageInfo.extent = {Desc.Width, Desc.Height, 1};
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = 1;
@@ -885,7 +885,7 @@ public:
       VkImageViewCreateInfo ViewCi = {};
       ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
       ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-      ViewCi.format = getVulkanFormat(Desc.Format);
+      ViewCi.format = getVulkanFormat(Desc.Fmt);
       ViewCi.subresourceRange.baseMipLevel = 0;
       ViewCi.subresourceRange.levelCount = 1;
       ViewCi.subresourceRange.baseArrayLayer = 0;
@@ -1308,7 +1308,7 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Could not end command buffer.");
 
-    auto *F = static_cast<VulkanFence *>(IS.Fence.get());
+    auto *F = static_cast<VulkanFence *>(IS.CompletionFence.get());
 
     VkTimelineSemaphoreSubmitInfo TimelineSubmitInfo = {};
     TimelineSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
@@ -1328,7 +1328,7 @@ public:
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to submit to queue.");
 
-    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
       return Err;
 
     vkFreeCommandBuffers(Device, IS.CB->CmdPool, 1, &IS.CB->CmdBuffer);
@@ -1640,7 +1640,7 @@ public:
   llvm::Error createRenderPass(InvocationState &IS) {
     std::array<VkAttachmentDescription, 2> Attachments = {};
 
-    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Format);
+    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Fmt);
     Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -1649,7 +1649,7 @@ public:
     Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Format);
+    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Fmt);
     Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
     Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -2102,7 +2102,7 @@ public:
                              VkImageLayout OldLayout,
                              VkAccessFlags SrcAccessMask,
                              VkPipelineStageFlags SrcStageMask) {
-    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Format)
+    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Fmt)
                                               ? VK_IMAGE_ASPECT_DEPTH_BIT
                                               : VK_IMAGE_ASPECT_COLOR_BIT;
 
@@ -2512,7 +2512,7 @@ public:
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    State.Fence = std::move(*FenceOrErr);
+    State.CompletionFence = std::move(*FenceOrErr);
     if (auto Err = createShaderModules(P, State))
       return Err;
     llvm::outs() << "Shader module created.\n";

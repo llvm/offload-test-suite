@@ -65,7 +65,7 @@ using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 struct TextureCreateDesc {
   MemoryLocation Location;
   TextureUsage Usage;
-  Format Format;
+  Format Fmt;
   uint32_t Width;
   uint32_t Height;
   uint32_t MipLevels;
@@ -77,13 +77,13 @@ struct TextureCreateDesc {
 };
 
 inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
-  if (!isTextureCompatible(Desc.Format))
+  if (!isTextureCompatible(Desc.Fmt))
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Format '%s' is not compatible with texture creation.",
-        getFormatName(Desc.Format).data());
+        getFormatName(Desc.Fmt).data());
 
-  const bool IsDepth = isDepthFormat(Desc.Format);
+  const bool IsDepth = isDepthFormat(Desc.Fmt);
   const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
   const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
 
@@ -104,12 +104,12 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Depth format '%s' requires DepthStencil usage.",
-        getFormatName(Desc.Format).data());
+        getFormatName(Desc.Fmt).data());
   if (!IsDepth && IsDS)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "DepthStencil usage requires a depth format, got '%s'.",
-        getFormatName(Desc.Format).data());
+        getFormatName(Desc.Fmt).data());
 
   // Render targets and depth/stencil textures only support a single mip level.
   if ((IsRT || IsDS) && Desc.MipLevels != 1)

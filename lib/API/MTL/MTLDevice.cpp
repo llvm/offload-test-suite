@@ -204,7 +204,7 @@ class MTLDevice : public offloadtest::Device {
     std::shared_ptr<MTLBuffer> FrameBufferReadback;
     std::shared_ptr<MTLTexture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
-    std::unique_ptr<offloadtest::Fence> Fence;
+    std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
 
   llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
@@ -632,7 +632,7 @@ class MTLDevice : public offloadtest::Device {
     // Blit the render target into the readback buffer for CPU access.
     MTL::BlitCommandEncoder *Blit = IS.CB->CmdBuffer->blitCommandEncoder();
     const size_t ElemSize =
-        getFormatSizeInBytes(IS.FrameBufferTexture->Desc.Format);
+        getFormatSizeInBytes(IS.FrameBufferTexture->Desc.Fmt);
     const size_t RowBytes = Width * ElemSize;
     Blit->copyFromTexture(IS.FrameBufferTexture->Tex, 0, 0,
                           MTL::Origin(0, 0, 0), MTL::Size(Width, Height, 1),
@@ -646,12 +646,12 @@ class MTLDevice : public offloadtest::Device {
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
-    auto *F = static_cast<MTLFence *>(IS.Fence.get());
+    auto *F = static_cast<MTLFence *>(IS.CompletionFence.get());
 
     IS.CB->CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
     IS.CB->CmdBuffer->commit();
 
-    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
       return Err;
 
     // Check and surface any errors that occurred during execution.
@@ -750,7 +750,7 @@ public:
       return Err;
 
     MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
-        getMetalPixelFormat(Desc.Format), Desc.Width, Desc.Height,
+        getMetalPixelFormat(Desc.Fmt), Desc.Width, Desc.Height,
         Desc.MipLevels > 1);
     TDesc->setMipmapLevelCount(Desc.MipLevels);
     TDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));
@@ -779,7 +779,7 @@ public:
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    IS.Fence = std::move(*FenceOrErr);
+    IS.CompletionFence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, IS))
       return Err;
