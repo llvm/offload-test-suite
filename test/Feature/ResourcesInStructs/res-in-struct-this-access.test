@@ -7,7 +7,7 @@ struct A {
   RWBuffer<int> Buf;
 
   int get(uint Index) {
-    return Buf[Index];
+    return this.Buf[Index];
   }
 };
 
