@@ -61,9 +61,6 @@ Results:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/101558
-# XFAIL: Clang && DirectX 
-
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
 # XFAIL: DirectX
 
