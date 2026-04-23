@@ -1,0 +1,46 @@
+#--- source.hlsl
+// Test that self-assignment of an uninitialized local resource compiles.
+// NOTE: Runtime behavior is undefined — the handle is never bound to a
+// global resource, so the Store operates on an uninitialized handle.
+// DXC: Error (codegen) — "local resource not guaranteed to map to unique global resource"
+
+RWByteAddressBuffer gBuf : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer Out;
+    Out = Out;
+    Out.Store(0, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf
+    Format: Int32
+    Stride: 4
+    Data: [0]
+DescriptorSets:
+  - Resources:
+    - Name: gBuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# DXC codegen error: local resource not guaranteed to map to unique global resource
+# XFAIL: DXC
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
