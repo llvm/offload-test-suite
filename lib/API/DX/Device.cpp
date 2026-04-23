@@ -285,10 +285,6 @@ namespace {
 
 class DXBuffer : public offloadtest::Buffer {
 public:
-  static bool classof(const offloadtest::Buffer *B) {
-    return B->getAPI() == GPUAPI::DirectX;
-  }
-
   ComPtr<ID3D12Resource> Buffer;
   std::string Name;
   BufferCreateDesc Desc;
@@ -298,14 +294,14 @@ public:
            BufferCreateDesc Desc, size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
         Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXTexture : public offloadtest::Texture {
 public:
-  static bool classof(const offloadtest::Texture *T) {
-    return T->getAPI() == GPUAPI::DirectX;
-  }
-
   ComPtr<ID3D12Resource> Resource;
   // TODO:
   // RTV/DSV own a dedicated single-descriptor heap and are created at
@@ -324,6 +320,10 @@ public:
             TextureCreateDesc Desc)
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource), Name(Name),
         Desc(Desc) {}
+
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXFence : public offloadtest::Fence {
@@ -424,10 +424,6 @@ public:
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static bool classof(const CommandBuffer *CB) {
-    return CB->getKind() == GPUAPI::DirectX;
-  }
-
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
 
@@ -449,6 +445,10 @@ public:
   }
 
   ~DXCommandBuffer() override = default;
+
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::DirectX;
+  }
 
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}

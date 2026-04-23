@@ -118,10 +118,6 @@ public:
 
 class MTLBuffer : public offloadtest::Buffer {
 public:
-  static bool classof(const offloadtest::Buffer *B) {
-    return B->getAPI() == GPUAPI::Metal;
-  }
-
   MTL::Buffer *Buf;
   std::string Name;
   BufferCreateDesc Desc;
@@ -136,14 +132,14 @@ public:
     if (Buf)
       Buf->release();
   }
+
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getAPI() == GPUAPI::Metal;
+  }
 };
 
 class MTLTexture : public offloadtest::Texture {
 public:
-  static bool classof(const offloadtest::Texture *T) {
-    return T->getAPI() == GPUAPI::Metal;
-  }
-
   MTL::Texture *Tex;
   std::string Name;
   TextureCreateDesc Desc;
@@ -155,14 +151,14 @@ public:
     if (Tex)
       Tex->release();
   }
+
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getAPI() == GPUAPI::Metal;
+  }
 };
 
 class MTLCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static bool classof(const CommandBuffer *CB) {
-    return CB->getKind() == GPUAPI::Metal;
-  }
-
   MTL::CommandBuffer *CmdBuffer = nullptr;
 
   static llvm::Expected<std::unique_ptr<MTLCommandBuffer>>
@@ -176,6 +172,10 @@ public:
   }
 
   ~MTLCommandBuffer() override = default;
+
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::Metal;
+  }
 
 private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}

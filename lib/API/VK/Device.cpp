@@ -374,10 +374,6 @@ namespace {
 
 class VulkanBuffer : public offloadtest::Buffer {
 public:
-  static bool classof(const offloadtest::Buffer *B) {
-    return B->getAPI() == GPUAPI::Vulkan;
-  }
-
   VkDevice Dev; // Needed for clean-up
   VkBuffer Buffer;
   VkDeviceMemory Memory;
@@ -394,14 +390,14 @@ public:
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
+
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getAPI() == GPUAPI::Vulkan;
+  }
 };
 
 class VulkanTexture : public offloadtest::Texture {
 public:
-  static bool classof(const offloadtest::Texture *T) {
-    return T->getAPI() == GPUAPI::Vulkan;
-  }
-
   VkDevice Dev;
   VkImage Image;
   VkDeviceMemory Memory;
@@ -424,6 +420,10 @@ public:
       vkDestroyImageView(Dev, View, nullptr);
     vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getAPI() == GPUAPI::Vulkan;
   }
 };
 
@@ -489,10 +489,6 @@ public:
 
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static bool classof(const CommandBuffer *CB) {
-    return CB->getKind() == GPUAPI::Vulkan;
-  }
-
   VkDevice Device = VK_NULL_HANDLE;
   // Owned per command buffer so that recording, submission, and lifetime
   // management of each command buffer are independently safe without external
@@ -533,6 +529,10 @@ public:
   ~VulkanCommandBuffer() override {
     if (CmdPool != VK_NULL_HANDLE)
       vkDestroyCommandPool(Device, CmdPool, nullptr);
+  }
+
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::Vulkan;
   }
 
 private:
