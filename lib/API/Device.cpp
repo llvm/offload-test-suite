@@ -88,7 +88,8 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
 }
 
 llvm::Expected<std::unique_ptr<Buffer>>
-offloadtest::createVertexBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf) {
+offloadtest::createVertexBufferFromCPUBuffer(Device &Dev,
+                                             const CPUBuffer &Buf) {
   BufferCreateDesc BufDesc = {};
   BufDesc.Location = MemoryLocation::CpuToGpu;
   BufDesc.Usage = BufferUsage::VertexBuffer;
@@ -97,10 +98,9 @@ offloadtest::createVertexBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf) 
     return BufOrErr.takeError();
   auto VB = std::move(*BufOrErr);
 
-  // TODO: Currently uses a single CpuToGpu mapped buffer. On discrete GPUs
-  // (DX/VK), consider using a staging buffer + copy to a GpuOnly vertex buffer
-  // for optimal GPU read performance. On Apple Silicon this is unnecessary
-  // due to unified memory.
+  // TODO: Currently uses a single CpuToGpu mapped buffer.
+  // On discrete GPUs consider using a staging buffer + copy to a GpuOnly vertex
+  // buffer for optimal GPU read performance.
   auto PtrOrErr = VB->map();
   if (!PtrOrErr)
     return PtrOrErr.takeError();
