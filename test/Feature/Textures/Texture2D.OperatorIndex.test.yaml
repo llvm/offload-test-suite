@@ -61,6 +61,8 @@ Results:
 ...
 #--- end
 
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
+# XFAIL: DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
