@@ -93,9 +93,11 @@ def hostHasIntelCPU():
         return False
     elif system == "Darwin":
         try:
-            output = subprocess.check_output(
-                ["sysctl", "-n", "machdep.cpu.vendor"]
-            ).decode("UTF-8").strip()
+            output = (
+                subprocess.check_output(["sysctl", "-n", "machdep.cpu.vendor"])
+                .decode("UTF-8")
+                .strip()
+            )
             return output == "GenuineIntel"
         except (subprocess.CalledProcessError, OSError):
             return False
