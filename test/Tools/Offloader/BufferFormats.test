@@ -1,0 +1,161 @@
+#--- source.hlsl
+Buffer<int4> In0 : register(t0);
+RWBuffer<int4> Out0 : register(u1);
+StructuredBuffer<int4> In1 : register(t2);
+RWStructuredBuffer<int4> Out1 : register(u3);
+Buffer<float4> In2 : register(t4);
+RWBuffer<float4> Out2 : register(u5);
+StructuredBuffer<float4> In3 : register(t6);
+RWStructuredBuffer<float4> Out3 : register(u7);
+
+[numthreads(1,1,1)]
+void main() {
+  Out0[0] = In0[0];
+  Out1[0] = In1[0];
+  Out2[0] = In2[0];
+  Out3[0] = In3[0];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Int32
+    Channels: 4
+    Data: [ 1, 2, 3, 4 ]
+  - Name: Out0
+    Format: Int32
+    Channels: 4
+    FillSize: 16
+  - Name: ExpectedOut0
+    Format: Int32
+    Channels: 4
+    Data: [ 1, 2, 3, 4 ]
+  - Name: In1
+    Format: Int32
+    Channels: 4
+    Data: [ 1, 2, 3, 4 ]
+  - Name: Out1
+    Format: Int32
+    Channels: 4
+    FillSize: 16
+  - Name: ExpectedOut1
+    Format: Int32
+    Channels: 4
+    Data: [ 1, 2, 3, 4 ]
+  - Name: In2
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 2.0, 3.0, 4.0 ]
+  - Name: Out2
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+  - Name: ExpectedOut2
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 2.0, 3.0, 4.0 ]
+  - Name: In3
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 2.0, 3.0, 4.0 ]
+  - Name: Out3
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+  - Name: ExpectedOut3
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 2.0, 3.0, 4.0 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: Test3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: Buffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out0
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: In2
+      Kind: Buffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: In3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+...
+#--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/351
+# XFAIL: Metal
+
+# Bug https://github.com/llvm/llvm-project/issues/193620
+# XFAIL: WARP && Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader --validation-layer %t/pipeline.yaml %t.o
