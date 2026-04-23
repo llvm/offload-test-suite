@@ -12,7 +12,10 @@
 #ifndef OFFLOADTEST_API_BUFFER_H
 #define OFFLOADTEST_API_BUFFER_H
 
+#include "API/API.h"
 #include "API/Resources.h"
+
+#include "llvm/Support/Casting.h"
 
 namespace offloadtest {
 
@@ -21,14 +24,17 @@ struct BufferCreateDesc {
 };
 
 class Buffer {
+  GPUAPI API;
+
 public:
   virtual ~Buffer();
-
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;
 
+  GPUAPI getAPI() const { return API; }
+
 protected:
-  Buffer() = default;
+  explicit Buffer(GPUAPI API) : API(API) {}
 };
 
 } // namespace offloadtest

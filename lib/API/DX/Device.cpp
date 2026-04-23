@@ -321,7 +321,12 @@ public:
 
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes)
-      : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+      : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
+        Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXTexture : public offloadtest::Texture {
@@ -342,7 +347,12 @@ public:
 
   DXTexture(ComPtr<ID3D12Resource> Resource, llvm::StringRef Name,
             TextureCreateDesc Desc)
-      : Resource(Resource), Name(Name), Desc(Desc) {}
+      : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource), Name(Name),
+        Desc(Desc) {}
+
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXFence : public offloadtest::Fence {
@@ -443,10 +453,6 @@ public:
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static bool classof(const CommandBuffer *CB) {
-    return CB->getKind() == GPUAPI::DirectX;
-  }
-
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
 
@@ -468,6 +474,10 @@ public:
   }
 
   ~DXCommandBuffer() override = default;
+
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::DirectX;
+  }
 
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
@@ -508,9 +518,9 @@ private:
     std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // Resources for graphics pipelines.
-    std::shared_ptr<DXTexture> RT;
-    std::shared_ptr<DXBuffer> RTReadback;
-    std::shared_ptr<DXTexture> DS;
+    std::unique_ptr<offloadtest::Texture> RT;
+    std::unique_ptr<offloadtest::Buffer> RTReadback;
+    std::unique_ptr<offloadtest::Texture> DS;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -540,7 +550,7 @@ public:
     return DXFence::create(Device.Get(), Name);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
@@ -571,10 +581,10 @@ public:
                         "Failed to create buffer."))
       return Err;
 
-    return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+    return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
@@ -628,7 +638,7 @@ public:
                                "Failed to create texture."))
       return Err;
 
-    auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+    auto Tex = std::make_unique<DXTexture>(DeviceTexture, Name, Desc);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -1576,13 +1586,15 @@ public:
     // while our image writer expects bottom-left.
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
-    if (auto Err = HR::toError(IS.RTReadback->Buffer->Map(0, nullptr, &Mapped),
+    auto &Readback = llvm::cast<DXBuffer>(*IS.RTReadback);
+    if (auto Err = HR::toError(Readback.Buffer->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
       return Err;
 
     // Query the copy footprint to get the actual padded row pitch used by the
     // copy operation.
-    const D3D12_RESOURCE_DESC RTDesc = IS.RT->Resource->GetDesc();
+    auto &RT = llvm::cast<DXTexture>(*IS.RT);
+    const D3D12_RESOURCE_DESC RTDesc = RT.Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
     uint32_t NumRows = 0;
     uint64_t RowSizeInBytes = 0;
@@ -1607,7 +1619,7 @@ public:
       memcpy(DstRow, SrcRow, RowBytes);
     }
 
-    IS.RTReadback->Buffer->Unmap(0, nullptr);
+    Readback.Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }
 
@@ -1622,7 +1634,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RT = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    IS.RT = std::move(*TexOrErr);
 
     // Create readback buffer sized for the pixel data (raw bytes).
     BufferCreateDesc BufDesc = {};
@@ -1630,7 +1642,7 @@ public:
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.RTReadback = std::static_pointer_cast<DXBuffer>(*BufOrErr);
+    IS.RTReadback = std::move(*BufOrErr);
 
     return llvm::Error::success();
   }
@@ -1641,7 +1653,7 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DS = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    IS.DS = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -1724,7 +1736,8 @@ public:
     PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
     PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
-    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Fmt);
+    auto &DS = llvm::cast<DXTexture>(*IS.DS);
+    PSODesc.DSVFormat = getDXGIFormat(DS.Desc.Fmt);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSODesc.NumRenderTargets = 1;
@@ -1741,6 +1754,10 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
+    auto &RT = llvm::cast<DXTexture>(*IS.RT);
+    auto &DS = llvm::cast<DXTexture>(*IS.DS);
+    auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
+
     IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1750,17 +1767,17 @@ public:
     }
     IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CB->CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
-                                       &IS.DS->ViewHandle);
+    IS.CB->CmdList->OMSetRenderTargets(1, &RT.ViewHandle, false,
+                                       &DS.ViewHandle);
 
     const auto *DepthCV =
-        std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
+        std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
     if (!DepthCV)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
     IS.CB->CmdList->ClearDepthStencilView(
-        IS.DS->ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        DS.ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
@@ -1782,7 +1799,7 @@ public:
     // Transition the render target to copy source and copy to the readback
     // buffer.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        IS.RT->Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+        RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
 
@@ -1792,9 +1809,9 @@ public:
         CD3DX12_SUBRESOURCE_FOOTPRINT(
             getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
             B.OutputProps.Height, 1, B.OutputProps.Width * B.getElementSize())};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback->Buffer.Get(),
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
                                                Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT->Resource.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
 
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 

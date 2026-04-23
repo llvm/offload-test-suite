@@ -12,10 +12,12 @@
 #ifndef OFFLOADTEST_API_TEXTURE_H
 #define OFFLOADTEST_API_TEXTURE_H
 
+#include "API/API.h"
 #include "API/Resources.h"
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 
 #include <cstdint>
@@ -140,14 +142,17 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
 }
 
 class Texture {
+  GPUAPI API;
+
 public:
   virtual ~Texture();
-
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;
 
+  GPUAPI getAPI() const { return API; }
+
 protected:
-  Texture() = default;
+  explicit Texture(GPUAPI API) : API(API) {}
 };
 
 } // namespace offloadtest
