@@ -78,11 +78,11 @@ public:
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
 
-  virtual llvm::Expected<std::shared_ptr<Buffer>>
+  virtual llvm::Expected<std::unique_ptr<Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
 
-  virtual llvm::Expected<std::shared_ptr<Texture>>
+  virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) = 0;
 
   virtual void printExtra(llvm::raw_ostream &OS) {}
@@ -111,11 +111,11 @@ initializeDevices(const DeviceConfig Config);
 // Creates a render target texture using the format and dimensions from a
 // CPUBuffer. Does not upload the buffer's data — only uses its description to
 // configure the texture.
-llvm::Expected<std::shared_ptr<Texture>>
+llvm::Expected<std::unique_ptr<Texture>>
 createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 
 // Creates a depth/stencil texture matching the dimensions of a render target.
-llvm::Expected<std::shared_ptr<Texture>>
+llvm::Expected<std::unique_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
 } // namespace offloadtest

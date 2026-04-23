@@ -114,12 +114,12 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
   auto ExpectedFmt = toFormat(Buf.Format, Buf.Channels);
   if (!ExpectedFmt)
     return ExpectedFmt.takeError();
-  if (Desc.Format != *ExpectedFmt)
+  if (Desc.Fmt != *ExpectedFmt)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "TextureCreateDesc format '%s' does not match CPUBuffer format "
         "(DataFormat %d, %d channels -> '%s').",
-        getFormatName(Desc.Format).data(), static_cast<int>(Buf.Format),
+        getFormatName(Desc.Fmt).data(), static_cast<int>(Buf.Format),
         Buf.Channels, getFormatName(*ExpectedFmt).data());
   if (Desc.Width != static_cast<uint32_t>(Buf.OutputProps.Width))
     return llvm::createStringError(
@@ -137,7 +137,7 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
         "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
         "levels %d.",
         Desc.MipLevels, Buf.OutputProps.MipLevels);
-  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Format);
+  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Fmt);
   if (Buf.Stride > 0 && static_cast<uint32_t>(Buf.Stride) != TexelSize)
     return llvm::createStringError(
         std::errc::invalid_argument,

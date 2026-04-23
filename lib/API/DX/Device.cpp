@@ -46,12 +46,41 @@
 
 #include <codecvt>
 #include <locale>
+#include <mutex>
 
 using namespace offloadtest;
 using Microsoft::WRL::ComPtr;
 
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
+
+static std::mutex SignalHandlerMutex;
+static llvm::SmallVector<ID3D12Device *> SignalHandlerDevices;
+
+static void dumpD3DInfoQueues(void *) {
+  const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+  for (ID3D12Device *Device : SignalHandlerDevices) {
+    ComPtr<ID3D12InfoQueue> InfoQueue;
+    HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
+    if (FAILED(HR)) {
+      llvm::errs() << "Failed to query D3D info queue\n";
+      continue;
+    }
+    for (int I = 0, E = InfoQueue->GetNumStoredMessages(); I < E; ++I) {
+      SIZE_T Len = 0;
+      HR = InfoQueue->GetMessage(I, NULL, &Len);
+      if (FAILED(HR)) {
+        llvm::errs() << "Failed to get message " << I
+                     << " from D3D info queue\n";
+      } else {
+        D3D12_MESSAGE *Msg = (D3D12_MESSAGE *)malloc(Len);
+        HR = InfoQueue->GetMessage(I, Msg, &Len);
+        llvm::errs() << "D3D: " << Msg->pDescription << "\n";
+        free(Msg);
+      }
+    }
+  }
+}
 
 #define DXFormats(FMT)                                                         \
   if (Channels == 1)                                                           \
@@ -292,7 +321,12 @@ public:
 
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes)
-      : Buffer(Buffer), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+      : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
+        Desc(Desc), SizeInBytes(SizeInBytes) {}
+
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXTexture : public offloadtest::Texture {
@@ -313,7 +347,12 @@ public:
 
   DXTexture(ComPtr<ID3D12Resource> Resource, llvm::StringRef Name,
             TextureCreateDesc Desc)
-      : Resource(Resource), Name(Name), Desc(Desc) {}
+      : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource), Name(Name),
+        Desc(Desc) {}
+
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXFence : public offloadtest::Fence {
@@ -414,10 +453,6 @@ public:
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static bool classof(const CommandBuffer *CB) {
-    return CB->getKind() == GPUAPI::DirectX;
-  }
-
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
 
@@ -439,6 +474,10 @@ public:
   }
 
   ~DXCommandBuffer() override = default;
+
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::DirectX;
+  }
 
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
@@ -476,12 +515,12 @@ private:
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     ComPtr<ID3D12PipelineState> PSO;
     std::unique_ptr<DXCommandBuffer> CB;
-    std::unique_ptr<offloadtest::Fence> Fence;
+    std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // Resources for graphics pipelines.
-    std::shared_ptr<DXTexture> RT;
-    std::shared_ptr<DXBuffer> RTReadback;
-    std::shared_ptr<DXTexture> DS;
+    std::unique_ptr<offloadtest::Texture> RT;
+    std::unique_ptr<offloadtest::Buffer> RTReadback;
+    std::unique_ptr<offloadtest::Texture> DS;
     ComPtr<ID3D12Resource> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -496,7 +535,10 @@ public:
   }
   DXDevice(const DXDevice &) = default;
 
-  ~DXDevice() override = default;
+  ~DXDevice() override {
+    const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+    llvm::erase(SignalHandlerDevices, Device.Get());
+  }
 
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
@@ -508,7 +550,7 @@ public:
     return DXFence::create(Device.Get(), Name);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
+  llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
@@ -539,10 +581,10 @@ public:
                         "Failed to create buffer."))
       return Err;
 
-    return std::make_shared<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+    return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
+  llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
@@ -556,7 +598,7 @@ public:
     TexDesc.Height = Desc.Height;
     TexDesc.DepthOrArraySize = 1;
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
-    TexDesc.Format = getDXGIFormat(Desc.Format);
+    TexDesc.Format = getDXGIFormat(Desc.Fmt);
     TexDesc.SampleDesc.Count = 1;
     TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     TexDesc.Flags = getDXResourceFlags(Desc.Usage);
@@ -596,7 +638,7 @@ public:
                                "Failed to create texture."))
       return Err;
 
-    auto Tex = std::make_shared<DXTexture>(DeviceTexture, Name, Desc);
+    auto Tex = std::make_unique<DXTexture>(DeviceTexture, Name, Desc);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -631,6 +673,16 @@ public:
                                           IID_PPV_ARGS(&Device)),
                         "Failed to create D3D device"))
       return Err;
+
+    static std::once_flag SignalHandlerRegistered;
+    std::call_once(SignalHandlerRegistered, [] {
+      llvm::sys::AddSignalHandler(dumpD3DInfoQueues, nullptr);
+    });
+    {
+      const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
+      SignalHandlerDevices.push_back(Device.Get());
+    }
+
     assert(
         Adapter->IsPropertySupported(DXCoreAdapterProperty::DriverDescription));
     size_t BufferSize;
@@ -1340,14 +1392,14 @@ public:
     // This is a hack but it works since this is all single threaded code.
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
-    auto *F = static_cast<DXFence *>(IS.Fence.get());
+    auto *F = static_cast<DXFence *>(IS.CompletionFence.get());
 
     if (auto Err = HR::toError(
             GraphicsQueue.Queue->Signal(F->Fence.Get(), CurrentCounter),
             "Failed to add signal."))
       return Err;
 
-    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
+    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
       return Err;
 
     FenceCounter = CurrentCounter;
@@ -1534,13 +1586,15 @@ public:
     // while our image writer expects bottom-left.
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
-    if (auto Err = HR::toError(IS.RTReadback->Buffer->Map(0, nullptr, &Mapped),
+    auto &Readback = llvm::cast<DXBuffer>(*IS.RTReadback);
+    if (auto Err = HR::toError(Readback.Buffer->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
       return Err;
 
     // Query the copy footprint to get the actual padded row pitch used by the
     // copy operation.
-    const D3D12_RESOURCE_DESC RTDesc = IS.RT->Resource->GetDesc();
+    auto &RT = llvm::cast<DXTexture>(*IS.RT);
+    const D3D12_RESOURCE_DESC RTDesc = RT.Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
     uint32_t NumRows = 0;
     uint64_t RowSizeInBytes = 0;
@@ -1565,7 +1619,7 @@ public:
       memcpy(DstRow, SrcRow, RowBytes);
     }
 
-    IS.RTReadback->Buffer->Unmap(0, nullptr);
+    Readback.Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }
 
@@ -1580,7 +1634,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RT = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    IS.RT = std::move(*TexOrErr);
 
     // Create readback buffer sized for the pixel data (raw bytes).
     BufferCreateDesc BufDesc = {};
@@ -1588,7 +1642,7 @@ public:
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.RTReadback = std::static_pointer_cast<DXBuffer>(*BufOrErr);
+    IS.RTReadback = std::move(*BufOrErr);
 
     return llvm::Error::success();
   }
@@ -1599,7 +1653,7 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DS = std::static_pointer_cast<DXTexture>(*TexOrErr);
+    IS.DS = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
@@ -1682,7 +1736,8 @@ public:
     PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
     PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
-    PSODesc.DSVFormat = getDXGIFormat(IS.DS->Desc.Format);
+    auto &DS = llvm::cast<DXTexture>(*IS.DS);
+    PSODesc.DSVFormat = getDXGIFormat(DS.Desc.Fmt);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     PSODesc.NumRenderTargets = 1;
@@ -1699,6 +1754,10 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
+    auto &RT = llvm::cast<DXTexture>(*IS.RT);
+    auto &DS = llvm::cast<DXTexture>(*IS.DS);
+    auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
+
     IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
@@ -1708,17 +1767,17 @@ public:
     }
     IS.CB->CmdList->SetPipelineState(IS.PSO.Get());
 
-    IS.CB->CmdList->OMSetRenderTargets(1, &IS.RT->ViewHandle, false,
-                                       &IS.DS->ViewHandle);
+    IS.CB->CmdList->OMSetRenderTargets(1, &RT.ViewHandle, false,
+                                       &DS.ViewHandle);
 
     const auto *DepthCV =
-        std::get_if<ClearDepthStencil>(&*IS.DS->Desc.OptimizedClearValue);
+        std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
     if (!DepthCV)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Depth/stencil clear value must be a ClearDepthStencil.");
     IS.CB->CmdList->ClearDepthStencilView(
-        IS.DS->ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
+        DS.ViewHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
         DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
 
     D3D12_VIEWPORT VP = {};
@@ -1740,7 +1799,7 @@ public:
     // Transition the render target to copy source and copy to the readback
     // buffer.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        IS.RT->Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+        RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
 
@@ -1750,9 +1809,9 @@ public:
         CD3DX12_SUBRESOURCE_FOOTPRINT(
             getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
             B.OutputProps.Height, 1, B.OutputProps.Width * B.getElementSize())};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(IS.RTReadback->Buffer.Get(),
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
                                                Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(IS.RT->Resource.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
 
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
@@ -1796,32 +1855,6 @@ public:
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    llvm::sys::AddSignalHandler(
-        [](void *Cookie) {
-          ID3D12Device *Device = (ID3D12Device *)Cookie;
-
-          ComPtr<ID3D12InfoQueue> InfoQueue;
-          HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
-          if (FAILED(HR)) {
-            llvm::errs() << "Failed to query D3D info queue\n";
-            return;
-          }
-          for (int I = 0, E = InfoQueue->GetNumStoredMessages(); I < E; ++I) {
-            SIZE_T Len = 0;
-            HR = InfoQueue->GetMessage(I, NULL, &Len);
-            if (FAILED(HR)) {
-              llvm::errs() << "Failed to get message " << I
-                           << " from D3D info queue\n";
-            } else {
-              D3D12_MESSAGE *Msg = (D3D12_MESSAGE *)malloc(Len);
-              HR = InfoQueue->GetMessage(I, Msg, &Len);
-              llvm::errs() << "D3D: " << Msg->pDescription << "\n";
-              free(Msg);
-            }
-          }
-        },
-        (void *)Device.Get());
-
     InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
     if (auto Err = createRootSignature(P, State))
@@ -1840,7 +1873,7 @@ public:
     auto FenceOrErr = createFence("Fence");
     if (!FenceOrErr)
       return FenceOrErr.takeError();
-    State.Fence = std::move(*FenceOrErr);
+    State.CompletionFence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, State))
       return Err;

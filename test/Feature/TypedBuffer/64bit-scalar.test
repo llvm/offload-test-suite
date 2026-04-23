@@ -125,8 +125,8 @@ DescriptorSets:
 
 # UNSUPPORTED: Metal
 
-# Bug https://github.com/llvm/offload-test-suite/issues/1030
-# XFAIL: Vulkan && !AMD
+# Bug https://github.com/llvm/offload-test-suite/issues/1110
+# XFAIL: Intel && Vulkan && DXC
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
