@@ -70,10 +70,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
-# XFAIL: Clang
-
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
+# Bug: https://github.com/llvm/offload-test-suite/issues/305
+# Bug: https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
 
 # RUN: split-file %s %t
