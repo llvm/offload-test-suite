@@ -1,0 +1,69 @@
+#--- source.hlsl
+// Test that two different resource types (RWByteAddressBuffer and RWStructuredBuffer) can coexist in the same function.
+RWByteAddressBuffer gBuf : register(u0);
+RWStructuredBuffer<uint> gSB : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer localBuf = gBuf;
+    RWStructuredBuffer<uint> localSB = gSB;
+    localBuf.Store(0, 42);
+    localSB[0] = 99;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf
+    Format: Int32
+    Stride: 4
+    Data: [42]
+  - Name: gSB
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGSB
+    Format: Int32
+    Stride: 4
+    Data: [99]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf
+    Expected: ExpectedGBuf
+  - Result: Test1
+    Rule: BufferExact
+    Actual: gSB
+    Expected: ExpectedGSB
+DescriptorSets:
+  - Resources:
+    - Name: gBuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gSB
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

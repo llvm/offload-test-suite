@@ -1,0 +1,68 @@
+#--- source.hlsl
+// Test that a ternary selecting between different indices of the same
+// unbounded global resource array produces correct output.
+// The ternary always resolves to OutArr[0] (true branch).
+
+RWByteAddressBuffer In : register(u0);
+RWByteAddressBuffer OutArr[] : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer Out = true ? OutArr[0] : OutArr[1];
+    Out.Store(0, In.Load(0));
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 4
+    Data: [42]
+  - Name: OutArr
+    Format: Int32
+    Stride: 4
+    ArraySize: 2
+    Data:
+      - [0]
+      - [0]
+  - Name: ExpectedOutArr
+    Format: Int32
+    Stride: 4
+    ArraySize: 2
+    Data:
+      - [42]
+      - [0]
+Results:
+  - Result: OutArrCheck
+    Rule: BufferExact
+    Actual: OutArr
+    Expected: ExpectedOutArr
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutArr
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

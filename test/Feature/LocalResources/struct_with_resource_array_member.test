@@ -1,0 +1,53 @@
+#--- source.hlsl
+// Test that a struct containing a resource array member works with constant indexing.
+RWByteAddressBuffer gBuf : register(u0);
+
+struct S { RWByteAddressBuffer arr[2]; };
+
+[numthreads(1,1,1)]
+void main() {
+    S s;
+    s.arr[0] = gBuf;
+    s.arr[0].Store(0, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf
+    Expected: ExpectedGBuf
+DescriptorSets:
+  - Resources:
+    - Name: gBuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8379
+# XFAIL: DXC && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

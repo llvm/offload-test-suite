@@ -1,0 +1,89 @@
+#--- source.hlsl
+// Test that reassigning a local resource to a different global inside a
+// conditional branch produces valid output. The branch is always taken
+// (tid.x == 0 with numthreads(1,1,1)), so Out resolves to Out1.
+// DXC: Error (codegen) — "local resource not guaranteed to map to unique global resource"
+
+RWByteAddressBuffer In : register(u0);
+RWByteAddressBuffer Out0 : register(u1);
+RWByteAddressBuffer Out1 : register(u2);
+
+[numthreads(1,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer Out = Out0;
+    if (tid.x == 0) {
+        Out = Out1;
+    }
+    Out.Store(0, In.Load(0));
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 4
+    Data: [42]
+  - Name: Out0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: Out1
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Out0Check
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Out1Check
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# DXC codegen error: local resource not guaranteed to map to unique global resource
+# XFAIL: DXC
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
