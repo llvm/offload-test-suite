@@ -118,8 +118,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/642
+# Bug https://github.com/llvm/offload-test-suite/issues/351
 # XFAIL: Metal
+
+# DXC + Vulkan does not support global structures containing buffers.
+# UNSUPPORTED: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
