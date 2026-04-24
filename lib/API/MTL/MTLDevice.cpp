@@ -10,12 +10,13 @@
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "MTLResources.h"
 #include "Support/Pipeline.h"
 
-#include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -77,12 +78,18 @@ static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
 namespace {
 class MTLQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   MTL::CommandQueue *Queue;
   MTLQueue(MTL::CommandQueue *Queue) : Queue(Queue) {}
-  ~MTLQueue() {
+  ~MTLQueue() override {
     if (Queue)
       Queue->release();
   }
+
+  llvm::Error submit(
+      llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs)
+      override;
 };
 
 class MTLFence : public offloadtest::Fence {
@@ -177,10 +184,222 @@ public:
     return CB->getKind() == GPUAPI::Metal;
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder(offloadtest::EncoderMode Mode) override;
+
 private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
 
+llvm::Error MTLQueue::submit(
+    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+  // Metal serial queues guarantee that command buffers execute in commit order,
+  // so no explicit wait on prior work is needed here.
+  for (auto &CB : CBs)
+    llvm::cast<MTLCommandBuffer>(CB.get())->CmdBuffer->commit();
+
+  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
+  for (auto &CB : CBs) {
+    auto &MCB = *llvm::cast<MTLCommandBuffer>(CB.get());
+    MCB.CmdBuffer->waitUntilCompleted();
+
+    NS::Error *Err = MCB.CmdBuffer->error();
+    if (Err)
+      return toError(Err);
+  }
+  return llvm::Error::success();
+}
+
+class MTLComputeEncoder : public offloadtest::ComputeEncoder {
+  MTL::CommandBuffer *CmdBuffer;
+  MTL::ComputeCommandEncoder *ComputeEnc = nullptr;
+  MTL::BlitCommandEncoder *BlitEnc = nullptr;
+
+  /// Threadgroup size from shader reflection (the numthreads() attribute
+  /// persisted in the transpiled Metallib). Must be set via
+  /// setThreadGroupSize() before dispatching.
+  MTL::Size ThreadsPerGroup = {1, 1, 1};
+
+  /// Accumulated barrier scope from commands recorded since the last barrier.
+  MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
+
+  /// Add DST scope for the upcoming command and, if serial, emit the barrier.
+  void addDstBarrier(MTL::BarrierScope Dst) {
+    PendingScope = MTL::BarrierScope(PendingScope | Dst);
+    if (isSerial())
+      barrier();
+  }
+
+  /// End the blit encoder if active, lazily (re-)create the compute encoder.
+  /// Metal requires a dedicated BlitCommandEncoder for copy operations. Metal 4
+  /// removes this separation, allowing copies on any encoder directly.
+  llvm::Error ensureComputeEncoder() {
+    if (ComputeEnc)
+      return llvm::Error::success();
+    if (BlitEnc) {
+      BlitEnc->endEncoding();
+      BlitEnc = nullptr;
+    }
+    ComputeEnc = CmdBuffer->computeCommandEncoder();
+    if (!ComputeEnc)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Metal compute encoder.");
+    ComputeEnc->pushDebugGroup(NS::String::string(
+        isSerial() ? "ComputeEncoder (Serial)" : "ComputeEncoder (Parallel)",
+        NS::UTF8StringEncoding));
+    return llvm::Error::success();
+  }
+
+  /// End the compute encoder if active, lazily create the blit encoder.
+  llvm::Error ensureBlitEncoder() {
+    if (BlitEnc)
+      return llvm::Error::success();
+    if (ComputeEnc) {
+      barrier();
+      ComputeEnc->popDebugGroup();
+      ComputeEnc->endEncoding();
+      ComputeEnc = nullptr;
+    }
+    BlitEnc = CmdBuffer->blitCommandEncoder();
+    if (!BlitEnc)
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Failed to create Metal blit encoder.");
+    return llvm::Error::success();
+  }
+
+public:
+  MTLComputeEncoder(MTL::CommandBuffer *CmdBuffer,
+                    MTL::ComputeCommandEncoder *Encoder, EncoderMode Mode)
+      : ComputeEncoder(GPUAPI::Metal, Mode), CmdBuffer(CmdBuffer),
+        ComputeEnc(Encoder) {}
+
+  ~MTLComputeEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Metal;
+  }
+
+  MTL::ComputeCommandEncoder *getNative() const { return ComputeEnc; }
+
+  /// Set the threadgroup size for subsequent dispatch calls. The values must
+  /// come from shader reflection (the numthreads() attribute in the HLSL
+  /// source, persisted in the transpiled Metallib).
+  void setThreadGroupSize(NS::UInteger X, NS::UInteger Y, NS::UInteger Z) {
+    ThreadsPerGroup = MTL::Size(X, Y, Z);
+  }
+
+  MTL::CommandEncoder *getActiveEncoder() const {
+    if (ComputeEnc)
+      return ComputeEnc;
+    return BlitEnc;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (auto *Enc = getActiveEncoder())
+      Enc->pushDebugGroup(
+          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+  }
+
+  void popDebugGroup() override {
+    if (auto *Enc = getActiveEncoder())
+      Enc->popDebugGroup();
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (auto *Enc = getActiveEncoder())
+      Enc->insertDebugSignpost(
+          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+  }
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ) override {
+    if (auto Err = ensureComputeEncoder())
+      return Err;
+    addDstBarrier(MTL::BarrierScope(MTL::BarrierScopeBuffers |
+                                    MTL::BarrierScopeTextures));
+
+    const MTL::Size GridSize(ThreadsPerGroup.width * GroupCountX,
+                             ThreadsPerGroup.height * GroupCountY,
+                             ThreadsPerGroup.depth * GroupCountZ);
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
+    ComputeEnc->dispatchThreads(GridSize, ThreadsPerGroup);
+    return llvm::Error::success();
+  }
+
+  llvm::Error dispatchIndirect(offloadtest::Buffer &ArgBuffer,
+                               size_t Offset) override {
+    if (auto Err = ensureComputeEncoder())
+      return Err;
+    addDstBarrier(MTL::BarrierScope(MTL::BarrierScopeBuffers |
+                                    MTL::BarrierScopeTextures));
+    auto &MTLBuf = static_cast<MTLBuffer &>(ArgBuffer);
+    insertDebugSignpost(
+        llvm::formatv("DispatchIndirect offset={0}", Offset).str());
+    ComputeEnc->dispatchThreadgroups(MTLBuf.Buf, Offset, ThreadsPerGroup);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLSrc = static_cast<MTLBuffer &>(Src);
+    auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
+    BlitEnc->copyFromBuffer(MTLSrc.Buf, SrcOffset, MTLDst.Buf, DstOffset, Size);
+    return llvm::Error::success();
+  }
+
+  llvm::Error fillBuffer(offloadtest::Buffer &Dst, size_t Offset, size_t Size,
+                         uint8_t Value) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    insertDebugSignpost(
+        llvm::formatv("FillBuffer {0}B value=0x{1:x2}", Size, Value).str());
+    BlitEnc->fillBuffer(MTLDst.Buf, NS::Range(Offset, Size), Value);
+    return llvm::Error::success();
+  }
+
+  void barrier() override {
+    if (ComputeEnc && PendingScope != MTL::BarrierScope(0)) {
+      insertDebugSignpost("Barrier");
+      ComputeEnc->memoryBarrier(PendingScope);
+      PendingScope = MTL::BarrierScope(0);
+    }
+  }
+
+  void endEncodingImpl() override {
+    if (ComputeEnc) {
+      barrier();
+      ComputeEnc->popDebugGroup();
+      ComputeEnc->endEncoding();
+      ComputeEnc = nullptr;
+    }
+    if (BlitEnc) {
+      BlitEnc->endEncoding();
+      BlitEnc = nullptr;
+    }
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+MTLCommandBuffer::createComputeEncoder(EncoderMode Mode) {
+  MTL::ComputeCommandEncoder *NativeEncoder =
+      CmdBuffer->computeCommandEncoder();
+  if (!NativeEncoder)
+    return llvm::createStringError(
+        std::errc::device_or_resource_busy,
+        "Failed to create Metal compute command encoder.");
+  NativeEncoder->pushDebugGroup(NS::String::string(
+      Mode == EncoderMode::Serial ? "ComputeEncoder (Serial)"
+                                  : "ComputeEncoder (Parallel)",
+      NS::UTF8StringEncoding));
+  return std::make_unique<MTLComputeEncoder>(CmdBuffer, NativeEncoder, Mode);
+}
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -213,7 +432,6 @@ class MTLDevice : public offloadtest::Device {
     std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
-    std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
 
   llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
@@ -458,20 +676,20 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    MTL::ComputeCommandEncoder *CmdEncoder =
-        IS.CB->CmdBuffer->computeCommandEncoder();
+    auto EncoderOrErr = IS.CB->createComputeEncoder(EncoderMode::Parallel);
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
+    MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
 
-    auto CloseCommandEncoder =
-        llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
-
-    CmdEncoder->setComputePipelineState(IS.ComputePipeline);
-    CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
+    NativeEncoder->setComputePipelineState(IS.ComputePipeline);
+    NativeEncoder->setBuffer(IS.ArgBuffer, 0, 2);
     for (uint64_t I = 0; I < IS.Textures.size(); ++I)
-      CmdEncoder->useResource(IS.Textures[I],
-                              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+      NativeEncoder->useResource(IS.Textures[I], MTL::ResourceUsageRead |
+                                                     MTL::ResourceUsageWrite);
     for (uint64_t I = 0; I < IS.Buffers.size(); ++I)
-      CmdEncoder->useResource(IS.Buffers[I],
-                              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+      NativeEncoder->useResource(IS.Buffers[I], MTL::ResourceUsageRead |
+                                                    MTL::ResourceUsageWrite);
 
     NS::UInteger TGS[3] = {IS.ComputePipeline->maxTotalThreadsPerThreadgroup(),
                            1, 1};
@@ -512,16 +730,14 @@ class MTLDevice : public offloadtest::Device {
         TGS[I] = *OpVal;
       }
     }
+    Encoder.setThreadGroupSize(TGS[0], TGS[1], TGS[2]);
 
     const llvm::ArrayRef<int> DispatchSize =
         llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-    const MTL::Size GridSize =
-        MTL::Size(TGS[0] * DispatchSize[0], TGS[1] * DispatchSize[1],
-                  TGS[2] * DispatchSize[2]);
-    const MTL::Size GroupSize(TGS[0], TGS[1], TGS[2]);
-    CmdEncoder->dispatchThreads(GridSize, GroupSize);
-    CmdEncoder->memoryBarrier(MTL::BarrierScopeBuffers);
-
+    if (auto Err =
+            Encoder.dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]))
+      return Err;
+    Encoder.endEncoding();
     return llvm::Error::success();
   }
 
@@ -655,24 +871,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error executeCommands(InvocationState &IS) {
-    // This is a hack but it works since this is all single threaded code.
-    static uint64_t FenceCounter = 0;
-    const uint64_t CurrentCounter = FenceCounter + 1;
-    auto *F = static_cast<MTLFence *>(IS.CompletionFence.get());
-
-    IS.CB->CmdBuffer->encodeSignalEvent(F->Event, CurrentCounter);
-    IS.CB->CmdBuffer->commit();
-
-    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
-      return Err;
-
-    // Check and surface any errors that occurred during execution.
-    NS::Error *CBErr = IS.CB->CmdBuffer->error();
-    if (CBErr)
-      return toError(CBErr);
-
-    FenceCounter = CurrentCounter;
-    return llvm::Error::success();
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
@@ -788,11 +987,6 @@ public:
     if (!CBOrErr)
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
-
-    auto FenceOrErr = createFence("Fence");
-    if (!FenceOrErr)
-      return FenceOrErr.takeError();
-    IS.CompletionFence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, IS))
       return Err;

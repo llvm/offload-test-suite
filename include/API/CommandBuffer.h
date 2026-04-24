@@ -17,6 +17,11 @@
 #define OFFLOADTEST_API_COMMANDBUFFER_H
 
 #include "API/API.h"
+#include "API/Encoder.h"
+
+#include "llvm/Support/Error.h"
+
+#include <memory>
 
 namespace offloadtest {
 
@@ -30,6 +35,16 @@ public:
   CommandBuffer &operator=(const CommandBuffer &) = delete;
 
   GPUAPI getKind() const { return Kind; }
+
+  /// Create a compute command encoder for recording dispatch commands.
+  /// When \p Mode is Parallel, the backend ensures all prior work is visible
+  /// (i.e., an implicit full barrier precedes the parallel encoding pass).
+  virtual llvm::Expected<std::unique_ptr<ComputeEncoder>>
+  createComputeEncoder(EncoderMode Mode) {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "createComputeEncoder not implemented for this backend");
+  }
 };
 
 } // namespace offloadtest

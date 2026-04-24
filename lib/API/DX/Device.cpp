@@ -33,6 +33,7 @@
 
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "DXFeatures.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
@@ -42,6 +43,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Signals.h"
 
 #include <codecvt>
@@ -433,32 +435,51 @@ public:
 
 class DXQueue : public offloadtest::Queue {
 public:
-  ComPtr<ID3D12CommandQueue> Queue;
+  using Queue::submit;
 
-  DXQueue(ComPtr<ID3D12CommandQueue> Queue) : Queue(Queue) {}
-  virtual ~DXQueue() {}
+  ComPtr<ID3D12CommandQueue> Queue;
+  std::unique_ptr<DXFence> SubmitFence;
+  uint64_t FenceCounter = 0;
+
+  DXQueue(ComPtr<ID3D12CommandQueue> Queue,
+          std::unique_ptr<DXFence> SubmitFence)
+      : Queue(Queue), SubmitFence(std::move(SubmitFence)) {}
+  DXQueue(DXQueue &&) = default;
+  ~DXQueue() override {}
 
   static llvm::Expected<DXQueue>
   createGraphicsQueue(ComPtr<ID3D12Device> Device) {
     const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
                                            D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
-    ComPtr<ID3D12CommandQueue> Queue;
-    if (auto Err =
-            HR::toError(Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&Queue)),
-                        "Failed to create command queue."))
+    ComPtr<ID3D12CommandQueue> CmdQueue;
+    if (auto Err = HR::toError(
+            Device->CreateCommandQueue(&Desc, IID_PPV_ARGS(&CmdQueue)),
+            "Failed to create command queue."))
       return Err;
-    return DXQueue(Queue);
+    auto FenceOrErr = DXFence::create(Device.Get(), "QueueSubmitFence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+    return DXQueue(CmdQueue, std::move(*FenceOrErr));
   }
+
+  llvm::Error submit(
+      llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs)
+      override;
 };
 
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
+  ComPtr<ID3D12Device> Device;
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
+  ComPtr<ID3D12CommandSignature> DispatchIndirectSig;
+  /// Whether a UAV barrier is pending from a prior compute command.
+  bool PendingUAVBarrier = false;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12Device> Device) {
     auto CB = std::unique_ptr<DXCommandBuffer>(new DXCommandBuffer());
+    CB->Device = Device;
     if (auto Err = HR::toError(
             Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
                                            IID_PPV_ARGS(&CB->Allocator)),
@@ -479,10 +500,163 @@ public:
     return CB->getKind() == GPUAPI::DirectX;
   }
 
+  void addPendingUAVBarrier() { PendingUAVBarrier = true; }
+
+  llvm::Error ensureDispatchIndirectSig() {
+    if (DispatchIndirectSig)
+      return llvm::Error::success();
+    D3D12_INDIRECT_ARGUMENT_DESC ArgDesc = {};
+    ArgDesc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
+    D3D12_COMMAND_SIGNATURE_DESC SigDesc = {};
+    SigDesc.ByteStride = sizeof(D3D12_DISPATCH_ARGUMENTS);
+    SigDesc.NumArgumentDescs = 1;
+    SigDesc.pArgumentDescs = &ArgDesc;
+    if (auto Err = HR::toError(
+            Device->CreateCommandSignature(&SigDesc, nullptr,
+                                           IID_PPV_ARGS(&DispatchIndirectSig)),
+            "Failed to create indirect dispatch command signature."))
+      return Err;
+    return llvm::Error::success();
+  }
+
+  void flushBarrier() {
+    if (!PendingUAVBarrier)
+      return;
+    const D3D12_RESOURCE_BARRIER Barrier =
+        CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
+    CmdList->ResourceBarrier(1, &Barrier);
+    PendingUAVBarrier = false;
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder(offloadtest::EncoderMode Mode) override;
+
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
 };
 
+llvm::Error DXQueue::submit(
+    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+  llvm::SmallVector<ID3D12CommandList *> CmdLists;
+  CmdLists.reserve(CBs.size());
+
+  // Wait on the previous submit's fence value before executing this batch,
+  // so that back-to-back submits don't overlap on the GPU. Skip on first
+  // submit since Wait(fence, 0) triggers a D3D12 validation warning.
+  if (FenceCounter > 0)
+    if (auto Err =
+            HR::toError(Queue->Wait(SubmitFence->Fence.Get(), FenceCounter),
+                        "Failed to wait on previous submit."))
+      return Err;
+
+  for (auto &CB : CBs) {
+    auto &DCB = *llvm::cast<DXCommandBuffer>(CB.get());
+    if (auto Err =
+            HR::toError(DCB.CmdList->Close(), "Failed to close command list."))
+      return Err;
+    CmdLists.push_back(DCB.CmdList.Get());
+  }
+
+  Queue->ExecuteCommandLists(CmdLists.size(), CmdLists.data());
+
+  const uint64_t CurrentCounter = ++FenceCounter;
+  if (auto Err =
+          HR::toError(Queue->Signal(SubmitFence->Fence.Get(), CurrentCounter),
+                      "Failed to add signal."))
+    return Err;
+
+  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
+  if (auto Err = SubmitFence->waitForCompletion(CurrentCounter))
+    return Err;
+
+  return llvm::Error::success();
+}
+
+class DXComputeEncoder : public offloadtest::ComputeEncoder {
+  DXCommandBuffer &CB;
+
+  void addDstBarrier() {
+    CB.addPendingUAVBarrier();
+    if (isSerial())
+      barrier();
+  }
+
+public:
+  DXComputeEncoder(DXCommandBuffer &CB, EncoderMode Mode)
+      : ComputeEncoder(GPUAPI::DirectX, Mode), CB(CB) {}
+
+  ~DXComputeEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::DirectX;
+  }
+
+  // D3D12 debug labels require WinPixEventRuntime for the proper event
+  // encoding.  Without it, BeginEvent/EndEvent/SetMarker with metadata type 0
+  // crash the D3D12 debug layer, so leave these as no-ops for now.
+  void pushDebugGroup(llvm::StringRef Label) override {}
+  void popDebugGroup() override {}
+  void insertDebugSignpost(llvm::StringRef Label) override {}
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ) override {
+    addDstBarrier();
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
+    CB.CmdList->Dispatch(GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &DXSrc = static_cast<DXBuffer &>(Src);
+    auto &DXDst = static_cast<DXBuffer &>(Dst);
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
+    CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
+                                 DXSrc.Buffer.Get(), SrcOffset, Size);
+    return llvm::Error::success();
+  }
+
+  llvm::Error fillBuffer(offloadtest::Buffer & /*Dst*/, size_t /*Offset*/,
+                         size_t /*Size*/, uint8_t /*Value*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "fillBuffer is not yet implemented for DirectX.");
+  }
+
+  llvm::Error dispatchIndirect(offloadtest::Buffer &ArgBuffer,
+                               size_t Offset) override {
+    if (auto Err = CB.ensureDispatchIndirectSig())
+      return Err;
+    addDstBarrier();
+    auto &DXBuf = static_cast<DXBuffer &>(ArgBuffer);
+    insertDebugSignpost(
+        llvm::formatv("DispatchIndirect offset={0}", Offset).str());
+    CB.CmdList->ExecuteIndirect(CB.DispatchIndirectSig.Get(), 1,
+                                DXBuf.Buffer.Get(), Offset, nullptr, 0);
+    return llvm::Error::success();
+  }
+
+  void barrier() override {
+    insertDebugSignpost("Barrier");
+    CB.flushBarrier();
+  }
+
+  void endEncodingImpl() override { popDebugGroup(); }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+DXCommandBuffer::createComputeEncoder(offloadtest::EncoderMode Mode) {
+  if (Mode == offloadtest::EncoderMode::Parallel)
+    flushBarrier();
+  auto Enc = std::make_unique<DXComputeEncoder>(*this, Mode);
+  Enc->pushDebugGroup(Mode == offloadtest::EncoderMode::Serial
+                          ? "ComputeEncoder (Serial)"
+                          : "ComputeEncoder (Parallel)");
+  return Enc;
+}
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
@@ -515,7 +689,6 @@ private:
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     ComPtr<ID3D12PipelineState> PSO;
     std::unique_ptr<DXCommandBuffer> CB;
-    std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // Resources for graphics pipelines.
     std::unique_ptr<offloadtest::Texture> RT;
@@ -530,10 +703,10 @@ private:
 public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
            std::string Desc)
-      : Adapter(A), Device(D), GraphicsQueue(Q) {
+      : Adapter(A), Device(D), GraphicsQueue(std::move(Q)) {
     Description = Desc;
   }
-  DXDevice(const DXDevice &) = default;
+  DXDevice(const DXDevice &) = delete;
 
   ~DXDevice() override {
     const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
@@ -698,9 +871,8 @@ public:
     auto GraphicsQueueOrErr = DXQueue::createGraphicsQueue(Device);
     if (!GraphicsQueueOrErr)
       return GraphicsQueueOrErr.takeError();
-    const DXQueue GraphicsQueue = *GraphicsQueueOrErr;
-
-    return std::make_unique<DXDevice>(Adapter, Device, std::move(GraphicsQueue),
+    return std::make_unique<DXDevice>(Adapter, Device,
+                                      std::move(*GraphicsQueueOrErr),
                                       std::string(DescVec.data()));
   }
 
@@ -911,7 +1083,7 @@ public:
     return Ret;
   }
 
-  llvm::Error setupReservedResource(Resource &R, InvocationState &IS,
+  llvm::Error setupReservedResource(Resource &R,
                                     const D3D12_RESOURCE_DESC ResDesc,
                                     ComPtr<ID3D12Heap> &Heap,
                                     ComPtr<ID3D12Resource> &Buffer) {
@@ -949,7 +1121,19 @@ public:
         Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
         &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
 
-    return waitForSignal(IS);
+    // Synchronize after UpdateTileMappings, which is a queue operation (not
+    // recorded into a command list). Use a dedicated fence to avoid
+    // conflicting signal values with the queue's SubmitFence.
+    auto FenceOrErr = DXFence::create(Device.Get(), "TileMappingFence");
+    if (!FenceOrErr)
+      return FenceOrErr.takeError();
+
+    if (auto Err =
+            HR::toError(CommandQueue->Signal((*FenceOrErr)->Fence.Get(), 1),
+                        "Failed to add signal."))
+      return Err;
+
+    return (*FenceOrErr)->waitForCompletion(1);
   }
 
   llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
@@ -1008,7 +1192,7 @@ public:
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (R.IsReserved)
-        if (auto Err = setupReservedResource(R, IS, ResDesc, Heap, Buffer))
+        if (auto Err = setupReservedResource(R, ResDesc, Heap, Buffer))
           return Err;
 
       // Upload data initialization
@@ -1134,7 +1318,7 @@ public:
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (R.IsReserved)
-        if (auto Err = setupReservedResource(R, IS, ResDesc, Heap, Buffer))
+        if (auto Err = setupReservedResource(R, ResDesc, Heap, Buffer))
           return Err;
 
       // Upload data initialization
@@ -1352,25 +1536,17 @@ public:
   }
 
   void addUploadBeginBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
-    const D3D12_RESOURCE_BARRIER Barrier = {
-        D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        {D3D12_RESOURCE_TRANSITION_BARRIER{
-            R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST}}};
+    const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        R.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
   void addUploadEndBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R,
                            bool IsUAV) {
-    const D3D12_RESOURCE_BARRIER Barrier = {
-        D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        {D3D12_RESOURCE_TRANSITION_BARRIER{
-            R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            IsUAV ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-                  : D3D12_RESOURCE_STATE_GENERIC_READ}}};
+    const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        R.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+        IsUAV ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+              : D3D12_RESOURCE_STATE_GENERIC_READ);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
@@ -1388,33 +1564,8 @@ public:
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  llvm::Error waitForSignal(InvocationState &IS) {
-    // This is a hack but it works since this is all single threaded code.
-    static uint64_t FenceCounter = 0;
-    const uint64_t CurrentCounter = FenceCounter + 1;
-    auto *F = static_cast<DXFence *>(IS.CompletionFence.get());
-
-    if (auto Err = HR::toError(
-            GraphicsQueue.Queue->Signal(F->Fence.Get(), CurrentCounter),
-            "Failed to add signal."))
-      return Err;
-
-    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
-      return Err;
-
-    FenceCounter = CurrentCounter;
-    return llvm::Error::success();
-  }
-
   llvm::Error executeCommandList(InvocationState &IS) {
-    if (auto Err = HR::toError(IS.CB->CmdList->Close(),
-                               "Failed to close command list."))
-      return Err;
-
-    ID3D12CommandList *const CmdLists[] = {IS.CB->CmdList.Get()};
-    GraphicsQueue.Queue->ExecuteCommandLists(1, CmdLists);
-
-    return waitForSignal(IS);
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
@@ -1495,10 +1646,18 @@ public:
       }
     }
 
-    const llvm::ArrayRef<int> DispatchSize =
-        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-
-    IS.CB->CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
+    {
+      auto EncoderOrErr = IS.CB->createComputeEncoder(EncoderMode::Parallel);
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
+      const llvm::ArrayRef<int> DispatchSize =
+          llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
+      if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
+                                      DispatchSize[2]))
+        return Err;
+      Encoder.endEncoding();
+    }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
@@ -1869,11 +2028,6 @@ public:
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
     llvm::outs() << "Command buffer created.\n";
-
-    auto FenceOrErr = createFence("Fence");
-    if (!FenceOrErr)
-      return FenceOrErr.takeError();
-    State.CompletionFence = std::move(*FenceOrErr);
 
     if (auto Err = createBuffers(P, State))
       return Err;
