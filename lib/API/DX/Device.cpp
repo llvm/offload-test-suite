@@ -499,7 +499,7 @@ struct DescriptorAllocator {
         Type, Capacity, D3D12_DESCRIPTOR_HEAP_FLAG_NONE, 0};
     if (auto Err = HR::toError(
             Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
-            "Failed to create staging descriptor heap."))
+            "Failed to create descriptor heap for DescriptorAllocator."))
       return Err;
     const uint32_t DescIncSize = Device->GetDescriptorHandleIncrementSize(Type);
     return DescriptorAllocator(Heap, DescIncSize, Capacity);
@@ -510,7 +510,7 @@ struct DescriptorAllocator {
     const uint32_t Index = NextIndex.fetch_add(1, std::memory_order_relaxed);
     if (Index >= Capacity)
       return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Staging descriptor heap exhausted.");
+                                     "Descriptor heap allocator exhausted.");
     D3D12_CPU_DESCRIPTOR_HANDLE Handle =
         Heap->GetCPUDescriptorHandleForHeapStart();
     Handle.ptr += Index * DescIncSize;
