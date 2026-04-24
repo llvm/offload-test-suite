@@ -324,6 +324,24 @@ public:
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
         Desc(Desc), SizeInBytes(SizeInBytes) {}
 
+  size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    void *Ptr = nullptr;
+    if (auto Err =
+            HR::toError(Buffer->Map(0, nullptr, &Ptr), "Failed to map buffer."))
+      return std::move(Err);
+    return Ptr;
+  }
+
+  llvm::Error unmap() override {
+    Buffer->Unmap(0, nullptr);
+    return llvm::Error::success();
+  }
+
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::DirectX;
   }
@@ -521,7 +539,7 @@ private:
     std::unique_ptr<offloadtest::Texture> RT;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DS;
-    ComPtr<ID3D12Resource> VB;
+    std::unique_ptr<offloadtest::Buffer> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
@@ -556,9 +574,9 @@ public:
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
 
     const D3D12_RESOURCE_FLAGS Flags =
-        HeapType == D3D12_HEAP_TYPE_READBACK
-            ? D3D12_RESOURCE_FLAG_NONE
-            : D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        HeapType == D3D12_HEAP_TYPE_DEFAULT
+            ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
+            : D3D12_RESOURCE_FLAG_NONE;
 
     const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
@@ -1639,6 +1657,7 @@ public:
     // Create readback buffer sized for the pixel data (raw bytes).
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
+    BufDesc.Usage = BufferUsage::Storage;
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -1662,28 +1681,17 @@ public:
       return llvm::createStringError(
           std::errc::invalid_argument,
           "No vertex buffer bound for graphics pipeline.");
-    const CPUBuffer &VB = *P.Bindings.VertexBufferPtr;
-    const uint64_t VBSize = VB.size();
-    D3D12_RESOURCE_DESC const Desc = CD3DX12_RESOURCE_DESC::Buffer(VBSize);
-    CD3DX12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &Desc,
-                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
-                                   IID_PPV_ARGS(&IS.VB)),
-                               "Failed to create vertex buffer"))
-      return Err;
 
-    void *Ptr = nullptr;
-    if (auto Err = HR::toError(IS.VB->Map(0, nullptr, &Ptr),
-                               "Failed to map vertex buffer"))
-      return Err;
-    memcpy(Ptr, VB.Data[0].get(), VBSize);
-    IS.VB->Unmap(0, nullptr);
+    auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
+        *this, *P.Bindings.VertexBufferPtr);
+    if (!VBOrErr)
+      return VBOrErr.takeError();
+    IS.VB = std::move(*VBOrErr);
 
+    auto &VBBuf = llvm::cast<DXBuffer>(*IS.VB);
     D3D12_VERTEX_BUFFER_VIEW VBView = {};
-    VBView.BufferLocation = IS.VB->GetGPUVirtualAddress();
-    VBView.SizeInBytes = static_cast<UINT>(VBSize);
+    VBView.BufferLocation = VBBuf.Buffer->GetGPUVirtualAddress();
+    VBView.SizeInBytes = static_cast<UINT>(IS.VB->getSizeInBytes());
     VBView.StrideInBytes = P.Bindings.getVertexStride();
 
     IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -1757,6 +1765,10 @@ public:
     auto &RT = llvm::cast<DXTexture>(*IS.RT);
     auto &DS = llvm::cast<DXTexture>(*IS.DS);
     auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
+
+    if (!IS.VB)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Vertex buffer not initialized.");
 
     IS.CB->CmdList->SetGraphicsRootSignature(IS.RootSig.Get());
     if (IS.DescHeap) {

@@ -118,6 +118,10 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 llvm::Expected<std::unique_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
+// Creates a vertex buffer and uploads the given CPU-side vertex data into it.
+llvm::Expected<std::unique_ptr<Buffer>>
+createVertexBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_DEVICE_H

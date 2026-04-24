@@ -128,6 +128,24 @@ public:
       : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
 
+  size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    return Buf->contents();
+  }
+
+  llvm::Error unmap() override {
+    // Managed storage (CpuToGpu) requires an explicit didModifyRange to
+    // propagate CPU-side writes to the GPU. Shared storage (GpuToCpu) is
+    // coherent and needs no action.
+    if (Desc.Location == MemoryLocation::CpuToGpu)
+      Buf->didModifyRange(NS::Range::Make(0, SizeInBytes));
+    return llvm::Error::success();
+  }
+
   ~MTLBuffer() override {
     if (Buf)
       Buf->release();
@@ -205,7 +223,7 @@ class MTLDevice : public offloadtest::Device {
     MTL::ComputePipelineState *ComputePipeline = nullptr;
     MTL::RenderPipelineState *RenderPipeline = nullptr;
     MTL::Buffer *ArgBuffer;
-    MTL::Buffer *VertexBuffer;
+    std::unique_ptr<offloadtest::Buffer> VB;
     MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
@@ -447,12 +465,16 @@ class MTLDevice : public offloadtest::Device {
       IS.ArgBuffer->didModifyRange(NS::Range::Make(0, IS.ArgBuffer->length()));
     }
     if (P.isGraphics()) {
-      // Create and mark the vertex buffer as modified.
-      IS.VertexBuffer = Device->newBuffer(
-          P.Bindings.VertexBufferPtr->Data.back().get(),
-          P.Bindings.VertexBufferPtr->size(), MTL::ResourceStorageModeManaged);
-      IS.VertexBuffer->didModifyRange(
-          NS::Range::Make(0, IS.VertexBuffer->length()));
+      if (!P.Bindings.VertexBufferPtr)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "No vertex buffer specified for graphics pipeline.");
+
+      auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
+          *this, *P.Bindings.VertexBufferPtr);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+      IS.VB = std::move(*VBOrErr);
     }
     return llvm::Error::success();
   }
@@ -541,6 +563,7 @@ class MTLDevice : public offloadtest::Device {
     // Create a readback buffer for copying render target data to the CPU.
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
+    BufDesc.Usage = BufferUsage::Storage;
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -635,7 +658,7 @@ class MTLDevice : public offloadtest::Device {
 
     // Bind vertex buffer at slot 0 to match the vertex descriptor which
     // references buffer index 0.
-    CmdEncoder->setVertexBuffer(IS.VertexBuffer, 0, 0);
+    CmdEncoder->setVertexBuffer(llvm::cast<MTLBuffer>(*IS.VB).Buf, 0, 0);
 
     CmdEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0),
                                P.Bindings.getVertexCount());
