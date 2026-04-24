@@ -320,11 +320,6 @@ public:
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  // Staging descriptors, allocated from the device's central non-shader-visible
-  // CBV_SRV_UAV heap. A zero ptr means no descriptor.
-  D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = {};
-  D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle = {};
-
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
