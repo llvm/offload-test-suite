@@ -150,9 +150,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/351
-# XFAIL: Metal
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader --validation-layer %t/pipeline.yaml %t.o
