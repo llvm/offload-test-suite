@@ -482,10 +482,23 @@ public:
 
 class VulkanQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   VkQueue Queue = VK_NULL_HANDLE;
   uint32_t QueueFamilyIdx = 0;
-  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx)
-      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx) {}
+  // TODO: Ensure device lifetime is managed (e.g. via shared_ptr).
+  VkDevice Device = VK_NULL_HANDLE;
+  std::unique_ptr<VulkanFence> SubmitFence;
+  uint64_t FenceCounter = 0;
+
+  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx, VkDevice Device,
+              std::unique_ptr<VulkanFence> SubmitFence)
+      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx), Device(Device),
+        SubmitFence(std::move(SubmitFence)) {}
+
+  llvm::Error submit(
+      llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs)
+      override;
 };
 
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
@@ -540,6 +553,54 @@ private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
 };
 
+llvm::Error VulkanQueue::submit(
+    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+  llvm::SmallVector<VkCommandBuffer> CmdBuffers;
+  CmdBuffers.reserve(CBs.size());
+
+  // Wait on the previous submit's fence value before executing this batch,
+  // so that back-to-back submits don't overlap on the GPU. Waiting for a
+  // value that is already signaled (including 0 on first submit) is a no-op.
+  const uint64_t WaitValue = FenceCounter;
+  const uint64_t SignalValue = ++FenceCounter;
+  const VkPipelineStageFlags WaitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
+  for (auto &CB : CBs) {
+    auto &VCB = *llvm::cast<VulkanCommandBuffer>(CB.get());
+    if (vkEndCommandBuffer(VCB.CmdBuffer))
+      return llvm::createStringError(std::errc::device_or_resource_busy,
+                                     "Could not end command buffer.");
+    CmdBuffers.push_back(VCB.CmdBuffer);
+  }
+
+  VkTimelineSemaphoreSubmitInfo TimelineInfo = {};
+  TimelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  TimelineInfo.waitSemaphoreValueCount = 1;
+  TimelineInfo.pWaitSemaphoreValues = &WaitValue;
+  TimelineInfo.signalSemaphoreValueCount = 1;
+  TimelineInfo.pSignalSemaphoreValues = &SignalValue;
+
+  VkSubmitInfo SubmitInfo = {};
+  SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  SubmitInfo.pNext = &TimelineInfo;
+  SubmitInfo.waitSemaphoreCount = 1;
+  SubmitInfo.pWaitSemaphores = &SubmitFence->Semaphore;
+  SubmitInfo.pWaitDstStageMask = &WaitStage;
+  SubmitInfo.commandBufferCount = CmdBuffers.size();
+  SubmitInfo.pCommandBuffers = CmdBuffers.data();
+  SubmitInfo.signalSemaphoreCount = 1;
+  SubmitInfo.pSignalSemaphores = &SubmitFence->Semaphore;
+
+  if (vkQueueSubmit(Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
+    return llvm::createStringError(std::errc::device_or_resource_busy,
+                                   "Failed to submit to queue.");
+
+  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
+  if (auto Err = SubmitFence->waitForCompletion(SignalValue))
+    return Err;
+
+  return llvm::Error::success();
+}
 class VulkanDevice : public offloadtest::Device {
 private:
   std::shared_ptr<VulkanInstance> Instance;
@@ -626,8 +687,6 @@ private:
     VkDescriptorPool Pool = VK_NULL_HANDLE;
     VkPipelineCache PipelineCache = VK_NULL_HANDLE;
     VkPipeline Pipeline = VK_NULL_HANDLE;
-
-    std::unique_ptr<offloadtest::Fence> CompletionFence;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
@@ -738,7 +797,11 @@ public:
     VkQueue DeviceQueue = VK_NULL_HANDLE;
     vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
 
-    const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
+    auto SubmitFenceOrErr = VulkanFence::create(Device, "QueueSubmitFence");
+    if (!SubmitFenceOrErr)
+      return SubmitFenceOrErr.takeError();
+    VulkanQueue GraphicsQueue(DeviceQueue, QueueFamilyIdx, Device,
+                              std::move(*SubmitFenceOrErr));
 
     return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
                                           Device, std::move(GraphicsQueue),
@@ -782,6 +845,9 @@ public:
   ~VulkanDevice() override {
     if (Device != VK_NULL_HANDLE) {
       vkDeviceWaitIdle(Device);
+      // Destroy the queue's fence before the device, since the fence
+      // references the VkDevice for vkDestroySemaphore.
+      GraphicsQueue.SubmitFence.reset();
       vkDestroyDevice(Device, nullptr);
     }
   }
@@ -1310,41 +1376,7 @@ public:
   }
 
   llvm::Error executeCommandBuffer(InvocationState &IS) {
-    // This is a hack but it works since this is all single threaded code.
-    static uint64_t FenceCounter = 0;
-    const uint64_t CurrentCounter = FenceCounter + 1;
-
-    if (vkEndCommandBuffer(IS.CB->CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not end command buffer.");
-
-    auto *F = static_cast<VulkanFence *>(IS.CompletionFence.get());
-
-    VkTimelineSemaphoreSubmitInfo TimelineSubmitInfo = {};
-    TimelineSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    TimelineSubmitInfo.signalSemaphoreValueCount = 1;
-    TimelineSubmitInfo.pSignalSemaphoreValues = &CurrentCounter;
-
-    VkSubmitInfo SubmitInfo = {};
-    SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    SubmitInfo.pNext = &TimelineSubmitInfo;
-    SubmitInfo.commandBufferCount = 1;
-    SubmitInfo.pCommandBuffers = &IS.CB->CmdBuffer;
-    SubmitInfo.signalSemaphoreCount = 1;
-    SubmitInfo.pSignalSemaphores = &F->Semaphore;
-
-    // Submit to the queue
-    if (vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to submit to queue.");
-
-    if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
-      return Err;
-
-    vkFreeCommandBuffers(Device, IS.CB->CmdPool, 1, &IS.CB->CmdBuffer);
-
-    FenceCounter = CurrentCounter;
-    return llvm::Error::success();
+    return GraphicsQueue.submit(std::move(IS.CB));
   }
 
   llvm::Error createDescriptorPool(Pipeline &P, InvocationState &IS) {
@@ -2531,10 +2563,6 @@ public:
     State.CB = std::move(*CBOrErr);
     llvm::outs() << "Command buffer created.\n";
 
-    auto FenceOrErr = createFence("Fence");
-    if (!FenceOrErr)
-      return FenceOrErr.takeError();
-    State.CompletionFence = std::move(*FenceOrErr);
     if (auto Err = createShaderModules(P, State))
       return Err;
     llvm::outs() << "Shader module created.\n";
