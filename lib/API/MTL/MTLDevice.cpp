@@ -10,6 +10,7 @@
 #include "metal_irconverter_runtime.h"
 
 #include "API/Device.h"
+#include "API/FormatConversion.h"
 #include "MTLResources.h"
 #include "Support/Pipeline.h"
 
@@ -54,26 +55,6 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   return MTL::PixelFormatInvalid;
 }
 
-#define MTLVTXFormats(Base)                                                    \
-  if (Channels == 1)                                                           \
-    return MTL::VertexFormat##Base;                                            \
-  if (Channels == 2)                                                           \
-    return MTL::VertexFormat##Base##2;                                         \
-  if (Channels == 3)                                                           \
-    return MTL::VertexFormat##Base##3;                                         \
-  if (Channels == 4)                                                           \
-    return MTL::VertexFormat##Base##4;
-
-static MTL::VertexFormat getMTLVertexFormat(DataFormat Format, int Channels) {
-  switch (Format) {
-  case DataFormat::Float32:
-    MTLVTXFormats(Float) break;
-  default:
-    llvm_unreachable("Unsupported Resource format specified");
-  }
-  return MTL::VertexFormatInvalid;
-}
-
 namespace {
 class MTLQueue : public offloadtest::Queue {
 public:
@@ -113,6 +94,28 @@ public:
       return llvm::createStringError(std::errc::timed_out,
                                      "Timed out waiting on shared event.");
     return llvm::Error::success();
+  }
+};
+
+class MTLPipelineState : public offloadtest::PipelineState {
+public:
+  std::string Name;
+  MTL::ComputePipelineState *ComputePipeline = nullptr;
+  MTL::RenderPipelineState *RenderPipeline = nullptr;
+
+  MTLPipelineState(llvm::StringRef Name,
+                   MTL::ComputePipelineState *ComputePipeline)
+      : Name(Name), ComputePipeline(ComputePipeline) {}
+
+  MTLPipelineState(llvm::StringRef Name,
+                   MTL::RenderPipelineState *RenderPipeline)
+      : Name(Name), RenderPipeline(RenderPipeline) {}
+
+  ~MTLPipelineState() override {
+    if (ComputePipeline)
+      ComputePipeline->release();
+    if (RenderPipeline)
+      RenderPipeline->release();
   }
 };
 
@@ -193,178 +196,22 @@ class MTLDevice : public offloadtest::Device {
         T->release();
       for (MTL::Buffer *B : Buffers)
         B->release();
-      if (ComputePipeline)
-        ComputePipeline->release();
-      if (RenderPipeline)
-        RenderPipeline->release();
 
       Pool->release();
     }
 
     NS::AutoreleasePool *Pool = nullptr;
-    MTL::ComputePipelineState *ComputePipeline = nullptr;
-    MTL::RenderPipelineState *RenderPipeline = nullptr;
     MTL::Buffer *ArgBuffer;
     MTL::Buffer *VertexBuffer;
-    MTL::VertexDescriptor *VertexDescriptor;
     llvm::SmallVector<MTL::Texture *> Textures;
     llvm::SmallVector<MTL::Buffer *> Buffers;
     std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
     std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
+    std::unique_ptr<PipelineState> Pipeline;
     std::unique_ptr<offloadtest::Fence> CompletionFence;
   };
-
-  llvm::Error setupVertexShader(InvocationState &IS, const Pipeline &P,
-                                MTL::Function *Fn) {
-    if (P.Bindings.VertexBufferPtr) {
-      NS::Array *FnAttrs = Fn->vertexAttributes();
-      // I'm not really sure if there's any valid case for a vertex shader with
-      // no vertex attributes, so we just error if that ever occurs.
-      if (!FnAttrs)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Vertex shader has no vertex attributes.");
-      if (FnAttrs->count() != P.Bindings.VertexAttributes.size())
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Mismatch between vertex shader attribute count and pipeline "
-            "vertex input count.");
-      // Collect the attribute indices the shader expects so that we can map the
-      // specified attributes onto the correct indices.
-      llvm::StringMap<uint32_t> ShaderAttrIndices;
-      for (uint32_t Ai = 0; Ai < FnAttrs->count(); ++Ai) {
-        auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(Ai));
-        if (A && A->isActive()) {
-          ShaderAttrIndices.insert(std::make_pair(
-              llvm::StringRef(A->name()->utf8String()), A->attributeIndex()));
-          llvm::errs() << "Shader attr: " << A->name()->utf8String()
-                       << " at index " << A->attributeIndex() << "\n";
-        }
-      }
-
-      IS.VertexDescriptor = MTL::VertexDescriptor::alloc()->init();
-      const uint32_t Stride = P.Bindings.getVertexStride();
-      for (const VertexAttribute &VA : P.Bindings.VertexAttributes) {
-        llvm::SmallString<32> AttrName(VA.Name);
-        llvm::transform(AttrName, AttrName.begin(), tolower);
-        // Append a zero since we're only supporting one attribute per name.
-        // We'll need to revisit this if we ever support indexed attributes.
-        AttrName += "0";
-        MTL::VertexAttributeDescriptor *VADesc =
-            MTL::VertexAttributeDescriptor::alloc()->init();
-        VADesc->setBufferIndex(0);
-        VADesc->setOffset(VA.Offset);
-        VADesc->setFormat(getMTLVertexFormat(VA.Format, VA.Channels));
-        IS.VertexDescriptor->attributes()->setObject(
-            VADesc, ShaderAttrIndices[AttrName]);
-      }
-
-      MTL::VertexBufferLayoutDescriptor *LDesc =
-          MTL::VertexBufferLayoutDescriptor::alloc()->init();
-      LDesc->setStride(Stride);
-      LDesc->setStepRate(1);
-      LDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
-      IS.VertexDescriptor->layouts()->setObject(LDesc, 0);
-    }
-    return llvm::Error::success();
-  }
-
-  llvm::Error loadShaders(InvocationState &IS, const Pipeline &P) {
-    NS::Error *Error = nullptr;
-    if (P.isCompute()) {
-      // This is an arbitrary distinction that we could alter in the future.
-      if (P.Shaders.size() != 1)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Compute pipeline must have exactly one compute shader.");
-      const llvm::StringRef Program = P.Shaders[0].Shader->getBuffer();
-      dispatch_data_t Data = dispatch_data_create(
-          Program.data(), Program.size(), dispatch_get_main_queue(),
-          ^{
-          });
-      MTL::Library *Lib = Device->newLibrary(Data, &Error);
-      if (Error)
-        return toError(Error);
-      IS.Pool->addObject(Lib);
-
-      MTL::Function *Fn = Lib->newFunction(NS::String::string(
-          P.Shaders[0].Entry.c_str(), NS::UTF8StringEncoding));
-      IS.ComputePipeline = Device->newComputePipelineState(Fn, &Error);
-      if (Error)
-        return toError(Error);
-      IS.Pool->addObject(Fn);
-    } else {
-      MTL::RenderPipelineDescriptor *Desc =
-          MTL::RenderPipelineDescriptor::alloc()->init();
-      IS.Pool->addObject(Desc);
-      for (const auto &S : P.Shaders) {
-        const llvm::StringRef Program = S.Shader->getBuffer();
-        dispatch_data_t Data = dispatch_data_create(
-            Program.data(), Program.size(), dispatch_get_main_queue(),
-            ^{
-            });
-        MTL::Library *Lib = Device->newLibrary(Data, &Error);
-        if (Error)
-          return toError(Error);
-        IS.Pool->addObject(Lib);
-
-        MTL::Function *Fn = Lib->newFunction(
-            NS::String::string(S.Entry.c_str(), NS::UTF8StringEncoding));
-        switch (S.Stage) {
-        case Stages::Vertex:
-          Desc->setVertexFunction(Fn);
-          if (llvm::Error Err = setupVertexShader(IS, P, Fn))
-            return Err;
-
-          Desc->setVertexDescriptor(IS.VertexDescriptor);
-          break;
-        case Stages::Pixel:
-          Desc->setFragmentFunction(Fn);
-          break;
-        case Stages::Compute:
-          return llvm::createStringError(
-              std::errc::not_supported,
-              "Metal: Compute shader invalid with render pipeline!");
-        }
-        if (Error)
-          return toError(Error);
-        IS.Pool->addObject(Fn);
-      }
-
-      // TODO: Add support for more shader stages and different pipeline shapes.
-      if (Desc->vertexFunction() == nullptr ||
-          Desc->fragmentFunction() == nullptr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Graphics pipeline requires both a vertex shader and a fragment "
-            "shader.");
-
-      if (P.Bindings.RTargetBufferPtr) {
-        // Configure the render target color attachment.
-        const MTL::PixelFormat PF =
-            getMTLFormat(P.Bindings.RTargetBufferPtr->Format,
-                         P.Bindings.RTargetBufferPtr->Channels);
-        MTL::RenderPipelineColorAttachmentDescriptor *RPCA =
-            MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
-        RPCA->setPixelFormat(PF);
-        Desc->colorAttachments()->setObject(RPCA, 0);
-
-        // Set the depth/stencil format on the pipeline descriptor.
-        const MTL::PixelFormat DepthFmt =
-            getMetalPixelFormat(Format::D32FloatS8Uint);
-        Desc->setDepthAttachmentPixelFormat(DepthFmt);
-        Desc->setStencilAttachmentPixelFormat(DepthFmt);
-      }
-
-      IS.RenderPipeline = Device->newRenderPipelineState(Desc, &Error);
-      if (Error)
-        return toError(Error);
-    }
-
-    return llvm::Error::success();
-  }
 
   llvm::Error createDescriptor(Resource &R, InvocationState &IS,
                                const uint32_t HeapIdx) {
@@ -464,7 +311,8 @@ class MTLDevice : public offloadtest::Device {
     auto CloseCommandEncoder =
         llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
 
-    CmdEncoder->setComputePipelineState(IS.ComputePipeline);
+    auto *PS = static_cast<MTLPipelineState *>(IS.Pipeline.get());
+    CmdEncoder->setComputePipelineState(PS->ComputePipeline);
     CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
     for (uint64_t I = 0; I < IS.Textures.size(); ++I)
       CmdEncoder->useResource(IS.Textures[I],
@@ -473,7 +321,7 @@ class MTLDevice : public offloadtest::Device {
       CmdEncoder->useResource(IS.Buffers[I],
                               MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
 
-    NS::UInteger TGS[3] = {IS.ComputePipeline->maxTotalThreadsPerThreadgroup(),
+    NS::UInteger TGS[3] = {PS->ComputePipeline->maxTotalThreadsPerThreadgroup(),
                            1, 1};
     if (P.Shaders[0].Reflection) {
       llvm::Expected<llvm::json::Value> E = llvm::json::parse(
@@ -616,7 +464,8 @@ class MTLDevice : public offloadtest::Device {
     MTL::RenderCommandEncoder *CmdEncoder =
         IS.CB->CmdBuffer->renderCommandEncoder(Desc);
 
-    CmdEncoder->setRenderPipelineState(IS.RenderPipeline);
+    auto *PS = static_cast<MTLPipelineState *>(IS.Pipeline.get());
+    CmdEncoder->setRenderPipelineState(PS->RenderPipeline);
 
     // Configure depth stencil state: depth test enabled, write all, less.
     MTL::DepthStencilDescriptor *DSDesc =
@@ -781,6 +630,152 @@ public:
     return MTLCommandBuffer::create(GraphicsQueue.Queue);
   }
 
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineCs(llvm::StringRef Name,
+                   const BindingsDesc & /*unused on metal*/,
+                   ShaderContainer CS) override {
+    NS::Error *Error = nullptr;
+    const llvm::StringRef Program = CS.Shader->getBuffer();
+    dispatch_data_t Data = dispatch_data_create(Program.data(), Program.size(),
+                                                dispatch_get_main_queue(),
+                                                ^{
+                                                });
+    MTL::Library *Lib = Device->newLibrary(Data, &Error);
+    if (Error)
+      return toError(Error);
+
+    MTL::Function *Fn = Lib->newFunction(
+        NS::String::string(CS.EntryPoint.c_str(), NS::UTF8StringEncoding));
+    if (!Fn) {
+      Lib->release();
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Failed to find entry point '%s' in Metal library.",
+          CS.EntryPoint.c_str());
+    }
+
+    MTL::ComputePipelineState *PSO =
+        Device->newComputePipelineState(Fn, &Error);
+    Fn->release();
+    Lib->release();
+    if (Error)
+      return toError(Error);
+
+    return std::make_unique<MTLPipelineState>(Name, PSO);
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>> createPipelineVsPs(
+      llvm::StringRef Name, const BindingsDesc & /*unused on metal*/,
+      llvm::ArrayRef<InputLayoutDesc> InputLayout,
+      llvm::ArrayRef<Format> RTFormats, std::optional<Format> DSFormat,
+      ShaderContainer VS, ShaderContainer PS) override {
+    NS::Error *Error = nullptr;
+
+    // Load vertex shader.
+    const llvm::StringRef VSProgram = VS.Shader->getBuffer();
+    dispatch_data_t VSData = dispatch_data_create(
+        VSProgram.data(), VSProgram.size(), dispatch_get_main_queue(),
+        ^{
+        });
+    MTL::Library *VSLib = Device->newLibrary(VSData, &Error);
+    if (Error)
+      return toError(Error);
+
+    MTL::Function *VSFn = VSLib->newFunction(
+        NS::String::string(VS.EntryPoint.c_str(), NS::UTF8StringEncoding));
+    if (!VSFn) {
+      VSLib->release();
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Failed to find vertex entry point '%s' in Metal library.",
+          VS.EntryPoint.c_str());
+    }
+
+    // Load pixel/fragment shader.
+    const llvm::StringRef PSProgram = PS.Shader->getBuffer();
+    dispatch_data_t PSData = dispatch_data_create(
+        PSProgram.data(), PSProgram.size(), dispatch_get_main_queue(),
+        ^{
+        });
+    MTL::Library *PSLib = Device->newLibrary(PSData, &Error);
+    if (Error) {
+      VSFn->release();
+      VSLib->release();
+      return toError(Error);
+    }
+
+    MTL::Function *PSFn = PSLib->newFunction(
+        NS::String::string(PS.EntryPoint.c_str(), NS::UTF8StringEncoding));
+    if (!PSFn) {
+      VSFn->release();
+      VSLib->release();
+      PSLib->release();
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Failed to find fragment entry point '%s' in Metal library.",
+          PS.EntryPoint.c_str());
+    }
+
+    MTL::RenderPipelineDescriptor *Desc =
+        MTL::RenderPipelineDescriptor::alloc()->init();
+    Desc->setVertexFunction(VSFn);
+    Desc->setFragmentFunction(PSFn);
+
+    // Build vertex descriptor from InputLayout.
+    if (!InputLayout.empty()) {
+      MTL::VertexDescriptor *VtxDesc = MTL::VertexDescriptor::alloc()->init();
+      uint32_t Stride = 0;
+      for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
+        const InputLayoutDesc &Elem = InputLayout[I];
+        const uint32_t ElemSize = getFormatSizeInBytes(Elem.Format);
+        MTL::VertexAttributeDescriptor *AttrDesc =
+            MTL::VertexAttributeDescriptor::alloc()->init();
+        AttrDesc->setBufferIndex(0);
+        AttrDesc->setOffset(Elem.OffsetInBytes);
+        AttrDesc->setFormat(getMetalVertexFormat(Elem.Format));
+        VtxDesc->attributes()->setObject(AttrDesc, I);
+        Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
+      }
+
+      MTL::VertexBufferLayoutDescriptor *LDesc =
+          MTL::VertexBufferLayoutDescriptor::alloc()->init();
+      LDesc->setStride(Stride);
+      LDesc->setStepRate(1);
+      LDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
+      VtxDesc->layouts()->setObject(LDesc, 0);
+
+      Desc->setVertexDescriptor(VtxDesc);
+    }
+
+    // Configure render target color attachments.
+    for (size_t I = 0; I < RTFormats.size(); ++I) {
+      MTL::RenderPipelineColorAttachmentDescriptor *RPCA =
+          MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
+      RPCA->setPixelFormat(getMetalPixelFormat(RTFormats[I]));
+      Desc->colorAttachments()->setObject(RPCA, I);
+    }
+
+    // Configure depth/stencil attachment.
+    if (DSFormat) {
+      const MTL::PixelFormat DSPixelFormat = getMetalPixelFormat(*DSFormat);
+      Desc->setDepthAttachmentPixelFormat(DSPixelFormat);
+      if (*DSFormat == Format::D32FloatS8Uint)
+        Desc->setStencilAttachmentPixelFormat(DSPixelFormat);
+    }
+
+    MTL::RenderPipelineState *PSO =
+        Device->newRenderPipelineState(Desc, &Error);
+    VSFn->release();
+    VSLib->release();
+    PSFn->release();
+    PSLib->release();
+    Desc->release();
+    if (Error)
+      return toError(Error);
+
+    return std::make_unique<MTLPipelineState>(Name, PSO);
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
 
@@ -797,17 +792,82 @@ public:
     if (auto Err = createBuffers(P, IS))
       return Err;
 
-    if (auto Err = loadShaders(IS, P))
-      return Err;
+    BindingsDesc Bindings = {};
+    for (auto &S : P.Sets) {
+      DescriptorSetLayoutDesc Layout;
+      for (auto &R : S.Resources) {
+        ResourceBindingDesc ResourceBinding = {};
+        ResourceBinding.Kind = R.Kind;
+        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
+        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        ResourceBinding.VKBinding = R.VKBinding;
+        ResourceBinding.DescriptorCount = R.getArraySize();
+        Layout.ResourceBindings.push_back(ResourceBinding);
+      }
+      Bindings.DescriptorSetDescs.push_back(Layout);
+    }
 
     if (P.isCompute()) {
+      if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Compute pipeline must have exactly one compute shader.");
+
+      ShaderContainer CS = {};
+      CS.EntryPoint = P.Shaders[0].Entry;
+      CS.Shader = P.Shaders[0].Shader.get();
+
+      auto PipelineStateOrErr =
+          createPipelineCs("Compute Pipeline State", Bindings, CS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      IS.Pipeline = std::move(*PipelineStateOrErr);
+      llvm::outs() << "Compute Pipeline created.\n";
+
       if (auto Err = createComputeCommands(P, IS))
         return Err;
-      llvm::outs() << "Created compute commands.\n";
     } else {
+      ShaderContainer VS = {};
+      ShaderContainer PS = {};
+      for (auto &Shader : P.Shaders) {
+        if (Shader.Stage == Stages::Vertex) {
+          VS.EntryPoint = Shader.Entry;
+          VS.Shader = Shader.Shader.get();
+        } else if (Shader.Stage == Stages::Pixel) {
+          PS.EntryPoint = Shader.Entry;
+          PS.Shader = Shader.Shader.get();
+        }
+      }
+
+      llvm::SmallVector<InputLayoutDesc> InputLayout;
+      for (auto &Attr : P.Bindings.VertexAttributes) {
+        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        InputLayoutDesc Desc = {};
+        Desc.Name = Attr.Name;
+        Desc.Format = *FormatOrErr;
+        Desc.OffsetInBytes = Attr.Offset;
+        InputLayout.push_back(Desc);
+      }
+
+      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                  P.Bindings.RTargetBufferPtr->Channels);
+      if (!FormatOrErr)
+        return FormatOrErr.takeError();
+
+      llvm::SmallVector<Format> RTFormats;
+      RTFormats.push_back(*FormatOrErr);
+
+      auto PipelineStateOrErr = createPipelineVsPs(
+          "Graphics Pipeline State", Bindings, InputLayout, RTFormats, VS, PS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      IS.Pipeline = std::move(*PipelineStateOrErr);
+
       if (auto Err = createGraphicsCommands(P, IS))
         return Err;
-      llvm::outs() << "Created graphics commands.\n";
     }
 
     if (auto Err = executeCommands(IS))

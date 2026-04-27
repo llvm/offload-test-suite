@@ -19,12 +19,18 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/Texture.h"
+
 #include "Support/Pipeline.h"
+
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/MemoryBuffer.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace llvm {
@@ -38,6 +44,56 @@ struct Pipeline;
 struct DeviceConfig {
   bool EnableDebugLayer = false;
   bool EnableValidationLayer = false;
+};
+
+struct DXBinding {
+  uint32_t Register;
+  uint32_t Space;
+};
+
+struct InputLayoutDesc {
+  std::string Name;
+  Format Format;
+  uint32_t OffsetInBytes;
+  std::optional<uint32_t> InstanceStepRate;
+};
+
+struct ResourceBindingDesc {
+  ResourceKind Kind;
+  DXBinding DXBinding;
+  std::optional<VulkanBinding> VKBinding;
+  uint32_t DescriptorCount;
+};
+
+struct DescriptorSetLayoutDesc {
+  llvm::SmallVector<ResourceBindingDesc> ResourceBindings;
+};
+
+struct PushConstantsRange {
+  uint32_t OffsetInBytes; // Must be multiple of 4
+  uint32_t SizeInBytes;   // Must be multiple of 4
+};
+
+struct BindingsDesc {
+  llvm::SmallVector<DescriptorSetLayoutDesc> DescriptorSetDescs;
+  llvm::SmallVector<PushConstantsRange> PushConstantRanges;
+};
+
+struct ShaderContainer {
+  std::string EntryPoint;
+  const llvm::MemoryBuffer *Shader;
+  llvm::SmallVector<SpecializationConstant> SpecializationConstants;
+};
+
+class PipelineState {
+public:
+  virtual ~PipelineState() = default;
+
+  PipelineState(const Buffer &) = delete;
+  PipelineState &operator=(const Buffer &) = delete;
+
+protected:
+  PipelineState() = default;
 };
 
 class Fence {
@@ -74,6 +130,17 @@ public:
   virtual llvm::Error executeProgram(Pipeline &P) = 0;
 
   virtual Queue &getGraphicsQueue() = 0;
+
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   ShaderContainer CS) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                     llvm::ArrayRef<Format> RTFormats,
+                     std::optional<Format> DSFormat, ShaderContainer VS,
+                     ShaderContainer PS) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
