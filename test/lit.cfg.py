@@ -77,33 +77,6 @@ def setWaveSizeFeaturesDirectX(config, device):
         MinSizeInt *= 2
 
 
-def hostHasIntelCPU():
-    # Check if the host machine has an Intel CPU.
-    system = platform.system()
-    if system == "Windows":
-        return "intel" in platform.processor().lower()
-    elif system == "Linux":
-        try:
-            with open("/proc/cpuinfo", "r") as f:
-                for line in f:
-                    if line.startswith("vendor_id"):
-                        return "GenuineIntel" in line
-        except (IOError, OSError):
-            return False
-        return False
-    elif system == "Darwin":
-        try:
-            output = (
-                subprocess.check_output(["sysctl", "-n", "machdep.cpu.vendor"])
-                .decode("UTF-8")
-                .strip()
-            )
-            return output == "GenuineIntel"
-        except (subprocess.CalledProcessError, OSError):
-            return False
-    return False
-
-
 def hostSupportsAVX512():
     # Check if the host CPU supports AVX-512 instructions.
     system = platform.system()
@@ -159,7 +132,7 @@ def setDeviceFeatures(config, device, compiler):
         gen = appleSilicon.group(1)
         config.available_features.add(f"AppleM{gen}")
 
-    if hostHasIntelCPU():
+    if "intel" in platform.processor().lower():
         config.available_features.add("IntelCPU")
 
     if hostSupportsAVX512():
