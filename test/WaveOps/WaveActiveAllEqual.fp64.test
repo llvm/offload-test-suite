@@ -147,6 +147,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1114
+# UNSUPPORTED: WARP
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/944
 # XFAIL: Intel && DirectX
 
