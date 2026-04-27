@@ -62,6 +62,33 @@ enum class ResourceKind {
   SampledTexture2D,
 };
 
+enum class DescriptorKind { UAV, SRV, CBV, SAMPLER };
+
+static DescriptorKind getDescriptorKind(ResourceKind RK) {
+  switch (RK) {
+  case ResourceKind::Buffer:
+  case ResourceKind::StructuredBuffer:
+  case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::Texture2D:
+    return DescriptorKind::SRV;
+
+  case ResourceKind::RWStructuredBuffer:
+  case ResourceKind::RWBuffer:
+  case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::RWTexture2D:
+    return DescriptorKind::UAV;
+
+  case ResourceKind::ConstantBuffer:
+    return DescriptorKind::CBV;
+
+  case ResourceKind::Sampler:
+    return DescriptorKind::SAMPLER;
+  case ResourceKind::SampledTexture2D:
+    llvm_unreachable("Sampled textures aren't supported!");
+  }
+  llvm_unreachable("All cases handled");
+}
+
 enum class FilterMode { Nearest, Linear };
 
 enum class AddressMode { Clamp, Repeat, Mirror, Border, MirrorOnce };
@@ -403,7 +430,6 @@ struct Shader {
   Stages Stage;
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
-  std::unique_ptr<llvm::MemoryBuffer> Reflection;
   int DispatchSize[3];
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };

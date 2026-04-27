@@ -172,33 +172,6 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-enum DXResourceKind { UAV, SRV, CBV, SAMPLER };
-
-static DXResourceKind getDXKind(offloadtest::ResourceKind RK) {
-  switch (RK) {
-  case ResourceKind::Buffer:
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::Texture2D:
-    return SRV;
-
-  case ResourceKind::RWStructuredBuffer:
-  case ResourceKind::RWBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-  case ResourceKind::RWTexture2D:
-    return UAV;
-
-  case ResourceKind::ConstantBuffer:
-    return CBV;
-
-  case ResourceKind::Sampler:
-    return SAMPLER;
-  case ResourceKind::SampledTexture2D:
-    llvm_unreachable("Sampled textures aren't supported in DirectX!");
-  }
-  llvm_unreachable("All cases handled");
-}
-
 static llvm::Expected<D3D12_RESOURCE_DESC>
 getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
@@ -218,7 +191,8 @@ getResourceDescription(const Resource &R) {
 
   if (R.isTexture())
     Layout =
-        R.IsReserved && (getDXKind(R.Kind) == SRV || getDXKind(R.Kind) == UAV)
+        R.IsReserved && (getDescriptorKind(R.Kind) == DescriptorKind::SRV ||
+                         getDescriptorKind(R.Kind) == DescriptorKind::UAV)
             ? D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE
             : D3D12_TEXTURE_LAYOUT_UNKNOWN;
   else
@@ -778,17 +752,17 @@ public:
       uint32_t DescriptorIdx = 0;
       const uint32_t StartRangeIdx = RangeIdx;
       for (const auto &R : D.Resources) {
-        switch (getDXKind(R.Kind)) {
-        case SRV:
+        switch (getDescriptorKind(R.Kind)) {
+        case DescriptorKind::SRV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
           break;
-        case UAV:
+        case DescriptorKind::UAV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
           break;
-        case CBV:
+        case DescriptorKind::CBV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
-        case SAMPLER:
+        case DescriptorKind::SAMPLER:
           llvm_unreachable("Not implemented yet.");
         }
         Ranges.get()[RangeIdx].NumDescriptors = R.getArraySize();
@@ -1276,29 +1250,29 @@ public:
         [&IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
-      switch (getDXKind(R.Kind)) {
-      case SRV: {
+      switch (getDescriptorKind(R.Kind)) {
+      case DescriptorKind::SRV: {
         auto ExRes = createSRV(R, IS);
         if (!ExRes)
           return ExRes.takeError();
         Resources.push_back(std::make_pair(&R, *ExRes));
         break;
       }
-      case UAV: {
+      case DescriptorKind::UAV: {
         auto ExRes = createUAV(R, IS);
         if (!ExRes)
           return ExRes.takeError();
         Resources.push_back(std::make_pair(&R, *ExRes));
         break;
       }
-      case CBV: {
+      case DescriptorKind::CBV: {
         auto ExRes = createCBV(R, IS);
         if (!ExRes)
           return ExRes.takeError();
         Resources.push_back(std::make_pair(&R, *ExRes));
         break;
       }
-      case SAMPLER:
+      case DescriptorKind::SAMPLER:
         return llvm::createStringError(
             std::errc::not_supported,
             "Samplers are not yet implemented for DirectX.");
@@ -1318,17 +1292,17 @@ public:
     uint32_t HeapIndex = 0;
     for (auto &T : IS.DescTables) {
       for (auto &R : T.Resources) {
-        switch (getDXKind(R.first->Kind)) {
-        case SRV:
+        switch (getDescriptorKind(R.first->Kind)) {
+        case DescriptorKind::SRV:
           HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
           break;
-        case UAV:
+        case DescriptorKind::UAV:
           HeapIndex = bindUAV(*(R.first), IS, HeapIndex, R.second);
           break;
-        case CBV:
+        case DescriptorKind::CBV:
           HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
           break;
-        case SAMPLER:
+        case DescriptorKind::SAMPLER:
           llvm_unreachable("Not implemented yet.");
         }
       }
@@ -1462,23 +1436,23 @@ public:
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root descriptor cannot refer to resource arrays.");
-          switch (getDXKind(RootDescIt->first->Kind)) {
-          case SRV:
+          switch (getDescriptorKind(RootDescIt->first->Kind)) {
+          case DescriptorKind::SRV:
             IS.CB->CmdList->SetComputeRootShaderResourceView(
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
-          case UAV:
+          case DescriptorKind::UAV:
             IS.CB->CmdList->SetComputeRootUnorderedAccessView(
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
-          case CBV:
+          case DescriptorKind::CBV:
             IS.CB->CmdList->SetComputeRootConstantBufferView(
                 RootParamIndex++,
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
-          case SAMPLER:
+          case DescriptorKind::SAMPLER:
             llvm_unreachable("Not implemented yet.");
           }
           ++RootDescIt;
