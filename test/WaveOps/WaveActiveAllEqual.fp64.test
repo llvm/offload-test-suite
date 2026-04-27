@@ -148,7 +148,7 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1114
-# XFAIL: WARP && !AVX512
+# XFAIL: WARP && (x64 || x86) && !AVX512
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/944
 # XFAIL: Intel && DirectX
