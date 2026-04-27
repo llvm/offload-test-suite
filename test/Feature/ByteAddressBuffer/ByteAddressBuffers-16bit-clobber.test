@@ -1,0 +1,73 @@
+#--- source.hlsl
+
+// This test checks that we don't do any clobbering within a single word when
+// writing 16bit values to the same word from multiple threads.
+
+ByteAddressBuffer In : register(t0);
+RWByteAddressBuffer Out : register(u1);
+
+[numthreads(32,1,1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  int16_t InVal = In.Load<int16_t>(TID.x * 2);
+  Out.Store<int16_t>(TID.x * 2, InVal);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [32, 1, 1]
+Buffers:
+  - Name: In0
+    Format: Int16
+    Stride: 2
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8,
+            9, 10, 11, 12, 13, 14, 15, 16,
+            17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32 ]
+  - Name: Out
+    Format: Int16
+    Stride: 2
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Int16
+    Stride: 2
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8,
+            9, 10, 11, 12, 13, 14, 15, 16,
+            17, 18, 19, 20, 21, 22, 23, 24,
+            25, 26, 27, 28, 29, 30, 31, 32 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/179560
+# XFAIL: Clang && Vulkan
+# Error https://github.com/microsoft/DirectXShaderCompiler/issues/8172
+# UNSUPPORTED: DXC && Vulkan
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
