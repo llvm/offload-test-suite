@@ -655,6 +655,7 @@ class MTLDevice : public offloadtest::Device {
     CmdEncoder->setViewport(
         MTL::Viewport{0.0, 0.0, (double)Width, (double)Height, 0.0, 1.0});
     CmdEncoder->setCullMode(MTL::CullModeNone);
+    CmdEncoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
 
     // Bind vertex buffer at slot 0 to match the vertex descriptor which
     // references buffer index 0.
