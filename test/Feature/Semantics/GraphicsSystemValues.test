@@ -75,19 +75,19 @@ Buffers:
     Format: Float32
     Stride: 16
     Data: [
-      # Triangle 0 (CCW, pixel 0, provoking VID=0): BL, BR, TL of left half
+      # Triangle 0 (CCW, pixel 0, provoking VID=0):
       -1.0, -1.0, 0.0, 1.0,
        0.0, -1.0, 0.0, 1.0,
       -1.0,  1.0, 0.0, 1.0,
-      # Triangle 1 (CCW, pixel 1, provoking VID=3): BR, TR, TL of left half
+      # Triangle 1 (CCW, pixel 1, provoking VID=3):
        0.0, -1.0, 0.0, 1.0,
        0.0,  1.0, 0.0, 1.0,
       -1.0,  1.0, 0.0, 1.0,
-      # Triangle 2 (CW,  pixel 2, provoking VID=6): BL, TL, BR of right half
+      # Triangle 2 (CW,  pixel 2, provoking VID=6):
        0.0, -1.0, 0.0, 1.0,
        0.0,  1.0, 0.0, 1.0,
        1.0, -1.0, 0.0, 1.0,
-      # Triangle 3 (CW,  pixel 3, provoking VID=9): TL, TR, BR of right half
+      # Triangle 3 (CW,  pixel 3, provoking VID=9):
        0.0,  1.0, 0.0, 1.0,
        1.0,  1.0, 0.0, 1.0,
        1.0, -1.0, 0.0, 1.0,
@@ -108,10 +108,10 @@ Buffers:
   - Name: ResultBuffer_Expected
     Format: Hex32
     Stride: 28
-# Per-pixel expected records: VID, PrimID, IsFront, PosX, PosY, PosZ, PosW
-# Floats are encoded as IEEE-754 bits:
-#   0.5 -> 0x3F000000   1.5 -> 0x3FC00000
-#   1.0 -> 0x3F800000   2.5 -> 0x40200000   3.5 -> 0x40600000
+    # Per-pixel expected records: VID, PrimID, IsFront, PosX, PosY, PosZ, PosW
+    # Floats are encoded as IEEE-754 bits:
+    #   0.5 -> 0x3F000000   1.5 -> 0x3FC00000
+    #   1.0 -> 0x3F800000   2.5 -> 0x40200000   3.5 -> 0x40600000
     Data: [
       # Pixel 0: VID=0, PrimID=0, IsFront=1, Pos=(0.5, 0.5, 0, 1)
       0x0, 0x0, 0x1, 0x3F000000, 0x3F000000, 0x0, 0x3F800000,
@@ -147,16 +147,23 @@ Results:
 ...
 #--- end
 
-# Graphics-stage system-value semantics tracked in
-# https://github.com/llvm/wg-hlsl/issues/25
 # This test exercises:
-#   * SV_VertexID    (#151) - VS input, forwarded via a `nointerpolation` varying
-#   * SV_PrimitiveID (#160) - PS input
-#   * SV_IsFrontFace (#162) - PS input
+#   * SV_VertexID     - VS input, forwarded via a `nointerpolation` varying
+#   * SV_PrimitiveID  - PS input
+#   * SV_IsFrontFace  - PS input
 #   * SV_POSITION            - VS output / PS input, asserted at pixel center
+#
+# SV_VertexID: https://github.com/llvm/wg-hlsl/issues/151
+# SV_PrimitiveID: https://github.com/llvm/wg-hlsl/issues/160
+# SV_IsFrontFace: https://github.com/llvm/wg-hlsl/issues/162
+# SV_POSITION: https://github.com/llvm/wg-hlsl/issues/141
 # Clang's HLSL -> DXIL lowering does not yet implement these graphics-stage SVs.
-# The Clang -> SPIR-V path uses different intrinsics and is unaffected.
-# XFAIL: Clang && DirectX
+#
+# Also indirectly exercises the `nointerpolation` modifier, which Clang's HLSL
+# frontend does not yet parse.
+# https://github.com/llvm/wg-hlsl/issues/303
+
+# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
