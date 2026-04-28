@@ -11,6 +11,7 @@
 
 #include "API/Device.h"
 #include "Support/Pipeline.h"
+#include "Support/VkError.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
@@ -21,7 +22,6 @@
 #include <memory>
 #include <numeric>
 #include <system_error>
-#include <vulkan/vulkan.h>
 
 using namespace offloadtest;
 
@@ -448,9 +448,10 @@ public:
     CreateInfo.pNext = &TypeCreateInfo;
 
     VkSemaphore Semaphore = VK_NULL_HANDLE;
-    if (vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create Semaphore.");
+    if (auto Err = VK::toError(
+            vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore),
+            "Failed to create Semaphore."))
+      return Err;
 
     return std::make_unique<VulkanFence>(Device, Semaphore, Name);
   }
@@ -472,9 +473,9 @@ public:
     WaitInfo.pSemaphores = &Semaphore;
     WaitInfo.pValues = &SignalValue;
 
-    if (vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to wait on Semaphore.");
+    if (auto Err = VK::toError(vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX),
+                               "Failed to wait on Semaphore."))
+      return Err;
 
     return llvm::Error::success();
   }
@@ -506,24 +507,26 @@ public:
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     CmdPoolInfo.queueFamilyIndex = QueueFamilyIdx;
     CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &CB->CmdPool))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command pool.");
+    if (auto Err = VK::toError(
+            vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &CB->CmdPool),
+            "Could not create command pool."))
+      return Err;
 
     VkCommandBufferAllocateInfo CBufAllocInfo = {};
     CBufAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     CBufAllocInfo.commandPool = CB->CmdPool;
     CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     CBufAllocInfo.commandBufferCount = 1;
-    if (vkAllocateCommandBuffers(Device, &CBufAllocInfo, &CB->CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command buffer.");
+    if (auto Err = VK::toError(
+            vkAllocateCommandBuffers(Device, &CBufAllocInfo, &CB->CmdBuffer),
+            "Could not create command buffer."))
+      return Err;
 
     VkCommandBufferBeginInfo BufferInfo = {};
     BufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not begin command buffer.");
+    if (auto Err = VK::toError(vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo),
+                               "Could not begin command buffer."))
+      return Err;
     return CB;
   }
 
@@ -732,9 +735,10 @@ public:
     DeviceInfo.pNext = Features.pNext;
 
     VkDevice Device = VK_NULL_HANDLE;
-    if (vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Could not create Vulkan logical device.");
+    if (auto Err = VK::toError(
+            vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device),
+            "Could not create Vulkan logical device."))
+      return Err;
     VkQueue DeviceQueue = VK_NULL_HANDLE;
     vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
 
@@ -808,9 +812,10 @@ public:
     BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer DeviceBuffer;
-    if (vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to create device buffer.");
+    if (auto Err = VK::toError(
+            vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer),
+            "Failed to create device buffer."))
+      return Err;
 
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
@@ -825,12 +830,14 @@ public:
     AllocInfo.memoryTypeIndex = *MemIdx;
 
     VkDeviceMemory DeviceMemory;
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to allocate device memory.");
-    if (vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0))
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to bind device buffer memory.");
+    if (auto Err = VK::toError(
+            vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
+            "Failed to allocate device memory."))
+      return Err;
+    if (auto Err = VK::toError(
+            vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0),
+            "Failed to bind device buffer memory."))
+      return Err;
 
     return std::make_unique<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
                                           Name, Desc, SizeInBytes);
@@ -855,9 +862,10 @@ public:
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage Image;
-    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to create image.");
+    if (auto Err =
+            VK::toError(vkCreateImage(Device, &ImageInfo, nullptr, &Image),
+                        "Failed to create image."))
+      return Err;
 
     VkMemoryRequirements MemReqs;
     vkGetImageMemoryRequirements(Device, Image, &MemReqs);
@@ -874,16 +882,18 @@ public:
     AllocInfo.memoryTypeIndex = *MemIdx;
 
     VkDeviceMemory DeviceMemory;
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+    if (auto Err = VK::toError(
+            vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
+            "Failed to allocate image memory.")) {
       vkDestroyImage(Device, Image, nullptr);
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to allocate image memory.");
+      return Err;
     }
-    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+    if (auto Err =
+            VK::toError(vkBindImageMemory(Device, Image, DeviceMemory, 0),
+                        "Failed to bind image memory.")) {
       vkDestroyImage(Device, Image, nullptr);
       vkFreeMemory(Device, DeviceMemory, nullptr);
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to bind image memory.");
+      return Err;
     }
 
     auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
@@ -909,11 +919,11 @@ public:
         ViewCi.subresourceRange.aspectMask =
             VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
       }
-      if (vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View)) {
-        // Tex destructor will clean up Image + Memory.
-        return llvm::createStringError(std::errc::device_or_resource_busy,
-                                       "Failed to create image view.");
-      }
+      // Tex destructor will clean up Image + Memory on failure.
+      if (auto Err = VK::toError(
+              vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View),
+              "Failed to create image view."))
+        return Err;
     }
 
     return Tex;
@@ -1022,9 +1032,10 @@ public:
     BufferInfo.usage = Usage;
     BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Could not create buffer.");
+    if (auto Err =
+            VK::toError(vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer),
+                        "Could not create buffer."))
+      return Err;
 
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
@@ -1039,14 +1050,16 @@ public:
 
     AllocInfo.memoryTypeIndex = *MemIdx;
 
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Memory allocation failed.");
+    if (auto Err =
+            VK::toError(vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory),
+                        "Memory allocation failed."))
+      return Err;
     if (Data) {
       void *Dst = nullptr;
-      if (vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
-        return llvm::createStringError(std::errc::not_enough_memory,
-                                       "Failed to map memory.");
+      if (auto Err = VK::toError(
+              vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst),
+              "Failed to map memory."))
+        return Err;
       memcpy(Dst, Data, Size);
 
       VkMappedMemoryRange Range = {};
@@ -1059,9 +1072,9 @@ public:
       vkUnmapMemory(Device, Memory);
     }
 
-    if (vkBindBufferMemory(Device, Buffer, Memory, 0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to bind buffer to memory.");
+    if (auto Err = VK::toError(vkBindBufferMemory(Device, Buffer, Memory, 0),
+                               "Failed to bind buffer to memory."))
+      return Err;
 
     return BufferRef{Buffer, Memory};
   }
@@ -1096,9 +1109,10 @@ public:
     }
 
     VkImage Image;
-    if (vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image))
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to create image.");
+    if (auto Err = VK::toError(
+            vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image),
+            "Failed to create image."))
+      return Err;
 
     VkSampler Sampler = 0;
 
@@ -1109,12 +1123,13 @@ public:
     AllocInfo.allocationSize = MemReqs.size;
 
     VkDeviceMemory Memory;
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Image memory allocation failed.");
-    if (vkBindImageMemory(Device, Image, Memory, 0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Image memory binding failed.");
+    if (auto Err =
+            VK::toError(vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory),
+                        "Image memory allocation failed."))
+      return Err;
+    if (auto Err = VK::toError(vkBindImageMemory(Device, Image, Memory, 0),
+                               "Image memory binding failed."))
+      return Err;
 
     return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
   }
@@ -1141,9 +1156,10 @@ public:
     SamplerInfo.unnormalizedCoordinates = VK_FALSE;
 
     VkSampler Sampler;
-    if (vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create sampler.");
+    if (auto Err = VK::toError(
+            vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler),
+            "Failed to create sampler."))
+      return Err;
 
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
@@ -1314,9 +1330,9 @@ public:
     static uint64_t FenceCounter = 0;
     const uint64_t CurrentCounter = FenceCounter + 1;
 
-    if (vkEndCommandBuffer(IS.CB->CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not end command buffer.");
+    if (auto Err = VK::toError(vkEndCommandBuffer(IS.CB->CmdBuffer),
+                               "Could not end command buffer."))
+      return Err;
 
     auto *F = static_cast<VulkanFence *>(IS.CompletionFence.get());
 
@@ -1334,9 +1350,10 @@ public:
     SubmitInfo.pSignalSemaphores = &F->Semaphore;
 
     // Submit to the queue
-    if (vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to submit to queue.");
+    if (auto Err = VK::toError(
+            vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, VK_NULL_HANDLE),
+            "Failed to submit to queue."))
+      return Err;
 
     if (auto Err = IS.CompletionFence->waitForCompletion(CurrentCounter))
       return Err;
@@ -1387,9 +1404,10 @@ public:
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
-      if (vkCreateDescriptorPool(Device, &PoolCreateInfo, nullptr, &IS.Pool))
-        return llvm::createStringError(std::errc::device_or_resource_busy,
-                                       "Failed to create descriptor pool.");
+      if (auto Err = VK::toError(vkCreateDescriptorPool(Device, &PoolCreateInfo,
+                                                        nullptr, &IS.Pool),
+                                 "Failed to create descriptor pool."))
+        return Err;
     }
     return llvm::Error::success();
   }
@@ -1429,11 +1447,11 @@ public:
       LayoutCreateInfo.pBindings = Bindings.data();
       llvm::outs() << "Binding " << Bindings.size() << " descriptors.\n";
       VkDescriptorSetLayout Layout;
-      if (vkCreateDescriptorSetLayout(Device, &LayoutCreateInfo, nullptr,
-                                      &Layout))
-        return llvm::createStringError(
-            std::errc::device_or_resource_busy,
-            "Failed to create descriptor set layout.");
+      if (auto Err =
+              VK::toError(vkCreateDescriptorSetLayout(Device, &LayoutCreateInfo,
+                                                      nullptr, &Layout),
+                          "Failed to create descriptor set layout."))
+        return Err;
       IS.DescriptorSetLayouts.push_back(Layout);
     }
 
@@ -1452,10 +1470,11 @@ public:
     PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
     PipelineCreateInfo.pPushConstantRanges = Ranges.data();
 
-    if (vkCreatePipelineLayout(Device, &PipelineCreateInfo, nullptr,
-                               &IS.PipelineLayout))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create pipeline layout.");
+    if (auto Err =
+            VK::toError(vkCreatePipelineLayout(Device, &PipelineCreateInfo,
+                                               nullptr, &IS.PipelineLayout),
+                        "Failed to create pipeline layout."))
+      return Err;
 
     if (P.Sets.size() == 0)
       return llvm::Error::success();
@@ -1470,10 +1489,11 @@ public:
                              IS.DescriptorSetLayouts.size(), VkDescriptorSet());
     llvm::outs() << "Num Descriptor sets: " << IS.DescriptorSetLayouts.size()
                  << "\n";
-    if (vkAllocateDescriptorSets(Device, &DSAllocInfo,
-                                 IS.DescriptorSets.data()))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to allocate descriptor sets.");
+    if (auto Err =
+            VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
+                                                 IS.DescriptorSets.data()),
+                        "Failed to allocate descriptor sets."))
+      return Err;
 
     // Calculate the number of infos/views we are going to need for each type
     uint32_t ImageInfoCount = 0;
@@ -1547,9 +1567,10 @@ public:
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
             VkImageView View = {0};
-            if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View))
-              return llvm::createStringError(std::errc::device_or_resource_busy,
-                                             "Failed to create image view.");
+            if (auto Err = VK::toError(
+                    vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View),
+                    "Failed to create image view."))
+              return Err;
             const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
                                                      VK_IMAGE_LAYOUT_GENERAL};
             IS.ImageViews.push_back(View);
@@ -1573,9 +1594,10 @@ public:
           IndexOfFirstBufferDataInArray = BufferViews.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.buffer = ResRef.Device.Buffer;
-            if (vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View))
-              return llvm::createStringError(std::errc::device_or_resource_busy,
-                                             "Failed to create buffer view.");
+            if (auto Err = VK::toError(
+                    vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View),
+                    "Failed to create buffer view."))
+              return Err;
             IS.BufferViews.push_back(View);
             BufferViews.push_back(View);
           }
@@ -1639,9 +1661,10 @@ public:
       ShaderCreateInfo.pCode =
           reinterpret_cast<const uint32_t *>(Program.data());
       CompiledShader CS = {Shader.Stage, Shader.Entry, 0};
-      if (vkCreateShaderModule(Device, &ShaderCreateInfo, nullptr, &CS.Shader))
-        return llvm::createStringError(std::errc::not_supported,
-                                       "Failed to create shader module.");
+      if (auto Err = VK::toError(vkCreateShaderModule(Device, &ShaderCreateInfo,
+                                                      nullptr, &CS.Shader),
+                                 "Failed to create shader module."))
+        return Err;
       IS.Shaders.emplace_back(CS);
     }
     return llvm::Error::success();
@@ -1726,9 +1749,10 @@ public:
     RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
     RPCI.pDependencies = Dependencies.data();
 
-    if (vkCreateRenderPass(Device, &RPCI, nullptr, &IS.RenderPass))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create render pass.");
+    if (auto Err = VK::toError(
+            vkCreateRenderPass(Device, &RPCI, nullptr, &IS.RenderPass),
+            "Failed to create render pass."))
+      return Err;
     return llvm::Error::success();
   }
 
@@ -1747,9 +1771,10 @@ public:
     FbufCreateInfo.height = RT.Desc.Height;
     FbufCreateInfo.layers = 1;
 
-    if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create frame buffer.");
+    if (auto Err = VK::toError(vkCreateFramebuffer(Device, &FbufCreateInfo,
+                                                   nullptr, &IS.FrameBuffer),
+                               "Failed to create frame buffer."))
+      return Err;
     return llvm::Error::success();
   }
 
@@ -1855,10 +1880,11 @@ public:
   llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
     VkPipelineCacheCreateInfo CacheCreateInfo = {};
     CacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    if (vkCreatePipelineCache(Device, &CacheCreateInfo, nullptr,
-                              &IS.PipelineCache))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create pipeline cache.");
+    if (auto Err =
+            VK::toError(vkCreatePipelineCache(Device, &CacheCreateInfo, nullptr,
+                                              &IS.PipelineCache),
+                        "Failed to create pipeline cache."))
+      return Err;
 
     if (P.isCompute()) {
       const offloadtest::Shader &Shader = P.Shaders[0];
@@ -1902,10 +1928,12 @@ public:
       PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
       PipelineCreateInfo.stage = StageInfo;
       PipelineCreateInfo.layout = IS.PipelineLayout;
-      if (vkCreateComputePipelines(Device, IS.PipelineCache, 1,
-                                   &PipelineCreateInfo, nullptr, &IS.Pipeline))
-        return llvm::createStringError(std::errc::device_or_resource_busy,
-                                       "Failed to create pipeline.");
+      if (auto Err =
+              VK::toError(vkCreateComputePipelines(Device, IS.PipelineCache, 1,
+                                                   &PipelineCreateInfo, nullptr,
+                                                   &IS.Pipeline),
+                          "Failed to create pipeline."))
+        return Err;
       return llvm::Error::success();
     }
 
@@ -2015,10 +2043,11 @@ public:
     PipelineCreateInfo.renderPass = IS.RenderPass;
     PipelineCreateInfo.layout = IS.PipelineLayout;
 
-    if (vkCreateGraphicsPipelines(Device, IS.PipelineCache, 1,
-                                  &PipelineCreateInfo, nullptr, &IS.Pipeline))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create graphics pipeline.");
+    if (auto Err = VK::toError(vkCreateGraphicsPipelines(
+                                   Device, IS.PipelineCache, 1,
+                                   &PipelineCreateInfo, nullptr, &IS.Pipeline),
+                               "Failed to create graphics pipeline."))
+      return Err;
 
     return llvm::Error::success();
   }
@@ -2631,14 +2660,9 @@ llvm::Error offloadtest::initializeVulkanDevices(
   CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
 
   VkInstance Instance = VK_NULL_HANDLE;
-  const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-  if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Cannot find a base Vulkan device");
-  if (Res)
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Unknown Vulkan initialization error: %d",
-                                   Res);
+  if (auto Err = VK::toError(vkCreateInstance(&CreateInfo, NULL, &Instance),
+                             "Failed to create Vulkan instance"))
+    return Err;
 
 #ifndef NDEBUG
   VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
@@ -2650,14 +2674,15 @@ llvm::Error offloadtest::initializeVulkanDevices(
       std::make_shared<VulkanInstance>(Instance, DebugMessenger);
 
   uint32_t DeviceCount = 0;
-  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Failed to get device count");
+  if (auto Err = VK::toError(
+          vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr),
+          "Failed to get device count"))
+    return Err;
   std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
-  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                 PhysicalDevices.data()))
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Failed to enumerate devices");
+  if (auto Err = VK::toError(vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                                        PhysicalDevices.data()),
+                             "Failed to enumerate devices"))
+    return Err;
 
   for (const auto &PDev : PhysicalDevices) {
     auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
