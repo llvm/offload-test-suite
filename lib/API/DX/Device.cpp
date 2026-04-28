@@ -1829,7 +1829,6 @@ public:
                                      "shader and a pixel shader.");
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-    // Match the Vulkan and Metal backends: no culling, CCW = front-facing.
     PSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     PSODesc.RasterizerState.FrontCounterClockwise = TRUE;
     PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
