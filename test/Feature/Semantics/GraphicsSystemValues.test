@@ -1,0 +1,164 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 pos : POSITION;
+    uint   vid : SV_VertexID;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    nointerpolation uint vid : VID;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput o;
+    o.position = input.pos;
+    o.vid = input.vid;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+    nointerpolation uint vid : VID;
+};
+
+struct Record {
+    uint  VertexID;
+    uint  PrimitiveID;
+    uint  IsFrontFace;
+    float PosX;
+    float PosY;
+    float PosZ;
+    float PosW;
+};
+
+RWStructuredBuffer<Record> Output : register(u0);
+
+float4 main(PSInput input,
+            uint primID  : SV_PrimitiveID,
+            bool isFront : SV_IsFrontFace) : SV_TARGET {
+    uint pixelX = (uint)input.position.x;
+
+    Record r;
+    r.VertexID    = input.vid;
+    r.PrimitiveID = primID;
+    r.IsFrontFace = isFront ? 1u : 0u;
+    r.PosX        = input.position.x;
+    r.PosY        = input.position.y;
+    r.PosZ        = input.position.z;
+    r.PosW        = input.position.w;
+    Output[pixelX] = r;
+
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Geometry: 4 triangles, each covering exactly one pixel of a 4x1 render target.
+  # Pixel-center NDC coordinates are (-0.75, 0), (-0.25, 0), (+0.25, 0), (+0.75, 0).
+  # The shared edges fall at NDC x in {-0.5, 0, +0.5}, none of which coincide with
+  # a pixel center, so rasterization tie-breaking does not affect coverage.
+  #
+  #   Triangles 0,1 are CCW (front-facing under our CCW=front convention).
+  #   Triangles 2,3 are CW  (back-facing).
+  #
+  # Provoking-vertex (= first vertex) convention is the default on D3D12, Vulkan,
+  # and Metal, so the `nointerpolation` VID varying carries the first vertex's
+  # SV_VertexID into the pixel shader.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+      # Triangle 0 (CCW, pixel 0, provoking VID=0): BL, BR, TL of left half
+      -1.0, -1.0, 0.0, 1.0,
+       0.0, -1.0, 0.0, 1.0,
+      -1.0,  1.0, 0.0, 1.0,
+      # Triangle 1 (CCW, pixel 1, provoking VID=3): BR, TR, TL of left half
+       0.0, -1.0, 0.0, 1.0,
+       0.0,  1.0, 0.0, 1.0,
+      -1.0,  1.0, 0.0, 1.0,
+      # Triangle 2 (CW,  pixel 2, provoking VID=6): BL, TL, BR of right half
+       0.0, -1.0, 0.0, 1.0,
+       0.0,  1.0, 0.0, 1.0,
+       1.0, -1.0, 0.0, 1.0,
+      # Triangle 3 (CW,  pixel 3, provoking VID=9): TL, TR, BR of right half
+       0.0,  1.0, 0.0, 1.0,
+       1.0,  1.0, 0.0, 1.0,
+       1.0, -1.0, 0.0, 1.0,
+    ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+  - Name: ResultBuffer
+    Format: Hex32
+    Stride: 28 # sizeof(Record): 3 uint + 4 float
+    FillSize: 112 # 4 records * 28 bytes
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Hex32
+    Stride: 28
+# Per-pixel expected records: VID, PrimID, IsFront, PosX, PosY, PosZ, PosW
+# Floats are encoded as IEEE-754 bits:
+#   0.5 -> 0x3F000000   1.5 -> 0x3FC00000
+#   1.0 -> 0x3F800000   2.5 -> 0x40200000   3.5 -> 0x40600000
+    Data: [
+      # Pixel 0: VID=0, PrimID=0, IsFront=1, Pos=(0.5, 0.5, 0, 1)
+      0x0, 0x0, 0x1, 0x3F000000, 0x3F000000, 0x0, 0x3F800000,
+      # Pixel 1: VID=3, PrimID=1, IsFront=1, Pos=(1.5, 0.5, 0, 1)
+      0x3, 0x1, 0x1, 0x3FC00000, 0x3F000000, 0x0, 0x3F800000,
+      # Pixel 2: VID=6, PrimID=2, IsFront=0, Pos=(2.5, 0.5, 0, 1)
+      0x6, 0x2, 0x0, 0x40200000, 0x3F000000, 0x0, 0x3F800000,
+      # Pixel 3: VID=9, PrimID=3, IsFront=0, Pos=(3.5, 0.5, 0, 1)
+      0x9, 0x3, 0x0, 0x40600000, 0x3F000000, 0x0, 0x3F800000,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: SystemValues
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# Graphics-stage system-value semantics tracked in
+# https://github.com/llvm/wg-hlsl/issues/25
+# This test exercises:
+#   * SV_VertexID    (#151) - VS input, forwarded via a `nointerpolation` varying
+#   * SV_PrimitiveID (#160) - PS input
+#   * SV_IsFrontFace (#162) - PS input
+#   * SV_POSITION            - VS output / PS input, asserted at pixel center
+# Clang's HLSL -> DXIL lowering does not yet implement these graphics-stage SVs.
+# The Clang -> SPIR-V path uses different intrinsics and is unaffected.
+# XFAIL: Clang && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
