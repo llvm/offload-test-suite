@@ -144,8 +144,7 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
 // row size (Width * elementSize) is already a multiple of 256, this is a
 // no-op; for smaller rows it pads up.
 static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
-  return llvm::alignTo(Width * ElementSize,
-                       D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+  return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 }
 
 static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
@@ -1824,11 +1823,11 @@ public:
 
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-               getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-               B.OutputProps.Height, 1,
-               getAlignedTexturePitch(B.OutputProps.Width,
-                                      B.getElementSize()))};
+        0,
+        CD3DX12_SUBRESOURCE_FOOTPRINT(
+            getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+            B.OutputProps.Height, 1,
+            getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()))};
     const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
                                                Footprint);
     const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
