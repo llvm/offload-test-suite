@@ -755,17 +755,54 @@ public:
 
     // Build vertex descriptor from InputLayout.
     if (!InputLayout.empty()) {
+      NS::Array *FnAttrs = VSFn->vertexAttributes();
+      // I'm not really sure if there's any valid case for a vertex shader with
+      // no vertex attributes, so we just error if that ever occurs.
+      // NOTE(manon): There is a very valid use case, loading vertices from a
+      // raw buffer using just the index acquried from the index buffer. A lot
+      // of modern hardware have the driver just turns this input layout vertex
+      // loading into shader code anyway.
+      if (!FnAttrs)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Vertex shader has no vertex attributes.");
+
+      if (FnAttrs->count() != InputLayout.size())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Mismatch between vertex shader attribute count and pipeline "
+            "vertex input count.");
+
+      // Collect the attribute indices the shader expects so that we can map the
+      // specified attributes onto the correct indices.
+      llvm::StringMap<uint32_t> ShaderAttrIndices;
+      for (uint32_t Ai = 0; Ai < FnAttrs->count(); ++Ai) {
+        auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(Ai));
+        if (A && A->isActive()) {
+          ShaderAttrIndices.insert(std::make_pair(
+              llvm::StringRef(A->name()->utf8String()), A->attributeIndex()));
+          llvm::errs() << "Shader attr: " << A->name()->utf8String()
+                       << " at index " << A->attributeIndex() << "\n";
+        }
+      }
+
       MTL::VertexDescriptor *VtxDesc = MTL::VertexDescriptor::alloc()->init();
       uint32_t Stride = 0;
       for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
         const InputLayoutDesc &Elem = InputLayout[I];
+        llvm::SmallString<32> AttrName(Elem.Name);
+        llvm::transform(AttrName, AttrName.begin(), tolower);
+        // Append a zero since we're only supporting one attribute per name.
+        // We'll need to revisit this if we ever support indexed attributes.
+        AttrName += "0";
+
         const uint32_t ElemSize = getFormatSizeInBytes(Elem.Format);
         MTL::VertexAttributeDescriptor *AttrDesc =
             MTL::VertexAttributeDescriptor::alloc()->init();
         AttrDesc->setBufferIndex(0);
         AttrDesc->setOffset(Elem.OffsetInBytes);
         AttrDesc->setFormat(getMetalVertexFormat(Elem.Format));
-        VtxDesc->attributes()->setObject(AttrDesc, I);
+        VtxDesc->attributes()->setObject(AttrDesc, ShaderAttrIndices[AttrName]);
         AttrDesc->release();
         Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
       }
