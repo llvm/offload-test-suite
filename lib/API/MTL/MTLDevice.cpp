@@ -887,8 +887,9 @@ public:
       llvm::SmallVector<Format> RTFormats;
       RTFormats.push_back(*FormatOrErr);
 
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", Bindings, InputLayout, RTFormats, VS, PS);
+      auto PipelineStateOrErr =
+          createPipelineVsPs("Graphics Pipeline State", Bindings, InputLayout,
+                             RTFormats, Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);

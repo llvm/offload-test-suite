@@ -1819,7 +1819,7 @@ public:
     VkDescriptorSetAllocateInfo DSAllocInfo = {};
     DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     DSAllocInfo.descriptorPool = IS.Pool;
-    DSAllocInfo.descriptorSetCount = VulkanPipeline->SetLayouts.size(); // error
+    DSAllocInfo.descriptorSetCount = VulkanPipeline->SetLayouts.size();
     DSAllocInfo.pSetLayouts = VulkanPipeline->SetLayouts.data();
     assert(IS.DescriptorSets.empty());
     IS.DescriptorSets.insert(IS.DescriptorSets.begin(),
