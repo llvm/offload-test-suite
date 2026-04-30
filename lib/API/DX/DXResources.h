@@ -84,6 +84,16 @@ inline D3D12_RESOURCE_FLAGS getDXResourceFlags(TextureUsage Usage) {
   return Flags;
 }
 
+inline DXGI_FORMAT getDXGIIndexFormat(IndexFormat Fmt) {
+  switch (Fmt) {
+  case IndexFormat::Uint16:
+    return DXGI_FORMAT_R16_UINT;
+  case IndexFormat::Uint32:
+    return DXGI_FORMAT_R32_UINT;
+  }
+  llvm_unreachable("All IndexFormat cases handled");
+}
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_DXRESOURCES_H

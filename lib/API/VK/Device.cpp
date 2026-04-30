@@ -505,6 +505,40 @@ public:
   }
 };
 
+class VulkanAccelerationStructure : public offloadtest::AccelerationStructure {
+public:
+  VkDevice Dev;
+  VkAccelerationStructureKHR AccelStruct;
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  VkDeviceAddress DeviceAddress;
+  PFN_vkDestroyAccelerationStructureKHR FnDestroyAS;
+
+  VulkanAccelerationStructure(VkDevice Dev,
+                              VkAccelerationStructureKHR AccelStruct,
+                              VkBuffer Buffer, VkDeviceMemory Memory,
+                              VkDeviceAddress DeviceAddress,
+                              PFN_vkDestroyAccelerationStructureKHR FnDestroyAS)
+      : offloadtest::AccelerationStructure(GPUAPI::Vulkan), Dev(Dev),
+        AccelStruct(AccelStruct), Buffer(Buffer), Memory(Memory),
+        DeviceAddress(DeviceAddress), FnDestroyAS(FnDestroyAS) {}
+
+  ~VulkanAccelerationStructure() override {
+    if (AccelStruct != VK_NULL_HANDLE)
+      FnDestroyAS(Dev, AccelStruct, nullptr);
+    if (Buffer != VK_NULL_HANDLE)
+      vkDestroyBuffer(Dev, Buffer, nullptr);
+    if (Memory != VK_NULL_HANDLE)
+      vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  VkDeviceAddress getDeviceAddress() const { return DeviceAddress; }
+
+  static bool classof(const offloadtest::AccelerationStructure *AS) {
+    return AS->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
 class VulkanFence : public offloadtest::Fence {
 public:
   VulkanFence(VkDevice Device, VkSemaphore Semaphore, llvm::StringRef Name)
@@ -1116,6 +1150,15 @@ private:
   PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
   MeshShaderFunctions MeshShaderFns;
 
+  bool HasRayTracingSupport = false;
+  struct RaytracingFunctions {
+    PFN_vkCreateAccelerationStructureKHR CreateAS = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR DestroyAS = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR GetBuildSizes = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR GetDeviceAddress = nullptr;
+  };
+  RaytracingFunctions RT;
+
   struct BufferRef {
     VkBuffer Buffer;
     VkDeviceMemory Memory;
@@ -1245,6 +1288,17 @@ public:
     DeviceInfo.queueCreateInfoCount = 1;
     DeviceInfo.pQueueCreateInfos = &QueueInfo;
 
+    const VulkanDevice::ExtensionVector AvailableDeviceExtensions =
+        queryDeviceExtensions(PhysicalDevice);
+    const bool HasVulkan12 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0);
+    const bool HasVulkan13 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0);
+#ifdef VK_VERSION_1_4
+    const bool HasVulkan14 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0);
+#endif
+
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     VkPhysicalDeviceVulkan11Features Features11{};
@@ -1257,75 +1311,142 @@ public:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
-#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
-    // Opt-in extension features: query and enable
-    // VK_EXT_shader_image_atomic_int64 when the device advertises it so that
-    // tests using 64-bit atomics on RWBuffer / RWTexture (SPIR-V image storage
-    // class) can run.
-    const auto AvailableExts = queryDeviceExtensions(PhysicalDevice);
-    const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
-        AvailableExts, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
-    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
-        FeaturesImageAtomicInt64{};
-    FeaturesImageAtomicInt64.sType =
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
-#endif
 
     Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+    if (HasVulkan12)
       Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+    if (HasVulkan13)
       Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+    if (HasVulkan14)
       Features13.pNext = &Features14;
 #endif
-#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
-    // Attach the extension features struct to the tail of the version-gated
-    // chain so vkGetPhysicalDeviceFeatures2 populates it and vkCreateDevice
-    // sees it enabled.
-    if (HasShaderImageAtomicInt64Ext) {
-#ifdef VK_VERSION_1_4
-      if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
-        Features14.pNext = &FeaturesImageAtomicInt64;
-      else
-#endif
-          if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
-        Features13.pNext = &FeaturesImageAtomicInt64;
-      else if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
-        Features12.pNext = &FeaturesImageAtomicInt64;
-      else
-        Features11.pNext = &FeaturesImageAtomicInt64;
-    }
-#endif
-    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
-
-    const VulkanDevice::ExtensionVector AvailableDeviceExtensions =
-        queryDeviceExtensions(PhysicalDevice);
 
     llvm::SmallVector<const char *> EnabledDeviceExtensions;
-    const llvm::StringRef ExtensionName = "VK_EXT_mesh_shader";
+
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    const bool HasShaderImageAtomicInt64Ext =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    if (HasShaderImageAtomicInt64Ext) {
+      FeaturesImageAtomicInt64.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+      FeaturesImageAtomicInt64.pNext = Features.pNext;
+      Features.pNext = &FeaturesImageAtomicInt64;
+    }
+#endif
+
+    const bool HasMeshShader = isExtensionSupported(
+        AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
-    if (isExtensionSupported(AvailableDeviceExtensions, ExtensionName)) {
-      EnabledDeviceExtensions.push_back(ExtensionName.data());
+    if (HasMeshShader) {
       MeshFeatures.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
-      MeshFeatures.taskShader = 1;
-      MeshFeatures.meshShader = 1;
-      MeshFeatures.multiviewMeshShader = 0;
-      MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
-      MeshFeatures.meshShaderQueries = 0;
-
       MeshFeatures.pNext = Features.pNext;
       Features.pNext = &MeshFeatures;
     }
 
+    const bool HasASExts =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
+        // bufferDeviceAddress is core in Vulkan 1.2; on 1.1 we need the ext.
+        (HasVulkan12 ||
+         isExtensionSupported(AvailableDeviceExtensions,
+                              VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME));
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR ASFeatures{};
+    // On Vulkan 1.1 we need a separate BDA features struct; on 1.2+
+    // bufferDeviceAddress lives in VkPhysicalDeviceVulkan12Features which is
+    // already in the chain, and adding a duplicate is a validation error.
+    VkPhysicalDeviceBufferDeviceAddressFeatures BDAFeatures{};
+    if (HasASExts) {
+      ASFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+      ASFeatures.pNext = Features.pNext;
+      Features.pNext = &ASFeatures;
+      if (!HasVulkan12) {
+        BDAFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        BDAFeatures.pNext = Features.pNext;
+        Features.pNext = &BDAFeatures;
+      }
+    }
+
+    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+
+    // For every extension chained above we verify that its gating feature bool
+    // came back true; if it didn't, return a descriptive error rather than
+    // letting vkCreateDevice raise the generic VK_ERROR_FEATURE_NOT_PRESENT.
+    // If this ever fires on a real driver, make the check infallible: either
+    // splice the struct back out of pNext or treat the feature as unsupported
+    // down below (skip the matching extension push).
+    if (HasMeshShader) {
+      if (!MeshFeatures.taskShader)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports taskShader=0",
+            VK_EXT_MESH_SHADER_EXTENSION_NAME);
+      if (!MeshFeatures.meshShader)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports meshShader=0",
+            VK_EXT_MESH_SHADER_EXTENSION_NAME);
+      // primitiveFragmentShadingRateMeshShader depends on
+      // primitiveFragmentShadingRate (VUID-...-07033), which we don't enable.
+      MeshFeatures.multiviewMeshShader = 0;
+      MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
+      MeshFeatures.meshShaderQueries = 0;
+      EnabledDeviceExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    }
+
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
-    if (HasShaderImageAtomicInt64Ext &&
-        FeaturesImageAtomicInt64.shaderImageInt64Atomics)
+    if (HasShaderImageAtomicInt64Ext) {
+      if (!FeaturesImageAtomicInt64.shaderImageInt64Atomics)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports shaderImageInt64Atomics=0",
+            VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+      FeaturesImageAtomicInt64.sparseImageInt64Atomics = 0;
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    }
 #endif
+
+    if (HasASExts) {
+      if (!ASFeatures.accelerationStructure)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports accelerationStructure=0",
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      const bool HasBDA = HasVulkan12 ? Features12.bufferDeviceAddress
+                                      : BDAFeatures.bufferDeviceAddress;
+      if (!HasBDA)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports bufferDeviceAddress=0",
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      // Enable only the base feature; capture-replay / indirect-build /
+      // host-commands / updateAfterBind aren't used by these tests.
+      ASFeatures.accelerationStructureCaptureReplay = 0;
+      ASFeatures.accelerationStructureIndirectBuild = 0;
+      ASFeatures.accelerationStructureHostCommands = 0;
+      ASFeatures.descriptorBindingAccelerationStructureUpdateAfterBind = 0;
+      if (!HasVulkan12) {
+        BDAFeatures.bufferDeviceAddressCaptureReplay = 0;
+        BDAFeatures.bufferDeviceAddressMultiDevice = 0;
+      }
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+      if (!HasVulkan12)
+        EnabledDeviceExtensions.push_back(
+            VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+    }
 
     DeviceInfo.enabledExtensionCount =
         static_cast<uint32_t>(EnabledDeviceExtensions.size());
@@ -1347,9 +1468,29 @@ public:
     VulkanQueue GraphicsQueue(DeviceQueue, QueueFamilyIdx, Device,
                               std::move(*SubmitFenceOrErr));
 
-    return std::make_unique<VulkanDevice>(
+    auto Dev = std::make_unique<VulkanDevice>(
         Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
         std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
+
+    // Load ray tracing function pointers after device creation.
+    if (HasASExts) {
+      Dev->HasRayTracingSupport = true;
+      Dev->RT.CreateAS = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+          vkGetDeviceProcAddr(Device, "vkCreateAccelerationStructureKHR"));
+      Dev->RT.DestroyAS =
+          reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+              vkGetDeviceProcAddr(Device, "vkDestroyAccelerationStructureKHR"));
+      Dev->RT.GetBuildSizes =
+          reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+              vkGetDeviceProcAddr(Device,
+                                  "vkGetAccelerationStructureBuildSizesKHR"));
+      Dev->RT.GetDeviceAddress =
+          reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+              vkGetDeviceProcAddr(
+                  Device, "vkGetAccelerationStructureDeviceAddressKHR"));
+    }
+
+    return Dev;
   }
 
   VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
@@ -2227,6 +2368,14 @@ public:
 
 private:
   void queryCapabilities() {
+    const bool HasVulkan12 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0);
+    const bool HasVulkan13 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0);
+#ifdef VK_VERSION_1_4
+    const bool HasVulkan14 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0);
+#endif
 
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -2250,12 +2399,12 @@ private:
 #endif
 
     Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+    if (HasVulkan12)
       Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+    if (HasVulkan13)
       Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+    if (HasVulkan14)
       Features13.pNext = &Features14;
 #endif
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
@@ -2267,13 +2416,13 @@ private:
     // tail for this device's apiVersion.
     if (HasShaderImageAtomicInt64Ext) {
 #ifdef VK_VERSION_1_4
-      if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+      if (HasVulkan14)
         Features14.pNext = &FeaturesImageAtomicInt64;
       else
 #endif
-          if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+          if (HasVulkan13)
         Features13.pNext = &FeaturesImageAtomicInt64;
-      else if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+      else if (HasVulkan12)
         Features12.pNext = &FeaturesImageAtomicInt64;
       else
         Features11.pNext = &FeaturesImageAtomicInt64;
@@ -2404,9 +2553,236 @@ public:
     return std::make_unique<VulkanRenderPass>(Device, Handle, Desc);
   }
 
+  // Helper: create a buffer with device address support.
+  llvm::Expected<BufferRef>
+  createBufferWithDeviceAddress(VkDeviceSize Size,
+                                VkBufferUsageFlags ExtraUsage) {
+    return createBuffer(ExtraUsage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Size, nullptr,
+                        VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+  }
+
+  llvm::Expected<BLASBuildRequest> createTriangleBLASBuildRequest(
+      llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
+    if (auto Err = validateBLASGeometry(Triangles))
+      return Err;
+
+    BLASBuildRequest Req;
+    Req.Geometry = llvm::SmallVector<TriangleGeometryDesc>(Triangles.begin(),
+                                                           Triangles.end());
+
+    llvm::SmallVector<VkAccelerationStructureGeometryKHR> Geoms;
+    Geoms.reserve(Triangles.size());
+
+    llvm::SmallVector<uint32_t> MaxPrimCounts;
+    MaxPrimCounts.reserve(Triangles.size());
+
+    for (const auto &T : Triangles) {
+      VkAccelerationStructureGeometryKHR Geom = {};
+      Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+      Geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+      if (T.Opaque)
+        Geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+      auto &Tri = Geom.geometry.triangles;
+      Tri.sType =
+          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+      // Device addresses are not needed for the size query; they will be
+      // populated at build time.
+      Tri.vertexStride = T.VertexStride;
+      Tri.maxVertex = T.VertexCount - 1;
+      Tri.vertexFormat = getVulkanFormat(T.VertexFormat);
+      Tri.indexType = T.IndexBuffer ? getVulkanIndexType(T.IdxFormat)
+                                    : VK_INDEX_TYPE_NONE_KHR;
+
+      Geoms.push_back(Geom);
+      MaxPrimCounts.push_back(T.IndexBuffer ? T.IndexCount / 3
+                                            : T.VertexCount / 3);
+    }
+
+    queryBLASPrebuildSize(Geoms, MaxPrimCounts, Req.Sizes);
+    return Req;
+  }
+
+  llvm::Expected<BLASBuildRequest>
+  createAABBBLASBuildRequest(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
+    if (auto Err = validateBLASGeometry(AABBs))
+      return Err;
+
+    BLASBuildRequest Req;
+    Req.Geometry =
+        llvm::SmallVector<AABBGeometryDesc>(AABBs.begin(), AABBs.end());
+
+    llvm::SmallVector<VkAccelerationStructureGeometryKHR> Geoms;
+    Geoms.reserve(AABBs.size());
+
+    llvm::SmallVector<uint32_t> MaxPrimCounts;
+    MaxPrimCounts.reserve(AABBs.size());
+
+    for (const auto &A : AABBs) {
+      VkAccelerationStructureGeometryKHR Geom = {};
+      Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+      Geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+      if (A.Opaque)
+        Geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+      auto &Aabbs = Geom.geometry.aabbs;
+      Aabbs.sType =
+          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+      Aabbs.stride = A.AABBStride;
+
+      Geoms.push_back(Geom);
+      MaxPrimCounts.push_back(A.AABBCount);
+    }
+
+    queryBLASPrebuildSize(Geoms, MaxPrimCounts, Req.Sizes);
+    return Req;
+  }
+
+private:
+  void queryBLASPrebuildSize(
+      llvm::ArrayRef<VkAccelerationStructureGeometryKHR> Geoms,
+      llvm::ArrayRef<uint32_t> MaxPrimCounts,
+      AccelerationStructureSizes &OutSizes) {
+    VkAccelerationStructureBuildGeometryInfoKHR BuildInfo = {};
+    BuildInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    BuildInfo.geometryCount = Geoms.size();
+    BuildInfo.pGeometries = Geoms.data();
+
+    VkAccelerationStructureBuildSizesInfoKHR SizesInfo = {};
+    SizesInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+    RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                     &BuildInfo, MaxPrimCounts.data(), &SizesInfo);
+
+    OutSizes.ResultDataMaxSizeInBytes = SizesInfo.accelerationStructureSize;
+    OutSizes.ScratchDataSizeInBytes = SizesInfo.buildScratchSize;
+    OutSizes.UpdateScratchDataSizeInBytes = SizesInfo.updateScratchSize;
+  }
+
+public:
+  llvm::Expected<TLASBuildRequest> createTLASBuildRequest(
+      llvm::ArrayRef<AccelerationStructureInstance> Instances) override {
+    TLASBuildRequest Req;
+    Req.Instances.assign(Instances.begin(), Instances.end());
+
+    if (auto Err = validateTLASBuildRequest(Req))
+      return Err;
+
+    VkAccelerationStructureGeometryKHR Geom = {};
+    Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    Geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    Geom.geometry.instances.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+
+    VkAccelerationStructureBuildGeometryInfoKHR BuildInfo = {};
+    BuildInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    BuildInfo.geometryCount = 1;
+    BuildInfo.pGeometries = &Geom;
+
+    const uint32_t InstanceCount = static_cast<uint32_t>(Instances.size());
+
+    VkAccelerationStructureBuildSizesInfoKHR SizesInfo = {};
+    SizesInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+    RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                     &BuildInfo, &InstanceCount, &SizesInfo);
+
+    Req.Sizes.ResultDataMaxSizeInBytes = SizesInfo.accelerationStructureSize;
+    Req.Sizes.ScratchDataSizeInBytes = SizesInfo.buildScratchSize;
+    Req.Sizes.UpdateScratchDataSizeInBytes = SizesInfo.updateScratchSize;
+
+    return Req;
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  createAccelerationStructure(const BLASBuildRequest &Request) override {
+    if (!HasRayTracingSupport)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    auto BufOrErr = createBufferWithDeviceAddress(
+        Request.Sizes.ResultDataMaxSizeInBytes,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+
+    VkAccelerationStructureCreateInfoKHR CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    CreateInfo.buffer = BufOrErr->Buffer;
+    CreateInfo.size = Request.Sizes.ResultDataMaxSizeInBytes;
+    CreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+    VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
+                        "Failed to create BLAS.")) {
+      vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
+      vkFreeMemory(Device, BufOrErr->Memory, nullptr);
+      return Err;
+    }
+
+    VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
+    AddrInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    AddrInfo.accelerationStructure = AccelStruct;
+    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
+
+    return std::make_unique<VulkanAccelerationStructure>(
+        Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
+        RT.DestroyAS);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  createAccelerationStructure(const TLASBuildRequest &Request) override {
+    if (!HasRayTracingSupport)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    auto BufOrErr = createBufferWithDeviceAddress(
+        Request.Sizes.ResultDataMaxSizeInBytes,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+
+    VkAccelerationStructureCreateInfoKHR CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    CreateInfo.buffer = BufOrErr->Buffer;
+    CreateInfo.size = Request.Sizes.ResultDataMaxSizeInBytes;
+    CreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+
+    VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
+                        "Failed to create TLAS.")) {
+      vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
+      vkFreeMemory(Device, BufOrErr->Memory, nullptr);
+      return Err;
+    }
+
+    VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
+    AddrInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    AddrInfo.accelerationStructure = AccelStruct;
+    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
+
+    return std::make_unique<VulkanAccelerationStructure>(
+        Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
+        RT.DestroyAS);
+  }
+
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
                                          VkMemoryPropertyFlags MemoryFlags,
-                                         size_t Size, void *Data = nullptr) {
+                                         size_t Size, void *Data = nullptr,
+                                         VkMemoryAllocateFlags AllocFlags = 0) {
     VkBuffer Buffer;
     VkDeviceMemory Memory;
     VkBufferCreateInfo BufferInfo = {};
@@ -2422,9 +2798,16 @@ public:
 
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
+
+    VkMemoryAllocateFlagsInfo FlagsInfo = {};
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
+    if (AllocFlags) {
+      FlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+      FlagsInfo.flags = AllocFlags;
+      AllocInfo.pNext = &FlagsInfo;
+    }
 
     llvm::Expected<uint32_t> MemIdx =
         getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemoryFlags);

@@ -403,6 +403,24 @@ private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
 
+class MetalAccelerationStructure : public offloadtest::AccelerationStructure {
+public:
+  MTL::AccelerationStructure *AccelStruct;
+
+  MetalAccelerationStructure(MTL::AccelerationStructure *AccelStruct)
+      : offloadtest::AccelerationStructure(GPUAPI::Metal),
+        AccelStruct(AccelStruct) {}
+
+  ~MetalAccelerationStructure() override {
+    if (AccelStruct)
+      AccelStruct->release();
+  }
+
+  static bool classof(const offloadtest::AccelerationStructure *AS) {
+    return AS->getAPI() == GPUAPI::Metal;
+  }
+};
+
 llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
     llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
   // Non-blocking: query how far the GPU has progressed and release
@@ -1934,6 +1952,164 @@ public:
     return std::make_unique<MTLPipelineState>(
         Name, std::move(RootSig), std::move(ArgBuffer), PSO, DSState,
         MTL::CullModeNone, MeshTGSize, ObjectTGSize);
+  }
+
+  llvm::Expected<BLASBuildRequest> createTriangleBLASBuildRequest(
+      llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    if (auto Err = validateBLASGeometry(Triangles))
+      return Err;
+
+    BLASBuildRequest Req;
+    Req.Geometry = llvm::SmallVector<TriangleGeometryDesc>(Triangles.begin(),
+                                                           Triangles.end());
+
+    llvm::SmallVector<MTL::AccelerationStructureGeometryDescriptor *> Descs;
+    Descs.reserve(Triangles.size());
+    for (const auto &T : Triangles) {
+      auto *TD =
+          MTL::AccelerationStructureTriangleGeometryDescriptor::alloc()->init();
+      auto *VB = llvm::cast<MTLBuffer>(T.VertexBuffer);
+      TD->setVertexBuffer(VB->Buf);
+      TD->setVertexBufferOffset(T.VertexBufferOffset);
+      TD->setVertexStride(T.VertexStride);
+      TD->setVertexFormat(getMetalPositionFormat(T.VertexFormat));
+      TD->setTriangleCount(T.IndexBuffer ? T.IndexCount / 3
+                                         : T.VertexCount / 3);
+      if (T.IndexBuffer) {
+        auto *IB = llvm::cast<MTLBuffer>(T.IndexBuffer);
+        TD->setIndexBuffer(IB->Buf);
+        TD->setIndexBufferOffset(T.IndexBufferOffset);
+        TD->setIndexType(getMetalIndexType(T.IdxFormat));
+      }
+      TD->setOpaque(T.Opaque);
+      Descs.push_back(TD);
+    }
+
+    queryBLASPrebuildSize(Descs, Req.Sizes);
+    for (auto *D : Descs)
+      D->release();
+    return Req;
+  }
+
+  llvm::Expected<BLASBuildRequest>
+  createAABBBLASBuildRequest(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    if (auto Err = validateBLASGeometry(AABBs))
+      return Err;
+
+    BLASBuildRequest Req;
+    Req.Geometry =
+        llvm::SmallVector<AABBGeometryDesc>(AABBs.begin(), AABBs.end());
+
+    llvm::SmallVector<MTL::AccelerationStructureGeometryDescriptor *> Descs;
+    Descs.reserve(AABBs.size());
+    for (const auto &A : AABBs) {
+      auto *AD =
+          MTL::AccelerationStructureBoundingBoxGeometryDescriptor::alloc()
+              ->init();
+      auto *BB = llvm::cast<MTLBuffer>(A.AABBBuffer);
+      AD->setBoundingBoxBuffer(BB->Buf);
+      AD->setBoundingBoxBufferOffset(A.AABBBufferOffset);
+      AD->setBoundingBoxStride(A.AABBStride);
+      AD->setBoundingBoxCount(A.AABBCount);
+      AD->setOpaque(A.Opaque);
+      Descs.push_back(AD);
+    }
+
+    queryBLASPrebuildSize(Descs, Req.Sizes);
+    for (auto *D : Descs)
+      D->release();
+    return Req;
+  }
+
+private:
+  void queryBLASPrebuildSize(
+      llvm::ArrayRef<MTL::AccelerationStructureGeometryDescriptor *> Descs,
+      AccelerationStructureSizes &OutSizes) {
+    NS::Array *GeomDescs = NS::Array::array(
+        reinterpret_cast<NS::Object *const *>(Descs.data()), Descs.size());
+
+    auto *Descriptor =
+        MTL::PrimitiveAccelerationStructureDescriptor::alloc()->init();
+    Descriptor->setGeometryDescriptors(GeomDescs);
+
+    MTL::AccelerationStructureSizes Sizes =
+        Device->accelerationStructureSizes(Descriptor);
+
+    OutSizes.ResultDataMaxSizeInBytes = Sizes.accelerationStructureSize;
+    OutSizes.ScratchDataSizeInBytes = Sizes.buildScratchBufferSize;
+    OutSizes.UpdateScratchDataSizeInBytes = Sizes.refitScratchBufferSize;
+
+    Descriptor->release();
+  }
+
+public:
+  llvm::Expected<TLASBuildRequest> createTLASBuildRequest(
+      llvm::ArrayRef<AccelerationStructureInstance> Instances) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    TLASBuildRequest Req;
+    Req.Instances.assign(Instances.begin(), Instances.end());
+
+    if (auto Err = validateTLASBuildRequest(Req))
+      return Err;
+
+    auto *Descriptor =
+        MTL::InstanceAccelerationStructureDescriptor::alloc()->init();
+    Descriptor->setInstanceCount(Instances.size());
+
+    MTL::AccelerationStructureSizes Sizes =
+        Device->accelerationStructureSizes(Descriptor);
+
+    Req.Sizes.ResultDataMaxSizeInBytes = Sizes.accelerationStructureSize;
+    Req.Sizes.ScratchDataSizeInBytes = Sizes.buildScratchBufferSize;
+    Req.Sizes.UpdateScratchDataSizeInBytes = Sizes.refitScratchBufferSize;
+
+    Descriptor->release();
+
+    return Req;
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  createAccelerationStructure(const BLASBuildRequest &Request) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    MTL::AccelerationStructure *AS = Device->newAccelerationStructure(
+        Request.Sizes.ResultDataMaxSizeInBytes);
+    if (!AS)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal BLAS.");
+    return std::make_unique<MetalAccelerationStructure>(AS);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  createAccelerationStructure(const TLASBuildRequest &Request) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    MTL::AccelerationStructure *AS = Device->newAccelerationStructure(
+        Request.Sizes.ResultDataMaxSizeInBytes);
+    if (!AS)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to create Metal TLAS.");
+    return std::make_unique<MetalAccelerationStructure>(AS);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {

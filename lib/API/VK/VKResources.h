@@ -88,6 +88,16 @@ inline VkImageUsageFlags getVulkanImageUsage(TextureUsage Usage) {
   return Flags;
 }
 
+inline VkIndexType getVulkanIndexType(IndexFormat Fmt) {
+  switch (Fmt) {
+  case IndexFormat::Uint16:
+    return VK_INDEX_TYPE_UINT16;
+  case IndexFormat::Uint32:
+    return VK_INDEX_TYPE_UINT32;
+  }
+  llvm_unreachable("All IndexFormat cases handled");
+}
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_VKRESOURCES_H

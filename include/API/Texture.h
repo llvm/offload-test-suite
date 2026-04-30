@@ -26,6 +26,7 @@
 #include <variant>
 
 namespace offloadtest {
+LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
 enum TextureUsage : uint32_t {
   Sampled = 1 << 0,
