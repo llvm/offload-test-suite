@@ -46,16 +46,16 @@ struct DeviceConfig {
   bool EnableValidationLayer = false;
 };
 
-struct DXBinding {
-  uint32_t Register;
-  uint32_t Space;
-};
-
 struct InputLayoutDesc {
   std::string Name;
   Format Format;
   uint32_t OffsetInBytes;
   std::optional<uint32_t> InstanceStepRate;
+};
+
+struct DXBinding {
+  uint32_t Register;
+  uint32_t Space;
 };
 
 struct ResourceBindingDesc {
