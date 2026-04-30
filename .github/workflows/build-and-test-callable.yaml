@@ -244,7 +244,6 @@ jobs:
               --exclude='*.o' \
               --exclude='*.ilk' \
               --exclude='*.pdb' \
-              --exclude='CMakeFiles' \
               DXC/build/bin llvm-project/build
       - name: Upload build artifacts
         if: inputs.SplitBuild == true
