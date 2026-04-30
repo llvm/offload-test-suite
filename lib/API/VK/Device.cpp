@@ -579,8 +579,7 @@ public:
   VkDevice Dev;
   VkPipeline Pipeline;
   VkPipelineLayout Layout;
-  llvm::SmallVector<VkDescriptorSetLayout>
-      SetLayouts; // Do we need to keep these alive?
+  llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
 
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
