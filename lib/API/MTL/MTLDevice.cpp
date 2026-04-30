@@ -766,6 +766,7 @@ public:
         AttrDesc->setOffset(Elem.OffsetInBytes);
         AttrDesc->setFormat(getMetalVertexFormat(Elem.Format));
         VtxDesc->attributes()->setObject(AttrDesc, I);
+        AttrDesc->release();
         Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
       }
 
@@ -775,8 +776,10 @@ public:
       LDesc->setStepRate(1);
       LDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
       VtxDesc->layouts()->setObject(LDesc, 0);
+      LDesc->release();
 
       Desc->setVertexDescriptor(VtxDesc);
+      VtxDesc->release();
     }
 
     // Configure render target color attachments.
@@ -785,6 +788,7 @@ public:
           MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
       RPCA->setPixelFormat(getMetalPixelFormat(RTFormats[I]));
       Desc->colorAttachments()->setObject(RPCA, I);
+      RPCA->release();
     }
 
     // Configure depth/stencil attachment.
