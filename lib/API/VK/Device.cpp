@@ -1119,11 +1119,11 @@ public:
       assert(!Elem.InstanceStepRate &&
              "Instance step rate is currently not supported.");
 
-      const uint32_t ElemSize = getFormatSizeInBytes(Elem.Format);
+      const uint32_t ElemSize = getFormatSizeInBytes(Elem.Fmt);
       VkVertexInputAttributeDescription Attr = {};
       Attr.location = I;
       Attr.binding = 0;
-      Attr.format = getVulkanFormat(Elem.Format);
+      Attr.format = getVulkanFormat(Elem.Fmt);
       Attr.offset = Elem.OffsetInBytes;
       Attributes.push_back(Attr);
       Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
@@ -2801,7 +2801,7 @@ public:
 
         InputLayoutDesc Desc = {};
         Desc.Name = Attr.Name;
-        Desc.Format = *FormatOrErr;
+        Desc.Fmt = *FormatOrErr;
         Desc.OffsetInBytes = Attr.Offset;
         InputLayout.push_back(Desc);
       }

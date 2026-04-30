@@ -802,7 +802,7 @@ public:
       D3D12_INPUT_ELEMENT_DESC ElementDesc = {};
       ElementDesc.SemanticName = Elem.Name.c_str();
       ElementDesc.SemanticIndex = 0;
-      ElementDesc.Format = getDXGIFormat(Elem.Format);
+      ElementDesc.Format = getDXGIFormat(Elem.Fmt);
       ElementDesc.InputSlot = 0;
       ElementDesc.AlignedByteOffset = Elem.OffsetInBytes;
       ElementDesc.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
@@ -2066,7 +2066,7 @@ public:
 
         InputLayoutDesc Desc = {};
         Desc.Name = Attr.Name;
-        Desc.Format = *FormatOrErr;
+        Desc.Fmt = *FormatOrErr;
         Desc.OffsetInBytes = Attr.Offset;
         InputLayout.push_back(Desc);
       }

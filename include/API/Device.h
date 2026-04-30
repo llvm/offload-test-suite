@@ -48,7 +48,7 @@ struct DeviceConfig {
 
 struct InputLayoutDesc {
   std::string Name;
-  Format Format;
+  Format Fmt;
   uint32_t OffsetInBytes;
   std::optional<uint32_t> InstanceStepRate;
 };
