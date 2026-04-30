@@ -147,6 +147,32 @@ inline bool isDepthFormat(Format Format) {
   llvm_unreachable("All Format cases handled");
 }
 
+inline bool isStencilFormat(Format Format) {
+  switch (Format) {
+  case Format::R16Sint:
+  case Format::R16Uint:
+  case Format::RG16Sint:
+  case Format::RG16Uint:
+  case Format::R32Sint:
+  case Format::R32Uint:
+  case Format::R32Float:
+  case Format::RGBA16Sint:
+  case Format::RGBA16Uint:
+  case Format::RG32Sint:
+  case Format::RG32Uint:
+  case Format::RG32Float:
+  case Format::RGB32Float:
+  case Format::RGBA32Sint:
+  case Format::RGBA32Uint:
+  case Format::RGBA32Float:
+  case Format::D32Float:
+    return false;
+  case Format::D32FloatS8Uint:
+    return true;
+  }
+  llvm_unreachable("All Format cases handled");
+}
+
 // Returns true if the format can be used as a texture pixel format across all
 // backends. Formats like RGB32Float are valid for vertex attributes but have no
 // pixel format equivalent on some APIs (e.g. Metal).

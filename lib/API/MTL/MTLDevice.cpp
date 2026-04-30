@@ -791,7 +791,7 @@ public:
     if (DSFormat) {
       const MTL::PixelFormat DSPixelFormat = getMetalPixelFormat(*DSFormat);
       Desc->setDepthAttachmentPixelFormat(DSPixelFormat);
-      if (*DSFormat == Format::D32FloatS8Uint)
+      if (isStencilFormat(*DSFormat))
         Desc->setStencilAttachmentPixelFormat(DSPixelFormat);
     }
 

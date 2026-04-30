@@ -1185,7 +1185,7 @@ public:
     DynRenderCI.pColorAttachmentFormats = ColorFormats.data();
     if (DSFormat) {
       DynRenderCI.depthAttachmentFormat = getVulkanFormat(*DSFormat);
-      if (*DSFormat == Format::D32FloatS8Uint)
+      if (isStencilFormat(*DSFormat))
         DynRenderCI.stencilAttachmentFormat = getVulkanFormat(*DSFormat);
     }
 
