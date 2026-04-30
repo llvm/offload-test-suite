@@ -159,10 +159,10 @@ static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
   png_bytepp Rows =
       (png_bytepp)png_malloc(PNG, Img.getHeight() * sizeof(png_bytep));
   const uint64_t RowSize = Img.getWidth() * Img.getChannels() * Img.getDepth();
-  // Step one row back from the end
-  const uint8_t *Row = reinterpret_cast<const uint8_t *>(Img.data()) +
-                       (RowSize * Img.getHeight()) - RowSize;
-  for (uint32_t I = 0; I < Img.getHeight(); ++I, Row -= RowSize)
+  // The host buffer has top-left origin (matching every backend's readback
+  // and the standard PNG row order), so we walk forward.
+  const uint8_t *Row = reinterpret_cast<const uint8_t *>(Img.data());
+  for (uint32_t I = 0; I < Img.getHeight(); ++I, Row += RowSize)
     Rows[I] = const_cast<png_bytep>(Row);
 
   png_write_image(PNG, Rows);
