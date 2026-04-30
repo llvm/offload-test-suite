@@ -176,6 +176,8 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
         setWaveSizeFeaturesDirectX(config, device)
+        if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
+            config.available_features.add("acceleration-structure")
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
@@ -183,6 +185,8 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Half")
         if device["Features"].get("MeshShader", False):
             config.available_features.add("MeshShader")
+        if device["Features"].get("supportsRaytracing", False):
+            config.available_features.add("acceleration-structure")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
@@ -205,6 +209,9 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add(Extension["ExtensionName"])
             if Extension["ExtensionName"] == "VK_EXT_mesh_shader":
                 config.available_features.add("MeshShader")
+
+        if "VK_KHR_acceleration_structure" in config.available_features:
+            config.available_features.add("acceleration-structure")
 
 
 offloader_args = []
