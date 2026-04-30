@@ -796,16 +796,16 @@ public:
     std::vector<D3D12_INPUT_ELEMENT_DESC> DXInputLayout;
     DXInputLayout.reserve(InputLayout.size());
     for (const InputLayoutDesc &Elem : InputLayout) {
+      assert(!Elem.InstanceStepRate &&
+             "Instance step rate is currently not supported.");
+
       D3D12_INPUT_ELEMENT_DESC ElementDesc = {};
       ElementDesc.SemanticName = Elem.Name.c_str();
       ElementDesc.SemanticIndex = 0;
       ElementDesc.Format = getDXGIFormat(Elem.Format);
       ElementDesc.InputSlot = 0;
       ElementDesc.AlignedByteOffset = Elem.OffsetInBytes;
-      ElementDesc.InputSlotClass =
-          Elem.InstanceStepRate ? D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA
-                                : D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-      ElementDesc.InstanceDataStepRate = Elem.InstanceStepRate.value_or(0);
+      ElementDesc.InputSlotClass = D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
       DXInputLayout.push_back(ElementDesc);
     }
 

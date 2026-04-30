@@ -1117,6 +1117,9 @@ public:
     Attributes.reserve(InputLayout.size());
     for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
       const InputLayoutDesc &Elem = InputLayout[I];
+      assert(!Elem.InstanceStepRate &&
+             "Instance step rate is currently not supported.");
+
       const uint32_t ElemSize = getFormatSizeInBytes(Elem.Format);
       VkVertexInputAttributeDescription Attr = {};
       Attr.location = I;

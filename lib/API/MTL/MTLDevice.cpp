@@ -790,6 +790,9 @@ public:
       uint32_t Stride = 0;
       for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
         const InputLayoutDesc &Elem = InputLayout[I];
+        assert(!Elem.InstanceStepRate &&
+               "Instance step rate is currently not supported.");
+
         llvm::SmallString<32> AttrName(Elem.Name);
         llvm::transform(AttrName, AttrName.begin(), tolower);
         // Append a zero since we're only supporting one attribute per name.
