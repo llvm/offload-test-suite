@@ -2640,8 +2640,8 @@ public:
       vkMapMemory(Device, Readback.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
-      memcpy(B.Data[0].get(), Mapped, B.size());
+      auto *RT = P.Bindings.RTargetBufferPtr;
+      RT->copyFromTexture(Mapped, RT->getImageRowBytes());
       vkUnmapMemory(Device, Readback.Memory);
     }
     return llvm::Error::success();
