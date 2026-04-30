@@ -962,8 +962,14 @@ public:
               SpecConst.ConstantID);
 
         VkSpecializationMapEntry Entry;
-        if (auto Err = parseSpecializationConstant(SpecConst, Entry, SpecData))
+        if (auto Err =
+                parseSpecializationConstant(SpecConst, Entry, SpecData)) {
+          vkDestroyShaderModule(Device, CSModule, nullptr);
+          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+          for (auto *L : SetLayouts)
+            vkDestroyDescriptorSetLayout(Device, L, nullptr);
           return Err;
+        }
         SpecEntries.push_back(Entry);
       }
       SpecInfo.mapEntryCount = SpecEntries.size();
@@ -1048,8 +1054,14 @@ public:
 
         VkSpecializationMapEntry Entry;
         if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, VSSpecData))
+                parseSpecializationConstant(SpecConst, Entry, VSSpecData)) {
+          for (auto *M : ShaderModules)
+            vkDestroyShaderModule(Device, M, nullptr);
+          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+          for (auto *L : SetLayouts)
+            vkDestroyDescriptorSetLayout(Device, L, nullptr);
           return Err;
+        }
         VSSpecEntries.push_back(Entry);
       }
       VSSpecInfo.mapEntryCount = VSSpecEntries.size();
@@ -1074,8 +1086,14 @@ public:
 
         VkSpecializationMapEntry Entry;
         if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, PSSpecData))
+                parseSpecializationConstant(SpecConst, Entry, PSSpecData)) {
+          for (auto *M : ShaderModules)
+            vkDestroyShaderModule(Device, M, nullptr);
+          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+          for (auto *L : SetLayouts)
+            vkDestroyDescriptorSetLayout(Device, L, nullptr);
           return Err;
+        }
         PSSpecEntries.push_back(Entry);
       }
       PSSpecInfo.mapEntryCount = PSSpecEntries.size();
