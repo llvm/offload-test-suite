@@ -499,43 +499,6 @@ private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
 };
 
-llvm::Error DXQueue::submit(
-    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
-  llvm::SmallVector<ID3D12CommandList *> CmdLists;
-  CmdLists.reserve(CBs.size());
-
-  // Wait on the previous submit's fence value before executing this batch,
-  // so that back-to-back submits don't overlap on the GPU. Skip on first
-  // submit since Wait(fence, 0) triggers a D3D12 validation warning.
-  if (FenceCounter > 0)
-    if (auto Err =
-            HR::toError(Queue->Wait(SubmitFence->Fence.Get(), FenceCounter),
-                        "Failed to wait on previous submit."))
-      return Err;
-
-  for (auto &CB : CBs) {
-    auto &DCB = *llvm::cast<DXCommandBuffer>(CB.get());
-    if (auto Err =
-            HR::toError(DCB.CmdList->Close(), "Failed to close command list."))
-      return Err;
-    CmdLists.push_back(DCB.CmdList.Get());
-  }
-
-  Queue->ExecuteCommandLists(CmdLists.size(), CmdLists.data());
-
-  const uint64_t CurrentCounter = ++FenceCounter;
-  if (auto Err =
-          HR::toError(Queue->Signal(SubmitFence->Fence.Get(), CurrentCounter),
-                      "Failed to add signal."))
-    return Err;
-
-  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
-  if (auto Err = SubmitFence->waitForCompletion(CurrentCounter))
-    return Err;
-
-  return llvm::Error::success();
-}
-
 struct DescriptorAllocator {
   ComPtr<ID3D12DescriptorHeap> Heap;
   std::atomic<uint32_t> NextIndex{0};
@@ -2017,6 +1980,43 @@ public:
   }
 };
 } // namespace
+
+llvm::Error DXQueue::submit(
+    llvm::SmallVectorImpl<std::unique_ptr<offloadtest::CommandBuffer>> &&CBs) {
+  llvm::SmallVector<ID3D12CommandList *> CmdLists;
+  CmdLists.reserve(CBs.size());
+
+  // Wait on the previous submit's fence value before executing this batch,
+  // so that back-to-back submits don't overlap on the GPU. Skip on first
+  // submit since Wait(fence, 0) triggers a D3D12 validation warning.
+  if (FenceCounter > 0)
+    if (auto Err =
+            HR::toError(Queue->Wait(SubmitFence->Fence.Get(), FenceCounter),
+                        "Failed to wait on previous submit."))
+      return Err;
+
+  for (auto &CB : CBs) {
+    auto &DCB = *llvm::cast<DXCommandBuffer>(CB.get());
+    if (auto Err =
+            HR::toError(DCB.CmdList->Close(), "Failed to close command list."))
+      return Err;
+    CmdLists.push_back(DCB.CmdList.Get());
+  }
+
+  Queue->ExecuteCommandLists(CmdLists.size(), CmdLists.data());
+
+  const uint64_t CurrentCounter = ++FenceCounter;
+  if (auto Err =
+          HR::toError(Queue->Signal(SubmitFence->Fence.Get(), CurrentCounter),
+                      "Failed to add signal."))
+    return Err;
+
+  // TODO: Return a Fence+value with keepalive lists instead of blocking here.
+  if (auto Err = SubmitFence->waitForCompletion(CurrentCounter))
+    return Err;
+
+  return llvm::Error::success();
+}
 
 llvm::Error offloadtest::initializeDX12Devices(
     const DeviceConfig Config,
