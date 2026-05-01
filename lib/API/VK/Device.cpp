@@ -2716,6 +2716,11 @@ public:
     for (auto &S : P.Sets) {
       DescriptorSetLayoutDesc Layout;
       for (auto &R : S.Resources) {
+        if (!R.VKBinding)
+          return llvm::createStringError(std::errc::invalid_argument,
+                                         "No VulkanBinding provided for '%s'",
+                                         R.Name.c_str());
+
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
         ResourceBinding.DXBinding.Register = R.DXBinding.Register;
