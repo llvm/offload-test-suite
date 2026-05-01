@@ -64,7 +64,7 @@ DescriptorSets:
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/179560
 # XFAIL: Clang && Vulkan
-# Error https://github.com/microsoft/DirectXShaderCompiler/issues/8172
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8172
 # UNSUPPORTED: DXC && Vulkan
 
 # REQUIRES: Int16
