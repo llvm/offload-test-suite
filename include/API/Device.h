@@ -54,19 +54,30 @@ protected:
   Fence() = default;
 };
 
+/// Returned by Queue::submit() so that callers can decide when to block.
+struct SubmitResult {
+  Fence *F;
+  uint64_t Value;
+
+  llvm::Error waitForCompletion() const { return F->waitForCompletion(Value); }
+};
+
 class Queue {
 public:
   virtual ~Queue() = 0;
+  Queue(const Queue &) = delete;
+  Queue &operator=(const Queue &) = delete;
+  Queue(Queue &&) = default;
+  Queue &operator=(Queue &&) = default;
 
-  /// Submit command buffers for execution and block until completion.
-  /// Command buffers execute in array order, but dependencies between them
-  /// require appropriate barriers within the command buffers themselves.
-  virtual llvm::Error
-  submit(llvm::SmallVectorImpl<std::unique_ptr<CommandBuffer>> &&CBs) = 0;
+  /// Submit command buffers for GPU execution.  Returns a fence + value that
+  /// the caller can wait on; the call itself does not block.
+  virtual llvm::Expected<SubmitResult>
+  submit(llvm::SmallVector<std::unique_ptr<CommandBuffer>> CBs) = 0;
 
   /// Convenience overload for submitting a single command buffer.
-  llvm::Error submit(std::unique_ptr<CommandBuffer> CB) {
-    llvm::SmallVector<std::unique_ptr<CommandBuffer>, 1> CBs;
+  llvm::Expected<SubmitResult> submit(std::unique_ptr<CommandBuffer> CB) {
+    llvm::SmallVector<std::unique_ptr<CommandBuffer>> CBs;
     CBs.push_back(std::move(CB));
     return submit(std::move(CBs));
   }
