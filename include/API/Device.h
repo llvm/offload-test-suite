@@ -87,13 +87,17 @@ struct ShaderContainer {
 
 class PipelineState {
 public:
+  GPUAPI API;
+
   virtual ~PipelineState() = default;
 
   PipelineState(const Buffer &) = delete;
   PipelineState &operator=(const Buffer &) = delete;
 
+  GPUAPI getAPI() const { return API; }
+
 protected:
-  PipelineState() = default;
+  explicit PipelineState(GPUAPI API) : API(API) {}
 };
 
 class Fence {

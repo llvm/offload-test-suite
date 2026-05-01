@@ -584,14 +584,18 @@ public:
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
                       llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
-      : Name(Name.str()), Dev(Dev), Pipeline(Pipeline), Layout(Layout),
-        SetLayouts(std::move(SetLayouts)) {}
+      : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
 
   ~VulkanPipelineState() override {
     vkDestroyPipeline(Dev, Pipeline, nullptr);
     vkDestroyPipelineLayout(Dev, Layout, nullptr);
     for (VkDescriptorSetLayout L : SetLayouts)
       vkDestroyDescriptorSetLayout(Dev, L, nullptr);
+  }
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    return B->getAPI() == GPUAPI::Vulkan;
   }
 };
 

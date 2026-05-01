@@ -125,17 +125,23 @@ public:
 
   MTLPipelineState(llvm::StringRef Name,
                    MTL::ComputePipelineState *ComputePipeline)
-      : Name(Name), ComputePipeline(ComputePipeline) {}
+      : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
+        ComputePipeline(ComputePipeline) {}
 
   MTLPipelineState(llvm::StringRef Name,
                    MTL::RenderPipelineState *RenderPipeline)
-      : Name(Name), RenderPipeline(RenderPipeline) {}
+      : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name),
+        RenderPipeline(RenderPipeline) {}
 
   ~MTLPipelineState() override {
     if (ComputePipeline)
       ComputePipeline->release();
     if (RenderPipeline)
       RenderPipeline->release();
+  }
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    return B->getAPI() == GPUAPI::Metal;
   }
 };
 

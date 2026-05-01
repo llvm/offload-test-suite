@@ -366,7 +366,12 @@ public:
 
   DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
                   ComPtr<ID3D12PipelineState> PSO)
-      : Name(Name), RootSig(RootSig), PSO(PSO) {}
+      : offloadtest::PipelineState(GPUAPI::DirectX), Name(Name),
+        RootSig(RootSig), PSO(PSO) {}
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    return B->getAPI() == GPUAPI::DirectX;
+  }
 };
 
 class DXFence : public offloadtest::Fence {
