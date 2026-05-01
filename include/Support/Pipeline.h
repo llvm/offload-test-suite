@@ -157,6 +157,19 @@ struct CPUBuffer {
       return Stride;
     return getSingleElementSize() * Channels;
   }
+
+  // The natural per-row byte size of this buffer when interpreted as a 2D
+  // image (no padding).
+  uint32_t getImageRowBytes() const {
+    return OutputProps.Width * getElementSize();
+  }
+
+  // Copy a 2D image readback from a GPU mapping into Data[0]. The host
+  // buffer is tightly packed with top-left origin. SrcRowPitch is the
+  // source's per-row stride in bytes; pass `getImageRowBytes()` when the
+  // source is tightly packed (Vulkan / Metal), or the GPU's reported pitch
+  // when the source has row padding (e.g., D3D12's 256-byte aligned rows).
+  void copyFromTexture(const void *Src, size_t SrcRowPitch);
 };
 
 struct Result {
