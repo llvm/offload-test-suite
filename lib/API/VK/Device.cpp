@@ -580,15 +580,19 @@ public:
   VkPipeline Pipeline;
   VkPipelineLayout Layout;
   llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+  VkRenderPass RenderPass;
 
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
-                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts,
+                      VkRenderPass RenderPass)
       : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
-        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)),
+        RenderPass(RenderPass) {}
 
   ~VulkanPipelineState() override {
     vkDestroyPipeline(Dev, Pipeline, nullptr);
+    vkDestroyRenderPass(Dev, RenderPass, nullptr);
     vkDestroyPipelineLayout(Dev, Layout, nullptr);
     for (VkDescriptorSetLayout L : SetLayouts)
       vkDestroyDescriptorSetLayout(Dev, L, nullptr);
@@ -686,7 +690,6 @@ private:
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::optional<ResourceRef> VertexBuffer = std::nullopt;
 
-    VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
 
     llvm::SmallVector<ResourceBundle> Resources;
@@ -1002,7 +1005,8 @@ public:
     vkDestroyShaderModule(Device, CSModule, nullptr);
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
+        VK_NULL_HANDLE);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -1020,9 +1024,20 @@ public:
                                         PipelineLayout))
       return Err;
 
+    auto RenderPassOrErr = createRenderPass(RTFormats, DSFormat);
+    if (!RenderPassOrErr) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return RenderPassOrErr.takeError();
+    }
+    VkRenderPass RenderPass = *RenderPassOrErr;
+    llvm::outs() << "Render pass created.\n";
+
     std::vector<VkShaderModule> ShaderModules;
     auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
     if (!VSModOrErr) {
+      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1034,6 +1049,7 @@ public:
     if (!PSModOrErr) {
       for (auto *M : ShaderModules)
         vkDestroyShaderModule(Device, M, nullptr);
+      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1060,6 +1076,7 @@ public:
                 parseSpecializationConstant(SpecConst, Entry, VSSpecData)) {
           for (auto *M : ShaderModules)
             vkDestroyShaderModule(Device, M, nullptr);
+          vkDestroyRenderPass(Device, RenderPass, nullptr);
           vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
           for (auto *L : SetLayouts)
             vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1092,6 +1109,7 @@ public:
                 parseSpecializationConstant(SpecConst, Entry, PSSpecData)) {
           for (auto *M : ShaderModules)
             vkDestroyShaderModule(Device, M, nullptr);
+          vkDestroyRenderPass(Device, RenderPass, nullptr);
           vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
           for (auto *L : SetLayouts)
             vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1198,24 +1216,8 @@ public:
     BlendCI.attachmentCount = static_cast<uint32_t>(BlendAttachments.size());
     BlendCI.pAttachments = BlendAttachments.data();
 
-    // Use dynamic rendering (Vulkan 1.3 core): no render pass object required.
-    llvm::SmallVector<VkFormat> ColorFormats;
-    for (const Format F : RTFormats)
-      ColorFormats.push_back(getVulkanFormat(F));
-    VkPipelineRenderingCreateInfo DynRenderCI = {};
-    DynRenderCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    DynRenderCI.colorAttachmentCount =
-        static_cast<uint32_t>(ColorFormats.size());
-    DynRenderCI.pColorAttachmentFormats = ColorFormats.data();
-    if (DSFormat) {
-      DynRenderCI.depthAttachmentFormat = getVulkanFormat(*DSFormat);
-      if (isStencilFormat(*DSFormat))
-        DynRenderCI.stencilAttachmentFormat = getVulkanFormat(*DSFormat);
-    }
-
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    PipelineCI.pNext = &DynRenderCI;
     PipelineCI.stageCount = static_cast<uint32_t>(Stages.size());
     PipelineCI.pStages = Stages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
@@ -1227,7 +1229,7 @@ public:
     PipelineCI.pColorBlendState = &BlendCI;
     PipelineCI.pDynamicState = &DynamicCI;
     PipelineCI.layout = PipelineLayout;
-    PipelineCI.renderPass = VK_NULL_HANDLE;
+    PipelineCI.renderPass = RenderPass;
 
     VkPipeline Pipeline = VK_NULL_HANDLE;
     if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
@@ -1236,6 +1238,7 @@ public:
                                "Failed to create graphics pipeline.")) {
       for (auto *M : ShaderModules)
         vkDestroyShaderModule(Device, M, nullptr);
+      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1247,7 +1250,8 @@ public:
       vkDestroyShaderModule(Device, M, nullptr);
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
+        RenderPass);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -2014,75 +2018,59 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRenderPass(InvocationState &IS) {
-    auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
-    auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+  llvm::Expected<VkRenderPass>
+  createRenderPass(llvm::ArrayRef<Format> RTFormats,
+                   std::optional<Format> DSFormat) {
+    // Only 8 render targets can be bound + 1 depth stencil target.
+    llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
+    llvm::SmallVector<VkAttachmentReference, 8> ColorReferences;
+    for (size_t I = 0, N = RTFormats.size(); I < N; ++I) {
+      VkAttachmentDescription AttachmentDesc = {};
+      AttachmentDesc.format = getVulkanFormat(RTFormats[I]);
+      AttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+      AttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+      AttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+      AttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      AttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      AttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      AttachmentDesc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      Attachments.push_back(AttachmentDesc);
 
-    std::array<VkAttachmentDescription, 2> Attachments = {};
-
-    Attachments[0].format = getVulkanFormat(RT.Desc.Fmt);
-    Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    Attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    Attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    Attachments[1].format = getVulkanFormat(DS.Desc.Fmt);
-    Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    Attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    Attachments[1].finalLayout =
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference ColorReference = {};
-    ColorReference.attachment = 0;
-    ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      VkAttachmentReference ColorReference = {};
+      ColorReference.attachment = I;
+      ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+      ColorReferences.push_back(ColorReference);
+    }
 
     VkAttachmentReference DepthReference = {};
-    DepthReference.attachment = 1;
-    DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    if (DSFormat.has_value()) {
+      VkAttachmentDescription AttachmentDesc = {};
+      AttachmentDesc.format = getVulkanFormat(*DSFormat);
+      AttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
+      AttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+      AttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      AttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      AttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      AttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      AttachmentDesc.finalLayout =
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+      Attachments.push_back(AttachmentDesc);
+
+      DepthReference.attachment = Attachments.size() - 1;
+      DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
 
     VkSubpassDescription SubpassDescription = {};
     SubpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    SubpassDescription.colorAttachmentCount = 1;
-    SubpassDescription.pColorAttachments = &ColorReference;
-    SubpassDescription.pDepthStencilAttachment = &DepthReference;
+    SubpassDescription.colorAttachmentCount = ColorReferences.size();
+    SubpassDescription.pColorAttachments = ColorReferences.data();
+    SubpassDescription.pDepthStencilAttachment =
+        DSFormat.has_value() ? &DepthReference : nullptr;
     SubpassDescription.inputAttachmentCount = 0;
     SubpassDescription.pInputAttachments = nullptr;
     SubpassDescription.preserveAttachmentCount = 0;
     SubpassDescription.pPreserveAttachments = nullptr;
     SubpassDescription.pResolveAttachments = nullptr;
-
-    std::array<VkSubpassDependency, 2> Dependencies = {};
-
-    Dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    Dependencies[0].dstSubpass = 0;
-    Dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    Dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    Dependencies[0].srcAccessMask =
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    Dependencies[0].dstAccessMask =
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-    Dependencies[0].dependencyFlags = 0;
-
-    Dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
-    Dependencies[1].dstSubpass = 0;
-    Dependencies[1].srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    Dependencies[1].dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    Dependencies[1].srcAccessMask = 0;
-    Dependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                                    VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-    Dependencies[1].dependencyFlags = 0;
 
     VkRenderPassCreateInfo RPCI = {};
     RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -2090,25 +2078,27 @@ public:
     RPCI.pAttachments = Attachments.data();
     RPCI.subpassCount = 1;
     RPCI.pSubpasses = &SubpassDescription;
-    RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
-    RPCI.pDependencies = Dependencies.data();
+    // RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
+    // RPCI.pDependencies = Dependencies.data();
 
-    if (auto Err = VK::toError(
-            vkCreateRenderPass(Device, &RPCI, nullptr, &IS.RenderPass),
-            "Failed to create render pass."))
+    VkRenderPass RenderPass = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(vkCreateRenderPass(Device, &RPCI, nullptr, &RenderPass),
+                        "Failed to create render pass."))
       return Err;
-    return llvm::Error::success();
+    return RenderPass;
   }
 
   llvm::Error createFrameBuffer(InvocationState &IS) {
     auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
     auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+    auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
 
     std::array<VkImageView, 2> Views = {RT.View, DS.View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    FbufCreateInfo.renderPass = IS.RenderPass;
+    FbufCreateInfo.renderPass = PipelineState.RenderPass;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
     FbufCreateInfo.width = RT.Desc.Width;
@@ -2492,6 +2482,7 @@ public:
     if (P.isGraphics()) {
       auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
       auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+      auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
 
       const auto *ColorCV =
           std::get_if<ClearColor>(&*RT.Desc.OptimizedClearValue);
@@ -2511,7 +2502,7 @@ public:
 
       VkRenderPassBeginInfo RenderPassBeginInfo = {};
       RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      RenderPassBeginInfo.renderPass = IS.RenderPass;
+      RenderPassBeginInfo.renderPass = PipelineState.RenderPass;
       RenderPassBeginInfo.framebuffer = IS.FrameBuffer;
       RenderPassBeginInfo.renderArea.extent.width =
           P.Bindings.RTargetBufferPtr->OutputProps.Width;
@@ -2699,8 +2690,6 @@ public:
     }
     if (IS.FrameBuffer)
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
-    if (IS.RenderPass)
-      vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
 
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
@@ -2722,14 +2711,6 @@ public:
 
     if (auto Err = createResources(P, State))
       return Err;
-    if (P.isGraphics()) {
-      if (auto Err = createRenderPass(State))
-        return Err;
-      llvm::outs() << "Render pass created.\n";
-      if (auto Err = createFrameBuffer(State))
-        return Err;
-      llvm::outs() << "Frame buffer created.\n";
-    }
 
     BindingsDesc BindingsDesc = {};
     for (auto &S : P.Sets) {
@@ -2825,6 +2806,10 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Graphics Pipeline created.\n";
+
+      if (auto Err = createFrameBuffer(State))
+        return Err;
+      llvm::outs() << "Frame buffer created.\n";
     }
 
     llvm::outs() << "Memory buffers created.\n";
