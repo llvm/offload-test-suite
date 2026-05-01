@@ -805,12 +805,12 @@ public:
         // We'll need to revisit this if we ever support indexed attributes.
         AttrName += "0";
 
-        const uint32_t ElemSize = getFormatSizeInBytes(Elem.Format);
+        const uint32_t ElemSize = getFormatSizeInBytes(Elem.Fmt);
         MTL::VertexAttributeDescriptor *AttrDesc =
             MTL::VertexAttributeDescriptor::alloc()->init();
         AttrDesc->setBufferIndex(0);
         AttrDesc->setOffset(Elem.OffsetInBytes);
-        AttrDesc->setFormat(getMetalVertexFormat(Elem.Format));
+        AttrDesc->setFormat(getMetalVertexFormat(Elem.Fmt));
         VtxDesc->attributes()->setObject(AttrDesc, ShaderAttrIndices[AttrName]);
         AttrDesc->release();
         Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
@@ -924,7 +924,7 @@ public:
 
         InputLayoutDesc Desc = {};
         Desc.Name = Attr.Name;
-        Desc.Format = *FormatOrErr;
+        Desc.Fmt = *FormatOrErr;
         Desc.OffsetInBytes = Attr.Offset;
         InputLayout.push_back(Desc);
       }
