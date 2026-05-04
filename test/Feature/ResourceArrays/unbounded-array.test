@@ -55,7 +55,6 @@ DescriptorSets:
 #--- end
 
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/305
-# XFAIL: Metal
 # XFAIL: DXC && Vulkan && KosmicKrisp
 
 # RUN: split-file %s %t

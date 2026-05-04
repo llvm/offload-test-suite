@@ -179,8 +179,6 @@ if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
 if ShouldSearchByGPuName:
     offloader_args.extend([f'-adapter-regex="{GPUName}"'])
-if config.offloadtest_enable_metal:
-    offloader_args.append("-reflection=%t.json")
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
@@ -191,7 +189,6 @@ if config.offloadtest_enable_vulkan:
     if config.offloadtest_test_clang:
         ExtraCompilerArgs.append("-fspv-extension=DXC")
 if config.offloadtest_enable_metal:
-    ExtraCompilerArgs = ["-metal", "-Fre", "%t.json"]
     # metal-irconverter version: 3.0.0
     MSCVersionOutput = subprocess.check_output(
         ["metal-shaderconverter", "--version"]

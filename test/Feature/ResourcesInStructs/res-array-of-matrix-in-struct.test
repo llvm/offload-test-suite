@@ -75,9 +75,6 @@ DescriptorSets:
 # Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8301
 # XFAIL: Vulkan && DXC
 
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
-# XFAIL: Metal
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

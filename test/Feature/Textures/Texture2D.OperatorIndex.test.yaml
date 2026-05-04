@@ -61,7 +61,7 @@ Results:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
+# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
 # XFAIL: DirectX
 
 # RUN: split-file %s %t
