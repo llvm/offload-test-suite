@@ -16,6 +16,7 @@
 #include "API/Enums.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
 #include <limits>
@@ -26,6 +27,14 @@
 namespace offloadtest {
 
 enum class Stages { Compute, Vertex, Pixel };
+inline constexpr std::array AllStages = {
+    Stages::Compute,
+    Stages::Vertex,
+    Stages::Pixel,
+};
+inline constexpr size_t NumStages = AllStages.size();
+
+enum class ShaderPipelineKind { Compute, TraditionalRaster };
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -396,6 +405,7 @@ struct Shader {
 };
 
 struct Pipeline {
+  ShaderPipelineKind Kind;
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
 
@@ -435,10 +445,11 @@ struct Pipeline {
     return nullptr;
   }
 
-  bool isGraphics() const { return !isCompute(); }
+  llvm::Error validatePipelineKind();
 
-  bool isCompute() const {
-    return Shaders.size() == 1 && Shaders[0].Stage == Stages::Compute;
+  bool isCompute() const { return Kind == ShaderPipelineKind::Compute; }
+  bool isTraditionalRaster() const {
+    return Kind == ShaderPipelineKind::TraditionalRaster;
   }
 };
 } // namespace offloadtest

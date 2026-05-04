@@ -40,6 +40,9 @@ namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
+  if (auto Err = P.validatePipelineKind())
+    I.setError(llvm::toString(std::move(Err)));
+
   // Runtime-specific settings.
   I.mapOptional("RuntimeSettings", P.Settings);
 
@@ -554,3 +557,35 @@ void MappingTraits<offloadtest::SpecializationConstant>::mapping(
 
 } // namespace yaml
 } // namespace llvm
+
+llvm::Error offloadtest::Pipeline::validatePipelineKind() {
+  bool HasShaderType[NumStages] = {};
+  for (const auto &Shader : Shaders) {
+    // This works except for ray tracing shaders. We will have to make an
+    // exception for miss, closest hit, any hit and intersection shaders once we
+    // support those.
+    if (HasShaderType[llvm::to_underlying(Shader.Stage)])
+      return llvm::createStringError(
+          "Pipeline has multiple shaders of the same type.");
+
+    HasShaderType[llvm::to_underlying(Shader.Stage)] = true;
+  }
+
+  if (HasShaderType[llvm::to_underlying(Stages::Compute)]) {
+    if (Shaders.size() > 1)
+      return llvm::createStringError(
+          "Compute Pipeline is only allowed to have Compute Shader.");
+    Kind = ShaderPipelineKind::Compute;
+    return llvm::Error::success();
+  }
+
+  if (HasShaderType[llvm::to_underlying(Stages::Vertex)]) {
+    Kind = ShaderPipelineKind::TraditionalRaster;
+    return llvm::Error::success();
+  }
+
+  // As we add more pipeline types this error message should be updated with
+  // more required shader types.
+  return llvm::createStringError(
+      "The pipeline misses a Compute or Vertex Shader.");
+}

@@ -364,7 +364,7 @@ class MTLDevice : public offloadtest::Device {
       }
       IS.ArgBuffer->didModifyRange(NS::Range::Make(0, IS.ArgBuffer->length()));
     }
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       if (!P.Bindings.VertexBufferPtr)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -612,7 +612,7 @@ class MTLDevice : public offloadtest::Device {
             MTL::Region(0, 0, Width, Height), 0);
       }
     }
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
       const uint64_t Width = RTarget->OutputProps.Width;
       const uint64_t Height = RTarget->OutputProps.Height;
