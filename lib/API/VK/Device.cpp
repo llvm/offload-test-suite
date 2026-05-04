@@ -2702,12 +2702,6 @@ public:
       }
     }
 
-    if (IS.VertexBuffer.has_value()) {
-      vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
-      vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
-      vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
-      vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
-    }
     if (IS.FrameBuffer)
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
 
