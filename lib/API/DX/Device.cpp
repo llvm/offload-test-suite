@@ -841,6 +841,8 @@ public:
                                      "shader and a pixel shader.");
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    PSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    PSODesc.RasterizerState.FrontCounterClockwise = TRUE;
     PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     PSODesc.DepthStencilState.DepthEnable = true;
     PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
@@ -1783,18 +1785,14 @@ public:
     if (!IS.RTReadback)
       return llvm::Error::success();
 
-    // Map readback and copy into host buffer, accounting for row pitch and
-    // flipping vertical orientation. DirectX render target origin is top-left,
-    // while our image writer expects bottom-left.
-    const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
     void *Mapped = nullptr;
     auto &Readback = llvm::cast<DXBuffer>(*IS.RTReadback);
     if (auto Err = HR::toError(Readback.Buffer->Map(0, nullptr, &Mapped),
                                "Failed to map render target readback"))
       return Err;
 
-    // Query the copy footprint to get the actual padded row pitch used by the
-    // copy operation.
+    // Query the copy footprint to get the actual padded row pitch used by
+    // the copy operation (D3D12 requires 256-byte aligned rows).
     auto &RT = llvm::cast<DXTexture>(*IS.RT);
     const D3D12_RESOURCE_DESC RTDesc = RT.Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
@@ -1804,23 +1802,8 @@ public:
     Device->GetCopyableFootprints(&RTDesc, 0u, 1u, 0u, &Placed, &NumRows,
                                   &RowSizeInBytes, &TotalBytes);
 
-    const uint32_t RowPitch = Placed.Footprint.RowPitch;
-    const uint32_t RowBytes =
-        static_cast<uint32_t>(B.getElementSize() * B.OutputProps.Width);
-    const uint32_t Height = static_cast<uint32_t>(B.OutputProps.Height);
-
-    const uint8_t *SrcBase = reinterpret_cast<uint8_t *>(Mapped);
-    uint8_t *DstBase =
-        reinterpret_cast<uint8_t *>(P.Bindings.RTargetBufferPtr->Data[0].get());
-
-    // Copy rows in reverse order.
-    for (uint32_t Y = 0; Y < Height; ++Y) {
-      const uint8_t *SrcRow = SrcBase + static_cast<size_t>(Y) * RowPitch;
-      uint8_t *DstRow =
-          DstBase + static_cast<size_t>(Height - 1 - Y) * RowBytes;
-      memcpy(DstRow, SrcRow, RowBytes);
-    }
-
+    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped,
+                                                 Placed.Footprint.RowPitch);
     Readback.Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }

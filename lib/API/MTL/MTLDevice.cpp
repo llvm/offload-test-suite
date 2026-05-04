@@ -534,6 +534,7 @@ class MTLDevice : public offloadtest::Device {
     CmdEncoder->setViewport(
         MTL::Viewport{0.0, 0.0, (double)Width, (double)Height, 0.0, 1.0});
     CmdEncoder->setCullMode(MTL::CullModeNone);
+    CmdEncoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
 
     // Bind vertex buffer at slot 0 to match the vertex descriptor which
     // references buffer index 0.
@@ -590,23 +591,9 @@ class MTLDevice : public offloadtest::Device {
       }
     }
     if (P.isGraphics()) {
-      CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
-      const uint64_t Width = RTarget->OutputProps.Width;
-      const uint64_t Height = RTarget->OutputProps.Height;
-      const size_t ElemSize = RTarget->getElementSize();
-      const size_t RowBytes = Width * ElemSize;
-
-      // Read from the readback buffer. The blit copied the texture data in
-      // GPU layout order, so we flip rows here to produce an upright image.
       auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
-      const unsigned char *Src =
-          reinterpret_cast<const unsigned char *>(FBReadback.Buf->contents());
-      unsigned char *Buf =
-          reinterpret_cast<unsigned char *>(RTarget->Data[0].get());
-      for (uint64_t R = 0; R < Height; ++R) {
-        const uint64_t SrcRow = (Height - 1) - R;
-        memcpy(Buf + R * RowBytes, Src + SrcRow * RowBytes, RowBytes);
-      }
+      auto *RT = P.Bindings.RTargetBufferPtr;
+      RT->copyFromTexture(FBReadback.Buf->contents(), RT->getImageRowBytes());
     }
     return llvm::Error::success();
   }

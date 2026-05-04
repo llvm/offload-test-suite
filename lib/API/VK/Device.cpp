@@ -2515,13 +2515,17 @@ public:
       vkCmdBeginRenderPass(IS.CB->CmdBuffer, &RenderPassBeginInfo,
                            VK_SUBPASS_CONTENTS_INLINE);
 
+      // Negative viewport height (with Y origin at the bottom) flips clip->
+      // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
+      // triangle is front-facing on every backend.
       VkViewport Viewport = {};
       Viewport.x = 0.0f;
-      Viewport.y = 0.0f;
+      Viewport.y =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
       Viewport.width =
           static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
       Viewport.height =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
+          -static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
       Viewport.minDepth = 0.0f;
       Viewport.maxDepth = 1.0f;
       vkCmdSetViewport(IS.CB->CmdBuffer, 0, 1, &Viewport);
@@ -2636,8 +2640,8 @@ public:
       vkMapMemory(Device, Readback.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
-      memcpy(B.Data[0].get(), Mapped, B.size());
+      auto *RT = P.Bindings.RTargetBufferPtr;
+      RT->copyFromTexture(Mapped, RT->getImageRowBytes());
       vkUnmapMemory(Device, Readback.Memory);
     }
     return llvm::Error::success();
