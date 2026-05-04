@@ -1,0 +1,97 @@
+#--- source.hlsl
+// Test that a local resource selected through nested if/else (phi merge) works correctly.
+RWByteAddressBuffer gBuf0 : register(u0);
+RWByteAddressBuffer gBuf1 : register(u1);
+RWByteAddressBuffer gBuf2 : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer buf;
+    if (true)
+        buf = false ? gBuf0 : gBuf1;
+    else
+        buf = gBuf2;
+    buf.Store(0, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: Out1
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 4
+    Data: [42]
+  - Name: Out2
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut2
+    Format: Int32
+    Stride: 4
+    Data: [0]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: Out0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out2
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/351
+# XFAIL: Metal
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8381
+# XFAIL: DXC && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
