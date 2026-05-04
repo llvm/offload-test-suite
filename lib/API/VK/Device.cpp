@@ -850,6 +850,8 @@ public:
                        VkShaderStageFlags StageFlags,
                        llvm::SmallVectorImpl<VkDescriptorSetLayout> &SetLayouts,
                        VkPipelineLayout &PipelineLayout) {
+    assert(SetLayouts.empty() && "Output vector SetLayouts must be empty.");
+
     // Build descriptor set layouts from BindingsDesc.
     for (const DescriptorSetLayoutDesc &SetDesc :
          BindingsDesc.DescriptorSetDescs) {
@@ -937,12 +939,15 @@ public:
                                  SetLayouts, PipelineLayout))
       return Err;
 
+    auto CleanupState = llvm::scope_exit([&]() {
+      for (auto &Layout : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
+    });
+
     // Create compute shader module.
     auto CSModOrErr = createShaderModule(CS.Shader, "compute");
     if (!CSModOrErr) {
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
       return CSModOrErr.takeError();
     }
     VkShaderModule CSModule = *CSModOrErr;
@@ -972,8 +977,6 @@ public:
                 parseSpecializationConstant(SpecConst, Entry, SpecData)) {
           vkDestroyShaderModule(Device, CSModule, nullptr);
           vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
           return Err;
         }
         SpecEntries.push_back(Entry);
@@ -996,8 +999,6 @@ public:
                                "Failed to create compute pipeline.")) {
       vkDestroyShaderModule(Device, CSModule, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
       return Err;
     }
 
@@ -1841,19 +1842,19 @@ public:
     if (P.Sets.size() == 0)
       return llvm::Error::success();
 
-    const VulkanPipelineState *VulkanPipeline =
-        static_cast<VulkanPipelineState *>(IS.Pipeline.get());
+    const VulkanPipelineState &VulkanPipeline =
+        llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
 
     VkDescriptorSetAllocateInfo DSAllocInfo = {};
     DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     DSAllocInfo.descriptorPool = IS.Pool;
-    DSAllocInfo.descriptorSetCount = VulkanPipeline->SetLayouts.size();
-    DSAllocInfo.pSetLayouts = VulkanPipeline->SetLayouts.data();
+    DSAllocInfo.descriptorSetCount = VulkanPipeline.SetLayouts.size();
+    DSAllocInfo.pSetLayouts = VulkanPipeline.SetLayouts.data();
     assert(IS.DescriptorSets.empty());
     IS.DescriptorSets.insert(IS.DescriptorSets.begin(),
-                             VulkanPipeline->SetLayouts.size(),
+                             VulkanPipeline.SetLayouts.size(),
                              VkDescriptorSet());
-    llvm::outs() << "Num Descriptor sets: " << VulkanPipeline->SetLayouts.size()
+    llvm::outs() << "Num Descriptor sets: " << VulkanPipeline.SetLayouts.size()
                  << "\n";
     if (auto Err =
             VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
@@ -2535,18 +2536,18 @@ public:
     const VkPipelineBindPoint BindPoint = P.isGraphics()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
-    const VulkanPipelineState *VulkanPipeline =
-        static_cast<VulkanPipelineState *>(IS.Pipeline.get());
-    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, VulkanPipeline->Pipeline);
+    const VulkanPipelineState &VulkanPipeline =
+        llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
+    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, VulkanPipeline.Pipeline);
     if (IS.DescriptorSets.size() > 0)
       vkCmdBindDescriptorSets(
-          IS.CB->CmdBuffer, BindPoint, VulkanPipeline->Layout, 0,
+          IS.CB->CmdBuffer, BindPoint, VulkanPipeline.Layout, 0,
           IS.DescriptorSets.size(), IS.DescriptorSets.data(), 0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
-      vkCmdPushConstants(IS.CB->CmdBuffer, VulkanPipeline->Layout,
+      vkCmdPushConstants(IS.CB->CmdBuffer, VulkanPipeline.Layout,
                          getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }

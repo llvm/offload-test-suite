@@ -364,7 +364,7 @@ class MTLDevice : public offloadtest::Device {
     auto CloseCommandEncoder =
         llvm::scope_exit([&]() { CmdEncoder->endEncoding(); });
 
-    auto *PS = static_cast<MTLPipelineState *>(IS.Pipeline.get());
+    const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
     CmdEncoder->setComputePipelineState(PS->ComputePipeline);
     CmdEncoder->setBuffer(IS.ArgBuffer, 0, 2);
     for (uint64_t I = 0; I < IS.Textures.size(); ++I)
@@ -517,7 +517,7 @@ class MTLDevice : public offloadtest::Device {
     MTL::RenderCommandEncoder *CmdEncoder =
         IS.CB->CmdBuffer->renderCommandEncoder(Desc);
 
-    auto *PS = static_cast<MTLPipelineState *>(IS.Pipeline.get());
+    const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
     CmdEncoder->setRenderPipelineState(PS->RenderPipeline);
 
     // Configure depth stencil state: depth test enabled, write all, less.
@@ -681,21 +681,19 @@ public:
     MTL::Library *Lib = Device->newLibrary(Data, &Error);
     if (Error)
       return toError(Error);
+    llvm::scope_exit([&] { Lib->release(); });
 
     MTL::Function *Fn = Lib->newFunction(
         NS::String::string(CS.EntryPoint.c_str(), NS::UTF8StringEncoding));
-    if (!Fn) {
-      Lib->release();
+    if (!Fn)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Failed to find entry point '%s' in Metal library.",
           CS.EntryPoint.c_str());
-    }
+    llvm::scope_exit([&] { Fn->release(); });
 
     MTL::ComputePipelineState *PSO =
         Device->newComputePipelineState(Fn, &Error);
-    Fn->release();
-    Lib->release();
     if (Error)
       return toError(Error);
 
@@ -718,16 +716,16 @@ public:
     MTL::Library *VSLib = Device->newLibrary(VSData, &Error);
     if (Error)
       return toError(Error);
+    llvm::scope_exit([&] { VSLib->release(); });
 
     MTL::Function *VSFn = VSLib->newFunction(
         NS::String::string(VS.EntryPoint.c_str(), NS::UTF8StringEncoding));
-    if (!VSFn) {
-      VSLib->release();
+    if (!VSFn)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Failed to find vertex entry point '%s' in Metal library.",
           VS.EntryPoint.c_str());
-    }
+    llvm::scope_exit([&] { VSFn->release(); });
 
     // Load pixel/fragment shader.
     const llvm::StringRef PSProgram = PS.Shader->getBuffer();
@@ -736,38 +734,31 @@ public:
         ^{
         });
     MTL::Library *PSLib = Device->newLibrary(PSData, &Error);
-    if (Error) {
-      VSFn->release();
-      VSLib->release();
+    if (Error)
       return toError(Error);
-    }
+    llvm::scope_exit([&] { PSLib->release(); });
 
     MTL::Function *PSFn = PSLib->newFunction(
         NS::String::string(PS.EntryPoint.c_str(), NS::UTF8StringEncoding));
-    if (!PSFn) {
-      VSFn->release();
-      VSLib->release();
-      PSLib->release();
+    if (!PSFn)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Failed to find fragment entry point '%s' in Metal library.",
           PS.EntryPoint.c_str());
-    }
+    llvm::scope_exit([&] { PSFn->release(); });
 
     MTL::RenderPipelineDescriptor *Desc =
         MTL::RenderPipelineDescriptor::alloc()->init();
+    llvm::scope_exit([&] { Desc->release(); });
     Desc->setVertexFunction(VSFn);
     Desc->setFragmentFunction(PSFn);
 
     // Build vertex descriptor from InputLayout.
     if (!InputLayout.empty()) {
       NS::Array *FnAttrs = VSFn->vertexAttributes();
-      // I'm not really sure if there's any valid case for a vertex shader with
-      // no vertex attributes, so we just error if that ever occurs.
-      // NOTE(manon): There is a very valid use case, loading vertices from a
-      // raw buffer using just the index acquried from the index buffer. A lot
-      // of modern hardware have the driver just turns this input layout vertex
-      // loading into shader code anyway.
+      // Currently we error on vertex shaders without any vertex attributes.
+      // However, this is a valid use case that should be supported in the
+      // future.
       if (!FnAttrs)
         return llvm::createStringError(
             std::errc::invalid_argument,
@@ -782,8 +773,8 @@ public:
       // Collect the attribute indices the shader expects so that we can map the
       // specified attributes onto the correct indices.
       llvm::StringMap<uint32_t> ShaderAttrIndices;
-      for (uint32_t Ai = 0; Ai < FnAttrs->count(); ++Ai) {
-        auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(Ai));
+      for (uint32_t I = 0; I < FnAttrs->count(); ++I) {
+        auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(I));
         if (A && A->isActive()) {
           ShaderAttrIndices.insert(std::make_pair(
               llvm::StringRef(A->name()->utf8String()), A->attributeIndex()));
@@ -793,6 +784,7 @@ public:
       }
 
       MTL::VertexDescriptor *VtxDesc = MTL::VertexDescriptor::alloc()->init();
+      llvm::scope_exit([&] { VtxDesc->release(); });
       uint32_t Stride = 0;
       for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
         const InputLayoutDesc &Elem = InputLayout[I];
@@ -847,11 +839,6 @@ public:
 
     MTL::RenderPipelineState *PSO =
         Device->newRenderPipelineState(Desc, &Error);
-    VSFn->release();
-    VSLib->release();
-    PSFn->release();
-    PSLib->release();
-    Desc->release();
     if (Error)
       return toError(Error);
 

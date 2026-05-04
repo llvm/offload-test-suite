@@ -672,15 +672,14 @@ public:
       DescriptorCount += D.ResourceBindings.size();
 
     std::vector<D3D12_ROOT_PARAMETER> RootParams;
-    const std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges =
-        std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]>(
-            new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
+    const std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges(
+        new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
     uint32_t RangeIdx = 0;
-    for (const auto &D : BindingsDesc.DescriptorSetDescs) {
+    for (const auto &Set : BindingsDesc.DescriptorSetDescs) {
       uint32_t DescriptorIdx = 0;
       const uint32_t StartRangeIdx = RangeIdx;
-      for (const auto &R : D.ResourceBindings) {
-        switch (getDXKind(R.Kind)) {
+      for (const auto &Binding : Set.ResourceBindings) {
+        switch (getDXKind(Binding.Kind)) {
         case SRV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
           break;
@@ -693,18 +692,18 @@ public:
         case SAMPLER:
           llvm_unreachable("Not implemented yet."); // Requires a separate heap
         }
-        Ranges.get()[RangeIdx].NumDescriptors = R.DescriptorCount;
-        Ranges.get()[RangeIdx].BaseShaderRegister = R.DXBinding.Register;
-        Ranges.get()[RangeIdx].RegisterSpace = R.DXBinding.Space;
+        Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
+        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
+        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
             DescriptorIdx;
         RangeIdx++;
-        DescriptorIdx += R.DescriptorCount;
+        DescriptorIdx += Binding.DescriptorCount;
       }
       RootParams.push_back(D3D12_ROOT_PARAMETER{
           D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
           {D3D12_ROOT_DESCRIPTOR_TABLE{
-              static_cast<uint32_t>(D.ResourceBindings.size()),
+              static_cast<uint32_t>(Set.ResourceBindings.size()),
               &Ranges.get()[StartRangeIdx]}},
           D3D12_SHADER_VISIBILITY_ALL});
     }
@@ -1608,10 +1607,10 @@ public:
       IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
       Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
-    const DXPipelineState *DXPipeline =
-        static_cast<const DXPipelineState *>(IS.Pipeline.get());
-    IS.CB->CmdList->SetComputeRootSignature(DXPipeline->RootSig.Get());
-    IS.CB->CmdList->SetPipelineState(DXPipeline->PSO.Get());
+    const DXPipelineState &DXPipeline =
+        llvm::cast<DXPipelineState>(*IS.Pipeline.get());
+    IS.CB->CmdList->SetComputeRootSignature(DXPipeline.RootSig.Get());
+    IS.CB->CmdList->SetPipelineState(DXPipeline.PSO.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1883,16 +1882,16 @@ public:
     auto &DS = llvm::cast<DXTexture>(*IS.DS);
     auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
 
-    const DXPipelineState *DXPipeline =
-        static_cast<const DXPipelineState *>(IS.Pipeline.get());
-    IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline->RootSig.Get());
+    const DXPipelineState &DXPipeline =
+        llvm::cast<DXPipelineState>(*IS.Pipeline.get());
+    IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
     if (IS.DescHeap) {
       ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
       IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
       IS.CB->CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
-    IS.CB->CmdList->SetPipelineState(DXPipeline->PSO.Get());
+    IS.CB->CmdList->SetPipelineState(DXPipeline.PSO.Get());
 
     IS.CB->CmdList->OMSetRenderTargets(1, &RT.RTVHandle, false, &DS.DSVHandle);
 
