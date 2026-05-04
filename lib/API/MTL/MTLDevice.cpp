@@ -346,7 +346,7 @@ class MTLDevice : public offloadtest::Device {
       }
       IS.ArgBuffer->didModifyRange(NS::Range::Make(0, IS.ArgBuffer->length()));
     }
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       // Create and mark the vertex buffer as modified.
       IS.VertexBuffer = Device->newBuffer(
           P.Bindings.VertexBufferPtr->Data.back().get(),
@@ -589,7 +589,7 @@ class MTLDevice : public offloadtest::Device {
             MTL::Region(0, 0, Width, Height), 0);
       }
     }
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       CPUBuffer *RTarget = P.Bindings.RTargetBufferPtr;
       const uint64_t Width = RTarget->OutputProps.Width;
       const uint64_t Height = RTarget->OutputProps.Height;
