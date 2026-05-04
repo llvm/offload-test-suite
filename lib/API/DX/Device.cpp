@@ -148,8 +148,11 @@ static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
 }
 
 static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
-  return uint64_t(B.OutputProps.Height) *
-         getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
+  const uint64_t AlignedPitch =
+      getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
+  const uint64_t LastRowSize =
+      uint64_t(B.OutputProps.Width) * B.getElementSize();
+  return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
 }
 
 static uint32_t getUAVBufferSize(const Resource &R) {
