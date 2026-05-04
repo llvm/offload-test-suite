@@ -140,6 +140,23 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
+// D3D12 requires the RowPitch in a placed subresource footprint (used for
+// texture <-> buffer copies via CopyTextureRegion) to be a multiple of
+// D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256 bytes). For textures whose natural
+// row size (Width * elementSize) is already a multiple of 256, this is a
+// no-op; for smaller rows it pads up.
+static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
+  return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+}
+
+static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
+  const uint64_t AlignedPitch =
+      getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
+  const uint64_t LastRowSize =
+      uint64_t(B.OutputProps.Width) * B.getElementSize();
+  return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
+}
+
 static uint32_t getUAVBufferSize(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) +
@@ -1821,10 +1838,14 @@ public:
 
     IS.RT = std::move(*TexOrErr);
 
-    // Create readback buffer sized for the pixel data (raw bytes).
+    // Create readback buffer sized for the pixel data with row pitch padded
+    // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
+    // for the placed footprint used by CopyTextureRegion. The compaction
+    // back to a tight layout happens in readBack() via GetCopyableFootprints.
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
-    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
+    auto BufOrErr = createBuffer("RTReadback", BufDesc,
+                                 getAlignedTextureBufferSize(OutBuf));
     if (!BufOrErr)
       return BufOrErr.takeError();
     IS.RTReadback = std::move(*BufOrErr);
@@ -1933,7 +1954,8 @@ public:
         0,
         CD3DX12_SUBRESOURCE_FOOTPRINT(
             getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-            B.OutputProps.Height, 1, B.OutputProps.Width * B.getElementSize())};
+            B.OutputProps.Height, 1,
+            getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()))};
     const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
                                                Footprint);
     const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
