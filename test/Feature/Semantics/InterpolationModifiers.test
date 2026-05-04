@@ -1,0 +1,156 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 pos : POSITION;
+    float  v   : VAL;
+};
+
+struct VSOutput {
+    float4 pos                : SV_POSITION;
+                    float v_lin    : LIN;
+    nointerpolation float v_flat   : FLAT;
+    noperspective   float v_nopers : NOPERS;
+    centroid        float v_centro : CENTRO;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput o;
+    o.pos      = input.pos;
+    o.v_lin    = input.v;
+    o.v_flat   = input.v;
+    o.v_nopers = input.v;
+    o.v_centro = input.v;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 pos                : SV_POSITION;
+                    float v_lin    : LIN;
+    nointerpolation float v_flat   : FLAT;
+    noperspective   float v_nopers : NOPERS;
+    centroid        float v_centro : CENTRO;
+};
+
+struct Record {
+    float v_lin;
+    float v_flat;
+    float v_nopers;
+    float v_centro;
+};
+
+RWStructuredBuffer<Record> Output : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    Record r;
+    r.v_lin    = input.v_lin;
+    r.v_flat   = input.v_flat;
+    r.v_nopers = input.v_nopers;
+    r.v_centro = input.v_centro;
+    Output[0] = r;
+
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Triangle covering the single pixel of a 1x1 render target. Vertex W
+  # values differ so that `linear` (perspective-correct) and `noperspective`
+  # produce visibly different interpolated values at the pixel center.
+  # All vertices are strictly inside the clip volume (-w <= x,y <= w,
+  # 0 <= z <= w).
+  #
+  # Clip-space vertices (POSITION / VAL):
+  #   v0 = (-1, -1, 0.5, 1), v = 12.0    <-- provoking vertex
+  #   v1 = ( 1, -1, 0.5, 1), v =  0.0
+  #   v2 = ( 0,  1, 0.5, 2), v =  0.0
+  # NDC after w-divide: v0=(-1,-1)  v1=(1,-1)  v2=(0, 0.5)
+  #
+  # Pixel center NDC = (0, 0). Screen-space barycentric:
+  #   (alpha, beta, gamma) = (1/6, 1/6, 2/3)
+  #
+  # With W = (1, 1, 2), the perspective denominator is
+  #   alpha/W0 + beta/W1 + gamma/W2 = 1/6 + 1/6 + 1/3 = 2/3
+  # and the linear numerator is
+  #   alpha*V0/W0 + beta*V1/W1 + gamma*V2/W2 = (1/6)*12 + 0 + 0 = 2
+  # giving:
+  #   v_lin    = 2 / (2/3)        = 3.0
+  #   v_nopers = (1/6)*12         = 2.0
+  #   v_flat   = V_0              = 12.0   (provoking vertex)
+  #   v_centro = v_lin            = 3.0    (no MSAA -> sample = pixel center)
+  - Name: VertexData
+    Format: Float32
+    Stride: 20  # float4 pos (16 bytes) + float v (4 bytes)
+    Data: [
+      -1.0, -1.0, 0.5, 1.0, 12.0,
+       1.0, -1.0, 0.5, 1.0,  0.0,
+       0.0,  1.0, 0.5, 2.0,  0.0,
+    ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16  # 1x1 @ 16 bytes per pixel
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: ResultBuffer
+    Format: Float32
+    Stride: 16  # 4 floats per Record (v_lin, v_flat, v_nopers, v_centro)
+    FillSize: 16
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Float32
+    Stride: 16
+    # Expected record: v_lin, v_flat, v_nopers, v_centro
+    Data: [ 3.0, 12.0, 2.0, 3.0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+    - Format: Float32
+      Channels: 1
+      Offset: 16
+      Name: VAL
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: Interpolation
+    Rule: BufferFloatULP
+    ULPT: 4
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# This test exercises the four HLSL pixel-shader interpolation modifiers:
+#   * `linear`         (default) - perspective-correct interpolation
+#   * `nointerpolation`           - provoking-vertex value (flat)
+#   * `noperspective`             - linear in screen space (no W correction)
+#   * `centroid`                  - same as `linear` without MSAA
+#
+# Tracking: https://github.com/llvm/wg-hlsl/issues/303
+# Clang's HLSL frontend does not yet parse interpolation-modifier keywords,
+# so this fails before either backend is reached on Clang targets.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
