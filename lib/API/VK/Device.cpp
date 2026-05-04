@@ -10,12 +10,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "Support/Pipeline.h"
 #include "Support/VkError.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -521,8 +523,15 @@ public:
   VkCommandPool CmdPool = VK_NULL_HANDLE;
   VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
 
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+
   static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
-  create(VkDevice Device, uint32_t QueueFamilyIdx) {
+  create(VkDevice Device, uint32_t QueueFamilyIdx,
+         PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
+         PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel,
+         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel) {
     auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
     CB->Device = Device;
 
@@ -550,7 +559,49 @@ public:
     if (auto Err = VK::toError(vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo),
                                "Could not begin command buffer."))
       return Err;
+
+    CB->CmdBeginDebugUtilsLabel = CmdBeginDebugUtilsLabel;
+    CB->CmdEndDebugUtilsLabel = CmdEndDebugUtilsLabel;
+    CB->CmdInsertDebugUtilsLabel = CmdInsertDebugUtilsLabel;
+
     return CB;
+  }
+
+  /// Pending pipeline barrier state accumulated by encoders. Lives on the
+  /// command buffer because in Vulkan all encoders record into the same
+  /// VkCommandBuffer.  Src tracks what prior commands produced; Dst tracks
+  /// what the next command will consume.
+  VkPipelineStageFlags PendingSrcStage = VK_PIPELINE_STAGE_HOST_BIT;
+  VkAccessFlags PendingSrcAccess = VK_ACCESS_HOST_WRITE_BIT;
+  VkPipelineStageFlags PendingDstStage = 0;
+  VkAccessFlags PendingDstAccess = 0;
+
+  void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
+    PendingDstStage |= Stage;
+    PendingDstAccess |= Access;
+  }
+
+  void flushBarrier() {
+    if (PendingSrcStage == 0) {
+      // Nothing produced yet — no barrier needed, but carry dst forward as
+      // the next src (the command we're about to run will produce at these
+      // stages).
+      PendingSrcStage = PendingDstStage;
+      PendingSrcAccess = PendingDstAccess;
+      PendingDstStage = 0;
+      PendingDstAccess = 0;
+      return;
+    }
+    VkMemoryBarrier Barrier = {};
+    Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    Barrier.srcAccessMask = PendingSrcAccess;
+    Barrier.dstAccessMask = PendingDstAccess;
+    vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
+                         &Barrier, 0, nullptr, 0, nullptr);
+    PendingSrcStage = PendingDstStage;
+    PendingSrcAccess = PendingDstAccess;
+    PendingDstStage = 0;
+    PendingDstAccess = 0;
   }
 
   ~VulkanCommandBuffer() override {
@@ -562,9 +613,89 @@ public:
     return CB->getKind() == GPUAPI::Vulkan;
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder() override;
+
 private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
 };
+
+class VKComputeEncoder : public offloadtest::ComputeEncoder {
+  VulkanCommandBuffer &CB;
+
+  void addDstBarrier(VkPipelineStageFlags DstStage, VkAccessFlags DstAccess) {
+    CB.addPendingBarrier(DstStage, DstAccess);
+    CB.flushBarrier();
+  }
+
+public:
+  VKComputeEncoder(VulkanCommandBuffer &CB)
+      : ComputeEncoder(GPUAPI::Vulkan), CB(CB) {}
+
+  ~VKComputeEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Vulkan;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (!CB.CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() override {
+    if (CB.CmdEndDebugUtilsLabel)
+      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (!CB.CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ) override {
+    addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
+    vkCmdDispatch(CB.CmdBuffer, GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
+    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    VkBufferCopy Region = {};
+    Region.srcOffset = SrcOffset;
+    Region.dstOffset = DstOffset;
+    Region.size = Size;
+    addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override { popDebugGroup(); }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+VulkanCommandBuffer::createComputeEncoder() {
+  auto Enc = std::make_unique<VKComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
+}
 
 class VulkanDevice : public offloadtest::Device {
 private:
@@ -581,6 +712,11 @@ private:
   LayerVector InstanceLayers;
   using ExtensionVector = llvm::SmallVector<VkExtensionProperties, 0>;
   ExtensionVector DeviceExtensions;
+
+  // Debug utils function pointers, resolved once per device.
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -805,6 +941,15 @@ public:
 #endif
 
     DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
+
+    CmdBeginDebugUtilsLabel =
+        (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdBeginDebugUtilsLabelEXT");
+    CmdEndDebugUtilsLabel = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+        Device, "vkCmdEndDebugUtilsLabelEXT");
+    CmdInsertDebugUtilsLabel =
+        (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdInsertDebugUtilsLabelEXT");
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
@@ -1049,7 +1194,9 @@ private:
 public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    return VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -2179,7 +2326,9 @@ public:
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            Readback.Buffer, 1, &Region);
 
-    // Barrier to make the readback buffer visible to the host.
+    // Barrier to make the readback buffer visible to the host.  These
+    // explicit HOST barriers are not managed by the encoder's barrier
+    // tracking — they are recorded directly on the command buffer.
     VkBufferMemoryBarrier BufBarrier = {};
     BufBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     BufBarrier.size = VK_WHOLE_SIZE;
@@ -2387,10 +2536,16 @@ public:
     }
 
     if (P.isCompute()) {
+      auto EncoderOrErr = IS.CB->createComputeEncoder();
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
       const llvm::ArrayRef<int> DispatchSize =
           llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-      vkCmdDispatch(IS.CB->CmdBuffer, DispatchSize[0], DispatchSize[1],
-                    DispatchSize[2]);
+      if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
+                                      DispatchSize[2]))
+        return Err;
+      Encoder.endEncoding();
       llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
                    << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
     } else {
@@ -2554,8 +2709,9 @@ public:
       llvm::outs() << "Cleanup complete.\n";
     });
 
-    auto CBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto CBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
@@ -2582,8 +2738,9 @@ public:
     if (!CopyResult)
       return CopyResult.takeError();
     llvm::outs() << "Executed copy command buffer.\n";
-    auto DispatchCBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto DispatchCBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
     if (!DispatchCBOrErr)
       return DispatchCBOrErr.takeError();
     State.CB = std::move(*DispatchCBOrErr);
@@ -2635,6 +2792,13 @@ llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
   const uint64_t SignalValue = ++FenceCounter;
   const VkPipelineStageFlags WaitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
+  // Each command buffer defaults to src=HOST, which is only correct for
+  // standalone submissions.  Multi-CB batches would need inter-CB barriers.
+  if (CBs.size() > 1)
+    llvm::errs()
+        << "Warning: submitting multiple command buffers in a single batch; "
+           "encoder barriers do not account for inter-command-buffer "
+           "dependencies.\n";
   for (auto &CB : CBs) {
     auto &VCB = *llvm::cast<VulkanCommandBuffer>(CB.get());
     if (auto Err = VK::toError(vkEndCommandBuffer(VCB.CmdBuffer),

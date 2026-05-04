@@ -33,6 +33,7 @@
 
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "API/Encoder.h"
 #include "DXFeatures.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
@@ -42,6 +43,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Signals.h"
 
 #include <atomic>
@@ -481,6 +483,8 @@ class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandList> CmdList;
+  /// Whether a UAV barrier is pending from a prior compute command.
+  bool PendingUAVBarrier = false;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12Device> Device) {
@@ -504,6 +508,20 @@ public:
   static bool classof(const CommandBuffer *CB) {
     return CB->getKind() == GPUAPI::DirectX;
   }
+
+  void addPendingUAVBarrier() { PendingUAVBarrier = true; }
+
+  void flushBarrier() {
+    if (!PendingUAVBarrier)
+      return;
+    const D3D12_RESOURCE_BARRIER Barrier =
+        CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
+    CmdList->ResourceBarrier(1, &Barrier);
+    PendingUAVBarrier = false;
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder() override;
 
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
@@ -553,6 +571,63 @@ struct DescriptorAllocator {
                       uint32_t Capacity)
       : Heap(Heap), DescIncSize(DescIncSize), Capacity(Capacity) {}
 };
+
+class DXComputeEncoder : public offloadtest::ComputeEncoder {
+  DXCommandBuffer &CB;
+
+  void addUAVBarrier() {
+    CB.addPendingUAVBarrier();
+    CB.flushBarrier();
+  }
+
+public:
+  DXComputeEncoder(DXCommandBuffer &CB)
+      : ComputeEncoder(GPUAPI::DirectX), CB(CB) {}
+
+  ~DXComputeEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::DirectX;
+  }
+
+  // D3D12 debug labels require WinPixEventRuntime for the proper event
+  // encoding.  Without it, BeginEvent/EndEvent/SetMarker with metadata type 0
+  // crash the D3D12 debug layer, so leave these as no-ops for now.
+  void pushDebugGroup(llvm::StringRef Label) override {}
+  void popDebugGroup() override {}
+  void insertDebugSignpost(llvm::StringRef Label) override {}
+
+  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ) override {
+    addUAVBarrier();
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
+    CB.CmdList->Dispatch(GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &DXSrc = static_cast<DXBuffer &>(Src);
+    auto &DXDst = static_cast<DXBuffer &>(Dst);
+    addUAVBarrier();
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
+    CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
+                                 DXSrc.Buffer.Get(), SrcOffset, Size);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override { popDebugGroup(); }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+DXCommandBuffer::createComputeEncoder() {
+  auto Enc = std::make_unique<DXComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
+}
 
 class DXDevice : public offloadtest::Device {
 private:
@@ -1445,25 +1520,17 @@ public:
   }
 
   void addUploadBeginBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R) {
-    const D3D12_RESOURCE_BARRIER Barrier = {
-        D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        {D3D12_RESOURCE_TRANSITION_BARRIER{
-            R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST}}};
+    const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        R.Get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_DEST);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
   void addUploadEndBarrier(InvocationState &IS, ComPtr<ID3D12Resource> R,
                            bool IsUAV) {
-    const D3D12_RESOURCE_BARRIER Barrier = {
-        D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        {D3D12_RESOURCE_TRANSITION_BARRIER{
-            R.Get(), D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            IsUAV ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
-                  : D3D12_RESOURCE_STATE_GENERIC_READ}}};
+    const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        R.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+        IsUAV ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+              : D3D12_RESOURCE_STATE_GENERIC_READ);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
@@ -1564,10 +1631,18 @@ public:
       }
     }
 
-    const llvm::ArrayRef<int> DispatchSize =
-        llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-
-    IS.CB->CmdList->Dispatch(DispatchSize[0], DispatchSize[1], DispatchSize[2]);
+    {
+      auto EncoderOrErr = IS.CB->createComputeEncoder();
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
+      const llvm::ArrayRef<int> DispatchSize =
+          llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
+      if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
+                                      DispatchSize[2]))
+        return Err;
+      Encoder.endEncoding();
+    }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
