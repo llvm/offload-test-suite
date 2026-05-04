@@ -210,17 +210,25 @@ public:
 class MTLPipelineState : public offloadtest::PipelineState {
 public:
   std::string Name;
+  IRRootSignaturePtr RootSig;
+  std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+  IRShaderReflectionPtr Reflection;
   MTL::ComputePipelineState *ComputePipeline = nullptr;
   MTL::RenderPipelineState *RenderPipeline = nullptr;
 
-  MTLPipelineState(llvm::StringRef Name,
+  MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
+                   std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
+                   IRShaderReflectionPtr Reflection,
                    MTL::ComputePipelineState *ComputePipeline)
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
-        ComputePipeline(ComputePipeline) {}
+        RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
+        Reflection(std::move(Reflection)), ComputePipeline(ComputePipeline) {}
 
-  MTLPipelineState(llvm::StringRef Name,
+  MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
+                   std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
                    MTL::RenderPipelineState *RenderPipeline)
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
+        RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
         RenderPipeline(RenderPipeline) {}
 
   ~MTLPipelineState() override {
@@ -352,8 +360,6 @@ class MTLDevice : public offloadtest::Device {
     ~InvocationState() { Pool->release(); }
 
     NS::AutoreleasePool *Pool = nullptr;
-    IRRootSignaturePtr RootSig;
-    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
     std::unique_ptr<MTLDescriptorHeap> DescHeap;
     MTL::Buffer *VertexBuffer;
     std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
@@ -361,26 +367,31 @@ class MTLDevice : public offloadtest::Device {
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<PipelineState> Pipeline;
-    IRShaderReflectionPtr ComputeReflection;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     // TODO: Support RootResources?
   };
 
-  llvm::Error createRootSignature(const Pipeline &P, InvocationState &State) {
+  llvm::Error createRootSignature(
+      const BindingsDesc &BindingsDesc, bool IsGraphics,
+      IRRootSignaturePtr &OutRootSig,
+      std::unique_ptr<MTLTopLevelArgumentBuffer> &OutArgBuffer) {
+    uint32_t DescriptorCount = 0;
+    for (auto &D : BindingsDesc.DescriptorSetDescs)
+      DescriptorCount += D.ResourceBindings.size();
+
     std::vector<IRRootParameter1> RootParams;
-    const uint32_t DescriptorCount = P.getDescriptorCount();
     const std::unique_ptr<IRDescriptorRange1[]> Ranges =
         std::unique_ptr<IRDescriptorRange1[]>(
             new IRDescriptorRange1[DescriptorCount]);
 
     uint32_t RangeIdx = 0;
-    for (const auto &D : P.Sets) {
+    for (const auto &Set : BindingsDesc.DescriptorSetDescs) {
       uint32_t DescriptorIdx = 0;
       const uint32_t StartRangeIdx = RangeIdx;
-      for (const auto &R : D.Resources) {
+      for (const auto &Binding : Set.ResourceBindings) {
         auto &Range = Ranges.get()[RangeIdx];
-        switch (getDescriptorKind(R.Kind)) {
+        switch (getDescriptorKind(Binding.Kind)) {
         case DescriptorKind::SRV:
           Range.RangeType = IRDescriptorRangeTypeSRV;
           break;
@@ -391,11 +402,11 @@ class MTLDevice : public offloadtest::Device {
           Range.RangeType = IRDescriptorRangeTypeCBV;
           break;
         case DescriptorKind::SAMPLER:
-          llvm_unreachable("Not implemented yet.");
+          llvm_unreachable("Not implemented yet."); // Requires a separate heap
         }
-        Range.NumDescriptors = R.getArraySize();
-        Range.BaseShaderRegister = R.DXBinding.Register;
-        Range.RegisterSpace = R.DXBinding.Space;
+        Range.NumDescriptors = Binding.DescriptorCount;
+        Range.BaseShaderRegister = Binding.DXBinding.Register;
+        Range.RegisterSpace = Binding.DXBinding.Space;
         Range.OffsetInDescriptorsFromTableStart = DescriptorIdx;
         llvm::outs() << "DescriptorRange[" << RangeIdx << "] {"
                      << " Type=" << static_cast<uint32_t>(Range.RangeType)
@@ -407,13 +418,13 @@ class MTLDevice : public offloadtest::Device {
                      << " OffsetInDescriptorsFromTableStart="
                      << Range.OffsetInDescriptorsFromTableStart << " }\n";
         RangeIdx++;
-        DescriptorIdx += R.getArraySize();
+        DescriptorIdx += Binding.DescriptorCount;
       }
 
       auto &Param = RootParams.emplace_back();
       Param.ParameterType = IRRootParameterTypeDescriptorTable;
       Param.DescriptorTable.NumDescriptorRanges =
-          static_cast<uint32_t>(D.Resources.size());
+          static_cast<uint32_t>(Set.ResourceBindings.size());
       Param.DescriptorTable.pDescriptorRanges = &Ranges.get()[StartRangeIdx];
       Param.ShaderVisibility = IRShaderVisibilityAll;
     }
@@ -428,9 +439,8 @@ class MTLDevice : public offloadtest::Device {
     Desc.pParameters = RootParams.data();
     Desc.NumStaticSamplers = 0;
     Desc.pStaticSamplers = nullptr;
-    Desc.Flags = P.isGraphics()
-                     ? IRRootSignatureFlagAllowInputAssemblerInputLayout
-                     : IRRootSignatureFlagNone;
+    Desc.Flags = IsGraphics ? IRRootSignatureFlagAllowInputAssemblerInputLayout
+                            : IRRootSignatureFlagNone;
 
     IRError *Err = nullptr;
     IRRootSignaturePtr RootSig(
@@ -438,14 +448,14 @@ class MTLDevice : public offloadtest::Device {
     if (!RootSig)
       return toError(IRErrorPtr(Err).get(), "Failed to create root signature");
 
-    State.RootSig = std::move(RootSig);
+    OutRootSig = std::move(RootSig);
 
     auto ArgBufferOrErr =
-        MTLTopLevelArgumentBuffer::create(Device, State.RootSig.get());
+        MTLTopLevelArgumentBuffer::create(Device, OutRootSig.get());
     if (!ArgBufferOrErr)
       return ArgBufferOrErr.takeError();
 
-    State.ArgBuffer = std::move(*ArgBufferOrErr);
+    OutArgBuffer = std::move(*ArgBufferOrErr);
     return llvm::Error::success();
   }
 
@@ -469,23 +479,23 @@ class MTLDevice : public offloadtest::Device {
     return llvm::Error::success();
   }
 
-  llvm::Expected<MetalIR> convertToMetalIR(const Pipeline &P, Stages Stage,
-                                           const ShaderContainer &SC,
-                                           const InvocationState &State) {
+  llvm::Expected<MetalIR> convertToMetalIR(Stages Stage, bool IsGraphics,
+                                           IRRootSignature *RootSig,
+                                           const ShaderContainer &SC) {
     IRCompilerPtr Compiler(IRCompilerCreate());
     if (!Compiler)
       return llvm::createStringError(std::errc::not_supported,
                                      "Failed to create IR compiler instance.");
 
-    if (!State.RootSig)
+    if (!RootSig)
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Root signature must be created before converting to Metal IR.");
 
     // Configure IR compiler settings
-    IRCompilerSetEntryPointName(Compiler.get(), SC.Entry.c_str());
-    IRCompilerSetGlobalRootSignature(Compiler.get(), State.RootSig.get());
-    if (P.isGraphics()) {
+    IRCompilerSetEntryPointName(Compiler.get(), SC.EntryPoint.c_str());
+    IRCompilerSetGlobalRootSignature(Compiler.get(), RootSig);
+    if (IsGraphics) {
       // Matches DX::Device backend:
       // PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
       IRCompilerSetInputTopology(Compiler.get(), IRInputTopologyTriangle);
@@ -782,11 +792,11 @@ class MTLDevice : public offloadtest::Device {
     }
 
     for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-      IS.ArgBuffer->setRootDescriptorTable(Idx, Handle);
+      PS->ArgBuffer->setRootDescriptorTable(Idx, Handle);
       Handle.Offset(P.Sets[Idx].Resources.size());
     }
 
-    IS.ArgBuffer->bind(CmdEncoder);
+    PS->ArgBuffer->bind(CmdEncoder);
     for (const auto &Table : IS.DescTables)
       for (const auto &ResPair : Table.Resources)
         for (const auto &ResSet : ResPair.second)
@@ -796,9 +806,9 @@ class MTLDevice : public offloadtest::Device {
 
     NS::UInteger TGS[3] = {PS->ComputePipeline->maxTotalThreadsPerThreadgroup(),
                            1, 1};
-    if (IS.ComputeReflection) {
+    if (PS->Reflection) {
       IRVersionedCSInfo Info;
-      if (IRShaderReflectionCopyComputeInfo(IS.ComputeReflection.get(),
+      if (IRShaderReflectionCopyComputeInfo(PS->Reflection.get(),
                                             IRReflectionVersion_1_0, &Info)) {
         TGS[0] = Info.info_1_0.tg_size[0];
         TGS[1] = Info.info_1_0.tg_size[1];
@@ -927,10 +937,10 @@ class MTLDevice : public offloadtest::Device {
       IS.DescHeap->bind(CmdEncoder);
       // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
       // this)
-      IS.ArgBuffer->setRootDescriptorTable(
+      PS->ArgBuffer->setRootDescriptorTable(
           0, IS.DescHeap->getGPUDescriptorHandleForHeapStart());
     }
-    IS.ArgBuffer->bind(CmdEncoder);
+    PS->ArgBuffer->bind(CmdEncoder);
     for (const auto &Table : IS.DescTables)
       for (const auto &ResPair : Table.Resources)
         for (const auto &ResSet : ResPair.second)
@@ -1081,17 +1091,21 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineCs(llvm::StringRef Name, const InvocationState &IS,
-                   const BindingsDesc & /*unused on metal*/,
+  createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                    ShaderContainer CS) override {
+    IRRootSignaturePtr RootSig;
+    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/false,
+                                       RootSig, ArgBuffer))
+      return Err;
+
     NS::Error *Error = nullptr;
     const llvm::StringRef Program = CS.Shader->getBuffer();
 
-    auto MetalIR = convertToMetalIR(P, Stages::Compute, CS, IS);
+    auto MetalIR = convertToMetalIR(Stages::Compute, /*IsGraphics=*/false,
+                                    RootSig.get(), CS);
     if (!MetalIR)
       return MetalIR.takeError();
-
-    IS.ComputeReflection = std::move(MetalIR->Reflection);
 
     dispatch_data_t Data = IRMetalLibGetBytecodeData(MetalIR->Binary.get());
     MTL::Library *Lib = Device->newLibrary(Data, &Error);
@@ -1113,20 +1127,28 @@ public:
     if (Error)
       return toError(Error);
 
-    return std::make_unique<MTLPipelineState>(Name, PSO);
+    return std::make_unique<MTLPipelineState>(
+        Name, std::move(RootSig), std::move(ArgBuffer),
+        std::move(MetalIR->Reflection), PSO);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const InvocationState &IS,
-                     const BindingsDesc & /*unused on metal*/,
+  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                      llvm::ArrayRef<InputLayoutDesc> InputLayout,
                      llvm::ArrayRef<Format> RTFormats,
                      std::optional<Format> DSFormat, ShaderContainer VS,
                      ShaderContainer PS) override {
+    IRRootSignaturePtr RootSig;
+    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
+                                       RootSig, ArgBuffer))
+      return Err;
+
     NS::Error *Error = nullptr;
 
     // Load vertex shader.
-    auto VSMetalIR = convertToMetalIR(P, Stages::Vertex, VS, IS);
+    auto VSMetalIR = convertToMetalIR(Stages::Vertex, /*IsGraphics=*/true,
+                                      RootSig.get(), VS);
     if (!VSMetalIR)
       return VSMetalIR.takeError();
 
@@ -1146,7 +1168,8 @@ public:
     auto VSFnScope = llvm::scope_exit([&] { VSFn->release(); });
 
     // Load pixel/fragment shader.
-    auto PSMetalIR = convertToMetalIR(P, Stages::Pixel, PS, IS);
+    auto PSMetalIR =
+        convertToMetalIR(Stages::Pixel, /*IsGraphics=*/true, RootSig.get(), PS);
     if (!PSMetalIR)
       return PSMetalIR.takeError();
 
@@ -1259,7 +1282,8 @@ public:
     if (Error)
       return toError(Error);
 
-    return std::make_unique<MTLPipelineState>(Name, PSO);
+    return std::make_unique<MTLPipelineState>(Name, std::move(RootSig),
+                                              std::move(ArgBuffer), PSO);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
@@ -1269,9 +1293,6 @@ public:
     if (!CBOrErr)
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
-
-    if (auto Err = createRootSignature(P, IS))
-      return Err;
 
     if (auto Err = createDescriptorHeap(P, IS))
       return Err;
@@ -1305,7 +1326,7 @@ public:
       CS.Shader = P.Shaders[0].Shader.get();
 
       auto PipelineStateOrErr =
-          createPipelineCs("Compute Pipeline State", IS, Bindings, CS);
+          createPipelineCs("Compute Pipeline State", Bindings, CS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
@@ -1347,9 +1368,9 @@ public:
       llvm::SmallVector<Format> RTFormats;
       RTFormats.push_back(*FormatOrErr);
 
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", IS, Bindings, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr =
+          createPipelineVsPs("Graphics Pipeline State", Bindings, InputLayout,
+                             RTFormats, Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
