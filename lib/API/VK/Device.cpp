@@ -404,8 +404,8 @@ public:
     if (vkMapMemory(Dev, Memory, 0, SizeInBytes, 0, &Ptr) != VK_SUCCESS)
       return llvm::createStringError(std::errc::io_error,
                                      "Failed to map buffer.");
-    // HOST_CACHED memory (GpuToCpu) needs explicit invalidation so the CPU
-    // sees the GPU-side writes.
+    // HOST_CACHED memory that is *not* HOST_COHERENT (GpuToCpu) needs explicit
+    // invalidation so the CPU sees the GPU-side writes.
     if (Desc.Location == MemoryLocation::GpuToCpu) {
       VkMappedMemoryRange Range = {};
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;

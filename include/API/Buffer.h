@@ -39,7 +39,7 @@ public:
 
   // Maps the buffer's memory for host access. Only valid for CpuToGpu and
   // GpuToCpu buffers; returns an error for GpuOnly. Each successful map() must
-  // be paired with a call to unmap().
+  // be paired with a call to unmap() before the buffer is used on the GPU.
   virtual llvm::Expected<void *> map() = 0;
   virtual llvm::Error unmap() = 0;
 
