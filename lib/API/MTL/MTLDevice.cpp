@@ -681,7 +681,7 @@ public:
     MTL::Library *Lib = Device->newLibrary(Data, &Error);
     if (Error)
       return toError(Error);
-    llvm::scope_exit([&] { Lib->release(); });
+    auto LibScope = llvm::scope_exit([&] { Lib->release(); });
 
     MTL::Function *Fn = Lib->newFunction(
         NS::String::string(CS.EntryPoint.c_str(), NS::UTF8StringEncoding));
@@ -690,7 +690,7 @@ public:
           std::errc::invalid_argument,
           "Failed to find entry point '%s' in Metal library.",
           CS.EntryPoint.c_str());
-    llvm::scope_exit([&] { Fn->release(); });
+    auto FnScope = llvm::scope_exit([&] { Fn->release(); });
 
     MTL::ComputePipelineState *PSO =
         Device->newComputePipelineState(Fn, &Error);
@@ -716,7 +716,7 @@ public:
     MTL::Library *VSLib = Device->newLibrary(VSData, &Error);
     if (Error)
       return toError(Error);
-    llvm::scope_exit([&] { VSLib->release(); });
+    auto VSLibScope = llvm::scope_exit([&] { VSLib->release(); });
 
     MTL::Function *VSFn = VSLib->newFunction(
         NS::String::string(VS.EntryPoint.c_str(), NS::UTF8StringEncoding));
@@ -725,7 +725,7 @@ public:
           std::errc::invalid_argument,
           "Failed to find vertex entry point '%s' in Metal library.",
           VS.EntryPoint.c_str());
-    llvm::scope_exit([&] { VSFn->release(); });
+    auto VSFnScope = llvm::scope_exit([&] { VSFn->release(); });
 
     // Load pixel/fragment shader.
     const llvm::StringRef PSProgram = PS.Shader->getBuffer();
@@ -736,7 +736,7 @@ public:
     MTL::Library *PSLib = Device->newLibrary(PSData, &Error);
     if (Error)
       return toError(Error);
-    llvm::scope_exit([&] { PSLib->release(); });
+    auto PSLibScope = llvm::scope_exit([&] { PSLib->release(); });
 
     MTL::Function *PSFn = PSLib->newFunction(
         NS::String::string(PS.EntryPoint.c_str(), NS::UTF8StringEncoding));
@@ -745,11 +745,11 @@ public:
           std::errc::invalid_argument,
           "Failed to find fragment entry point '%s' in Metal library.",
           PS.EntryPoint.c_str());
-    llvm::scope_exit([&] { PSFn->release(); });
+    auto PSFnScope = llvm::scope_exit([&] { PSFn->release(); });
 
     MTL::RenderPipelineDescriptor *Desc =
         MTL::RenderPipelineDescriptor::alloc()->init();
-    llvm::scope_exit([&] { Desc->release(); });
+    auto DescScope = llvm::scope_exit([&] { Desc->release(); });
     Desc->setVertexFunction(VSFn);
     Desc->setFragmentFunction(PSFn);
 
@@ -784,7 +784,7 @@ public:
       }
 
       MTL::VertexDescriptor *VtxDesc = MTL::VertexDescriptor::alloc()->init();
-      llvm::scope_exit([&] { VtxDesc->release(); });
+      auto VtxDescScope = llvm::scope_exit([&] { VtxDesc->release(); });
       uint32_t Stride = 0;
       for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
         const InputLayoutDesc &Elem = InputLayout[I];
@@ -817,7 +817,6 @@ public:
       LDesc->release();
 
       Desc->setVertexDescriptor(VtxDesc);
-      VtxDesc->release();
     }
 
     // Configure render target color attachments.
