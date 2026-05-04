@@ -302,11 +302,38 @@ jobs:
       - name: Refresh artifact timestamps
         shell: python
         run: |
-          import pathlib
+          import os, pathlib, shutil, time, re
+          # 1) The build runner's CMakeCache.txt has CMAKE_MAKE_PROGRAM baked
+          #    in as an absolute path (often using 8.3 short names) that may
+          #    not resolve on the test runner. Rewrite it to whatever ninja
+          #    is on PATH here, so any CMake regen would still work.
+          ninja_path = shutil.which('ninja') or shutil.which('ninja.exe')
+          for cache in [
+              pathlib.Path('llvm-project/build/CMakeCache.txt'),
+              pathlib.Path('DXC/build/CMakeCache.txt'),
+          ]:
+              if cache.is_file() and ninja_path:
+                  text = cache.read_text(encoding='utf-8', errors='replace')
+                  text = re.sub(
+                      r'(?im)^(CMAKE_MAKE_PROGRAM:FILEPATH=).*$',
+                      lambda m: m.group(1) + ninja_path.replace('\\', '/'),
+                      text,
+                  )
+                  cache.write_text(text, encoding='utf-8')
+          # 2) Ensure ninja considers build outputs up-to-date by setting
+          #    their mtimes into the future, so freshly checked-out source
+          #    trees can never be newer than them and trigger a CMake regen.
+          future = time.time() + 24 * 60 * 60
           for d in ['DXC/build/bin', 'llvm-project/build']:
-              for f in pathlib.Path(d).rglob('*'):
+              root = pathlib.Path(d)
+              if not root.exists():
+                  continue
+              for f in root.rglob('*'):
                   if f.is_file():
-                      f.touch()
+                      try:
+                          os.utime(f, (future, future))
+                      except OSError:
+                          pass
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
