@@ -1744,7 +1744,7 @@ public:
       }
     }
 
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       if (auto Err = createRenderTarget(P, IS))
         return Err;
       // TODO: Always created for graphics pipelines. Consider making this
@@ -2480,7 +2480,7 @@ public:
     for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
       auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
       auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
@@ -2533,7 +2533,7 @@ public:
       vkCmdSetScissor(IS.CB->CmdBuffer, 0, 1, &Scissor);
     }
 
-    const VkPipelineBindPoint BindPoint = P.isGraphics()
+    const VkPipelineBindPoint BindPoint = P.isTraditionalRaster()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
     const VulkanPipelineState &VulkanPipeline =
@@ -2623,7 +2623,7 @@ public:
     }
 
     // Copy back the frame buffer data if this was a graphics pipeline.
-    if (P.isGraphics()) {
+    if (P.isTraditionalRaster()) {
       auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
 
       VkMappedMemoryRange Range = {};
@@ -2768,7 +2768,7 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
-    } else {
+    } else if (P.isTraditionalRaster()) {
       ShaderContainer VS = {};
       ShaderContainer PS = {};
       for (auto &Shader : P.Shaders) {
@@ -2816,6 +2816,9 @@ public:
       if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
+    } else {
+      return llvm::createStringError(
+          "Pipeline was neither Compute nor Traditional Graphics");
     }
 
     llvm::outs() << "Memory buffers created.\n";

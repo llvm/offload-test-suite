@@ -2056,7 +2056,7 @@ public:
         return Err;
       llvm::outs() << "Compute command list created.\n";
 
-    } else {
+    } else if (P.isTraditionalRaster()) {
       // Create render target, depth/stencil, readback and vertex buffer and
       // PSO.
       if (auto Err = createRenderTarget(P, State))
@@ -2115,6 +2115,9 @@ public:
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
+    } else {
+      return llvm::createStringError(
+          "Pipeline was neither Compute nor Traditional Graphics");
     }
 
     auto SubmitResult = executeCommandList(State);
