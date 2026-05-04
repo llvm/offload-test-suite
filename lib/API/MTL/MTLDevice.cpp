@@ -130,7 +130,7 @@ public:
 
   MTLPipelineState(llvm::StringRef Name,
                    MTL::RenderPipelineState *RenderPipeline)
-      : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name),
+      : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
         RenderPipeline(RenderPipeline) {}
 
   ~MTLPipelineState() override {
