@@ -87,6 +87,30 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
   return Dev.createTexture("RenderTarget", Desc);
 }
 
+llvm::Expected<std::unique_ptr<Buffer>>
+offloadtest::createVertexBufferFromCPUBuffer(Device &Dev,
+                                             const CPUBuffer &Buf) {
+  BufferCreateDesc BufDesc = {};
+  BufDesc.Location = MemoryLocation::CpuToGpu;
+  BufDesc.Usage = BufferUsage::VertexBuffer;
+  auto BufOrErr = Dev.createBuffer("VertexBuffer", BufDesc, Buf.size());
+  if (!BufOrErr)
+    return BufOrErr.takeError();
+  auto VB = std::move(*BufOrErr);
+
+  // TODO: Currently uses a single CpuToGpu mapped buffer.
+  // On discrete GPUs consider using a staging buffer + copy to a GpuOnly vertex
+  // buffer for optimal GPU read performance.
+  auto PtrOrErr = VB->map();
+  if (!PtrOrErr)
+    return PtrOrErr.takeError();
+  memcpy(*PtrOrErr, Buf.Data[0].get(), Buf.size());
+  if (auto Err = VB->unmap())
+    return std::move(Err);
+
+  return VB;
+}
+
 llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
                                              uint32_t Height) {
