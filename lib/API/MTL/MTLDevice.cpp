@@ -226,7 +226,7 @@ llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
   const uint64_t SignalValue = ++FenceCounter;
 
   for (size_t I = 0; I < CBs.size(); ++I) {
-    auto &MCB = *llvm::cast<MTLCommandBuffer>(CBs[I].get());
+    auto &MCB = llvm::cast<MTLCommandBuffer>(*CBs[I].get());
     // Signal the submit fence when the last command buffer completes.
     if (I == CBs.size() - 1)
       MCB.CmdBuffer->encodeSignalEvent(SubmitFence->Event, SignalValue);
