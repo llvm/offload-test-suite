@@ -383,11 +383,11 @@ struct VertexAttribute {
 
 struct IOBindings {
   std::string VertexBuffer;
-  CPUBuffer *VertexBufferPtr;
+  CPUBuffer *VertexBufferPtr = nullptr;
   llvm::SmallVector<VertexAttribute> VertexAttributes;
 
   std::string RenderTarget;
-  CPUBuffer *RTargetBufferPtr;
+  CPUBuffer *RTargetBufferPtr = nullptr;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
