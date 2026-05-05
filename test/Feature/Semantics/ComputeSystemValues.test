@@ -21,7 +21,8 @@ void main(uint3 DTID : SV_DispatchThreadID, uint3 GID : SV_GroupID, uint3 GTID :
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [2, 2, 2]
+DispatchParameters:
+  DispatchGroupCount: [2, 2, 2]
 Buffers:
   - Name: OUTPUT
     Format: Int32

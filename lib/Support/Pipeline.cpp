@@ -52,6 +52,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
   I.mapOptional("PushConstants", P.PushConstants);
+  I.mapOptional("DispatchParameters", P.DispatchParameters);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
@@ -464,6 +465,12 @@ void MappingTraits<offloadtest::PushConstantValue>::mapping(
   }
 }
 
+void MappingTraits<offloadtest::DispatchParametersSet>::mapping(
+    IO &I, offloadtest::DispatchParametersSet &Set) {
+  I.mapOptional("DispatchGroupCount", Set.DispatchGroupCount);
+  I.mapOptional("VertexCount", Set.VertexCount);
+}
+
 void MappingTraits<offloadtest::OutputProperties>::mapping(
     IO &I, offloadtest::OutputProperties &P) {
   I.mapRequired("Height", P.Height);
@@ -516,13 +523,6 @@ void MappingTraits<offloadtest::Shader>::mapping(IO &I,
   I.mapRequired("Stage", S.Stage);
   I.mapRequired("Entry", S.Entry);
   I.mapOptional("SpecializationConstants", S.SpecializationConstants);
-
-  if (S.Stage == Stages::Compute) {
-    // Stage-specific data, not sure if this should be optional
-    // or moved into the Shaders structure.
-    MutableArrayRef<int> MutableDispatchSize(S.DispatchSize);
-    I.mapRequired("DispatchSize", MutableDispatchSize);
-  }
 }
 
 void MappingTraits<offloadtest::Result>::mapping(IO &I,

@@ -355,10 +355,6 @@ struct IOBindings {
       Stride += VA.size();
     return Stride;
   }
-
-  uint32_t getVertexCount() const {
-    return VertexBufferPtr->size() / getVertexStride();
-  }
 };
 
 // Describes a contiguous group of bytes in a push constant block.
@@ -400,8 +396,12 @@ struct Shader {
   std::string Entry;
   std::unique_ptr<llvm::MemoryBuffer> Shader;
   std::unique_ptr<llvm::MemoryBuffer> Reflection;
-  int DispatchSize[3];
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
+};
+
+struct DispatchParametersSet {
+  std::array<uint32_t, 3> DispatchGroupCount = {1, 1, 1};
+  std::optional<uint32_t> VertexCount;
 };
 
 struct Pipeline {
@@ -415,6 +415,17 @@ struct Pipeline {
   llvm::SmallVector<Sampler> Samplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
+  DispatchParametersSet DispatchParameters;
+
+  uint32_t getVertexCount() const {
+    if (DispatchParameters.VertexCount)
+      return *DispatchParameters.VertexCount;
+
+    assert(Bindings.VertexBufferPtr != nullptr &&
+           "No VertexCount specified and no Vertex Buffer available to imply "
+           "VertexCount from.");
+    return Bindings.VertexBufferPtr->size() / Bindings.getVertexStride();
+  }
 
   uint32_t getDescriptorCount() const {
     uint32_t DescriptorCount = 0;
@@ -465,6 +476,7 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantBlock)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DispatchParametersSet)
 
 namespace llvm {
 namespace yaml {
@@ -511,6 +523,10 @@ template <> struct MappingTraits<offloadtest::PushConstantValue> {
 
 template <> struct MappingTraits<offloadtest::PushConstantBlock> {
   static void mapping(IO &I, offloadtest::PushConstantBlock &B);
+};
+
+template <> struct MappingTraits<offloadtest::DispatchParametersSet> {
+  static void mapping(IO &I, offloadtest::DispatchParametersSet &B);
 };
 
 template <> struct MappingTraits<offloadtest::VertexAttribute> {

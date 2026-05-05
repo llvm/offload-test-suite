@@ -18,7 +18,8 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [4, 2, 1]
+DispatchParameters:
+  DispatchGroupCount: [4, 2, 1]
 RuntimeSettings:
   DirectX:
     RootParameters:

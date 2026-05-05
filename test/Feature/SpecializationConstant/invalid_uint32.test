@@ -12,7 +12,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
     SpecializationConstants:
       - { ConstantID: 0, Value: "not a number", Type: UInt32 }
 Buffers:

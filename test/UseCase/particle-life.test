@@ -156,7 +156,8 @@ uint float_to_abgr(float3 rgb) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [32, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [32, 1, 1]
 Buffers:
   - Name: CONSTANTS
     Format: Int32

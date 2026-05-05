@@ -13,7 +13,6 @@ void CSMain(uint3 TID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: CSMain
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Int32
