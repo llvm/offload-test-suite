@@ -281,6 +281,21 @@ createBufferWithData(Device &Dev, std::string Name,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
+// Builds all BLAS / TLAS objects defined in `P.AccelStructs` using the
+// supplied compute encoder. Uploads each BLAS's vertex/index data, creates
+// the BLASBuildRequest + AS object via `Dev`, and records the build via
+// `Enc.batchBuildAS`. Then resolves TLAS instance references and records the
+// TLAS batch with a separate call (so the AS-build-write barrier between
+// BLAS and TLAS is automatic).
+//
+// Built AS objects are pushed to `OutAS` (in declaration order: BLASes first,
+// then TLASes). Vertex/index buffers used as build inputs are pushed to
+// `OutInputBuffers`; both must outlive command-buffer submission.
+llvm::Error buildPipelineAccelerationStructures(
+    Device &Dev, ComputeEncoder &Enc, Pipeline &P,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers);
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_DEVICE_H
