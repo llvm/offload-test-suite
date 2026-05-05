@@ -2831,7 +2831,7 @@ public:
       llvm::outs() << "Frame buffer created.\n";
     } else {
       return llvm::createStringError(
-          "Pipeline was neither Compute nor Traditional Graphics");
+          "Pipeline was neither Compute nor Traditional Raster");
     }
 
     llvm::outs() << "Memory buffers created.\n";

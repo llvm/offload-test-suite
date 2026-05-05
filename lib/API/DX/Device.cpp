@@ -2129,7 +2129,7 @@ public:
       llvm::outs() << "Graphics command list created complete.\n";
     } else {
       return llvm::createStringError(
-          "Pipeline was neither Compute nor Traditional Graphics");
+          "Pipeline was neither Compute nor Traditional Raster");
     }
 
     auto SubmitResult = executeCommandList(State);
