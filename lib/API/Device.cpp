@@ -15,6 +15,7 @@
 
 #include "Config.h"
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -92,6 +93,134 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
     return Err;
 
   return Dev.createTexture("RenderTarget", Desc);
+}
+
+llvm::Error offloadtest::buildPipelineAccelerationStructures(
+    Device &Dev, ComputeEncoder &Enc, Pipeline &P,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
+  if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
+    return llvm::Error::success();
+
+  // `BufferUsage::Storage` is the usage to pick for acceleration structure
+  // build inputs. Backends widen it with the native AS-input flags
+  // (e.g. Vulkan `SHADER_DEVICE_ADDRESS` + `ACCEL_BUILD_INPUT_READ_ONLY`)
+  // implicitly when ray tracing is supported.
+  const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
+                                    BufferUsage::Storage};
+
+  // Stash the request structs while we build them up — the encoder reads
+  // them through pointers stored in ASBuildItem.
+  llvm::SmallVector<BLASBuildRequest> BLASRequests;
+  BLASRequests.reserve(P.AccelStructs.BLAS.size());
+  llvm::StringMap<size_t> BLASIndex;
+
+  for (const auto &BD : P.AccelStructs.BLAS) {
+    llvm::SmallVector<TriangleGeometryDesc> Triangles;
+    Triangles.reserve(BD.Triangles.size());
+    for (const auto &T : BD.Triangles) {
+      assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
+      auto VBOrErr = createBufferWithData(
+          Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
+          T.VertexBufferPtr->size(), nullptr, nullptr);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+
+      TriangleGeometryDesc TGD;
+      TGD.VertexBuffer = VBOrErr->get();
+      TGD.VertexCount = T.VertexCount;
+      TGD.VertexStride = T.VertexStride;
+      TGD.VertexFormat = T.VertexFormat;
+      TGD.Opaque = T.Opaque;
+
+      OutInputBuffers.push_back(std::move(*VBOrErr));
+
+      if (T.IndexBufferPtr) {
+        auto IBOrErr = createBufferWithData(
+            Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
+            T.IndexBufferPtr->size(), nullptr, nullptr);
+        if (!IBOrErr)
+          return IBOrErr.takeError();
+        TGD.IndexBuffer = IBOrErr->get();
+        TGD.IndexCount = T.IndexCount;
+        TGD.IdxFormat = T.IdxFormat;
+        OutInputBuffers.push_back(std::move(*IBOrErr));
+      }
+      Triangles.push_back(TGD);
+    }
+    // TODO: AABB geometry support (would mirror the triangle path).
+
+    auto SizesOrErr = Dev.getBLASBuildSizes(Triangles);
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    auto ASOrErr = Dev.createBLAS(*SizesOrErr);
+    if (!ASOrErr)
+      return ASOrErr.takeError();
+
+    BLASBuildRequest Req;
+    Req.AS = ASOrErr->get();
+    Req.Geometry = std::move(Triangles);
+
+    BLASIndex[BD.Name] = OutAS.size();
+    OutAS.push_back(std::move(*ASOrErr));
+    BLASRequests.push_back(std::move(Req));
+  }
+
+  llvm::SmallVector<ASBuildItem> BLASBatch;
+  BLASBatch.reserve(BLASRequests.size());
+  for (const auto &Req : BLASRequests)
+    BLASBatch.push_back(&Req);
+  if (!BLASBatch.empty())
+    if (auto Err = Enc.batchBuildAS(BLASBatch))
+      return Err;
+
+  // TLAS pass — references BLASes built in the previous batch.
+  llvm::SmallVector<TLASBuildRequest> TLASRequests;
+  TLASRequests.reserve(P.AccelStructs.TLAS.size());
+
+  for (const auto &TD : P.AccelStructs.TLAS) {
+    TLASBuildRequest Req;
+    Req.Instances.reserve(TD.Instances.size());
+    for (const auto &I : TD.Instances) {
+      auto It = BLASIndex.find(I.BLAS);
+      if (It == BLASIndex.end())
+        return llvm::createStringError(std::errc::invalid_argument,
+                                       "TLAS '%s' references unknown BLAS '%s'",
+                                       TD.Name.c_str(), I.BLAS.c_str());
+
+      AccelerationStructureInstance Inst;
+      static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
+                    "Transform layout mismatch");
+      memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
+      Inst.InstanceID = I.InstanceID;
+      Inst.InstanceMask = I.InstanceMask;
+      Inst.BLAS = OutAS[It->second].get();
+      Req.Instances.push_back(Inst);
+    }
+    if (auto Err = validateTLASBuildRequest(Req))
+      return Err;
+    auto SizesOrErr =
+        Dev.getTLASBuildSizes(static_cast<uint32_t>(Req.Instances.size()));
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    auto ASOrErr = Dev.createTLAS(*SizesOrErr);
+    if (!ASOrErr)
+      return ASOrErr.takeError();
+
+    Req.AS = ASOrErr->get();
+    OutAS.push_back(std::move(*ASOrErr));
+    TLASRequests.push_back(std::move(Req));
+  }
+
+  llvm::SmallVector<ASBuildItem> TLASBatch;
+  TLASBatch.reserve(TLASRequests.size());
+  for (const auto &Req : TLASRequests)
+    TLASBatch.push_back(&Req);
+  if (!TLASBatch.empty())
+    if (auto Err = Enc.batchBuildAS(TLASBatch))
+      return Err;
+
+  return llvm::Error::success();
 }
 
 llvm::Expected<std::unique_ptr<Texture>>

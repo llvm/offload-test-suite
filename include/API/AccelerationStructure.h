@@ -59,6 +59,8 @@ struct AccelerationStructureInstance {
 };
 
 struct BLASBuildRequest {
+  // Target AS this build writes into.
+  AccelerationStructure *AS = nullptr;
   // DXR / Vulkan / Metal all forbid mixing triangle and AABB geometry in a
   // single BLAS, so the geometry list is held as a variant — the invalid
   // mixed-geometry state is unrepresentable.
@@ -68,6 +70,8 @@ struct BLASBuildRequest {
 };
 
 struct TLASBuildRequest {
+  // Target AS this build writes into.
+  AccelerationStructure *AS = nullptr;
   llvm::SmallVector<AccelerationStructureInstance> Instances;
 };
 
