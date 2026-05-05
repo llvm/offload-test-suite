@@ -457,6 +457,7 @@ struct Pipeline {
   }
 
   llvm::Error validatePipelineKind();
+  llvm::Error validateDispatchParameters();
 
   bool isCompute() const { return Kind == ShaderPipelineKind::Compute; }
   bool isTraditionalRaster() const {

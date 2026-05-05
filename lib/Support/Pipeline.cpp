@@ -52,7 +52,10 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
   I.mapOptional("PushConstants", P.PushConstants);
+
   I.mapOptional("DispatchParameters", P.DispatchParameters);
+  if (auto Err = P.validateDispatchParameters())
+    I.setError(llvm::toString(std::move(Err)));
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
@@ -588,4 +591,24 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
   // more required shader types.
   return llvm::createStringError(
       "The pipeline misses a Compute or Vertex Shader.");
+}
+
+llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
+  switch (Kind) {
+  case ShaderPipelineKind::Compute:
+    if (DispatchParameters.VertexCount)
+      return llvm::createStringError(
+          "DispatchParameters.VertexCount set on a Compute pipeline. Only "
+          "allowed on a TraditionalRaster pipeline.");
+    break;
+  case ShaderPipelineKind::TraditionalRaster:
+    if (DispatchParameters.DispatchGroupCount !=
+        std::array<uint32_t, 3>{1, 1, 1})
+      return llvm::createStringError(
+          "DispatchParameters.DispatchGroupCount set on a TraditionalRaster "
+          "pipeline. Only allowed on a Compute pipeline.");
+    break;
+  }
+
+  return llvm::Error::success();
 }
