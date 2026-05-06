@@ -1433,7 +1433,7 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
-  createBuffer(std::string Name, BufferCreateDesc &Desc,
+  createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     VkBufferCreateInfo BufInfo = {};
     BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1484,7 +1484,7 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
-  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+  createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 

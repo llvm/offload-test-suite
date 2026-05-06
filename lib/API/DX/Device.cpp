@@ -963,7 +963,7 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
-  createBuffer(std::string Name, BufferCreateDesc &Desc,
+  createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
 
@@ -997,7 +997,7 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
-  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+  createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 
