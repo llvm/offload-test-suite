@@ -1134,6 +1134,90 @@ public:
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
   }
 
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       std::optional<ShaderContainer> AS, ShaderContainer MS,
+                       std::optional<ShaderContainer> PS) /*override*/ {
+    assert(RTFormats.size() <= 8);
+
+    ComPtr<ID3D12RootSignature> RootSig;
+    if (auto Err = createRootSignature(Name, BindingsDesc, MS,
+                                       /*IsGraphics=*/true, RootSig))
+      return Err;
+
+    D3D12_SHADER_BYTECODE MSBytecode = {MS.Shader->getBuffer().data(),
+                                        MS.Shader->getBuffer().size()};
+    if (MSBytecode.BytecodeLength == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Mesh shader pipeline requires a mesh shader.");
+
+    // The amplification (task) shader is optional.
+    D3D12_SHADER_BYTECODE ASBytecode = {};
+    if (AS) {
+      assert((*AS).Shader->getBufferSize() > 0 &&
+             "The passed task/amplification shader was empty.");
+      ASBytecode = {(*AS).Shader->getBuffer().data(),
+                    (*AS).Shader->getBuffer().size()};
+    }
+
+    // The pixel shader is optional
+    D3D12_SHADER_BYTECODE PSBytecode = {};
+    if (PS) {
+      assert((*PS).Shader->getBufferSize() > 0 &&
+             "The passed pixel shader was empty.");
+      PSBytecode = {(*PS).Shader->getBuffer().data(),
+                    (*PS).Shader->getBuffer().size()};
+    }
+
+    D3D12_RT_FORMAT_ARRAY RTArray = {};
+    RTArray.NumRenderTargets = static_cast<UINT>(RTFormats.size());
+    for (size_t I = 0; I < RTFormats.size(); ++I)
+      RTArray.RTFormats[I] = getDXGIFormat(RTFormats[I]);
+
+    CD3DX12_DEPTH_STENCIL_DESC1 DepthStencil(D3D12_DEFAULT);
+    DepthStencil.DepthEnable = true;
+    DepthStencil.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    DepthStencil.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    DepthStencil.StencilEnable = false;
+
+    DXGI_SAMPLE_DESC SampleDesc = {};
+    SampleDesc.Count = 1;
+
+    CD3DX12_PIPELINE_MESH_STATE_STREAM Stream;
+    Stream.pRootSignature = RootSig.Get();
+    Stream.AS = ASBytecode;
+    Stream.MS = MSBytecode;
+    Stream.PS = PSBytecode;
+    Stream.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    Stream.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    Stream.DepthStencilState = DepthStencil;
+    Stream.SampleMask = UINT_MAX;
+    Stream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    Stream.RTVFormats = RTArray;
+    if (DSFormat)
+      Stream.DSVFormat = getDXGIFormat(*DSFormat);
+    Stream.SampleDesc = SampleDesc;
+
+    const D3D12_PIPELINE_STATE_STREAM_DESC StreamDesc = {sizeof(Stream),
+                                                         &Stream};
+
+    ComPtr<ID3D12Device2> Device2;
+    if (auto Err =
+            HR::toError(Device.As(&Device2), "Failed to query ID3D12Device2."))
+      return Err;
+
+    ComPtr<ID3D12PipelineState> PSO;
+    if (auto Err = HR::toError(
+            Device2->CreatePipelineState(&StreamDesc, IID_PPV_ARGS(&PSO)),
+            "Failed to create mesh shader PSO."))
+      return Err;
+
+    return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return DXFence::create(Device.Get(), Name);
@@ -2268,6 +2352,19 @@ public:
       BindingsDesc.DescriptorSetDescs.push_back(Layout);
     }
 
+    if (P.isRaster()) {
+      // Create render target, depth/stencil, readback and vertex buffer and
+      // PSO.
+      if (auto Err = createRenderTarget(P, State))
+        return Err;
+      llvm::outs() << "Render target created.\n";
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
+      if (auto Err = createDepthStencil(P, State))
+        return Err;
+      llvm::outs() << "Depth stencil created.\n";
+    }
+
     if (P.isCompute()) {
       // This is an arbitrary distinction that we could alter in the future.
       if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
@@ -2290,17 +2387,6 @@ public:
       llvm::outs() << "Compute command list created.\n";
 
     } else if (P.isTraditionalRaster()) {
-      // Create render target, depth/stencil, readback and vertex buffer and
-      // PSO.
-      if (auto Err = createRenderTarget(P, State))
-        return Err;
-      llvm::outs() << "Render target created.\n";
-      // TODO: Always created for graphics pipelines. Consider making this
-      // conditional on the pipeline definition.
-      if (auto Err = createDepthStencil(P, State))
-        return Err;
-      llvm::outs() << "Depth stencil created.\n";
-
       ShaderContainer VS = {};
       ShaderContainer PS = {};
       for (auto &Shader : P.Shaders) {
@@ -2336,12 +2422,12 @@ public:
       RTFormats.push_back(*FormatOrErr);
 
       auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
+          "Traditional Raster Pipeline State", BindingsDesc, InputLayout,
+          RTFormats, Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
-      llvm::outs() << "Graphics Pipeline created.\n";
+      llvm::outs() << "Traditional Raster Pipeline created.\n";
 
       // Begin a render pass: bind RT/DSV and clear depth-stencil. Color
       // load action is Load — the existing inline code didn't clear color.
@@ -2370,6 +2456,43 @@ public:
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
+    } else if (P.isMeshShaderRaster()) {
+      std::optional<ShaderContainer> AS = {};
+      ShaderContainer MS = {};
+      std::optional<ShaderContainer> PS = {};
+      for (auto &Shader : P.Shaders) {
+        if (Shader.Stage == Stages::Amplification) {
+          ShaderContainer Container;
+          Container.EntryPoint = Shader.Entry;
+          Container.Shader = Shader.Shader.get();
+          AS = Container;
+        } else if (Shader.Stage == Stages::Mesh) {
+          MS.EntryPoint = Shader.Entry;
+          MS.Shader = Shader.Shader.get();
+        } else if (Shader.Stage == Stages::Pixel) {
+          ShaderContainer Container;
+          Container.EntryPoint = Shader.Entry;
+          Container.Shader = Shader.Shader.get();
+          PS = Container;
+        }
+      }
+
+      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                  P.Bindings.RTargetBufferPtr->Channels);
+      if (!FormatOrErr)
+        return FormatOrErr.takeError();
+
+      llvm::SmallVector<Format> RTFormats;
+      RTFormats.push_back(*FormatOrErr);
+
+      auto PipelineStateOrErr =
+          createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
+                               RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      State.Pipeline = std::move(*PipelineStateOrErr);
+      llvm::outs() << "Mesh Shader Pipeline created.\n";
     } else {
       return llvm::createStringError(
           "Pipeline was neither Compute nor Traditional Raster");
