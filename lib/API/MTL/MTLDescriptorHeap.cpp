@@ -1,3 +1,11 @@
+//===- MTL/MTLDescriptorHeap.cpp - Metal Descriptor Heap ------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #include "MTLDescriptorHeap.h"
 #include "MetalIRConverter.h"
 
@@ -14,7 +22,7 @@ static NS::UInteger getDescriptorHeapBindPoint(MTLDescriptorHeapType Type) {
 }
 
 MTLGPUDescriptorHandle &
-MTLGPUDescriptorHandle::Offset(int32_t OffsetInDescriptors) {
+MTLGPUDescriptorHandle::addOffset(int32_t OffsetInDescriptors) {
   Ptr = MTL::GPUAddress(int64_t(Ptr) + int64_t(OffsetInDescriptors) *
                                            sizeof(IRDescriptorTableEntry));
   return *this;

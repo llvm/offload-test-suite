@@ -5,9 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef OFFLOADTEST_API_MTL_MTLDESCRIPTORHEAP_H
 #define OFFLOADTEST_API_MTL_MTLDESCRIPTORHEAP_H
@@ -26,7 +23,7 @@ struct IRDescriptorTableEntry;
 
 namespace offloadtest {
 struct MTLGPUDescriptorHandle {
-  MTLGPUDescriptorHandle &Offset(int32_t OffsetInDescriptors);
+  MTLGPUDescriptorHandle &addOffset(int32_t OffsetInDescriptors);
 
   uint64_t Ptr;
 };

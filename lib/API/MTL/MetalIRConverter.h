@@ -5,9 +5,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef OFFLOADTEST_API_MTL_METALIRCONVERTER_H
 #define OFFLOADTEST_API_MTL_METALIRCONVERTER_H

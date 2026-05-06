@@ -1,3 +1,11 @@
+//===- MTL/MTLDevice.cpp - Metal Device -----------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #define NS_PRIVATE_IMPLEMENTATION
 #define CA_PRIVATE_IMPLEMENTATION
 #define MTL_PRIVATE_IMPLEMENTATION
@@ -971,7 +979,7 @@ class MTLDevice : public offloadtest::Device {
 
     for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
       PS->ArgBuffer->setRootDescriptorTable(Idx, Handle);
-      Handle.Offset(P.Sets[Idx].Resources.size());
+      Handle.addOffset(P.Sets[Idx].Resources.size());
     }
 
     PS->ArgBuffer->bind(CmdEncoder);

@@ -5,21 +5,19 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-//
-//===----------------------------------------------------------------------===//
 
 #ifndef OFFLOADTEST_API_MTL_MTLTOPLEVELARGUMENTBUFFER_H
 #define OFFLOADTEST_API_MTL_MTLTOPLEVELARGUMENTBUFFER_H
 
 #include "MTLDescriptorHeap.h"
 #include "MetalIRConverter.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace offloadtest {
 // Manages a Metal buffer that serves as the top-level argument buffer for
 // shader resource binding with the explicit root signature layout.
 class MTLTopLevelArgumentBuffer {
-  std::vector<IRResourceLocation> ResourceLocs;
+  llvm::SmallVector<IRResourceLocation> ResourceLocs;
   MTL::Buffer *Buffer = nullptr;
 
   bool checkIndex(uint32_t Index) const;
@@ -40,7 +38,7 @@ public:
   static llvm::Expected<std::unique_ptr<MTLTopLevelArgumentBuffer>>
   create(MTL::Device *Device, IRRootSignature *RootSig);
 
-  MTLTopLevelArgumentBuffer(std::vector<IRResourceLocation> ResourceLocs,
+  MTLTopLevelArgumentBuffer(llvm::SmallVector<IRResourceLocation> ResourceLocs,
                             MTL::Buffer *Buffer)
       : ResourceLocs(std::move(ResourceLocs)), Buffer(Buffer) {}
   ~MTLTopLevelArgumentBuffer();

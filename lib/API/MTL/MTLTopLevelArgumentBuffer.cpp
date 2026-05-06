@@ -1,3 +1,11 @@
+//===- MTL/MTLTopLevelArgumentBuffer.cpp - Metal Top-Level Argument Buffer ===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
 #include "MTLTopLevelArgumentBuffer.h"
 
 using namespace offloadtest;
@@ -28,7 +36,7 @@ MTLTopLevelArgumentBuffer::create(MTL::Device *Device,
     return llvm::createStringError(std::errc::invalid_argument,
                                    "Invalid IRRootSignature pointer.");
 
-  std::vector<IRResourceLocation> ResourceLocs(
+  llvm::SmallVector<IRResourceLocation> ResourceLocs(
       IRRootSignatureGetResourceCount(RootSig));
   // Empty root signature is valid, bind methods will be no-ops
   if (ResourceLocs.empty()) {
