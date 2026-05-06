@@ -53,14 +53,9 @@ struct InputLayoutDesc {
   std::optional<uint32_t> InstanceStepRate;
 };
 
-struct DXBinding {
-  uint32_t Register;
-  uint32_t Space;
-};
-
 struct ResourceBindingDesc {
   ResourceKind Kind;
-  DXBinding DXBinding;
+  DirectXBinding DXBinding;
   std::optional<VulkanBinding> VKBinding;
   uint32_t DescriptorCount;
 };
