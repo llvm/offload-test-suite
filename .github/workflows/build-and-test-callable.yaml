@@ -303,17 +303,23 @@ jobs:
         shell: python
         run: |
           import os, pathlib, shutil, time, re
+          workspace = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
           # 1) The build runner's CMakeCache.txt has CMAKE_MAKE_PROGRAM baked
           #    in as an absolute path (often using 8.3 short names) that may
           #    not resolve on the test runner. Rewrite it to whatever ninja
           #    is on PATH here, so any CMake regen would still work.
           ninja_path = shutil.which('ninja') or shutil.which('ninja.exe')
           for cache in [
-              pathlib.Path('llvm-project/build/CMakeCache.txt'),
-              pathlib.Path('DXC/build/CMakeCache.txt'),
+              workspace / 'llvm-project' / 'build' / 'CMakeCache.txt',
+              workspace / 'DXC' / 'build' / 'CMakeCache.txt',
           ]:
               if cache.is_file() and ninja_path:
                   text = cache.read_text(encoding='utf-8', errors='replace')
+                  # Match the CMakeCache.txt entry of the form
+                  #   CMAKE_MAKE_PROGRAM:FILEPATH=<old absolute path to ninja>
+                  # anchored at the start of a line (case-insensitive, multiline)
+                  # and replace just the value after the '=' with the ninja
+                  # executable resolved on this (test) runner.
                   text = re.sub(
                       r'(?im)^(CMAKE_MAKE_PROGRAM:FILEPATH=).*$',
                       lambda m: m.group(1) + ninja_path.replace('\\', '/'),
@@ -325,7 +331,7 @@ jobs:
           #    trees can never be newer than them and trigger a CMake regen.
           future = time.time() + 24 * 60 * 60
           for d in ['DXC/build/bin', 'llvm-project/build']:
-              root = pathlib.Path(d)
+              root = workspace / d
               if not root.exists():
                   continue
               for f in root.rglob('*'):
