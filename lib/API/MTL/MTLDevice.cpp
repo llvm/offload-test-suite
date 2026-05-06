@@ -1435,7 +1435,7 @@ class MTLDevice : public offloadtest::Device {
         if (auto Err = MemCpyBack(R))
           return Err;
 
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
       auto *RT = P.Bindings.RTargetBufferPtr;
       RT->copyFromTexture(FBReadback.Buf->contents(), RT->getImageRowBytes());

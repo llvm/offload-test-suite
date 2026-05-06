@@ -208,6 +208,8 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_VERTEX_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
+  case Stages::Mesh:
+    return VK_SHADER_STAGE_MESH_BIT_EXT;
   }
   llvm_unreachable("All cases handled");
 }
@@ -2291,7 +2293,7 @@ public:
       }
     }
 
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       if (auto Err = createRenderTarget(P, IS))
         return Err;
       // TODO: Always created for graphics pipelines. Consider making this
@@ -3055,7 +3057,7 @@ public:
     }
 
     // Copy back the frame buffer data if this was a graphics pipeline.
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
 
       VkMappedMemoryRange Range = {};
