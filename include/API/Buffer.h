@@ -41,7 +41,7 @@ public:
   // GpuToCpu buffers; returns an error for GpuOnly. Each successful map() must
   // be paired with a call to unmap() before the buffer is used on the GPU.
   virtual llvm::Expected<void *> map() = 0;
-  virtual llvm::Error unmap() = 0;
+  virtual void unmap() = 0;
 
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;

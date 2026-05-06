@@ -419,10 +419,7 @@ public:
     return Ptr;
   }
 
-  llvm::Error unmap() override {
-    vkUnmapMemory(Dev, Memory);
-    return llvm::Error::success();
-  }
+  void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   ~VulkanBuffer() override {
     vkDestroyBuffer(Dev, Buffer, nullptr);

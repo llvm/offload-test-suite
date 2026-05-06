@@ -108,8 +108,7 @@ offloadtest::createVertexBufferFromCPUBuffer(Device &Dev,
   if (!PtrOrErr)
     return PtrOrErr.takeError();
   memcpy(*PtrOrErr, Buf.Data[0].get(), Buf.size());
-  if (auto Err = VB->unmap())
-    return std::move(Err);
+  VB->unmap();
 
   return VB;
 }
