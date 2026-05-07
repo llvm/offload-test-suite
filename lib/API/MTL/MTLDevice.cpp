@@ -970,10 +970,10 @@ class MTLDevice : public offloadtest::Device {
     MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
 
     const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
-    CmdEncoder->setComputePipelineState(PS->ComputePipeline);
+    NativeEncoder->setComputePipelineState(PS->ComputePipeline);
     MTLGPUDescriptorHandle Handle = {};
     if (IS.DescHeap) {
-      IS.DescHeap->bind(CmdEncoder);
+      IS.DescHeap->bind(NativeEncoder);
       Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
     }
 
@@ -982,13 +982,13 @@ class MTLDevice : public offloadtest::Device {
       Handle.addOffset(P.Sets[Idx].Resources.size());
     }
 
-    PS->ArgBuffer->bind(CmdEncoder);
+    PS->ArgBuffer->bind(NativeEncoder);
     for (const auto &Table : IS.DescTables)
       for (const auto &ResPair : Table.Resources)
         for (const auto &ResSet : ResPair.second)
-          CmdEncoder->useResource(ResSet.Resource.get(),
-                                  MTL::ResourceUsageRead |
-                                      MTL::ResourceUsageWrite);
+          NativeEncoder->useResource(ResSet.Resource.get(),
+                                     MTL::ResourceUsageRead |
+                                         MTL::ResourceUsageWrite);
 
     NS::UInteger TGS[3] = {PS->ComputePipeline->maxTotalThreadsPerThreadgroup(),
                            1, 1};
