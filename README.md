@@ -105,7 +105,7 @@ Shaders:
   - Stage: Compute
     Entry: main
 DispatchParameters:
-  DispatchGroupCount: [2, 1, 1]
+  DispatchGroupCount: [2, 1, 1] # Define how many groups to dispatch, if omitted one group is launched.
 Buffers:
   - Name: Constants
     Format: Int32
