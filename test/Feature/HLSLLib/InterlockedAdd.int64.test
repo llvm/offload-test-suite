@@ -1,0 +1,163 @@
+#--- source.hlsl
+
+// This test exercises InterlockedAdd against non-resource (groupshared)
+// destinations using 64-bit integer types. A single threadgroup of 64
+// threads concurrently updates shared counters, so the test actually
+// exercises atomic behavior.
+//
+// Both the 2-argument and 3-argument overloads are covered for int64_t
+// and uint64_t.
+//
+// Atomicity of the 3-argument form is verified by using each thread's
+// returned original value as an index into a groupshared "seen" array.
+// If every original value is unique (i.e. no add was lost), the array is
+// all-ones after the dispatch.
+
+RWStructuredBuffer<uint> OutSlotsInt : register(u0);
+RWStructuredBuffer<uint> OutSlotsUInt : register(u1);
+RWStructuredBuffer<int64_t> OutFinal : register(u2);
+
+groupshared int64_t  CounterInt;          // 3-arg form, signed
+groupshared uint64_t CounterUInt;         // 3-arg form, unsigned
+groupshared int64_t  CounterIntNoOrig;    // 2-arg form, signed
+groupshared uint64_t CounterUIntNoOrig;   // 2-arg form, unsigned
+groupshared int64_t  SignedCounter;       // 2-arg form with negative addend
+groupshared uint64_t LargeCounter;        // 2-arg form starting above 2^32
+
+groupshared uint SlotsInt[64];
+groupshared uint SlotsUInt[64];
+
+[numthreads(64, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    CounterInt = 0;
+    CounterUInt = 0;
+    CounterIntNoOrig = 0;
+    CounterUIntNoOrig = 0;
+    SignedCounter = 1000;
+    LargeCounter = 0x100000000ull; // 2^32
+  }
+  SlotsInt[GTID.x] = 0;
+  SlotsUInt[GTID.x] = 0;
+  GroupMemoryBarrierWithGroupSync();
+
+  // 3-argument form: capture original.
+  int64_t origI;
+  InterlockedAdd(CounterInt, (int64_t)1, origI);
+  SlotsInt[(uint)origI] = 1;
+
+  uint64_t origU;
+  InterlockedAdd(CounterUInt, (uint64_t)1, origU);
+  SlotsUInt[(uint)origU] = 1u;
+
+  // 2-argument form: no original captured.
+  InterlockedAdd(CounterIntNoOrig, (int64_t)2);
+  InterlockedAdd(CounterUIntNoOrig, (uint64_t)3);
+
+  // 2-argument form with negative addend (signedness test).
+  InterlockedAdd(SignedCounter, (int64_t)-1);
+
+  // 2-argument form with a value that exercises the upper 32 bits.
+  InterlockedAdd(LargeCounter, 0x100000000ull);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  OutSlotsInt[GTID.x] = SlotsInt[GTID.x];
+  OutSlotsUInt[GTID.x] = SlotsUInt[GTID.x];
+
+  if (GTID.x == 0) {
+    OutFinal[0] = CounterInt;                 // 64
+    OutFinal[1] = (int64_t)CounterUInt;       // 64
+    OutFinal[2] = CounterIntNoOrig;           // 128
+    OutFinal[3] = (int64_t)CounterUIntNoOrig; // 192
+    OutFinal[4] = SignedCounter;              // 1000 - 64 = 936
+    OutFinal[5] = (int64_t)LargeCounter;      // 2^32 + 64*2^32 = 65 * 2^32
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: OutSlotsInt
+    Format: UInt32
+    Stride: 4
+    ZeroInitSize: 256
+  - Name: ExpectedSlotsInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlotsUInt
+    Format: UInt32
+    Stride: 4
+    ZeroInitSize: 256
+  - Name: ExpectedSlotsUInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutFinal
+    Format: Int64
+    Stride: 8
+    ZeroInitSize: 48
+  - Name: ExpectedFinal
+    Format: Int64
+    Stride: 8
+    Data: [ 64, 64, 128, 192, 936, 279172874240 ]
+    
+Results:
+  - Result: TestSlotsInt
+    Rule: BufferExact
+    Actual: OutSlotsInt
+    Expected: ExpectedSlotsInt
+  - Result: TestSlotsUInt
+    Rule: BufferExact
+    Actual: OutSlotsUInt
+    Expected: ExpectedSlotsUInt
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutSlotsInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutSlotsUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# REQUIRES: Int64
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99122
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
