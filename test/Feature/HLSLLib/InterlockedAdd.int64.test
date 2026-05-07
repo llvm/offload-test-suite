@@ -86,7 +86,7 @@ Buffers:
   - Name: OutSlotsInt
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 256
+    FillSize: 256
   - Name: ExpectedSlotsInt
     Format: UInt32
     Stride: 4
@@ -97,7 +97,7 @@ Buffers:
   - Name: OutSlotsUInt
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 256
+    FillSize: 256
   - Name: ExpectedSlotsUInt
     Format: UInt32
     Stride: 4
@@ -108,7 +108,7 @@ Buffers:
   - Name: OutFinal
     Format: Int64
     Stride: 8
-    ZeroInitSize: 48
+    FillSize: 48
   - Name: ExpectedFinal
     Format: Int64
     Stride: 8
