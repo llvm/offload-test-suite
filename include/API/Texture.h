@@ -150,6 +150,7 @@ public:
   Texture &operator=(const Texture &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  virtual const TextureCreateDesc &getDesc() const = 0;
 
 protected:
   explicit Texture(GPUAPI API) : API(API) {}

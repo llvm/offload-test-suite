@@ -457,6 +457,8 @@ public:
     vkFreeMemory(Dev, Memory, nullptr);
   }
 
+  const TextureCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Vulkan;
   }
