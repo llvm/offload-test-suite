@@ -25,7 +25,6 @@ void main(uint3 threadID : SV_DispatchThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: value
     Format: Int32

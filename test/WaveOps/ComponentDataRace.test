@@ -19,7 +19,6 @@ void main(uint3 ThreadID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: UInt32

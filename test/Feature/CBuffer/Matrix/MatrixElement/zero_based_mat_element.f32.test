@@ -51,7 +51,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: cbuffer_f1x4
     Format: Float32

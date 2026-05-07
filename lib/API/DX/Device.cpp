@@ -1787,10 +1787,10 @@ public:
       if (!EncoderOrErr)
         return EncoderOrErr.takeError();
       auto &Encoder = *EncoderOrErr.get();
-      const llvm::ArrayRef<int> DispatchSize =
-          llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-      if (auto Err = Encoder.dispatch(DispatchSize[0], DispatchSize[1],
-                                      DispatchSize[2]))
+      if (auto Err =
+              Encoder.dispatch(P.DispatchParameters.DispatchGroupCount[0],
+                               P.DispatchParameters.DispatchGroupCount[1],
+                               P.DispatchParameters.DispatchGroupCount[2]))
         return Err;
       Encoder.endEncoding();
     }
@@ -2027,7 +2027,7 @@ public:
                                 static_cast<LONG>(VP.Height)};
     IS.CB->CmdList->RSSetScissorRects(1, &Scissor);
 
-    IS.CB->CmdList->DrawInstanced(P.Bindings.getVertexCount(), 1, 0, 0);
+    IS.CB->CmdList->DrawInstanced(P.getVertexCount(), 1, 0, 0);
 
     // Transition the render target to copy source and copy to the readback
     // buffer.

@@ -104,7 +104,8 @@ This framework provides a YAML representation for describing GPU pipelines and b
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [2, 1, 1] # Define how many groups to dispatch, if omitted one group is launched.
 Buffers:
   - Name: Constants
     Format: Int32

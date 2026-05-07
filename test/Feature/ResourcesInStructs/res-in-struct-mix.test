@@ -35,7 +35,6 @@ void main(uint3 ID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Buf_g_F_SrvBuf1
     Format: Int32
