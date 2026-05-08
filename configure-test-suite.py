@@ -30,14 +30,35 @@ import sys
 
 # Suite name -> (d3d12, vk, mtl, clang, warp, description).
 SUITES = {
-    "d3d12":           (True,  False, False, False, False, "DXC-compiled shaders on DirectX 12"),
-    "vk":              (False, True,  False, False, False, "DXC-compiled shaders on Vulkan"),
-    "mtl":             (False, False, True,  False, False, "DXC-compiled shaders on Metal"),
-    "clang-d3d12":     (True,  False, False, True,  False, "Clang-compiled shaders on DirectX 12"),
-    "clang-vk":        (False, True,  False, True,  False, "Clang-compiled shaders on Vulkan"),
-    "clang-mtl":       (False, False, True,  True,  False, "Clang-compiled shaders on Metal"),
-    "warp-d3d12":      (True,  False, False, False, True,  "DXC-compiled shaders on WARP (Windows)"),
-    "clang-warp-d3d12":(True,  False, False, True,  True,  "Clang-compiled shaders on WARP (Windows)"),
+    "d3d12": (True, False, False, False, False, "DXC-compiled shaders on DirectX 12"),
+    "vk": (False, True, False, False, False, "DXC-compiled shaders on Vulkan"),
+    "mtl": (False, False, True, False, False, "DXC-compiled shaders on Metal"),
+    "clang-d3d12": (
+        True,
+        False,
+        False,
+        True,
+        False,
+        "Clang-compiled shaders on DirectX 12",
+    ),
+    "clang-vk": (False, True, False, True, False, "Clang-compiled shaders on Vulkan"),
+    "clang-mtl": (False, False, True, True, False, "Clang-compiled shaders on Metal"),
+    "warp-d3d12": (
+        True,
+        False,
+        False,
+        False,
+        True,
+        "DXC-compiled shaders on WARP (Windows)",
+    ),
+    "clang-warp-d3d12": (
+        True,
+        False,
+        False,
+        True,
+        True,
+        "Clang-compiled shaders on WARP (Windows)",
+    ),
 }
 
 # Self-contained replacement for @LIT_SITE_CFG_IN_HEADER@. The in-tree
@@ -63,6 +84,7 @@ def emit_site_cfg(template_text, substitutions):
         text = text.replace("@{}@".format(key), value)
     # Catch any leftover @TOKEN@ that we didn't account for.
     import re
+
     leftover = re.findall(r"@[A-Za-z_][A-Za-z0-9_]*@", text)
     if leftover:
         raise SystemExit(
@@ -74,36 +96,83 @@ def emit_site_cfg(template_text, substitutions):
 
 def main():
     script_dir = pathlib.Path(__file__).resolve().parent
-    default_prefix = script_dir.parent.parent  # <prefix>/share/hlsl-test-suite -> <prefix>
+    default_prefix = (
+        script_dir.parent.parent
+    )  # <prefix>/share/hlsl-test-suite -> <prefix>
 
     p = argparse.ArgumentParser(
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--suite", action="append", dest="suites", metavar="NAME",
-                   help="Test suite to configure (repeatable).")
-    p.add_argument("--list-suites", action="store_true",
-                   help="List available suites and exit.")
-    p.add_argument("--prefix", type=pathlib.Path, default=default_prefix,
-                   help="Install prefix containing bin/ (default: auto-detected from script location).")
-    p.add_argument("--bin-dir", type=pathlib.Path, default=None,
-                   help="Override directory containing tool binaries (default: <prefix>/bin).")
-    p.add_argument("--output-dir", type=pathlib.Path, default=None,
-                   help="Output directory for generated configs (default: <script-dir>/run).")
-    p.add_argument("--dxc-path", type=pathlib.Path, default=None,
-                   help="Path to dxc executable (for non-clang suites; default: from PATH).")
-    p.add_argument("--golden-images", type=pathlib.Path, default=None,
-                   help="Override golden-images directory (default: <script-dir>/golden-images if present).")
-    p.add_argument("--enable-debug", dest="enable_debug", action="store_true", default=True,
-                   help="Enable runtime debug layers (default: on).")
-    p.add_argument("--no-debug", dest="enable_debug", action="store_false",
-                   help="Disable runtime debug layers.")
-    p.add_argument("--enable-validation", action="store_true", default=False,
-                   help="Enable runtime validation layers (default: off).")
-    p.add_argument("--os-name", default=platform.system(),
-                   help="Override CMAKE_SYSTEM_NAME-equivalent OS name (default: auto-detect).")
-    p.add_argument("--warp-arch", default="",
-                   help="WARP_ARCHITECTURE value (only for *-warp-d3d12 suites).")
+    p.add_argument(
+        "--suite",
+        action="append",
+        dest="suites",
+        metavar="NAME",
+        help="Test suite to configure (repeatable).",
+    )
+    p.add_argument(
+        "--list-suites", action="store_true", help="List available suites and exit."
+    )
+    p.add_argument(
+        "--prefix",
+        type=pathlib.Path,
+        default=default_prefix,
+        help="Install prefix containing bin/ (default: auto-detected from script location).",
+    )
+    p.add_argument(
+        "--bin-dir",
+        type=pathlib.Path,
+        default=None,
+        help="Override directory containing tool binaries (default: <prefix>/bin).",
+    )
+    p.add_argument(
+        "--output-dir",
+        type=pathlib.Path,
+        default=None,
+        help="Output directory for generated configs (default: <script-dir>/run).",
+    )
+    p.add_argument(
+        "--dxc-path",
+        type=pathlib.Path,
+        default=None,
+        help="Path to dxc executable (for non-clang suites; default: from PATH).",
+    )
+    p.add_argument(
+        "--golden-images",
+        type=pathlib.Path,
+        default=None,
+        help="Override golden-images directory (default: <script-dir>/golden-images if present).",
+    )
+    p.add_argument(
+        "--enable-debug",
+        dest="enable_debug",
+        action="store_true",
+        default=True,
+        help="Enable runtime debug layers (default: on).",
+    )
+    p.add_argument(
+        "--no-debug",
+        dest="enable_debug",
+        action="store_false",
+        help="Disable runtime debug layers.",
+    )
+    p.add_argument(
+        "--enable-validation",
+        action="store_true",
+        default=False,
+        help="Enable runtime validation layers (default: off).",
+    )
+    p.add_argument(
+        "--os-name",
+        default=platform.system(),
+        help="Override CMAKE_SYSTEM_NAME-equivalent OS name (default: auto-detect).",
+    )
+    p.add_argument(
+        "--warp-arch",
+        default="",
+        help="WARP_ARCHITECTURE value (only for *-warp-d3d12 suites).",
+    )
 
     args = p.parse_args()
 
@@ -118,8 +187,11 @@ def main():
 
     unknown = [s for s in args.suites if s not in SUITES]
     if unknown:
-        p.error("unknown suite(s): {} (available: {})".format(
-            ", ".join(unknown), ", ".join(sorted(SUITES))))
+        p.error(
+            "unknown suite(s): {} (available: {})".format(
+                ", ".join(unknown), ", ".join(sorted(SUITES))
+            )
+        )
 
     bin_dir = (args.bin_dir or (args.prefix / "bin")).resolve()
     if not bin_dir.is_dir():
@@ -143,8 +215,11 @@ def main():
         if found:
             dxc_path = pathlib.Path(found).resolve()
     if needs_dxc and (dxc_path is None or not dxc_path.is_file()):
-        print("warning: DXC not found; non-clang suites will not be able to compile shaders. "
-              "Pass --dxc-path to silence this warning.", file=sys.stderr)
+        print(
+            "warning: DXC not found; non-clang suites will not be able to compile shaders. "
+            "Pass --dxc-path to silence this warning.",
+            file=sys.stderr,
+        )
         dxc_path = pathlib.Path("")
     dxc_dir = str(dxc_path.parent) if dxc_path and str(dxc_path) else ""
 
@@ -166,26 +241,27 @@ def main():
         substitutions = {
             "OFFLOADTEST_BINARY_DIR": str(suite_obj_root),
             "OFFLOADTEST_SOURCE_DIR": str(test_src_root.parent),
-            "LLVM_TOOLS_DIR":         str(bin_dir),
-            "DXC_EXECUTABLE":         str(dxc_path) if dxc_path else "",
-            "SUPPORTS_SPIRV":         "True" if vk else "False",
-            "FORCE_CLANG":            "True" if clang else "False",
-            "FORCE_WARP":             "True" if warp else "False",
-            "WARP_ARCHITECTURE":      args.warp_arch,
-            "DXC_DIR":                dxc_dir,
-            "GOLDENIMAGE_DIR":        golden_dir,
-            "suite":                  suite,
-            "TEST_d3d12":             "True" if d3d12 else "False",
-            "TEST_vk":                "True" if vk else "False",
-            "TEST_mtl":               "True" if mtl else "False",
-            "CMAKE_SYSTEM_NAME":      args.os_name,
-            "OFFLOADTEST_ENABLE_DEBUG":      "1" if args.enable_debug else "0",
+            "LLVM_TOOLS_DIR": str(bin_dir),
+            "DXC_EXECUTABLE": str(dxc_path) if dxc_path else "",
+            "SUPPORTS_SPIRV": "True" if vk else "False",
+            "FORCE_CLANG": "True" if clang else "False",
+            "FORCE_WARP": "True" if warp else "False",
+            "WARP_ARCHITECTURE": args.warp_arch,
+            "DXC_DIR": dxc_dir,
+            "GOLDENIMAGE_DIR": golden_dir,
+            "suite": suite,
+            "TEST_d3d12": "True" if d3d12 else "False",
+            "TEST_vk": "True" if vk else "False",
+            "TEST_mtl": "True" if mtl else "False",
+            "CMAKE_SYSTEM_NAME": args.os_name,
+            "OFFLOADTEST_ENABLE_DEBUG": "1" if args.enable_debug else "0",
             "OFFLOADTEST_ENABLE_VALIDATION": "1" if args.enable_validation else "0",
         }
 
         site_cfg = suite_dir / "lit.site.cfg.py"
-        site_cfg.write_text(emit_site_cfg(template_text, substitutions),
-                            encoding="utf-8")
+        site_cfg.write_text(
+            emit_site_cfg(template_text, substitutions), encoding="utf-8"
+        )
         print("configured: {}".format(site_cfg))
 
     print("\nrun with:")
