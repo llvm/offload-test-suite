@@ -17,6 +17,9 @@
 #define IR_PRIVATE_IMPLEMENTATION
 #include "metal_irconverter.h"
 #include "metal_irconverter_runtime.h"
+// ir_raytracing.h depends on types defined in metal_irconverter_runtime.h —
+// keep this include in its own block so clang-format won't sort it above.
+#include "ir_raytracing.h"
 
 #include "API/Device.h"
 #include "API/Encoder.h"
@@ -962,6 +965,10 @@ class MTLDevice : public offloadtest::Device {
         AccelStructs;
     // Vertex/index buffers consumed during AS builds; must outlive submission.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
+    // Per-AS-descriptor header + instance-contribution buffers backing inline
+    // RT bindings; must be resident on the dispatch encoder so the shader can
+    // read the header.
+    llvm::SmallVector<MTL::Buffer *> ASDescriptorBuffers;
   };
 
   llvm::Error createRootSignature(
@@ -1301,6 +1308,12 @@ class MTLDevice : public offloadtest::Device {
         [&IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
+      // Acceleration structures are created separately; descriptor binding for
+      // AS resources is wired up in the per-table binding loop below.
+      if (R.isAccelerationStructure()) {
+        Resources.emplace_back(&R, ResourceBundle{});
+        return llvm::Error::success();
+      }
       switch (getDescriptorKind(R.Kind)) {
       case DescriptorKind::SRV: {
         auto ExRes = createSRV(R, IS);
@@ -1343,6 +1356,51 @@ class MTLDevice : public offloadtest::Device {
     uint32_t HeapIndex = 0;
     for (auto &T : IS.DescTables) {
       for (auto &R : T.Resources) {
+        if (R.first->isAccelerationStructure()) {
+          assert(R.first->TLASPtr && "AS resource must be resolved to a TLAS");
+          assert(R.first->getArraySize() == 1 && "AS arrays not yet supported");
+          // OutAS layout from buildPipelineAccelerationStructures:
+          // BLASes first, then TLASes — both in declaration order.
+          const size_t TLASIdx = R.first->TLASPtr - &P.AccelStructs.TLAS[0];
+          const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
+          auto *MTLAS = llvm::cast<MetalAccelerationStructure>(
+              IS.AccelStructs[ASIdx].get());
+
+          // Metal shader converter doesn't bind the AS directly; the shader
+          // reads a buffer containing an IRRaytracingAccelerationStructureGPU-
+          // Header that holds the AS's gpuResourceID plus a pointer to an
+          // instance-contributions array (one uint32 per instance, supplying
+          // the equivalent of D3D12's InstanceContributionToHitGroupIndex).
+          // Build both buffers here and point the descriptor entry at the
+          // header buffer's GPU address.
+          const uint32_t InstCount =
+              static_cast<uint32_t>(R.first->TLASPtr->Instances.size());
+          llvm::SmallVector<uint32_t> Contributions(InstCount, 0);
+          MTL::Buffer *ContribBuf = Device->newBuffer(
+              Contributions.data(), InstCount * sizeof(uint32_t),
+              MTL::ResourceStorageModeShared);
+          MTL::Buffer *HeaderBuf = Device->newBuffer(
+              sizeof(IRRaytracingAccelerationStructureGPUHeader),
+              MTL::ResourceStorageModeShared);
+          IRRaytracingSetAccelerationStructure(
+              static_cast<uint8_t *>(HeaderBuf->contents()),
+              MTLAS->AccelStruct->gpuResourceID(),
+              static_cast<uint8_t *>(ContribBuf->contents()),
+              ContribBuf->gpuAddress(), Contributions.data(), InstCount);
+          IS.CB->KeepAliveMTLBuffers.push_back(HeaderBuf);
+          IS.CB->KeepAliveMTLBuffers.push_back(ContribBuf);
+          // Only the header is read by the shader (via the descriptor's gpuVA).
+          // The contribution buffer is read indirectly via the header's
+          // addressOfInstanceContributions pointer, so both must be resident
+          // during dispatch.
+          IS.ASDescriptorBuffers.push_back(HeaderBuf);
+          IS.ASDescriptorBuffers.push_back(ContribBuf);
+
+          IRDescriptorTableSetAccelerationStructure(
+              IS.DescHeap->getEntryHandle(HeapIndex), HeaderBuf->gpuAddress());
+          HeapIndex += R.first->getArraySize();
+          continue;
+        }
         switch (getDescriptorKind(R.first->Kind)) {
         case DescriptorKind::SRV:
           HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
@@ -1402,6 +1460,12 @@ class MTLDevice : public offloadtest::Device {
           NativeEncoder->useResource(ResSet.Resource.get(),
                                      MTL::ResourceUsageRead |
                                          MTL::ResourceUsageWrite);
+    for (auto &AS : IS.AccelStructs) {
+      auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
+      NativeEncoder->useResource(MTLAS->AccelStruct, MTL::ResourceUsageRead);
+    }
+    for (MTL::Buffer *B : IS.ASDescriptorBuffers)
+      NativeEncoder->useResource(B, MTL::ResourceUsageRead);
 
     if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
                                     P.DispatchParameters.DispatchGroupCount[0],
@@ -1534,6 +1598,9 @@ class MTLDevice : public offloadtest::Device {
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
     auto MemCpyBack = [](ResourcePair &Pair) -> llvm::Error {
       const Resource &R = *Pair.first;
+      // AS resources don't have CPU-side readback data.
+      if (R.isAccelerationStructure())
+        return llvm::Error::success();
       if (!R.isReadWrite())
         return llvm::Error::success();
 
@@ -2122,6 +2189,11 @@ public:
     auto *Descriptor =
         MTL::InstanceAccelerationStructureDescriptor::alloc()->init();
     Descriptor->setInstanceCount(Instances.size());
+    // UserID descriptor type so per-instance InstanceID survives the
+    // build and is returned by HLSL CommittedInstanceID()/InstanceIndex()
+    // semantics on the shader side.
+    Descriptor->setInstanceDescriptorType(
+        MTL::AccelerationStructureInstanceDescriptorTypeUserID);
 
     MTL::AccelerationStructureSizes Sizes =
         Device->accelerationStructureSizes(Descriptor);
@@ -2436,11 +2508,12 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         InstanceASIdx.push_back(Idx);
       }
 
-      // Pack instance descriptors. Layout differs from VK/DX12: 32-byte
-      // entries with an index instead of a GPU address.
+      // Pack instance descriptors. Layout differs from VK/DX12: indexed
+      // BLAS references with an extra userID slot so HLSL InstanceID()
+      // survives across the build.
       const size_t InstByteSize =
           TLAS->Instances.size() *
-          sizeof(MTL::AccelerationStructureInstanceDescriptor);
+          sizeof(MTL::AccelerationStructureUserIDInstanceDescriptor);
       MTL::Buffer *InstBuf =
           MTLDev->newBuffer(InstByteSize, MTL::ResourceStorageModeShared);
       if (!InstBuf)
@@ -2448,7 +2521,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
             std::errc::not_enough_memory,
             "Failed to allocate TLAS instance buffer.");
       auto *InstPtr =
-          static_cast<MTL::AccelerationStructureInstanceDescriptor *>(
+          static_cast<MTL::AccelerationStructureUserIDInstanceDescriptor *>(
               InstBuf->contents());
       for (size_t I = 0; I < TLAS->Instances.size(); ++I) {
         const auto &Src = TLAS->Instances[I];
@@ -2462,12 +2535,15 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         D.mask = Src.InstanceMask;
         D.intersectionFunctionTableOffset = 0;
         D.accelerationStructureIndex = InstanceASIdx[I];
+        D.userID = Src.InstanceID;
       }
       CB->KeepAliveMTLBuffers.push_back(InstBuf);
 
       auto *ID = MTL::InstanceAccelerationStructureDescriptor::alloc()->init();
       ID->setInstanceDescriptorBuffer(InstBuf);
       ID->setInstanceCount(TLAS->Instances.size());
+      ID->setInstanceDescriptorType(
+          MTL::AccelerationStructureInstanceDescriptorTypeUserID);
       NS::Array *BLASArr = NS::Array::array(
           reinterpret_cast<NS::Object *const *>(UniqueBLASes.data()),
           UniqueBLASes.size());
