@@ -253,6 +253,7 @@ struct Resource {
     case ResourceKind::SampledTexture2D:
       return false;
     }
+    llvm_unreachable("All cases handled");
   }
 
   bool isTexture() const {
