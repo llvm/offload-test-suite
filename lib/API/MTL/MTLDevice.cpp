@@ -234,6 +234,13 @@ public:
   MTL::ComputePipelineState *ComputePipeline = nullptr;
   MTL::RenderPipelineState *RenderPipeline = nullptr;
 
+  // Rasterization pipeline only state.
+  // These are part of the pipeline in DX and VK, but dynamic state in Metal.
+  // To have a shared API we store these here and set the state when the
+  // pipeline is used.
+  MTL::DepthStencilState *DepthStencilState = nullptr;
+  MTL::CullMode CullMode = MTL::CullModeNone;
+
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
                    IRShaderReflectionPtr Reflection,
@@ -244,16 +251,21 @@ public:
 
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
-                   MTL::RenderPipelineState *RenderPipeline)
+                   MTL::RenderPipelineState *RenderPipeline,
+                   MTL::DepthStencilState *DepthStencilState,
+                   MTL::CullMode CullMode)
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
         RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
-        RenderPipeline(RenderPipeline) {}
+        RenderPipeline(RenderPipeline), DepthStencilState(DepthStencilState),
+        CullMode(CullMode) {}
 
   ~MTLPipelineState() override {
     if (ComputePipeline)
       ComputePipeline->release();
     if (RenderPipeline)
       RenderPipeline->release();
+    if (DepthStencilState)
+      DepthStencilState->release();
   }
 
   static bool classof(const offloadtest::PipelineState *B) {
@@ -359,6 +371,9 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
   createComputeEncoder() override;
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+  createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
 
 private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
@@ -544,6 +559,262 @@ MTLCommandBuffer::createComputeEncoder() {
       NS::String::string("ComputeEncoder", NS::UTF8StringEncoding));
   return std::make_unique<MTLComputeEncoder>(CmdBuffer, NativeEncoder);
 }
+
+static MTL::PrimitiveType
+getMTLPrimitiveType(offloadtest::PrimitiveTopology Topology) {
+  switch (Topology) {
+  case offloadtest::PrimitiveTopology::TriangleList:
+    return MTL::PrimitiveTypeTriangle;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
+}
+
+static MTL::LoadAction getMTLLoadAction(offloadtest::LoadAction Action) {
+  switch (Action) {
+  case offloadtest::LoadAction::Load:
+    return MTL::LoadActionLoad;
+  case offloadtest::LoadAction::Clear:
+    return MTL::LoadActionClear;
+  case offloadtest::LoadAction::DontCare:
+    return MTL::LoadActionDontCare;
+  }
+  llvm_unreachable("All LoadAction cases handled");
+}
+
+static MTL::StoreAction getMTLStoreAction(offloadtest::StoreAction Action) {
+  switch (Action) {
+  case offloadtest::StoreAction::Store:
+    return MTL::StoreActionStore;
+  case offloadtest::StoreAction::DontCare:
+    return MTL::StoreActionDontCare;
+  }
+  llvm_unreachable("All StoreAction cases handled");
+}
+
+class MTLRenderEncoder : public offloadtest::RenderEncoder {
+  MTL::RenderCommandEncoder *RenderEnc = nullptr;
+
+  // Encoder contract: viewport and scissor must both be set before
+  // drawInstanced().
+  bool ViewportSet = false;
+  bool ScissorSet = false;
+
+public:
+  MTLRenderEncoder(MTL::RenderCommandEncoder *Enc)
+      : RenderEncoder(GPUAPI::Metal), RenderEnc(Enc) {}
+
+  ~MTLRenderEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Metal;
+  }
+
+  /// Access the underlying Metal encoder for state that the abstract
+  /// RenderEncoder API does not yet cover (depth-stencil state, cull
+  /// mode, etc.). Returns nullptr after endEncoding().
+  MTL::RenderCommandEncoder *getNative() const { return RenderEnc; }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (RenderEnc)
+      RenderEnc->pushDebugGroup(
+          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+  }
+
+  void popDebugGroup() override {
+    if (RenderEnc)
+      RenderEnc->popDebugGroup();
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (RenderEnc)
+      RenderEnc->insertDebugSignpost(
+          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+  }
+
+  void setViewport(const offloadtest::Viewport &VP) override {
+    RenderEnc->setViewport(MTL::Viewport{
+        static_cast<double>(VP.X), static_cast<double>(VP.Y),
+        static_cast<double>(VP.Width), static_cast<double>(VP.Height),
+        static_cast<double>(VP.MinDepth), static_cast<double>(VP.MaxDepth)});
+    ViewportSet = true;
+  }
+
+  void setScissor(const offloadtest::ScissorRect &Rect) override {
+    MTL::ScissorRect MTLRect;
+    MTLRect.x = static_cast<NS::UInteger>(Rect.X);
+    MTLRect.y = static_cast<NS::UInteger>(Rect.Y);
+    MTLRect.width = Rect.Width;
+    MTLRect.height = Rect.Height;
+    RenderEnc->setScissorRect(MTLRect);
+    ScissorSet = true;
+  }
+
+  void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
+                       uint32_t /*Stride*/) override {
+    // Stride lives in the render pipeline's vertex descriptor in Metal,
+    // not on the buffer binding.
+    if (!VB) {
+      RenderEnc->setVertexBuffer(nullptr, 0, Slot);
+      return;
+    }
+    auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
+    RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, Slot);
+  }
+
+  llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
+                            offloadtest::PrimitiveTopology Topology,
+                            uint32_t VertexCount, uint32_t InstanceCount,
+                            uint32_t FirstVertex,
+                            uint32_t FirstInstance) override {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &MTLPSO = llvm::cast<MTLPipelineState>(PSO);
+    if (!MTLPSO.RenderPipeline)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "PipelineState bound to drawInstanced() is not a render pipeline.");
+    RenderEnc->setRenderPipelineState(MTLPSO.RenderPipeline);
+    if (MTLPSO.DepthStencilState)
+      RenderEnc->setDepthStencilState(MTLPSO.DepthStencilState);
+    RenderEnc->setCullMode(MTLPSO.CullMode);
+
+    // IRRuntimeDrawPrimitives also sets the DrawParams / DrawInfo argument
+    // buffers that metal-irconverter consults for SV_VertexID and friends.
+    IRRuntimeDrawPrimitives(RenderEnc, getMTLPrimitiveType(Topology),
+                            static_cast<NS::UInteger>(FirstVertex),
+                            static_cast<NS::UInteger>(VertexCount),
+                            static_cast<NS::UInteger>(InstanceCount),
+                            static_cast<NS::UInteger>(FirstInstance));
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer & /*Src*/,
+                                 size_t /*SrcOffset*/,
+                                 offloadtest::Buffer & /*Dst*/,
+                                 size_t /*DstOffset*/,
+                                 size_t /*Size*/) override {
+    // A Metal render command encoder cannot record blit operations. The
+    // caller must end this encoder and use a separate compute or blit
+    // encoder for buffer copies.
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "copyBufferToBuffer is not supported on a Metal render encoder; "
+        "end the encoder and use a separate compute or blit encoder.");
+  }
+
+  void endEncodingImpl() override {
+    if (RenderEnc) {
+      RenderEnc->popDebugGroup();
+      RenderEnc->endEncoding();
+      RenderEnc = nullptr;
+    }
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+MTLCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &Pass = llvm::cast<MTLRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = Pass.Desc;
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  MTL::RenderPassDescriptor *MTLDesc =
+      MTL::RenderPassDescriptor::alloc()->init();
+  auto DescScope = llvm::scope_exit([&] { MTLDesc->release(); });
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    if (!Desc.ColorAttachments[I])
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &Tex = llvm::cast<MTLTexture>(*Desc.ColorAttachments[I]);
+    const offloadtest::ColorAttachmentFormatDesc &Color =
+        PassDesc.ColorAttachments[I];
+
+    auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
+    CADesc->setTexture(Tex.Tex);
+    CADesc->setLoadAction(getMTLLoadAction(Color.Load));
+    CADesc->setStoreAction(getMTLStoreAction(Color.Store));
+    if (Color.Load == offloadtest::LoadAction::Clear) {
+      if (!Tex.getDesc().OptimizedClearValue) {
+        CADesc->release();
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the render target to have been "
+            "created with an OptimizedClearValue.");
+      }
+      const auto *CV =
+          std::get_if<ClearColor>(&*Tex.getDesc().OptimizedClearValue);
+      assert(CV && "RenderTarget OptimizedClearValue must be a ClearColor");
+      CADesc->setClearColor(MTL::ClearColor(CV->R, CV->G, CV->B, CV->A));
+    }
+    MTLDesc->colorAttachments()->setObject(CADesc, I);
+    CADesc->release();
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<MTLTexture>(*Desc.DepthStencil);
+    const offloadtest::DepthStencilAttachmentFormatDesc &DS =
+        *PassDesc.DepthStencil;
+
+    auto *DADesc = MTLDesc->depthAttachment();
+    DADesc->setTexture(Tex.Tex);
+    DADesc->setLoadAction(getMTLLoadAction(DS.DepthLoad));
+    DADesc->setStoreAction(getMTLStoreAction(DS.DepthStore));
+
+    auto *SADesc = MTLDesc->stencilAttachment();
+    SADesc->setTexture(Tex.Tex);
+    SADesc->setLoadAction(getMTLLoadAction(DS.StencilLoad));
+    SADesc->setStoreAction(getMTLStoreAction(DS.StencilStore));
+
+    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
+        DS.StencilLoad == offloadtest::LoadAction::Clear) {
+      if (!Tex.getDesc().OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *CV =
+          std::get_if<ClearDepthStencil>(&*Tex.getDesc().OptimizedClearValue);
+      assert(CV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      if (DS.DepthLoad == offloadtest::LoadAction::Clear)
+        DADesc->setClearDepth(CV->Depth);
+      if (DS.StencilLoad == offloadtest::LoadAction::Clear)
+        SADesc->setClearStencil(CV->Stencil);
+    }
+  }
+
+  MTL::RenderCommandEncoder *NativeEncoder =
+      CmdBuffer->renderCommandEncoder(MTLDesc);
+  if (!NativeEncoder)
+    return llvm::createStringError(
+        std::errc::device_or_resource_busy,
+        "Failed to create Metal render command encoder.");
+  NativeEncoder->pushDebugGroup(
+      NS::String::string("RenderEncoder", NS::UTF8StringEncoding));
+  return std::make_unique<MTLRenderEncoder>(NativeEncoder);
+}
+
 class MTLDevice : public offloadtest::Device {
   Capabilities Caps;
   MTL::Device *Device;
@@ -570,11 +841,12 @@ class MTLDevice : public offloadtest::Device {
     NS::AutoreleasePool *Pool = nullptr;
     std::unique_ptr<MTLDescriptorHeap> DescHeap;
     std::unique_ptr<offloadtest::Buffer> VB;
-    std::unique_ptr<offloadtest::Texture> FrameBufferTexture;
+    std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<PipelineState> Pipeline;
+    std::unique_ptr<offloadtest::RenderPass> RenderPass;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     // TODO: Support RootResources?
@@ -1045,7 +1317,7 @@ class MTLDevice : public offloadtest::Device {
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.FrameBufferTexture = std::move(*TexOrErr);
+    IS.RenderTarget = std::move(*TexOrErr);
 
     // Create a readback buffer for copying render target data to the CPU.
     BufferCreateDesc BufDesc = {};
@@ -1077,102 +1349,61 @@ class MTLDevice : public offloadtest::Device {
     if (auto Err = createDepthStencil(P, IS))
       return Err;
 
-    auto &FBTex = llvm::cast<MTLTexture>(*IS.FrameBufferTexture);
-    auto &DS = llvm::cast<MTLTexture>(*IS.DepthStencil);
-    auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
+    const uint64_t Width = IS.RenderTarget->getDesc().Width;
+    const uint64_t Height = IS.RenderTarget->getDesc().Height;
 
-    MTL::RenderPassDescriptor *Desc =
-        MTL::RenderPassDescriptor::alloc()->init();
+    RenderPassBeginDesc BeginDesc = {};
+    BeginDesc.Pass = IS.RenderPass.get();
+    BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
+    BeginDesc.DepthStencil = &IS.DepthStencil.get();
 
-    const uint64_t Width = FBTex.Desc.Width;
-    const uint64_t Height = FBTex.Desc.Height;
+    auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
+    if (!EncOrErr)
+      return EncOrErr.takeError();
+    auto &Encoder = *EncOrErr.get();
 
-    // Color attachment.
-    auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
-    CADesc->setTexture(FBTex.Tex);
-    CADesc->setLoadAction(MTL::LoadActionClear);
-    const auto *ColorCV =
-        std::get_if<ClearColor>(&*FBTex.Desc.OptimizedClearValue);
-    if (!ColorCV)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Render target clear value must be a ClearColor.");
-
-    CADesc->setClearColor(
-        MTL::ClearColor(ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A));
-    CADesc->setStoreAction(MTL::StoreActionStore);
-    Desc->colorAttachments()->setObject(CADesc, 0);
-
-    // Depth/stencil attachment.
-    const auto *DepthCV =
-        std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
-    if (!DepthCV)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Depth/stencil clear value must be a ClearDepthStencil.");
-
-    auto *DADesc = Desc->depthAttachment();
-    DADesc->setTexture(DS.Tex);
-    DADesc->setLoadAction(MTL::LoadActionClear);
-    DADesc->setClearDepth(DepthCV->Depth);
-    DADesc->setStoreAction(MTL::StoreActionDontCare);
-
-    auto *SADesc = Desc->stencilAttachment();
-    SADesc->setTexture(DS.Tex);
-    SADesc->setLoadAction(MTL::LoadActionClear);
-    SADesc->setClearStencil(DepthCV->Stencil);
-    SADesc->setStoreAction(MTL::StoreActionDontCare);
-
-    MTL::RenderCommandEncoder *CmdEncoder =
-        IS.CB->CmdBuffer->renderCommandEncoder(Desc);
-
-    const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
-    CmdEncoder->setRenderPipelineState(PS->RenderPipeline);
-
-    // Configure depth stencil state: depth test enabled, write all, less.
-    MTL::DepthStencilDescriptor *DSDesc =
-        MTL::DepthStencilDescriptor::alloc()->init();
-    DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
-    DSDesc->setDepthWriteEnabled(true);
-    MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
-    CmdEncoder->setDepthStencilState(DSState);
-    DSDesc->release();
-    DSState->release();
-
-    if (IS.DescHeap) {
-      IS.DescHeap->bind(CmdEncoder);
-      // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
-      // this)
-      PS->ArgBuffer->setRootDescriptorTable(
-          0, IS.DescHeap->getGPUDescriptorHandleForHeapStart());
+    {
+      auto &MTLEncoder = llvm::cast<MTLRenderEncoder>(*Encoder);
+      auto *CmdEncoder = MTLEncoder.getNative();
+      if (IS.DescHeap) {
+        IS.DescHeap->bind(CmdEncoder);
+        // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
+        // this)
+        PS->ArgBuffer->setRootDescriptorTable(
+            0, IS.DescHeap->getGPUDescriptorHandleForHeapStart());
+      }
+      PS->ArgBuffer->bind(CmdEncoder);
+      for (const auto &Table : IS.DescTables)
+        for (const auto &ResPair : Table.Resources)
+          for (const auto &ResSet : ResPair.second)
+            CmdEncoder->useResource(ResSet.Resource.get(),
+                                    MTL::ResourceUsageRead |
+                                        MTL::ResourceUsageWrite);
     }
-    PS->ArgBuffer->bind(CmdEncoder);
-    for (const auto &Table : IS.DescTables)
-      for (const auto &ResPair : Table.Resources)
-        for (const auto &ResSet : ResPair.second)
-          CmdEncoder->useResource(ResSet.Resource.get(),
-                                  MTL::ResourceUsageRead |
-                                      MTL::ResourceUsageWrite);
 
-    // Explicitly set viewport to texture dimensions.
-    CmdEncoder->setViewport(
-        MTL::Viewport{0.0, 0.0, (double)Width, (double)Height, 0.0, 1.0});
-    CmdEncoder->setCullMode(MTL::CullModeNone);
-    CmdEncoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
+    Viewport VP;
+    VP.Width = static_cast<float>(Width);
+    VP.Height = static_cast<float>(Height);
+    Encoder.setViewport(VP);
+
+    ScissorRect Scissor;
+    Scissor.Width = static_cast<uint32_t>(Width);
+    Scissor.Height = static_cast<uint32_t>(Height);
+    Encoder.setScissor(Scissor);
 
     if (IS.VB)
-      // Bind vertex buffer at slot 0 to match the vertex descriptor which
-      // references buffer index 0.
-      CmdEncoder->setVertexBuffer(llvm::cast<MTLBuffer>(*IS.VB).Buf, 0, 0);
+      Encoder.setVertexBuffer(0, IS.VB.get(), 0, P.Bindings.getVertexStride());
 
-    // IRRuntimeDrawPrimitives also sets the DrawParams / DrawInfo argument
-    // buffers that metal-irconverter consults for SV_VertexID and friends.
-    IRRuntimeDrawPrimitives(CmdEncoder, MTL::PrimitiveTypeTriangle,
-                            NS::UInteger(0), P.getVertexCount());
-
-    CmdEncoder->endEncoding();
+    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(),
+                                         PrimitiveTopology::TriangleList,
+                                         P.getVertexCount(),
+                                         /*InstanceCount=*/1))
+      return Err;
+    Encoder.endEncoding();
 
     // Blit the render target into the readback buffer for CPU access.
+    auto &FBTex = llvm::cast<MTLTexture>(*IS.RenderTarget);
+    auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
     MTL::BlitCommandEncoder *Blit = IS.CB->CmdBuffer->blitCommandEncoder();
     const size_t ElemSize = getFormatSizeInBytes(FBTex.Desc.Fmt);
     const size_t RowBytes = Width * ElemSize;
@@ -1476,8 +1707,18 @@ public:
     if (Error)
       return toError(Error);
 
+    // Bake the depth-stencil state and cull mode into the pipeline, mirroring
+    // the DX12 / Vulkan PSO model.
+    MTL::DepthStencilDescriptor *DSDesc =
+        MTL::DepthStencilDescriptor::alloc()->init();
+    DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
+    DSDesc->setDepthWriteEnabled(true);
+    MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
+    DSDesc->release();
+
     return std::make_unique<MTLPipelineState>(Name, std::move(RootSig),
-                                              std::move(ArgBuffer), PSO);
+                                              std::move(ArgBuffer), PSO,
+                                              DSState, MTL::CullModeNone);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
@@ -1568,6 +1809,27 @@ public:
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
+
+      ColorAttachmentFormatDesc ColorAttachment = {};
+      ColorAttachment.Fmt = *FormatOrErr;
+      ColorAttachment.Load = LoadAction::Clear;
+      ColorAttachment.Store = StoreAction::Store;
+
+      DepthStencilAttachmentFormatDesc DSAttachment = {};
+      DSAttachment.Fmt = Format::D32FloatS8Uint;
+      DSAttachment.DepthLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::DontCare;
+      DSAttachment.StencilLoad = LoadAction::Clear;
+      DSAttachment.StencilStore = StoreAction::DontCare;
+
+      RenderPassDesc PassDesc;
+      PassDesc.ColorAttachments.push_back(ColorAttachment);
+      PassDesc.DepthStencil = DSAttachment;
+
+      auto RenderPassOrErr = createRenderPass(PassDesc);
+      if (!RenderPassOrErr)
+        return RenderPassOrErr.takeError();
+      IS.RenderPass = std::move(*RenderPassOrErr);
 
       if (auto Err = createGraphicsCommands(P, IS))
         return Err;
