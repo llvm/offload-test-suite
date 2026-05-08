@@ -1078,21 +1078,26 @@ private:
     ComPtr<ID3D12Resource> Buffer;
     std::unique_ptr<offloadtest::Buffer> Readback;
     ComPtr<ID3D12Heap> Heap;
-    ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
-                std::unique_ptr<offloadtest::Buffer> Readback,
-                ComPtr<ID3D12Heap> Heap = nullptr)
+    // AS-only; mutually exclusive with the buffer/heap fields above.
+    DXAccelerationStructure *AS = nullptr;
+    explicit ResourceSet(ComPtr<ID3D12Resource> Upload,
+                         ComPtr<ID3D12Resource> Buffer,
+                         std::unique_ptr<offloadtest::Buffer> Readback,
+                         ComPtr<ID3D12Heap> Heap = nullptr)
         : Upload(Upload), Buffer(Buffer), Readback(std::move(Readback)),
           Heap(Heap) {}
+    explicit ResourceSet(DXAccelerationStructure *AS) : AS(AS) {}
     ResourceSet(const ResourceSet &) = delete;
     ResourceSet(ResourceSet &&A)
         : Upload(A.Upload), Buffer(A.Buffer), Readback(std::move(A.Readback)),
-          Heap(A.Heap) {}
+          Heap(A.Heap), AS(A.AS) {}
     ResourceSet &operator=(const ResourceSet &) = delete;
     ResourceSet &operator=(ResourceSet &&A) {
       Upload = A.Upload;
       Buffer = A.Buffer;
       Readback = std::move(A.Readback);
       Heap = A.Heap;
+      AS = A.AS;
       return *this;
     }
   };
@@ -1121,9 +1126,11 @@ private:
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
 
-    // Built acceleration structures, kept alive for the pipeline lifetime.
+    // Parallel-indexed to `P.AccelStructs.BLAS`.
     llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
-        AccelStructs;
+        BLASes;
+    // Keyed by `TLASDesc::Name`.
+    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
     // Vertex/index buffers consumed during AS builds; must outlive submission.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
@@ -2007,21 +2014,40 @@ public:
   // returns the next available HeapIdx
   uint32_t bindSRV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
                    const ResourceBundle &ResBundle) {
-    const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.size() / EltSize;
-    const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = getSRVDescription(R);
     const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     const D3D12_CPU_DESCRIPTOR_HANDLE SRVHandleHeapStart =
         IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
 
-    for (const ResourceSet &RS : ResBundle) {
-      llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                   << " NumElts = " << NumElts << "\n";
-      D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = SRVHandleHeapStart;
-      SRVHandle.ptr += HeapIdx * DescHandleIncSize;
-      Device->CreateShaderResourceView(RS.Buffer.Get(), &SRVDesc, SRVHandle);
-      HeapIdx++;
+    if (R.isAccelerationStructure()) {
+      // AS SRVs are created with a null resource; the AS lives in the
+      // buffer referenced by Location.
+      D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+      SRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+      SRVDesc.ViewDimension =
+          D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+      SRVDesc.Shader4ComponentMapping =
+          D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      for (const ResourceSet &RS : ResBundle) {
+        SRVDesc.RaytracingAccelerationStructure.Location =
+            RS.AS->getGPUVirtualAddress();
+        D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = SRVHandleHeapStart;
+        SRVHandle.ptr += HeapIdx * DescHandleIncSize;
+        Device->CreateShaderResourceView(nullptr, &SRVDesc, SRVHandle);
+        HeapIdx++;
+      }
+    } else {
+      const uint32_t EltSize = R.getElementSize();
+      const uint32_t NumElts = R.size() / EltSize;
+      const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = getSRVDescription(R);
+      for (const ResourceSet &RS : ResBundle) {
+        llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
+                     << " NumElts = " << NumElts << "\n";
+        D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = SRVHandleHeapStart;
+        SRVHandle.ptr += HeapIdx * DescHandleIncSize;
+        Device->CreateShaderResourceView(RS.Buffer.Get(), &SRVDesc, SRVHandle);
+        HeapIdx++;
+      }
     }
     return HeapIdx;
   }
@@ -2228,11 +2254,35 @@ public:
     return HeapIdx;
   }
 
+  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
+    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+    auto SizesOrErr =
+        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    return createTLAS(*SizesOrErr);
+  }
+
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto CreateBuffer =
         [&IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
+      if (R.isAccelerationStructure()) {
+        auto ASOrErr = createAS(R);
+        if (!ASOrErr)
+          return ASOrErr.takeError();
+        ResourceBundle Bundle;
+        Bundle.emplace_back(
+            llvm::cast<DXAccelerationStructure>(ASOrErr->get()));
+        auto Inserted =
+            IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+        assert(Inserted.second && "TLAS bound to multiple resources NYI");
+        (void)Inserted;
+        Resources.push_back(std::make_pair(&R, std::move(Bundle)));
+        return llvm::Error::success();
+      }
       switch (getDescriptorKind(R.Kind)) {
       case DescriptorKind::SRV: {
         auto ExRes = createSRV(R, IS);
@@ -2723,19 +2773,20 @@ public:
     State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
 
+    if (auto Err = createBuffers(P, State))
+      return Err;
+    llvm::outs() << "Buffers created.\n";
+
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
       auto EncOrErr = State.CB->createComputeEncoder();
       if (!EncOrErr)
         return EncOrErr.takeError();
       if (auto Err = offloadtest::buildPipelineAccelerationStructures(
-              *this, **EncOrErr, P, State.AccelStructs, State.ASInputBuffers))
+              *this, **EncOrErr, P, State.BLASes, State.TLASes,
+              State.ASInputBuffers))
         return Err;
       (*EncOrErr)->endEncoding();
     }
-
-    if (auto Err = createBuffers(P, State))
-      return Err;
-    llvm::outs() << "Buffers created.\n";
 
     BindingsDesc BndDesc = {};
     for (auto &S : P.Sets) {
