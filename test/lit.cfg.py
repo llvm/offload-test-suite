@@ -148,6 +148,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("Int64ShaderOps", False):
             config.available_features.add("Int64")
+        if device["Features"].get("AtomicInt64OnGroupSharedSupported", False):
+            config.available_features.add("Int64GroupSharedAtomics")
         setWaveSizeFeaturesDirectX(config, device)
 
     if device["API"] == "Metal":
@@ -164,6 +166,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
+        if device["Features"].get("shaderSharedInt64Atomics", False):
+            config.available_features.add("Int64GroupSharedAtomics")
 
         # Add supported extensions.
         for Extension in device["Extensions"]:
