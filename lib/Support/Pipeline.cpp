@@ -26,6 +26,21 @@ void PushConstantBlock::getContent(
     memcpy(Output.data() + V.OffsetInBytes, V.Data.data(), V.Data.size());
 }
 
+void CPUBuffer::copyFromTexture(const void *Src, size_t SrcRowPitch) {
+  const uint32_t Height = OutputProps.Height;
+  const uint32_t RowBytes = getImageRowBytes();
+  assert(SrcRowPitch >= RowBytes && "Source row pitch is smaller than image");
+  uint8_t *Dst = reinterpret_cast<uint8_t *>(Data[0].get());
+  if (SrcRowPitch == RowBytes) {
+    memcpy(Dst, Src, static_cast<size_t>(Height) * RowBytes);
+    return;
+  }
+  const uint8_t *S = reinterpret_cast<const uint8_t *>(Src);
+  for (uint32_t Y = 0; Y < Height; ++Y)
+    memcpy(Dst + static_cast<size_t>(Y) * RowBytes,
+           S + static_cast<size_t>(Y) * SrcRowPitch, RowBytes);
+}
+
 uint32_t PushConstantBlock::size() const {
   uint32_t Size = 0;
   for (const PushConstantValue &V : Values)
