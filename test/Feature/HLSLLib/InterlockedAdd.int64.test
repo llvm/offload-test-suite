@@ -158,6 +158,9 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99122
 # XFAIL: Clang
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: DXC && Metal
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
