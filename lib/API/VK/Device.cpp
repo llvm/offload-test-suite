@@ -638,7 +638,18 @@ public:
     PendingDstAccess = 0;
   }
 
+  /// Render passes and framebuffers built by render encoders for this
+  /// command buffer. The encoder records vkCmdBeginRenderPass against these,
+  /// so they must remain alive until the command buffer is submitted and
+  /// finishes execution. Destroyed alongside the command buffer.
+  llvm::SmallVector<VkRenderPass, 4> OwnedRenderPasses;
+  llvm::SmallVector<VkFramebuffer, 4> OwnedFramebuffers;
+
   ~VulkanCommandBuffer() override {
+    for (VkFramebuffer FB : OwnedFramebuffers)
+      vkDestroyFramebuffer(Device, FB, nullptr);
+    for (VkRenderPass RP : OwnedRenderPasses)
+      vkDestroyRenderPass(Device, RP, nullptr);
     if (CmdPool != VK_NULL_HANDLE)
       vkDestroyCommandPool(Device, CmdPool, nullptr);
   }
@@ -649,6 +660,9 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
   createComputeEncoder() override;
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+  createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
 
 private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
@@ -757,6 +771,15 @@ public:
   }
 };
 
+static VkPrimitiveTopology
+getVkTopology(offloadtest::PrimitiveTopology Topology) {
+  switch (Topology) {
+  case offloadtest::PrimitiveTopology::TriangleList:
+    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
+}
+
 static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
   switch (Action) {
   case offloadtest::LoadAction::Load:
@@ -802,6 +825,256 @@ public:
     return RP->getAPI() == GPUAPI::Vulkan;
   }
 };
+
+class VKRenderEncoder : public offloadtest::RenderEncoder {
+  VulkanCommandBuffer &CB;
+
+  // Encoder contract: viewport and scissor must both be set before draw().
+  bool ViewportSet = false;
+  bool ScissorSet = false;
+
+public:
+  VKRenderEncoder(VulkanCommandBuffer &CB)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {}
+
+  ~VKRenderEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Vulkan;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (!CB.CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() override {
+    if (CB.CmdEndDebugUtilsLabel)
+      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (!CB.CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void setViewport(const offloadtest::Viewport &VP) override {
+    // Negative viewport height (with Y origin at the bottom) flips clip->
+    // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
+    // triangle is front-facing on every backend.
+    VkViewport VKVP = {};
+    VKVP.x = VP.X;
+    VKVP.y = VP.Y + VP.Height;
+    VKVP.width = VP.Width;
+    VKVP.height = -VP.Height;
+    VKVP.minDepth = VP.MinDepth;
+    VKVP.maxDepth = VP.MaxDepth;
+    vkCmdSetViewport(CB.CmdBuffer, 0, 1, &VKVP);
+    ViewportSet = true;
+  }
+
+  void setScissor(const offloadtest::ScissorRect &Rect) override {
+    VkRect2D VKRect = {};
+    VKRect.offset.x = Rect.X;
+    VKRect.offset.y = Rect.Y;
+    VKRect.extent.width = Rect.Width;
+    VKRect.extent.height = Rect.Height;
+    vkCmdSetScissor(CB.CmdBuffer, 0, 1, &VKRect);
+    ScissorSet = true;
+  }
+
+  void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
+                       uint32_t /*Stride*/) override {
+    // Stride is part of the pipeline's input layout in Vulkan, not the
+    // buffer binding. The DX12 backend needs it; we don't.
+    if (!VB) {
+      VkBuffer NullBuf = VK_NULL_HANDLE;
+      VkDeviceSize Zero = 0;
+      vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &NullBuf, &Zero);
+      return;
+    }
+    VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
+    VkDeviceSize VKOffset = Offset;
+    vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &Handle, &VKOffset);
+  }
+
+  llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
+                            offloadtest::PrimitiveTopology Topology,
+                            uint32_t VertexCount, uint32_t InstanceCount,
+                            uint32_t FirstVertex,
+                            uint32_t FirstInstance) override {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+    // Topology is fixed at PSO creation in Vulkan; the encoder argument is
+    // accepted for API parity with DX12. A future change can switch to
+    // dynamic topology via VK_EXT_extended_dynamic_state.
+    (void)getVkTopology(Topology);
+
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VKPSO.Pipeline);
+    vkCmdDraw(CB.CmdBuffer, VertexCount, InstanceCount, FirstVertex,
+              FirstInstance);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
+    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    VkBufferCopy Region = {};
+    Region.srcOffset = SrcOffset;
+    Region.dstOffset = DstOffset;
+    Region.size = Size;
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override {
+    vkCmdEndRenderPass(CB.CmdBuffer);
+    popDebugGroup();
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+VulkanCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries the VkRenderPass and the format / load / store policy.
+  // The begin desc supplies the textures that get bound for this encoder.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  llvm::SmallVector<VkImageView, 9> Views;
+  llvm::SmallVector<VkClearValue, 9> ClearValues;
+  uint32_t Width = 0;
+  uint32_t Height = 0;
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    if (!Desc.ColorAttachments[I])
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    VkClearValue CV = {};
+    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the render target to have been "
+            "created with an OptimizedClearValue.");
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
+      assert(ColorCV &&
+             "RenderTarget OptimizedClearValue must be a ClearColor");
+      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+    }
+    ClearValues.push_back(CV);
+
+    if (Tex.Desc.Width > Width)
+      Width = Tex.Desc.Width;
+    if (Tex.Desc.Height > Height)
+      Height = Tex.Desc.Height;
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    const auto &DS = *PassDesc.DepthStencil;
+    VkClearValue CV = {};
+    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
+        DS.StencilLoad == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *DepthCV =
+          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
+      assert(DepthCV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
+    }
+    ClearValues.push_back(CV);
+
+    if (Tex.Desc.Width > Width)
+      Width = Tex.Desc.Width;
+    if (Tex.Desc.Height > Height)
+      Height = Tex.Desc.Height;
+  }
+
+  VkFramebufferCreateInfo FBCI = {};
+  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  FBCI.renderPass = VKPass.Handle;
+  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
+  FBCI.pAttachments = Views.data();
+  FBCI.width = Width;
+  FBCI.height = Height;
+  FBCI.layers = 1;
+
+  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
+                      "Failed to create framebuffer for RenderEncoder."))
+    return Err;
+
+  // The framebuffer must outlive this encoder and remain valid through GPU
+  // execution; the command buffer destroys it on teardown. The render pass
+  // is owned by the user-supplied VulkanRenderPass.
+  OwnedFramebuffers.push_back(Framebuffer);
+
+  VkRenderPassBeginInfo BeginInfo = {};
+  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  BeginInfo.renderPass = VKPass.Handle;
+  BeginInfo.framebuffer = Framebuffer;
+  BeginInfo.renderArea.extent.width = Width;
+  BeginInfo.renderArea.extent.height = Height;
+  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
+  BeginInfo.pClearValues = ClearValues.data();
+
+  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  auto Enc = std::make_unique<VKRenderEncoder>(*this);
+  Enc->pushDebugGroup("RenderEncoder");
+  return Enc;
+}
 
 class VulkanDevice : public offloadtest::Device {
 private:
@@ -2712,63 +2985,6 @@ public:
     for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
-    if (P.isTraditionalRaster()) {
-      auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
-      auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-
-      const auto *ColorCV =
-          std::get_if<ClearColor>(&*RT.Desc.OptimizedClearValue);
-      if (!ColorCV)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Render target clear value must be a ClearColor.");
-      const auto *DepthCV =
-          std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
-      if (!DepthCV)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Depth/stencil clear value must be a ClearDepthStencil.");
-      VkClearValue ClearValues[2] = {};
-      ClearValues[0].color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
-      ClearValues[1].depthStencil = {DepthCV->Depth, DepthCV->Stencil};
-
-      VkRenderPassBeginInfo RenderPassBeginInfo = {};
-      RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      RenderPassBeginInfo.renderPass =
-          llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
-      RenderPassBeginInfo.framebuffer = IS.FrameBuffer;
-      RenderPassBeginInfo.renderArea.extent.width =
-          P.Bindings.RTargetBufferPtr->OutputProps.Width;
-      RenderPassBeginInfo.renderArea.extent.height =
-          P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      RenderPassBeginInfo.clearValueCount = 2;
-      RenderPassBeginInfo.pClearValues = ClearValues;
-
-      vkCmdBeginRenderPass(IS.CB->CmdBuffer, &RenderPassBeginInfo,
-                           VK_SUBPASS_CONTENTS_INLINE);
-
-      // Negative viewport height (with Y origin at the bottom) flips clip->
-      // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
-      // triangle is front-facing on every backend.
-      VkViewport Viewport = {};
-      Viewport.x = 0.0f;
-      Viewport.y =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Viewport.width =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
-      Viewport.height =
-          -static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Viewport.minDepth = 0.0f;
-      Viewport.maxDepth = 1.0f;
-      vkCmdSetViewport(IS.CB->CmdBuffer, 0, 1, &Viewport);
-
-      VkRect2D Scissor = {};
-      Scissor.offset = {0, 0};
-      Scissor.extent.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
-      Scissor.extent.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      vkCmdSetScissor(IS.CB->CmdBuffer, 0, 1, &Scissor);
-    }
-
     const VkPipelineBindPoint BindPoint = P.isTraditionalRaster()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -2803,22 +3019,48 @@ public:
                    << P.DispatchParameters.DispatchGroupCount[0] << ", "
                    << P.DispatchParameters.DispatchGroupCount[1] << ", "
                    << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
-    } else {
-      VkDeviceSize Offsets[1]{0};
-      if (IS.VB) {
-        VkBuffer VBHandle = llvm::cast<VulkanBuffer>(*IS.VB).Buffer;
-        vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
-      }
-      // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CB->CmdBuffer, P.getVertexCount(), 1, 0, 0);
-      llvm::outs() << "Drew " << P.getVertexCount() << " vertices.\n";
-      vkCmdEndRenderPass(IS.CB->CmdBuffer);
+    } else if (P.isTraditionalRaster()) {
+      RenderPassBeginDesc BeginDesc = {};
+      BeginDesc.Pass = IS.RenderPass.get();
+      BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
+      BeginDesc.DepthStencil = IS.DepthStencil.get();
+
+      auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      auto &Encoder = *EncOrErr.get();
+
+      Viewport VP;
+      VP.Width =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
+      VP.Height =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
+      Encoder.setViewport(VP);
+
+      ScissorRect Scissor;
+      Scissor.Width = static_cast<uint32_t>(VP.Width);
+      Scissor.Height = static_cast<uint32_t>(VP.Height);
+      Encoder.setScissor(Scissor);
+
+      if (IS.VB)
+        Encoder.setVertexBuffer(0, IS.VB.get(), 0,
+                                P.Bindings.getVertexStride());
+
+      if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(),
+                                           PrimitiveTopology::TriangleList,
+                                           P.getVertexCount(),
+                                           /*InstanceCount=*/1))
+        return Err;
+      Encoder.endEncoding();
+
       copyTextureToReadback(IS.CB->CmdBuffer,
                             llvm::cast<VulkanTexture>(*IS.RenderTarget),
                             llvm::cast<VulkanBuffer>(*IS.RTReadback),
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    } else {
+      assert(false && "Unhandled test pipeline variant.");
     }
 
     for (auto &R : IS.Resources)
@@ -3054,12 +3296,12 @@ public:
       llvm::outs() << "Graphics Pipeline created.\n";
 
       ColorAttachmentFormatDesc ColorAttachment = {};
-      ColorAttachment.Fmt = *FormatOrErr;
+      ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
       ColorAttachment.Load = LoadAction::Clear;
       ColorAttachment.Store = StoreAction::Store;
 
       DepthStencilAttachmentFormatDesc DSAttachment = {};
-      DSAttachment.Fmt = Format::D32FloatS8Uint;
+      DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
       DSAttachment.DepthLoad = LoadAction::Clear;
       DSAttachment.DepthStore = StoreAction::Store;
       DSAttachment.StencilLoad = LoadAction::DontCare;
