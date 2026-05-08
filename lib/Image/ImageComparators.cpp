@@ -83,4 +83,5 @@ bool ImageComparatorDistance::evaluateCheck(const CompareCheck &C,
   case CompareCheck::None:
     llvm_unreachable("Check run with no rule");
   }
+  llvm_unreachable("All cases handled");
 }
