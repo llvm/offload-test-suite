@@ -22,7 +22,7 @@ A complete deployment consists of two install prefixes:
    - `include/`, `lib/clang/<ver>/include/` — clang resource headers
      (`hlsl-resource-headers` component).
    - `share/hlsl-test-suite/` — test sources, `lit.site.cfg.py.in` template,
-     `configure-test-suite.py`, and (optionally) golden images.
+     `configure-test-suite.py`, and golden images.
 
 2. **DXC prefix** — produced by `cmake --install <DXC-build> --prefix <dxc-prefix>`.
    Kept separate from the LLVM prefix to avoid header / binary conflicts

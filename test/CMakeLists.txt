@@ -227,7 +227,7 @@ install(FILES ${OFFLOADTEST_SOURCE_DIR}/test/lit.site.cfg.py.in
   COMPONENT offload-test-suite)
 
 # Install the standalone configure script.
-install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/configure-test-suite.py
+install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/utils/configure-test-suite.py
   DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}
   COMPONENT offload-test-suite)
 

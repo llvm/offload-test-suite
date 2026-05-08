@@ -153,7 +153,6 @@ jobs:
           fetch-depth: 1
       - name: Checkout Golden Images
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        if: inputs.SplitBuild != true
         with:
           repository: llvm/offload-golden-images
           ref: main
