@@ -169,11 +169,11 @@ public:
   createFence(llvm::StringRef Name) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Buffer>>
-  createBuffer(std::string Name, BufferCreateDesc &Desc,
+  createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Texture>>
-  createTexture(std::string Name, TextureCreateDesc &Desc) = 0;
+  createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
 
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
