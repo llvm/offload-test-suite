@@ -190,9 +190,9 @@ jobs:
             cd llvm-project
             mkdir build
             cd build
-            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
+            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ${{ github.workspace }}/llvm-project/llvm/
             ninja hlsl-test-depends
-      - name: Dump GPU Info
+      - name: Dump GPU Info (build runner)
         if: inputs.SplitBuild != true
         run: |
             cd llvm-project
@@ -232,19 +232,28 @@ jobs:
           name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
           path: ${{ runner.temp }}/dxdiag.txt
 
-      # When SplitBuild is true, package and upload build
-      # artifacts for the test job.
-      - name: Package build artifacts
+      # When SplitBuild is true, install the LLVM/DXC distribution and the
+      # standalone offload test suite into a single portable prefix, then
+      # tar that prefix for the test job. The prefix is fully self-contained:
+      # tools under bin/, test sources + configure script under
+      # share/hlsl-test-suite/. No CMake, ninja, or compiler toolchain is
+      # required on the test runner.
+      - name: Install distribution
+        if: inputs.SplitBuild == true
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE/llvm-project/build
+            ninja install-distribution install-offload-tools install-offload-test-suite
+            # DXC isn't part of the LLVM distribution; install it into the
+            # same prefix so non-clang suites still find dxc on PATH.
+            cmake --install $GITHUB_WORKSPACE/DXC/build --prefix $GITHUB_WORKSPACE/install
+      - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
         run: |
             cd $GITHUB_WORKSPACE
-            tar cf $RUNNER_TEMP/build-artifacts.tar \
-              --exclude='*.obj' \
-              --exclude='*.o' \
-              --exclude='*.ilk' \
-              --exclude='*.pdb' \
-              DXC/build/bin llvm-project/build
+            tar cf $RUNNER_TEMP/build-artifacts.tar -C install .
       - name: Upload build artifacts
         if: inputs.SplitBuild == true
         uses: actions/upload-artifact@v4
@@ -260,86 +269,20 @@ jobs:
       checks: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
-      - name: Checkout DXC
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: Microsoft/DirectXShaderCompiler
-          ref: ${{ inputs.DXC-branch }}
-          path: DXC
-          fetch-depth: 1
-          submodules: true
-      - name: Checkout LLVM
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: ${{ inputs.LLVM-fork }}/llvm-project
-          ref: ${{ inputs.LLVM-branch }}
-          path: llvm-project
-          fetch-depth: 1
-      - name: Checkout OffloadTest
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: llvm/offload-test-suite
-          ref: ${{ inputs.OffloadTest-branch }}
-          path: OffloadTest
-          fetch-depth: 1
-      - name: Checkout Golden Images
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: llvm/offload-golden-images
-          ref: main
-          path: golden-images
-          fetch-depth: 1
+      # Test job consumes ONLY the install tarball produced by the build job.
+      # No source checkouts of llvm-project / DXC / OffloadTest are needed
+      # here -- everything required to run lit lives inside the prefix.
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}
-      - name: Extract build artifacts
+      - name: Extract install prefix
         shell: bash
         run: |
-            cd $GITHUB_WORKSPACE
-            tar xf $RUNNER_TEMP/build-artifacts.tar
-      - name: Refresh artifact timestamps
-        shell: python
-        run: |
-          import os, pathlib, shutil, time, re
-          workspace = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
-          # 1) The build runner's CMakeCache.txt has CMAKE_MAKE_PROGRAM baked
-          #    in as an absolute path (often using 8.3 short names) that may
-          #    not resolve on the test runner. Rewrite it to whatever ninja
-          #    is on PATH here, so any CMake regen would still work.
-          ninja_path = shutil.which('ninja') or shutil.which('ninja.exe')
-          for cache in [
-              workspace / 'llvm-project' / 'build' / 'CMakeCache.txt',
-              workspace / 'DXC' / 'build' / 'CMakeCache.txt',
-          ]:
-              if cache.is_file() and ninja_path:
-                  text = cache.read_text(encoding='utf-8', errors='replace')
-                  # Match the CMakeCache.txt entry of the form
-                  #   CMAKE_MAKE_PROGRAM:FILEPATH=<old absolute path to ninja>
-                  # anchored at the start of a line (case-insensitive, multiline)
-                  # and replace just the value after the '=' with the ninja
-                  # executable resolved on this (test) runner.
-                  text = re.sub(
-                      r'(?im)^(CMAKE_MAKE_PROGRAM:FILEPATH=).*$',
-                      lambda m: m.group(1) + ninja_path.replace('\\', '/'),
-                      text,
-                  )
-                  cache.write_text(text, encoding='utf-8')
-          # 2) Ensure ninja considers build outputs up-to-date by setting
-          #    their mtimes into the future, so freshly checked-out source
-          #    trees can never be newer than them and trigger a CMake regen.
-          future = time.time() + 24 * 60 * 60
-          for d in ['DXC/build/bin', 'llvm-project/build']:
-              root = workspace / d
-              if not root.exists():
-                  continue
-              for f in root.rglob('*'):
-                  if f.is_file():
-                      try:
-                          os.utime(f, (future, future))
-                      except OSError:
-                          pass
+            set -euxo pipefail
+            mkdir -p $GITHUB_WORKSPACE/install
+            tar xf $RUNNER_TEMP/build-artifacts.tar -C $GITHUB_WORKSPACE/install
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
@@ -353,24 +296,54 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
-      - name: Dump GPU Info
+          # The test runner needs only lit + pyyaml; no source checkout is
+          # available so we can't pip install -r requirements.txt. Keep
+          # this list in sync with OffloadTest/test/requirements.txt.
+          pip-install: lit pyyaml
+      - name: Dump GPU Info (test runner)
+        shell: bash
         run: |
-            cd llvm-project
-            cd build
-            ./bin/api-query
+            $GITHUB_WORKSPACE/install/bin/api-query
+      - name: Resolve lit suite from TestTarget
+        id: suite
+        shell: bash
+        run: |
+            # SplitBuild callers always pass a single specific suite as
+            # TestTarget=check-hlsl-<suite>. Strip the prefix to get the
+            # suite name configure-test-suite.py understands.
+            set -euxo pipefail
+            target='${{ inputs.TestTarget }}'
+            case "$target" in
+              check-hlsl-*)
+                suite="${target#check-hlsl-}"
+                ;;
+              *)
+                echo "::error::SplitBuild requires TestTarget=check-hlsl-<suite>, got: $target"
+                exit 1
+                ;;
+            esac
+            echo "suite=$suite" >> $GITHUB_OUTPUT
+            echo "Will run lit suite: $suite"
+      - name: Configure standalone test suite
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
+            python configure-test-suite.py --suite "${{ steps.suite.outputs.suite }}"
       - name: Run HLSL Tests
+        shell: bash
         run: |
-            cd llvm-project
-            cd build
-            ninja check-hlsl-unit
-            ninja ${{ inputs.TestTarget }}
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
+            suite='${{ steps.suite.outputs.suite }}'
+            python -m lit -v "run/test/$suite" \
+              --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
           comment_mode: off
-          files: llvm-project/build/**/testresults.xunit.xml
+          files: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
       - name: Run dxdiag (Windows only)
         if: inputs.OS == 'windows' && failure()
         shell: powershell

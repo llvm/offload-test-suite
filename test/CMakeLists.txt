@@ -191,3 +191,55 @@ endif()
 
 umbrella_lit_testsuite_end(check-hlsl)
 set_target_properties(check-hlsl PROPERTIES FOLDER "HLSL tests")
+
+# === Standalone test suite distribution ===
+#
+# Install the test sources, the canonical lit.site.cfg.py.in template, and
+# the configure-test-suite.py helper into a portable install prefix. After
+# installing, the prefix can be tarred up and consumed on a different
+# machine without a CMake or compiler toolchain. The consumer runs:
+#
+#   cd <prefix>/share/hlsl-test-suite
+#   ./configure-test-suite.py --suite clang-d3d12
+#   lit run/test/clang-d3d12
+#
+# All test infrastructure is installed under a single `offload-test-suite`
+# component. Build with `ninja install-offload-test-suite`.
+set(OFFLOADTEST_INSTALL_TESTDIR "share/hlsl-test-suite" CACHE STRING
+    "Install directory (relative to CMAKE_INSTALL_PREFIX) for the standalone offload test suite distribution.")
+
+# Install the test source tree. Using two separate install(DIRECTORY) calls
+# keeps EXCLUDE patterns out of FILES_MATCHING, where EXCLUDE inside
+# FILES_MATCHING is interpreted as an include-override.
+install(DIRECTORY ${OFFLOADTEST_SOURCE_DIR}/test/
+  DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}/test
+  COMPONENT offload-test-suite
+  PATTERN "Output" EXCLUDE
+  PATTERN "__pycache__" EXCLUDE
+  PATTERN "CMakeLists.txt" EXCLUDE
+  PATTERN "*.py.in" EXCLUDE)
+
+# Install the canonical lit.site.cfg.py template so configure-test-suite.py
+# can substitute @VAR@ tokens against the same template the in-tree build
+# uses, avoiding any drift between the two code paths.
+install(FILES ${OFFLOADTEST_SOURCE_DIR}/test/lit.site.cfg.py.in
+  DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}
+  COMPONENT offload-test-suite)
+
+# Install the standalone configure script.
+install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/configure-test-suite.py
+  DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}
+  COMPONENT offload-test-suite)
+
+# If golden images were available at configure time, ship them inside the
+# distribution so the test runner doesn't need to re-checkout the repo.
+if (GOLDENIMAGE_DIR AND EXISTS "${GOLDENIMAGE_DIR}")
+  install(DIRECTORY ${GOLDENIMAGE_DIR}/
+    DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}/golden-images
+    COMPONENT offload-test-suite)
+endif()
+
+if (NOT LLVM_ENABLE_IDE)
+  add_llvm_install_targets(install-offload-test-suite
+    COMPONENT offload-test-suite)
+endif()
