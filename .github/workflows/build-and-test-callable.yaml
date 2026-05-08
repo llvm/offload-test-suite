@@ -245,21 +245,31 @@ jobs:
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/llvm-project/build
             ninja install-distribution install-offload-tools install-offload-test-suite
-            # DXC isn't part of the LLVM distribution; install it into the
-            # same prefix so non-clang suites still find dxc on PATH.
-            cmake --install $GITHUB_WORKSPACE/DXC/build --prefix $GITHUB_WORKSPACE/install
+            # DXC is packaged into its own prefix to avoid header/binary
+            # conflicts with the LLVM distribution. The test job downloads
+            # both artifacts and points configure-test-suite.py at the dxc
+            # binary explicitly via --dxc-path.
+            cmake --install $GITHUB_WORKSPACE/DXC/build --prefix $GITHUB_WORKSPACE/install-dxc
       - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
         run: |
             cd $GITHUB_WORKSPACE
             tar cf $RUNNER_TEMP/build-artifacts.tar -C install .
+            tar cf $RUNNER_TEMP/dxc-artifacts.tar -C install-dxc .
       - name: Upload build artifacts
         if: inputs.SplitBuild == true
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}/build-artifacts.tar
+          retention-days: 1
+      - name: Upload DXC artifacts
+        if: inputs.SplitBuild == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxc-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ runner.temp }}/dxc-artifacts.tar
           retention-days: 1
 
   test:
@@ -277,12 +287,18 @@ jobs:
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}
+      - name: Download DXC artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dxc-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ runner.temp }}
       - name: Extract install prefix
         shell: bash
         run: |
             set -euxo pipefail
-            mkdir -p $GITHUB_WORKSPACE/install
+            mkdir -p $GITHUB_WORKSPACE/install $GITHUB_WORKSPACE/install-dxc
             tar xf $RUNNER_TEMP/build-artifacts.tar -C $GITHUB_WORKSPACE/install
+            tar xf $RUNNER_TEMP/dxc-artifacts.tar -C $GITHUB_WORKSPACE/install-dxc
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
@@ -329,7 +345,13 @@ jobs:
         run: |
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
-            python configure-test-suite.py --suite "${{ steps.suite.outputs.suite }}"
+            # Locate dxc in the separate DXC install prefix. .exe on Windows,
+            # bare name elsewhere.
+            dxc_path=$GITHUB_WORKSPACE/install-dxc/bin/dxc
+            if [ -x "${dxc_path}.exe" ]; then dxc_path="${dxc_path}.exe"; fi
+            python configure-test-suite.py \
+              --suite "${{ steps.suite.outputs.suite }}" \
+              --dxc-path "$dxc_path"
       - name: Run HLSL Tests
         shell: bash
         run: |
