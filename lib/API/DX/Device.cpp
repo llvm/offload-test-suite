@@ -358,10 +358,7 @@ public:
     return Ptr;
   }
 
-  llvm::Error unmap() override {
-    Buffer->Unmap(0, nullptr);
-    return llvm::Error::success();
-  }
+  void unmap() override { Buffer->Unmap(0, nullptr); }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::DirectX;
