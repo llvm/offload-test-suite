@@ -34,6 +34,8 @@ Queue::~Queue() {}
 
 Texture::~Texture() {}
 
+RenderPass::~RenderPass() {}
+
 Device::~Device() {}
 
 llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>

@@ -736,19 +736,15 @@ public:
   VkPipeline Pipeline;
   VkPipelineLayout Layout;
   llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
-  VkRenderPass RenderPass;
 
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
-                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts,
-                      VkRenderPass RenderPass)
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
       : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
-        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)),
-        RenderPass(RenderPass) {}
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
 
   ~VulkanPipelineState() override {
     vkDestroyPipeline(Dev, Pipeline, nullptr);
-    vkDestroyRenderPass(Dev, RenderPass, nullptr);
     vkDestroyPipelineLayout(Dev, Layout, nullptr);
     for (VkDescriptorSetLayout L : SetLayouts)
       vkDestroyDescriptorSetLayout(Dev, L, nullptr);
@@ -758,6 +754,53 @@ public:
     return B->getAPI() == GPUAPI::Vulkan;
   }
 };
+
+static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
+  switch (Action) {
+  case offloadtest::LoadAction::Load:
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+  case offloadtest::LoadAction::Clear:
+    return VK_ATTACHMENT_LOAD_OP_CLEAR;
+  case offloadtest::LoadAction::DontCare:
+    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  }
+  llvm_unreachable("All LoadAction cases handled");
+}
+
+static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
+  switch (Action) {
+  case offloadtest::StoreAction::Store:
+    return VK_ATTACHMENT_STORE_OP_STORE;
+  case offloadtest::StoreAction::DontCare:
+    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  }
+  llvm_unreachable("All StoreAction cases handled");
+}
+
+/// Vulkan render pass — owns a VkRenderPass built from the descriptor's
+/// formats and load/store actions. The handle outlives any encoder built
+/// against this pass and is destroyed with the RenderPass object.
+class VulkanRenderPass final : public offloadtest::RenderPass {
+public:
+  VkDevice Dev;
+  VkRenderPass Handle;
+  offloadtest::RenderPassDesc Desc;
+
+  VulkanRenderPass(VkDevice Dev, VkRenderPass Handle,
+                   offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::Vulkan), Dev(Dev), Handle(Handle),
+        Desc(std::move(Desc)) {}
+
+  ~VulkanRenderPass() override {
+    if (Handle != VK_NULL_HANDLE)
+      vkDestroyRenderPass(Dev, Handle, nullptr);
+  }
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
 class VulkanDevice : public offloadtest::Device {
 private:
   std::shared_ptr<VulkanInstance> Instance;
@@ -845,6 +888,7 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
+    std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
@@ -1175,8 +1219,7 @@ public:
     vkDestroyShaderModule(Device, CSModule, nullptr);
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
-        VK_NULL_HANDLE);
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -1194,20 +1237,45 @@ public:
                                         PipelineLayout))
       return Err;
 
-    auto RenderPassOrErr = createRenderPass(RTFormats, DSFormat);
+    // Build a RenderPassDesc from the PSO's RT/DS formats.
+    RenderPassDesc PassDesc;
+    PassDesc.ColorAttachments.reserve(RTFormats.size());
+    for (Format F : RTFormats) {
+      ColorAttachmentFormatDesc CA = {};
+      CA.Fmt = F;
+      CA.Load = LoadAction::DontCare;
+      CA.Store = StoreAction::DontCare;
+      PassDesc.ColorAttachments.push_back(CA);
+    }
+    if (DSFormat) {
+      DepthStencilAttachmentFormatDesc DS = {};
+      DS.Fmt = *DSFormat;
+      DS.DepthLoad = LoadAction::DontCare;
+      DS.DepthStore = StoreAction::DontCare;
+      DS.StencilLoad = LoadAction::DontCare;
+      DS.StencilStore = StoreAction::DontCare;
+      PassDesc.DepthStencil = DS;
+    }
+
+    // NOTE: After pipeline creation this render pass can be dropped. Later
+    // render passes just need to be compatible with this render pass, or in
+    // other words: the format, sample count and number of targets (rt and ds),
+    // need to match.
+    auto RenderPassOrErr = createRenderPass(PassDesc);
     if (!RenderPassOrErr) {
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
       return RenderPassOrErr.takeError();
     }
-    VkRenderPass RenderPass = *RenderPassOrErr;
-    llvm::outs() << "Render pass created.\n";
+    std::unique_ptr<offloadtest::RenderPass> RenderPass =
+        std::move(*RenderPassOrErr);
+    VkRenderPass RenderPassHandle =
+        llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
 
     std::vector<VkShaderModule> ShaderModules;
     auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
     if (!VSModOrErr) {
-      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1219,7 +1287,6 @@ public:
     if (!PSModOrErr) {
       for (auto *M : ShaderModules)
         vkDestroyShaderModule(Device, M, nullptr);
-      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1246,7 +1313,6 @@ public:
                 parseSpecializationConstant(SpecConst, Entry, VSSpecData)) {
           for (auto *M : ShaderModules)
             vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyRenderPass(Device, RenderPass, nullptr);
           vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
           for (auto *L : SetLayouts)
             vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1279,7 +1345,6 @@ public:
                 parseSpecializationConstant(SpecConst, Entry, PSSpecData)) {
           for (auto *M : ShaderModules)
             vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyRenderPass(Device, RenderPass, nullptr);
           vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
           for (auto *L : SetLayouts)
             vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1399,7 +1464,7 @@ public:
     PipelineCI.pColorBlendState = &BlendCI;
     PipelineCI.pDynamicState = &DynamicCI;
     PipelineCI.layout = PipelineLayout;
-    PipelineCI.renderPass = RenderPass;
+    PipelineCI.renderPass = RenderPassHandle;
 
     VkPipeline Pipeline = VK_NULL_HANDLE;
     if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
@@ -1408,7 +1473,6 @@ public:
                                "Failed to create graphics pipeline.")) {
       for (auto *M : ShaderModules)
         vkDestroyShaderModule(Device, M, nullptr);
-      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1420,8 +1484,7 @@ public:
       vkDestroyShaderModule(Device, M, nullptr);
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
-        RenderPass);
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -1658,6 +1721,82 @@ public:
     return VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
         CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    // Build a VkRenderPass from the descriptor's attachment formats and
+    // load/store actions. Initial layout for Load-action attachments is the
+    // standard attachment layout (caller's responsibility); for Clear /
+    // DontCare it's UNDEFINED. Final layout is always the standard
+    // attachment layout — caller does any post-pass transitions.
+    llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
+    llvm::SmallVector<VkAttachmentReference, 8> ColorRefs;
+
+    for (const ColorAttachmentFormatDesc &Color : Desc.ColorAttachments) {
+      VkAttachmentDescription AD = {};
+      AD.format = getVulkanFormat(Color.Fmt);
+      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.loadOp = getVkLoadOp(Color.Load);
+      AD.storeOp = getVkStoreOp(Color.Store);
+      AD.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      AD.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      AD.initialLayout = Color.Load == LoadAction::Load
+                             ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_UNDEFINED;
+      AD.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      VkAttachmentReference Ref = {};
+      Ref.attachment = static_cast<uint32_t>(Attachments.size());
+      Ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      Attachments.push_back(AD);
+      ColorRefs.push_back(Ref);
+    }
+
+    VkAttachmentReference DepthReference = {};
+    bool HasDS = false;
+    if (Desc.DepthStencil) {
+      const auto &DS = *Desc.DepthStencil;
+      VkAttachmentDescription AD = {};
+      AD.format = getVulkanFormat(DS.Fmt);
+      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.loadOp = getVkLoadOp(DS.DepthLoad);
+      AD.storeOp = getVkStoreOp(DS.DepthStore);
+      AD.stencilLoadOp = getVkLoadOp(DS.StencilLoad);
+      AD.stencilStoreOp = getVkStoreOp(DS.StencilStore);
+      AD.initialLayout = (DS.DepthLoad == LoadAction::Load ||
+                          DS.StencilLoad == LoadAction::Load)
+                             ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_UNDEFINED;
+      AD.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+      DepthReference.attachment = static_cast<uint32_t>(Attachments.size());
+      DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+      Attachments.push_back(AD);
+      HasDS = true;
+    }
+
+    VkSubpassDescription Subpass = {};
+    Subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    Subpass.colorAttachmentCount = static_cast<uint32_t>(ColorRefs.size());
+    Subpass.pColorAttachments = ColorRefs.data();
+    Subpass.pDepthStencilAttachment = HasDS ? &DepthReference : nullptr;
+
+    VkRenderPassCreateInfo RPCI = {};
+    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
+    RPCI.pAttachments = Attachments.data();
+    RPCI.subpassCount = 1;
+    RPCI.pSubpasses = &Subpass;
+
+    VkRenderPass Handle = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(vkCreateRenderPass(Device, &RPCI, nullptr, &Handle),
+                        "Failed to create render pass."))
+      return Err;
+    return std::make_unique<VulkanRenderPass>(Device, Handle, Desc);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -2174,87 +2313,16 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Expected<VkRenderPass>
-  createRenderPass(llvm::ArrayRef<Format> RTFormats,
-                   std::optional<Format> DSFormat) {
-    // Only 8 render targets can be bound + 1 depth stencil target.
-    llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
-    llvm::SmallVector<VkAttachmentReference, 8> ColorReferences;
-    for (size_t I = 0, N = RTFormats.size(); I < N; ++I) {
-      VkAttachmentDescription AttachmentDesc = {};
-      AttachmentDesc.format = getVulkanFormat(RTFormats[I]);
-      AttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
-      AttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-      AttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-      AttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-      AttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      AttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      AttachmentDesc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      Attachments.push_back(AttachmentDesc);
-
-      VkAttachmentReference ColorReference = {};
-      ColorReference.attachment = I;
-      ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      ColorReferences.push_back(ColorReference);
-    }
-
-    VkAttachmentReference DepthReference = {};
-    if (DSFormat.has_value()) {
-      VkAttachmentDescription AttachmentDesc = {};
-      AttachmentDesc.format = getVulkanFormat(*DSFormat);
-      AttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
-      AttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-      AttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      AttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-      AttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      AttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      AttachmentDesc.finalLayout =
-          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-      Attachments.push_back(AttachmentDesc);
-
-      DepthReference.attachment = Attachments.size() - 1;
-      DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    }
-
-    VkSubpassDescription SubpassDescription = {};
-    SubpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    SubpassDescription.colorAttachmentCount = ColorReferences.size();
-    SubpassDescription.pColorAttachments = ColorReferences.data();
-    SubpassDescription.pDepthStencilAttachment =
-        DSFormat.has_value() ? &DepthReference : nullptr;
-    SubpassDescription.inputAttachmentCount = 0;
-    SubpassDescription.pInputAttachments = nullptr;
-    SubpassDescription.preserveAttachmentCount = 0;
-    SubpassDescription.pPreserveAttachments = nullptr;
-    SubpassDescription.pResolveAttachments = nullptr;
-
-    VkRenderPassCreateInfo RPCI = {};
-    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
-    RPCI.pAttachments = Attachments.data();
-    RPCI.subpassCount = 1;
-    RPCI.pSubpasses = &SubpassDescription;
-    // RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
-    // RPCI.pDependencies = Dependencies.data();
-
-    VkRenderPass RenderPass = VK_NULL_HANDLE;
-    if (auto Err =
-            VK::toError(vkCreateRenderPass(Device, &RPCI, nullptr, &RenderPass),
-                        "Failed to create render pass."))
-      return Err;
-    return RenderPass;
-  }
-
   llvm::Error createFrameBuffer(InvocationState &IS) {
     auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
     auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-    auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
 
     std::array<VkImageView, 2> Views = {RT.View, DS.View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    FbufCreateInfo.renderPass = PipelineState.RenderPass;
+    FbufCreateInfo.renderPass =
+        llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
     FbufCreateInfo.width = RT.Desc.Width;
@@ -2640,7 +2708,6 @@ public:
     if (P.isTraditionalRaster()) {
       auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
       auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-      auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
 
       const auto *ColorCV =
           std::get_if<ClearColor>(&*RT.Desc.OptimizedClearValue);
@@ -2660,7 +2727,8 @@ public:
 
       VkRenderPassBeginInfo RenderPassBeginInfo = {};
       RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      RenderPassBeginInfo.renderPass = PipelineState.RenderPass;
+      RenderPassBeginInfo.renderPass =
+          llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
       RenderPassBeginInfo.framebuffer = IS.FrameBuffer;
       RenderPassBeginInfo.renderArea.extent.width =
           P.Bindings.RTargetBufferPtr->OutputProps.Width;
@@ -2977,6 +3045,28 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Graphics Pipeline created.\n";
+
+      ColorAttachmentFormatDesc ColorAttachment = {};
+      ColorAttachment.Fmt = *FormatOrErr;
+      ColorAttachment.Load = LoadAction::Clear;
+      ColorAttachment.Store = StoreAction::Store;
+
+      DepthStencilAttachmentFormatDesc DSAttachment = {};
+      DSAttachment.Fmt = Format::D32FloatS8Uint;
+      DSAttachment.DepthLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::Store;
+      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilStore = StoreAction::DontCare;
+
+      RenderPassDesc PassDesc;
+      PassDesc.ColorAttachments.push_back(ColorAttachment);
+      PassDesc.DepthStencil = DSAttachment;
+
+      auto RenderPassOrErr = createRenderPass(PassDesc);
+      if (!RenderPassOrErr)
+        return RenderPassOrErr.takeError();
+      State.RenderPass = std::move(*RenderPassOrErr);
+      llvm::outs() << "Render pass created.\n";
 
       if (auto Err = createFrameBuffer(State))
         return Err;

@@ -319,6 +319,22 @@ public:
   }
 };
 
+/// Metal has no standalone render-pass object: render pass info lives on
+/// MTLRenderPassDescriptor and is consumed when a render command encoder
+/// is created. We therefore just stash the descriptor for the encoder to
+/// translate later.
+class MTLRenderPass final : public offloadtest::RenderPass {
+public:
+  offloadtest::RenderPassDesc Desc;
+
+  explicit MTLRenderPass(offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::Metal), Desc(std::move(Desc)) {}
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::Metal;
+  }
+};
+
 class MTLCommandBuffer : public offloadtest::CommandBuffer {
 public:
   MTL::CommandBuffer *CmdBuffer = nullptr;
@@ -1261,6 +1277,11 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
     return MTLCommandBuffer::create(GraphicsQueue.Queue);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    return std::make_unique<MTLRenderPass>(Desc);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>

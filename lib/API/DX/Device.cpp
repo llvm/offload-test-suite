@@ -652,6 +652,22 @@ DXCommandBuffer::createComputeEncoder() {
   return Enc;
 }
 
+/// DX12 has no native render-pass object in the path this backend uses
+/// (we drive raster via OMSetRenderTargets + ClearRenderTargetView /
+/// ClearDepthStencilView, not BeginRenderPass). The render pass therefore
+/// just stores its description for the encoder to consult later.
+class DXRenderPass final : public offloadtest::RenderPass {
+public:
+  offloadtest::RenderPassDesc Desc;
+
+  explicit DXRenderPass(offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::DirectX), Desc(std::move(Desc)) {}
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::DirectX;
+  }
+};
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
@@ -1153,6 +1169,11 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
     return DXCommandBuffer::create(Device);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    return std::make_unique<DXRenderPass>(Desc);
   }
 
   void addResourceUploadCommands(Resource &R, InvocationState &IS,
