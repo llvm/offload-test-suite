@@ -11,6 +11,11 @@ on:
         required: false
         default: 'main'
         type: string
+      OffloadTest-fork:
+        description: 'Test Suite fork'
+        required: false
+        default: 'llvm'
+        type: string
       LLVM-branch:
         description: 'LLVM Branch'
         required: false
@@ -70,6 +75,11 @@ on:
         description: 'Test Suite Branch'
         required: false
         default: 'main'
+        type: string
+      OffloadTest-fork:
+        description: 'Test Suite Fork'
+        required: false
+        default: 'llvm'
         type: string
       LLVM-branch:
         description: 'LLVM Branch'
@@ -147,7 +157,7 @@ jobs:
       - name: Checkout OffloadTest
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          repository: llvm/offload-test-suite
+          repository: ${{ inputs.OffloadTest-fork }}/offload-test-suite
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1

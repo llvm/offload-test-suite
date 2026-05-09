@@ -234,7 +234,8 @@ install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/utils/configure-test-suite.py
 # If golden images were available at configure time, ship them inside the
 # distribution so the test runner doesn't need to re-checkout the repo.
 if (GOLDENIMAGE_DIR AND EXISTS "${GOLDENIMAGE_DIR}")
-  install(DIRECTORY ${GOLDENIMAGE_DIR}/
+  file(TO_CMAKE_PATH "${GOLDENIMAGE_DIR}" _goldenimage_dir)
+  install(DIRECTORY "${_goldenimage_dir}/"
     DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}/golden-images
     COMPONENT offload-test-suite)
 endif()
