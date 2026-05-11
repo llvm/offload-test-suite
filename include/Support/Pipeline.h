@@ -60,7 +60,7 @@ enum class DataFormat {
 
 enum class DescriptorKind { UAV, SRV, CBV, SAMPLER };
 
-static DescriptorKind getDescriptorKind(ResourceKind RK) {
+static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
   case ResourceKind::StructuredBuffer:
