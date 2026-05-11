@@ -1270,15 +1270,13 @@ public:
                                        RootSig, ArgBuffer))
       return Err;
 
-    NS::Error *Error = nullptr;
-    const llvm::StringRef Program = CS.Shader->getBuffer();
-
     auto MetalIR = convertToMetalIR(Stages::Compute, /*IsGraphics=*/false,
                                     RootSig.get(), CS);
     if (!MetalIR)
       return MetalIR.takeError();
 
     dispatch_data_t Data = IRMetalLibGetBytecodeData(MetalIR->Binary.get());
+    NS::Error *Error = nullptr;
     MTL::Library *Lib = Device->newLibrary(Data, &Error);
     if (Error)
       return toError(Error);
