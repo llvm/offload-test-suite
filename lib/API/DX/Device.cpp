@@ -657,10 +657,6 @@ DXCommandBuffer::createComputeEncoder() {
   return Enc;
 }
 
-/// DX12 has no native render-pass object in the path this backend uses
-/// (we drive raster via OMSetRenderTargets + ClearRenderTargetView /
-/// ClearDepthStencilView, not BeginRenderPass). The render pass therefore
-/// just stores its description for the encoder to consult later.
 class DXRenderPass final : public offloadtest::RenderPass {
 public:
   offloadtest::RenderPassDesc Desc;
@@ -819,10 +815,6 @@ DXCommandBuffer::createRenderEncoder(
       static_cast<UINT>(RTVHandles.size()), RTVHandles.data(),
       /*RTsSingleHandleToDescriptorRange=*/false, DSVPtr);
 
-  // Apply LoadAction::Clear for each attachment that requested it. Clear
-  // values come from the texture's OptimizedClearValue — both because DX12
-  // requires a matching clear value to skip a clear-color fixup pass, and
-  // because tests don't currently need pass-level overrides.
   for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
     if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)
       continue;

@@ -642,8 +642,7 @@ public:
 
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
-    // Stride lives in the render pipeline's vertex descriptor in Metal,
-    // not on the buffer binding.
+    // Stride is needed in DX12 at binding time, ignore parameter here.
     if (!VB) {
       RenderEnc->setVertexBuffer(nullptr, 0, Slot);
       return;
@@ -1681,8 +1680,6 @@ public:
     if (Error)
       return toError(Error);
 
-    // Bake the depth-stencil state and cull mode into the pipeline, mirroring
-    // the DX12 / Vulkan PSO model.
     MTL::DepthStencilDescriptor *DSDesc =
         MTL::DepthStencilDescriptor::alloc()->init();
     DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
