@@ -930,19 +930,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
-                                 offloadtest::Buffer &Dst, size_t DstOffset,
-                                 size_t Size) override {
-    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
-    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
-    VkBufferCopy Region = {};
-    Region.srcOffset = SrcOffset;
-    Region.dstOffset = DstOffset;
-    Region.size = Size;
-    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
-    return llvm::Error::success();
-  }
-
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
     popDebugGroup();

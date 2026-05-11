@@ -694,20 +694,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error copyBufferToBuffer(offloadtest::Buffer & /*Src*/,
-                                 size_t /*SrcOffset*/,
-                                 offloadtest::Buffer & /*Dst*/,
-                                 size_t /*DstOffset*/,
-                                 size_t /*Size*/) override {
-    // A Metal render command encoder cannot record blit operations. The
-    // caller must end this encoder and use a separate compute or blit
-    // encoder for buffer copies.
-    return llvm::createStringError(
-        std::errc::not_supported,
-        "copyBufferToBuffer is not supported on a Metal render encoder; "
-        "end the encoder and use a separate compute or blit encoder.");
-  }
-
   void endEncodingImpl() override {
     if (RenderEnc) {
       RenderEnc->popDebugGroup();
