@@ -274,6 +274,11 @@ Results:
 # Height > 1 is required everywhere -- a 1-row RT would only read the
 # unpadded last row and silently sidestep the bug.
 
+# Clang's HLSL -> DXIL lowering does not yet implement the graphics-stage
+# signature intrinsics (llvm.dx.load.input / llvm.dx.store.output) needed
+# for SV_POSITION / SV_TARGET plumbing; clang -> SPIR-V is unaffected.
+# XFAIL: Clang && DirectX
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
