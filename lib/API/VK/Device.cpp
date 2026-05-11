@@ -638,18 +638,12 @@ public:
     PendingDstAccess = 0;
   }
 
-  /// Render passes and framebuffers built by render encoders for this
-  /// command buffer. The encoder records vkCmdBeginRenderPass against these,
-  /// so they must remain alive until the command buffer is submitted and
-  /// finishes execution. Destroyed alongside the command buffer.
-  llvm::SmallVector<VkRenderPass, 4> OwnedRenderPasses;
+  /// Keep-alive list for Framebuffers constructed by RencderEncoders.
   llvm::SmallVector<VkFramebuffer, 4> OwnedFramebuffers;
 
   ~VulkanCommandBuffer() override {
     for (VkFramebuffer FB : OwnedFramebuffers)
       vkDestroyFramebuffer(Device, FB, nullptr);
-    for (VkRenderPass RP : OwnedRenderPasses)
-      vkDestroyRenderPass(Device, RP, nullptr);
     if (CmdPool != VK_NULL_HANDLE)
       vkDestroyCommandPool(Device, CmdPool, nullptr);
   }
@@ -793,9 +787,6 @@ static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
   llvm_unreachable("All StoreAction cases handled");
 }
 
-/// Vulkan render pass — owns a VkRenderPass built from the descriptor's
-/// formats and load/store actions. The handle outlives any encoder built
-/// against this pass and is destroyed with the RenderPass object.
 class VulkanRenderPass final : public offloadtest::RenderPass {
 public:
   VkDevice Dev;
@@ -884,8 +875,7 @@ public:
 
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
-    // Stride is part of the pipeline's input layout in Vulkan, not the
-    // buffer binding. The DX12 backend needs it; we don't.
+    // Stride is needed in DX12 at binding time, ignore parameter here.
     if (!VB) {
       VkBuffer NullBuf = VK_NULL_HANDLE;
       VkDeviceSize Zero = 0;
@@ -1973,11 +1963,6 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
   createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
-    // Build a VkRenderPass from the descriptor's attachment formats and
-    // load/store actions. Initial layout for Load-action attachments is the
-    // standard attachment layout (caller's responsibility); for Clear /
-    // DontCare it's UNDEFINED. Final layout is always the standard
-    // attachment layout — caller does any post-pass transitions.
     llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
     llvm::SmallVector<VkAttachmentReference, 8> ColorRefs;
 

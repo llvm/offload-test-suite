@@ -94,15 +94,6 @@ struct ScissorRect {
   uint32_t Width = 0, Height = 0;
 };
 
-/// Encoder for recording rasterization draw commands within a render pass.
-/// Created via CommandBuffer::createRenderEncoder(const RenderPassDesc &).
-///
-/// State model: every encoder starts with no viewport, scissor, or vertex
-/// buffer bindings. The caller is required to set viewport and scissor (and
-/// any vertex buffers needed by the pipeline) before the first draw — there
-/// is no carry-over from a previous pass. The pipeline state is passed
-/// directly to draw() so a draw cannot be issued with no pipeline bound or
-/// a stale pipeline from another pass.
 class RenderEncoder : public CommandEncoder {
 public:
   using CommandEncoder::CommandEncoder;
@@ -110,18 +101,9 @@ public:
   virtual void setViewport(const Viewport &VP) = 0;
   virtual void setScissor(const ScissorRect &Rect) = 0;
 
-  /// Bind a vertex buffer at \p Slot with the given per-vertex \p Stride in
-  /// bytes. \p Stride is required at set time (DX12 carries it on the buffer
-  /// view, not the PSO). Pass nullptr to unbind; \p Stride is ignored when
-  /// unbinding.
   virtual void setVertexBuffer(uint32_t Slot, Buffer *VB, size_t Offset,
                                uint32_t Stride) = 0;
 
-  /// Non-indexed instanced draw. Mirrors DX12 DrawInstanced / vkCmdDraw /
-  /// MTL drawPrimitives. The pipeline is bound as part of the call.
-  /// Resource bindings (root descriptor tables, descriptor sets, argument
-  /// buffers) must be set up on the underlying command buffer before draw —
-  /// the abstraction for those is still WIP.
   virtual llvm::Error drawInstanced(const PipelineState &PSO,
                                     uint32_t VertexCount,
                                     uint32_t InstanceCount,
