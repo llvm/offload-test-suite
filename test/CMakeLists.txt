@@ -237,7 +237,9 @@ if (GOLDENIMAGE_DIR AND EXISTS "${GOLDENIMAGE_DIR}")
   file(TO_CMAKE_PATH "${GOLDENIMAGE_DIR}" _goldenimage_dir)
   install(DIRECTORY "${_goldenimage_dir}/"
     DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}/golden-images
-    COMPONENT offload-test-suite)
+    COMPONENT offload-test-suite
+    PATTERN ".git" EXCLUDE
+    PATTERN ".gitattributes" EXCLUDE)
 endif()
 
 if (NOT LLVM_ENABLE_IDE)

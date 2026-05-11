@@ -257,8 +257,19 @@ jobs:
             # DXC is packaged into its own prefix to avoid header/binary
             # conflicts with the LLVM distribution. The test job downloads
             # both artifacts and points configure-test-suite.py at the dxc
-            # binary explicitly via --dxc-path.
-            cmake --install $GITHUB_WORKSPACE/DXC/build --prefix $GITHUB_WORKSPACE/install-dxc
+            # binary explicitly via --dxc-path. We don't run `cmake --install`
+            # on the DXC build because its install rules reference targets
+            # that aren't part of the default ninja build (e.g. llvm-as);
+            # instead we just stage the runtime binaries the tests need.
+            mkdir -p $GITHUB_WORKSPACE/install-dxc/bin
+            # Stage the dxc runtime binaries (Windows: dxc.exe + *.dll;
+            # Linux: dxc + libdxcompiler.so + libdxil.so). cd into the
+            # source dir so glob expansion works regardless of how
+            # $GITHUB_WORKSPACE is quoted.
+            cd $GITHUB_WORKSPACE/DXC/build/bin
+            cp dxc* $GITHUB_WORKSPACE/install-dxc/bin/
+            cp *dxcompiler* $GITHUB_WORKSPACE/install-dxc/bin/ 2>/dev/null || true
+            cp *dxil* $GITHUB_WORKSPACE/install-dxc/bin/ 2>/dev/null || true
       - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
