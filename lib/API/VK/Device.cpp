@@ -771,15 +771,6 @@ public:
   }
 };
 
-static VkPrimitiveTopology
-getVkTopology(offloadtest::PrimitiveTopology Topology) {
-  switch (Topology) {
-  case offloadtest::PrimitiveTopology::TriangleList:
-    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-  }
-  llvm_unreachable("All PrimitiveTopology cases handled");
-}
-
 static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
   switch (Action) {
   case offloadtest::LoadAction::Load:
@@ -907,7 +898,6 @@ public:
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
-                            offloadtest::PrimitiveTopology Topology,
                             uint32_t VertexCount, uint32_t InstanceCount,
                             uint32_t FirstVertex,
                             uint32_t FirstInstance) override {
@@ -917,10 +907,6 @@ public:
     if (!ScissorSet)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Scissor must be set before drawing.");
-    // Topology is fixed at PSO creation in Vulkan; the encoder argument is
-    // accepted for API parity with DX12. A future change can switch to
-    // dynamic topology via VK_EXT_extended_dynamic_state.
-    (void)getVkTopology(Topology);
 
     const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
     vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
@@ -3033,10 +3019,9 @@ public:
         Encoder.setVertexBuffer(0, IS.VB.get(), 0,
                                 P.Bindings.getVertexStride());
 
-      if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(),
-                                           PrimitiveTopology::TriangleList,
-                                           P.getVertexCount(),
-                                           /*InstanceCount=*/1))
+      if (auto Err =
+              Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                    /*InstanceCount=*/1))
         return Err;
       Encoder.endEncoding();
 

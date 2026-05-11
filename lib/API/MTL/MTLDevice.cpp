@@ -560,15 +560,6 @@ MTLCommandBuffer::createComputeEncoder() {
   return std::make_unique<MTLComputeEncoder>(CmdBuffer, NativeEncoder);
 }
 
-static MTL::PrimitiveType
-getMTLPrimitiveType(offloadtest::PrimitiveTopology Topology) {
-  switch (Topology) {
-  case offloadtest::PrimitiveTopology::TriangleList:
-    return MTL::PrimitiveTypeTriangle;
-  }
-  llvm_unreachable("All PrimitiveTopology cases handled");
-}
-
 static MTL::LoadAction getMTLLoadAction(offloadtest::LoadAction Action) {
   switch (Action) {
   case offloadtest::LoadAction::Load:
@@ -662,7 +653,6 @@ public:
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
-                            offloadtest::PrimitiveTopology Topology,
                             uint32_t VertexCount, uint32_t InstanceCount,
                             uint32_t FirstVertex,
                             uint32_t FirstInstance) override {
@@ -682,7 +672,7 @@ public:
     if (MTLPSO.DepthStencilState)
       RenderEnc->setDepthStencilState(MTLPSO.DepthStencilState);
     RenderEnc->setCullMode(MTLPSO.CullMode);
-    RenderEnc->drawPrimitives(getMTLPrimitiveType(Topology),
+    RenderEnc->drawPrimitives(MTL::PrimitiveTypeTriangle,
                               static_cast<NS::UInteger>(FirstVertex),
                               static_cast<NS::UInteger>(VertexCount),
                               static_cast<NS::UInteger>(InstanceCount),
@@ -1376,9 +1366,7 @@ class MTLDevice : public offloadtest::Device {
     if (IS.VB)
       Encoder.setVertexBuffer(0, IS.VB.get(), 0, P.Bindings.getVertexStride());
 
-    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(),
-                                         PrimitiveTopology::TriangleList,
-                                         P.getVertexCount(),
+    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
                                          /*InstanceCount=*/1))
       return Err;
     Encoder.endEncoding();
