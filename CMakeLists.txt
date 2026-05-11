@@ -60,7 +60,10 @@ endif ()
 
 if (APPLE)
   set(METAL_INCLUDE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/third-party/metal-cpp
+                         /usr/local/include/metal_irconverter
                          ${CMAKE_CURRENT_SOURCE_DIR}/third-party/metal_irconverter_runtime)
+  find_library(METAL_IRCONVERTER_LIBRARY metalirconverter PATHS /usr/local/lib REQUIRED)
+  set(METAL_LIBRARIES ${METAL_IRCONVERTER_LIBRARY})
   set(OFFLOADTEST_ENABLE_METAL On)
 endif ()
 
