@@ -122,8 +122,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Metal
-
 # Bug https://github.com/llvm/offload-test-suite/issues/1110
 # XFAIL: Intel && Vulkan && DXC
 
