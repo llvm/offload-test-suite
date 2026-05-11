@@ -1670,11 +1670,6 @@ public:
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
-  llvm::Expected<offloadtest::SubmitResult>
-  executeCommandList(InvocationState &IS) {
-    return GraphicsQueue.submit(std::move(IS.CB));
-  }
-
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
     if (IS.DescHeap) {
@@ -2161,7 +2156,7 @@ public:
           "Pipeline was neither Compute nor Traditional Raster");
     }
 
-    auto SubmitResult = executeCommandList(State);
+    auto SubmitResult = GraphicsQueue.submit(std::move(State.CB));
     if (!SubmitResult)
       return SubmitResult.takeError();
     llvm::outs() << "Compute commands executed.\n";
