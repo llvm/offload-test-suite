@@ -43,12 +43,6 @@ public:
   GPUAPI getAPI() const { return API; }
   bool isEnded() const { return Ended; }
 
-  /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
-  /// \p DstOffset.
-  virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
-                                         Buffer &Dst, size_t DstOffset,
-                                         size_t Size) = 0;
-
   /// Begin a named debug group. Visible in GPU debuggers (PIX, RenderDoc,
   /// Xcode). Must be balanced by a corresponding popDebugGroup() call.
   virtual void pushDebugGroup(llvm::StringRef Label) {}
@@ -81,6 +75,12 @@ public:
   /// pipeline state (e.g. the shader's numthreads attribute).
   virtual llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                                uint32_t GroupCountZ) = 0;
+
+  /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
+  /// \p DstOffset.
+  virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
+                                         Buffer &Dst, size_t DstOffset,
+                                         size_t Size) = 0;
 };
 
 /// Primitive topology used at draw time. The bound pipeline's topology
