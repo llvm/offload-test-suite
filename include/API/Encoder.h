@@ -83,12 +83,6 @@ public:
                                          size_t Size) = 0;
 };
 
-/// Primitive topology used at draw time. The bound pipeline's topology
-/// category (point / line / triangle) must match the value passed to draw().
-enum class PrimitiveTopology {
-  TriangleList,
-};
-
 struct Viewport {
   float X = 0.0f, Y = 0.0f;
   float Width = 0.0f, Height = 0.0f;
@@ -128,10 +122,11 @@ public:
   /// Resource bindings (root descriptor tables, descriptor sets, argument
   /// buffers) must be set up on the underlying command buffer before draw —
   /// the abstraction for those is still WIP.
-  virtual llvm::Error
-  drawInstanced(const PipelineState &PSO, PrimitiveTopology Topology,
-                uint32_t VertexCount, uint32_t InstanceCount,
-                uint32_t FirstVertex = 0, uint32_t FirstInstance = 0) = 0;
+  virtual llvm::Error drawInstanced(const PipelineState &PSO,
+                                    uint32_t VertexCount,
+                                    uint32_t InstanceCount,
+                                    uint32_t FirstVertex = 0,
+                                    uint32_t FirstInstance = 0) = 0;
 };
 
 } // namespace offloadtest

@@ -673,15 +673,6 @@ public:
   }
 };
 
-static D3D_PRIMITIVE_TOPOLOGY
-getDXTopology(offloadtest::PrimitiveTopology Topology) {
-  switch (Topology) {
-  case offloadtest::PrimitiveTopology::TriangleList:
-    return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
-  }
-  llvm_unreachable("All PrimitiveTopology cases handled");
-}
-
 class DXRenderEncoder : public offloadtest::RenderEncoder {
   DXCommandBuffer &CB;
 
@@ -689,8 +680,7 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
   bool ViewportSet = false;
   bool ScissorSet = false;
 
-  llvm::Error bindCommonDrawState(const offloadtest::PipelineState &PSO,
-                                  offloadtest::PrimitiveTopology Topology) {
+  llvm::Error bindCommonDrawState(const offloadtest::PipelineState &PSO) {
     if (!ViewportSet)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Viewport must be set before drawing.");
@@ -701,7 +691,7 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
     const auto &DXPSO = llvm::cast<DXPipelineState>(PSO);
     CB.CmdList->SetGraphicsRootSignature(DXPSO.RootSig.Get());
     CB.CmdList->SetPipelineState(DXPSO.PSO.Get());
-    CB.CmdList->IASetPrimitiveTopology(getDXTopology(Topology));
+    CB.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     return llvm::Error::success();
   }
 
@@ -755,11 +745,10 @@ public:
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
-                            offloadtest::PrimitiveTopology Topology,
                             uint32_t VertexCount, uint32_t InstanceCount,
                             uint32_t FirstVertex,
                             uint32_t FirstInstance) override {
-    if (auto Err = bindCommonDrawState(PSO, Topology))
+    if (auto Err = bindCommonDrawState(PSO))
       return Err;
     CB.CmdList->DrawInstanced(VertexCount, InstanceCount, FirstVertex,
                               FirstInstance);
@@ -2184,9 +2173,7 @@ public:
     if (IS.VB)
       Encoder.setVertexBuffer(0, IS.VB.get(), 0, P.Bindings.getVertexStride());
 
-    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(),
-                                         PrimitiveTopology::TriangleList,
-                                         P.getVertexCount(),
+    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
                                          /*InstanceCount=*/1))
       return Err;
     Encoder.endEncoding();
