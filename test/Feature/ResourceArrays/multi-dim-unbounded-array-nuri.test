@@ -60,9 +60,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
-
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
 

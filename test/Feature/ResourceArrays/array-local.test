@@ -78,9 +78,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
-
 # Bug https://github.com/llvm/llvm-project/issues/154669
 # XFAIL: Clang && Vulkan
 
