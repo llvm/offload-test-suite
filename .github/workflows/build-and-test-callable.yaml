@@ -275,8 +275,11 @@ jobs:
         shell: bash
         run: |
             cd $GITHUB_WORKSPACE
-            tar cf $RUNNER_TEMP/build-artifacts.tar -C install .
-            tar cf $RUNNER_TEMP/dxc-artifacts.tar -C install-dxc .
+            # Use stdout redirection so tar doesn't try to parse the
+            # destination Windows drive letter (e.g. C:\...) as a remote
+            # host:path tuple.
+            tar cf - -C install . > "$RUNNER_TEMP/build-artifacts.tar"
+            tar cf - -C install-dxc . > "$RUNNER_TEMP/dxc-artifacts.tar"
       - name: Upload build artifacts
         if: inputs.SplitBuild == true
         uses: actions/upload-artifact@v4
@@ -317,8 +320,10 @@ jobs:
         run: |
             set -euxo pipefail
             mkdir -p $GITHUB_WORKSPACE/install $GITHUB_WORKSPACE/install-dxc
-            tar xf $RUNNER_TEMP/build-artifacts.tar -C $GITHUB_WORKSPACE/install
-            tar xf $RUNNER_TEMP/dxc-artifacts.tar -C $GITHUB_WORKSPACE/install-dxc
+            # Pipe the archive in via stdin so tar doesn't try to parse the
+            # source path as a remote host (Windows drive letter issue).
+            tar xf - -C $GITHUB_WORKSPACE/install < "$RUNNER_TEMP/build-artifacts.tar"
+            tar xf - -C $GITHUB_WORKSPACE/install-dxc < "$RUNNER_TEMP/dxc-artifacts.tar"
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
