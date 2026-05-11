@@ -88,11 +88,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 3
 
-
-# Note: Metal and Vulkan KosmicKrisp and MoltenVK 
-# Are always empty
-# UNSUPPORTED: Darwin
-
 # BUG https://github.com/llvm/offload-test-suite/issues/931
 # XFAIL: Clang && DirectX && AMD
 

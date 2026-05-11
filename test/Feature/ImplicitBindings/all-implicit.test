@@ -69,10 +69,6 @@ DescriptorSets:
 ...
 #--- end
 
-# CBuffer bindings seem to be broken under metal
-# https://github.com/llvm/offload-test-suite/issues/55
-# UNSUPPORTED: Metal
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
