@@ -37,9 +37,9 @@ an external project:
 
 ```
 cmake -G Ninja \
-    -C llvm-project/clang/cmake/caches/HLSL.cmake \
     -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=On \
     -DLLVM_EXTERNAL_PROJECTS=OffloadTest \
+    -C llvm-project/clang/cmake/caches/HLSL.cmake \
     -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=<path-to-offload-test-suite> \
     -DCMAKE_INSTALL_PREFIX=<install-prefix> \
     <other LLVM/HLSL flags...> \
@@ -53,7 +53,10 @@ cmake --install <dxc-build> --prefix <dxc-prefix>
 
 The HLSL.cmake cache file enforces that `OffloadTest` is in
 `LLVM_EXTERNAL_PROJECTS` when `HLSL_ENABLE_OFFLOAD_DISTRIBUTION` is on; the
-configure step will fail fast otherwise.
+configure step will fail fast otherwise. Note that
+`-DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=On` and `-DLLVM_EXTERNAL_PROJECTS=OffloadTest`
+must appear on the `cmake` command line *before* the `-C HLSL.cmake` argument
+so they're set in the cache before the cache script runs.
 
 ## Packaging
 
