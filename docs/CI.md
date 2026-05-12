@@ -4,7 +4,7 @@
 
 ### Tier 1 Configurations
 
-Tier 1 configuraitons are regularly tested and expected to be known good.
+Tier 1 configurations are regularly tested and expected to be known good.
 Builders of these configurations are enabled in pre-merge testing and PRs should
 not regress these configurations.
 
@@ -29,7 +29,7 @@ Tier 2 configurations.
 Configurations:
 * macOS Metal
 
-### Experimental Configurfations
+### Experimental Configurations
 
 Experimental configurations are testing configurations that have been
 recently added and are not yet completely passing. These configurations are not
