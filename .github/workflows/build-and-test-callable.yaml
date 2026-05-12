@@ -343,12 +343,6 @@ jobs:
           # available so we can't pip install -r requirements.txt. Keep
           # this list in sync with OffloadTest/test/requirements.txt.
           pip-install: lit pyyaml
-      - name: Ensure lit is installed
-        shell: bash
-        run: |
-            set -euxo pipefail
-            python -m pip install --upgrade pip
-            python -m pip install lit pyyaml
       - name: Dump GPU Info (test runner)
         shell: bash
         run: |

@@ -115,6 +115,12 @@ endforeach()
 # expanding it into lit.
 cmake_path(SET DXC_DIR NORMALIZE "${DXC_DIR}")
 
+# The lit.site.cfg.py.in templates expect @OFFLOADTEST_TEST_ROOT@ — the
+# directory containing test/lit.cfg.py. In an in-tree build that's the
+# project source dir; in the standalone install layout it's the install
+# share dir (set by configure-test-suite.py).
+set(OFFLOADTEST_TEST_ROOT ${OFFLOADTEST_SOURCE_DIR})
+
 function(add_offloadtest_lit_suite suite)
   configure_lit_site_cfg(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in

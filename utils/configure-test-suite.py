@@ -25,6 +25,7 @@ import argparse
 import os
 import pathlib
 import platform
+import re
 import shutil
 import sys
 
@@ -83,8 +84,6 @@ def emit_site_cfg(template_text, substitutions):
     for key, value in substitutions.items():
         text = text.replace("@{}@".format(key), value)
     # Catch any leftover @TOKEN@ that we didn't account for.
-    import re
-
     leftover = re.findall(r"@[A-Za-z_][A-Za-z0-9_]*@", text)
     if leftover:
         raise SystemExit(
@@ -220,8 +219,8 @@ def main():
             "Pass --dxc-path to silence this warning.",
             file=sys.stderr,
         )
-        dxc_path = pathlib.Path("")
-    dxc_dir = str(dxc_path.parent) if dxc_path and str(dxc_path) else ""
+        dxc_path = None
+    dxc_dir = str(dxc_path.parent) if dxc_path is not None else ""
 
     # Golden images: prefer explicit path, then installed copy. An empty
     # string indicates "not configured" (lit.cfg.py treats it as such);
@@ -240,9 +239,12 @@ def main():
 
         substitutions = {
             "OFFLOADTEST_BINARY_DIR": str(suite_obj_root),
-            "OFFLOADTEST_SOURCE_DIR": str(test_src_root.parent),
+            # The directory containing test/lit.cfg.py. In an in-tree build
+            # this is the project source dir; in the standalone install
+            # layout it's the install share dir.
+            "OFFLOADTEST_TEST_ROOT": str(test_src_root.parent),
             "LLVM_TOOLS_DIR": str(bin_dir),
-            "DXC_EXECUTABLE": str(dxc_path) if dxc_path else "",
+            "DXC_EXECUTABLE": str(dxc_path) if dxc_path is not None else "",
             "SUPPORTS_SPIRV": "True" if vk else "False",
             "FORCE_CLANG": "True" if clang else "False",
             "FORCE_WARP": "True" if warp else "False",
