@@ -192,7 +192,7 @@ jobs:
             cd DXC
             mkdir build
             cd build
-            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/dxc-install-staging ${{ github.workspace }}/DXC/
             ninja
       - name: Build LLVM
         run: |
@@ -254,22 +254,38 @@ jobs:
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/llvm-project/build
             ninja install-distribution install-offload-tools install-offload-test-suite
-            # DXC is packaged into its own prefix to avoid header/binary
-            # conflicts with the LLVM distribution. The test job downloads
-            # both artifacts and points configure-test-suite.py at the dxc
-            # binary explicitly via --dxc-path. We don't run `cmake --install`
-            # on the DXC build because its install rules reference targets
-            # that aren't part of the default ninja build (e.g. llvm-as);
-            # instead we just stage the runtime binaries the tests need.
-            mkdir -p $GITHUB_WORKSPACE/install-dxc/bin
-            # Stage the dxc runtime binaries (Windows: dxc.exe + *.dll;
-            # Linux: dxc + libdxcompiler.so + libdxil.so). cd into the
-            # source dir so glob expansion works regardless of how
-            # $GITHUB_WORKSPACE is quoted.
-            cd $GITHUB_WORKSPACE/DXC/build/bin
-            cp dxc* $GITHUB_WORKSPACE/install-dxc/bin/
-            cp *dxcompiler* $GITHUB_WORKSPACE/install-dxc/bin/ 2>/dev/null || true
-            cp *dxil* $GITHUB_WORKSPACE/install-dxc/bin/ 2>/dev/null || true
+            # Run DXC's install target to populate a staging install
+            # prefix at $GITHUB_WORKSPACE/dxc-install-staging. That prefix
+            # bundles a lot of unrelated LLVM tooling we don't want to
+            # ship, so we don't tar it directly. Instead, cherry-pick dxc,
+            # dxv, dxcompiler, and dxil into a clean
+            # $GITHUB_WORKSPACE/dxc-dist tree with the conventional bin/ +
+            # lib/ layout, and ship that as the DXC artifact.
+            #
+            # DXC's install rules follow CMake convention (verified in
+            # tools/clang/tools/{dxc,dxv,dxcompiler}/CMakeLists.txt):
+            #   * dxc / dxv               -> bin/  (RUNTIME DESTINATION)
+            #   * dxcompiler.dll (Win)    -> bin/  (RUNTIME DESTINATION)
+            #   * libdxcompiler.{so,dylib}-> lib/  (LIBRARY DESTINATION)
+            # dxil has no install rule (it's a prebuilt signing library
+            # bundled with DXC), so we copy it from the build directory.
+            cd $GITHUB_WORKSPACE/DXC/build
+            ninja install
+            mkdir -p $GITHUB_WORKSPACE/dxc-dist/bin $GITHUB_WORKSPACE/dxc-dist/lib
+            staging=$GITHUB_WORKSPACE/dxc-install-staging
+            for exe in dxc dxc.exe dxv dxv.exe; do
+              [ -f "$staging/bin/$exe" ] && cp "$staging/bin/$exe" $GITHUB_WORKSPACE/dxc-dist/bin/
+            done
+            # dxcompiler: Windows DLL is in bin/; Unix shared lib is in lib/.
+            [ -f "$staging/bin/dxcompiler.dll" ] && cp "$staging/bin/dxcompiler.dll" $GITHUB_WORKSPACE/dxc-dist/lib/
+            for lib in libdxcompiler.so libdxcompiler.dylib; do
+              [ -f "$staging/lib/$lib" ] && cp "$staging/lib/$lib" $GITHUB_WORKSPACE/dxc-dist/lib/
+            done
+            # dxil isn't installed by DXC's CMake -- pull it from the build dir.
+            buildbin=$GITHUB_WORKSPACE/DXC/build/bin
+            for lib in dxil.dll libdxil.so libdxil.dylib; do
+              [ -f "$buildbin/$lib" ] && cp "$buildbin/$lib" $GITHUB_WORKSPACE/dxc-dist/lib/
+            done
       - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
@@ -279,7 +295,7 @@ jobs:
             # destination Windows drive letter (e.g. C:\...) as a remote
             # host:path tuple.
             tar cf - -C install . > "$RUNNER_TEMP/build-artifacts.tar"
-            tar cf - -C install-dxc . > "$RUNNER_TEMP/dxc-artifacts.tar"
+            tar cf - -C dxc-dist . > "$RUNNER_TEMP/dxc-artifacts.tar"
       - name: Upload build artifacts
         if: inputs.SplitBuild == true
         uses: actions/upload-artifact@v4
@@ -320,12 +336,25 @@ jobs:
         run: |
             set -euxo pipefail
             cd $GITHUB_WORKSPACE
-            mkdir -p install install-dxc
+            mkdir -p install dxc-dist
             # Pipe the archive in via stdin and use a relative -C path so
             # tar doesn't try to parse the Windows drive letter or treat
             # backslashes as escape characters.
             tar xf - -C install < "$RUNNER_TEMP/build-artifacts.tar"
-            tar xf - -C install-dxc < "$RUNNER_TEMP/dxc-artifacts.tar"
+            tar xf - -C dxc-dist < "$RUNNER_TEMP/dxc-artifacts.tar"
+      - name: Expose DXC runtime libraries
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # The DXC artifact follows the conventional bin/ + lib/ split,
+            # so dxc.exe / dxc won't find dxcompiler / dxil at runtime
+            # without help. Add dxc-dist/lib to the platform DLL search
+            # paths (PATH on Windows, LD_LIBRARY_PATH on Linux,
+            # DYLD_LIBRARY_PATH on macOS) for the rest of the job.
+            libdir="$GITHUB_WORKSPACE/dxc-dist/lib"
+            echo "$libdir" >> "$GITHUB_PATH"
+            echo "LD_LIBRARY_PATH=$libdir:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+            echo "DYLD_LIBRARY_PATH=$libdir:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
@@ -374,7 +403,7 @@ jobs:
             cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
             # Locate dxc in the separate DXC install prefix. .exe on Windows,
             # bare name elsewhere.
-            dxc_path=$GITHUB_WORKSPACE/install-dxc/bin/dxc
+            dxc_path=$GITHUB_WORKSPACE/dxc-dist/bin/dxc
             if [ -x "${dxc_path}.exe" ]; then dxc_path="${dxc_path}.exe"; fi
             python configure-test-suite.py \
               --suite "${{ steps.suite.outputs.suite }}" \
