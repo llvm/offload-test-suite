@@ -109,6 +109,10 @@ public:
                                     uint32_t InstanceCount,
                                     uint32_t FirstVertex = 0,
                                     uint32_t FirstInstance = 0) = 0;
+
+  virtual llvm::Error dispatchMesh(const PipelineState &PSO,
+                                   uint32_t GroupCountX, uint32_t GroupCountY,
+                                   uint32_t GroupCountZ) = 0;
 };
 
 } // namespace offloadtest

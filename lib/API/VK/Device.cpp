@@ -909,6 +909,13 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    return llvm::createStringError(
+        "dispatchMesh is unimplemented in the Vulkan backend.");
+  }
+
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
     popDebugGroup();
