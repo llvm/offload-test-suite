@@ -1330,7 +1330,7 @@ class MTLDevice : public offloadtest::Device {
     RenderPassBeginDesc BeginDesc = {};
     BeginDesc.Pass = IS.RenderPass.get();
     BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
-    BeginDesc.DepthStencil = &IS.DepthStencil.get();
+    BeginDesc.DepthStencil = IS.DepthStencil.get();
 
     auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
     if (!EncOrErr)
@@ -1338,7 +1338,8 @@ class MTLDevice : public offloadtest::Device {
     auto &Encoder = *EncOrErr.get();
 
     {
-      auto &MTLEncoder = llvm::cast<MTLRenderEncoder>(*Encoder);
+      auto &MTLEncoder = llvm::cast<MTLRenderEncoder>(Encoder);
+      const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
       auto *CmdEncoder = MTLEncoder.getNative();
       if (IS.DescHeap) {
         IS.DescHeap->bind(CmdEncoder);
