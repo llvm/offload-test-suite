@@ -71,4 +71,4 @@ DispatchParameters:
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o -r Output -o %t/Output.png
-# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/VerticesFromVertexID.png -rules %t/rules.yaml
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/SimpleTriangle.png -rules %t/rules.yaml
