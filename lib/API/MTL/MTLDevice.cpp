@@ -110,6 +110,14 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
     MTLFormats(32Sint) break;
   case DataFormat::Float32:
     MTLFormats(32Float) break;
+  case DataFormat::UInt64:
+  case DataFormat::Int64:
+    if (Channels == 1)
+      return MTL::PixelFormatRG32Uint;
+    if (Channels == 2)
+      return MTL::PixelFormatRGBA32Uint;
+    llvm_unreachable("Unsupported channel count for 64-bit format");
+
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
