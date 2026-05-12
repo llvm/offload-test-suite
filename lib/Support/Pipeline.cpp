@@ -621,10 +621,11 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
 llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
   switch (Kind) {
   case ShaderPipelineKind::Compute:
+  case ShaderPipelineKind::MeshShaderRaster:
     if (DispatchParameters.VertexCount)
       return llvm::createStringError(
-          "DispatchParameters.VertexCount set on a Compute pipeline. Only "
-          "allowed on a TraditionalRaster pipeline.");
+          "DispatchParameters.VertexCount set on a Compute or Mesh Shader "
+          "pipeline. Only allowed on a TraditionalRaster pipeline.");
     break;
   case ShaderPipelineKind::TraditionalRaster:
     if (DispatchParameters.DispatchGroupCount !=
