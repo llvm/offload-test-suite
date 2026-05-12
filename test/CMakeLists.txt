@@ -194,17 +194,9 @@ set_target_properties(check-hlsl PROPERTIES FOLDER "HLSL tests")
 
 # === Standalone test suite distribution ===
 #
-# Install the test sources, the canonical lit.site.cfg.py.in template, and
-# the configure-test-suite.py helper into a portable install prefix. After
-# installing, the prefix can be tarred up and consumed on a different
-# machine without a CMake or compiler toolchain. The consumer runs:
-#
-#   cd <prefix>/share/hlsl-test-suite
-#   ./configure-test-suite.py --suite clang-d3d12
-#   lit run/test/clang-d3d12
-#
-# All test infrastructure is installed under a single `offload-test-suite`
-# component. Build with `ninja install-offload-test-suite`.
+# See docs/offload-distribution.md for an overview. All test infrastructure
+# is installed under a single `offload-test-suite` component. Build with
+# `ninja install-offload-test-suite`.
 set(OFFLOADTEST_INSTALL_TESTDIR "share/hlsl-test-suite" CACHE STRING
     "Install directory (relative to CMAKE_INSTALL_PREFIX) for the standalone offload test suite distribution.")
 
