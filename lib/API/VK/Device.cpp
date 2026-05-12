@@ -206,6 +206,10 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_VERTEX_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
+  case Stages::Mesh:
+    return VK_SHADER_STAGE_MESH_BIT_EXT;
+  case Stages::Amplification:
+    return VK_SHADER_STAGE_TASK_BIT_EXT;
   }
   llvm_unreachable("All cases handled");
 }
@@ -382,6 +386,18 @@ struct VulkanInstance {
 
 namespace {
 
+struct MeshShaderFunctions {
+  PFN_vkCmdDrawMeshTasksEXT VkCmdDrawMeshTasksEXT = nullptr;
+
+  static MeshShaderFunctions create(VkDevice Device) {
+    MeshShaderFunctions Result;
+    Result.VkCmdDrawMeshTasksEXT =
+        (PFN_vkCmdDrawMeshTasksEXT)vkGetDeviceProcAddr(Device,
+                                                       "vkCmdDrawMeshTasksEXT");
+    return Result;
+  }
+};
+
 class VulkanBuffer : public offloadtest::Buffer {
 public:
   VkDevice Dev; // Needed for clean-up
@@ -456,6 +472,8 @@ public:
     vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
+
+  const TextureCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Vulkan;
@@ -549,6 +567,7 @@ public:
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
 public:
   VkDevice Device = VK_NULL_HANDLE;
+  MeshShaderFunctions MeshShaderFns;
   // Owned per command buffer so that recording, submission, and lifetime
   // management of each command buffer are independently safe without external
   // synchronization.
@@ -563,7 +582,8 @@ public:
   create(VkDevice Device, uint32_t QueueFamilyIdx,
          PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
          PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel,
-         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel) {
+         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel,
+         MeshShaderFunctions MeshShaderFns) {
     auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
     CB->Device = Device;
 
@@ -595,6 +615,7 @@ public:
     CB->CmdBeginDebugUtilsLabel = CmdBeginDebugUtilsLabel;
     CB->CmdEndDebugUtilsLabel = CmdEndDebugUtilsLabel;
     CB->CmdInsertDebugUtilsLabel = CmdInsertDebugUtilsLabel;
+    CB->MeshShaderFns = MeshShaderFns;
 
     return CB;
   }
@@ -636,7 +657,12 @@ public:
     PendingDstAccess = 0;
   }
 
+  /// Keep-alive list for Framebuffers constructed by RencderEncoders.
+  llvm::SmallVector<VkFramebuffer, 4> OwnedFramebuffers;
+
   ~VulkanCommandBuffer() override {
+    for (VkFramebuffer FB : OwnedFramebuffers)
+      vkDestroyFramebuffer(Device, FB, nullptr);
     if (CmdPool != VK_NULL_HANDLE)
       vkDestroyCommandPool(Device, CmdPool, nullptr);
   }
@@ -647,6 +673,9 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
   createComputeEncoder() override;
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+  createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
 
 private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
@@ -736,19 +765,15 @@ public:
   VkPipeline Pipeline;
   VkPipelineLayout Layout;
   llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
-  VkRenderPass RenderPass;
 
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
-                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts,
-                      VkRenderPass RenderPass)
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
       : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
-        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)),
-        RenderPass(RenderPass) {}
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
 
   ~VulkanPipelineState() override {
     vkDestroyPipeline(Dev, Pipeline, nullptr);
-    vkDestroyRenderPass(Dev, RenderPass, nullptr);
     vkDestroyPipelineLayout(Dev, Layout, nullptr);
     for (VkDescriptorSetLayout L : SetLayouts)
       vkDestroyDescriptorSetLayout(Dev, L, nullptr);
@@ -758,6 +783,299 @@ public:
     return B->getAPI() == GPUAPI::Vulkan;
   }
 };
+
+static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
+  switch (Action) {
+  case offloadtest::LoadAction::Load:
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+  case offloadtest::LoadAction::Clear:
+    return VK_ATTACHMENT_LOAD_OP_CLEAR;
+  case offloadtest::LoadAction::DontCare:
+    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  }
+  llvm_unreachable("All LoadAction cases handled");
+}
+
+static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
+  switch (Action) {
+  case offloadtest::StoreAction::Store:
+    return VK_ATTACHMENT_STORE_OP_STORE;
+  case offloadtest::StoreAction::DontCare:
+    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  }
+  llvm_unreachable("All StoreAction cases handled");
+}
+
+class VulkanRenderPass final : public offloadtest::RenderPass {
+public:
+  VkDevice Dev;
+  VkRenderPass Handle;
+  offloadtest::RenderPassDesc Desc;
+
+  VulkanRenderPass(VkDevice Dev, VkRenderPass Handle,
+                   offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::Vulkan), Dev(Dev), Handle(Handle),
+        Desc(std::move(Desc)) {}
+
+  ~VulkanRenderPass() override {
+    if (Handle != VK_NULL_HANDLE)
+      vkDestroyRenderPass(Dev, Handle, nullptr);
+  }
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+class VKRenderEncoder : public offloadtest::RenderEncoder {
+  VulkanCommandBuffer &CB;
+
+  // Encoder contract: viewport and scissor must both be set before draw().
+  bool ViewportSet = false;
+  bool ScissorSet = false;
+
+public:
+  VKRenderEncoder(VulkanCommandBuffer &CB)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {}
+
+  ~VKRenderEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Vulkan;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    if (!CB.CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() override {
+    if (CB.CmdEndDebugUtilsLabel)
+      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    if (!CB.CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+  }
+
+  void setViewport(const offloadtest::Viewport &VP) override {
+    // Negative viewport height (with Y origin at the bottom) flips clip->
+    // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
+    // triangle is front-facing on every backend.
+    VkViewport VKVP = {};
+    VKVP.x = VP.X;
+    VKVP.y = VP.Y + VP.Height;
+    VKVP.width = VP.Width;
+    VKVP.height = -VP.Height;
+    VKVP.minDepth = VP.MinDepth;
+    VKVP.maxDepth = VP.MaxDepth;
+    vkCmdSetViewport(CB.CmdBuffer, 0, 1, &VKVP);
+    ViewportSet = true;
+  }
+
+  void setScissor(const offloadtest::ScissorRect &Rect) override {
+    VkRect2D VKRect = {};
+    VKRect.offset.x = Rect.X;
+    VKRect.offset.y = Rect.Y;
+    VKRect.extent.width = Rect.Width;
+    VKRect.extent.height = Rect.Height;
+    vkCmdSetScissor(CB.CmdBuffer, 0, 1, &VKRect);
+    ScissorSet = true;
+  }
+
+  void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
+                       uint32_t /*Stride*/) override {
+    // Stride is needed in DX12 at binding time, ignore parameter here.
+    if (!VB) {
+      VkBuffer NullBuf = VK_NULL_HANDLE;
+      const VkDeviceSize Zero = 0;
+      vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &NullBuf, &Zero);
+      return;
+    }
+    VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
+    const VkDeviceSize VKOffset = Offset;
+    vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &Handle, &VKOffset);
+  }
+
+  llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
+                            uint32_t VertexCount, uint32_t InstanceCount,
+                            uint32_t FirstVertex,
+                            uint32_t FirstInstance) override {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VKPSO.Pipeline);
+    vkCmdDraw(CB.CmdBuffer, VertexCount, InstanceCount, FirstVertex,
+              FirstInstance);
+    return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VKPSO.Pipeline);
+    CB.MeshShaderFns.VkCmdDrawMeshTasksEXT(CB.CmdBuffer, GroupCountX,
+                                           GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override {
+    vkCmdEndRenderPass(CB.CmdBuffer);
+    popDebugGroup();
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+VulkanCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries the VkRenderPass and the format / load / store policy.
+  // The begin desc supplies the textures that get bound for this encoder.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  llvm::SmallVector<VkImageView, 9> Views;
+  llvm::SmallVector<VkClearValue, 9> ClearValues;
+  uint32_t Width = 0;
+  uint32_t Height = 0;
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    if (!Desc.ColorAttachments[I])
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    VkClearValue CV = {};
+    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the render target to have been "
+            "created with an OptimizedClearValue.");
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
+      assert(ColorCV &&
+             "RenderTarget OptimizedClearValue must be a ClearColor");
+      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+    }
+    ClearValues.push_back(CV);
+
+    if (Tex.Desc.Width > Width)
+      Width = Tex.Desc.Width;
+    if (Tex.Desc.Height > Height)
+      Height = Tex.Desc.Height;
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    const auto &DS = *PassDesc.DepthStencil;
+    VkClearValue CV = {};
+    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
+        DS.StencilLoad == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *DepthCV =
+          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
+      assert(DepthCV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
+    }
+    ClearValues.push_back(CV);
+
+    if (Tex.Desc.Width > Width)
+      Width = Tex.Desc.Width;
+    if (Tex.Desc.Height > Height)
+      Height = Tex.Desc.Height;
+  }
+
+  VkFramebufferCreateInfo FBCI = {};
+  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  FBCI.renderPass = VKPass.Handle;
+  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
+  FBCI.pAttachments = Views.data();
+  FBCI.width = Width;
+  FBCI.height = Height;
+  FBCI.layers = 1;
+
+  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
+                      "Failed to create framebuffer for RenderEncoder."))
+    return Err;
+
+  // The framebuffer must outlive this encoder and remain valid through GPU
+  // execution; the command buffer destroys it on teardown. The render pass
+  // is owned by the user-supplied VulkanRenderPass.
+  OwnedFramebuffers.push_back(Framebuffer);
+
+  VkRenderPassBeginInfo BeginInfo = {};
+  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  BeginInfo.renderPass = VKPass.Handle;
+  BeginInfo.framebuffer = Framebuffer;
+  BeginInfo.renderArea.extent.width = Width;
+  BeginInfo.renderArea.extent.height = Height;
+  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
+  BeginInfo.pClearValues = ClearValues.data();
+
+  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  auto Enc = std::make_unique<VKRenderEncoder>(*this);
+  Enc->pushDebugGroup("RenderEncoder");
+  return Enc;
+}
+
 class VulkanDevice : public offloadtest::Device {
 private:
   std::shared_ptr<VulkanInstance> Instance;
@@ -778,6 +1096,7 @@ private:
   PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
   PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
   PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+  MeshShaderFunctions MeshShaderFns;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -845,6 +1164,7 @@ private:
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
+    std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
@@ -931,6 +1251,31 @@ public:
 #endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
+    const VulkanDevice::ExtensionVector AvailableDeviceExtensions =
+        queryDeviceExtensions(PhysicalDevice);
+
+    llvm::SmallVector<const char *> EnabledDeviceExtensions;
+    const llvm::StringRef ExtensionName = "VK_EXT_mesh_shader";
+    VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
+    if (isExtensionSupported(AvailableDeviceExtensions, ExtensionName)) {
+      EnabledDeviceExtensions.push_back(ExtensionName.data());
+      MeshFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+      MeshFeatures.taskShader = 1;
+      MeshFeatures.meshShader = 1;
+      MeshFeatures.multiviewMeshShader = 0;
+      MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
+      MeshFeatures.meshShaderQueries = 0;
+#ifdef VK_VERSION_1_4
+      Features14.pNext = &MeshFeatures;
+#else
+      Features13.pNext = &MeshFeatures;
+#endif
+    }
+
+    DeviceInfo.enabledExtensionCount =
+        static_cast<uint32_t>(EnabledDeviceExtensions.size());
+    DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
 
@@ -948,16 +1293,18 @@ public:
     VulkanQueue GraphicsQueue(DeviceQueue, QueueFamilyIdx, Device,
                               std::move(*SubmitFenceOrErr));
 
-    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
-                                          Device, std::move(GraphicsQueue),
-                                          std::move(InstanceLayers));
+    return std::make_unique<VulkanDevice>(
+        Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
+        std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
   }
 
   VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
                VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
-               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
+               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers,
+               ExtensionVector DeviceExtensions)
       : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
-        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
+        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)),
+        DeviceExtensions(std::move(DeviceExtensions)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -983,8 +1330,6 @@ public:
     Description += " (" + DriverName + ")";
 #endif
 
-    DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
-
     CmdBeginDebugUtilsLabel =
         (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
             Device, "vkCmdBeginDebugUtilsLabelEXT");
@@ -993,6 +1338,8 @@ public:
     CmdInsertDebugUtilsLabel =
         (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetDeviceProcAddr(
             Device, "vkCmdInsertDebugUtilsLabelEXT");
+
+    MeshShaderFns = MeshShaderFunctions::create(Device);
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
@@ -1101,6 +1448,21 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                    ShaderContainer CS) override {
+    auto CSModOrErr = createShaderModule(CS.Shader, "compute");
+    if (!CSModOrErr)
+      return CSModOrErr.takeError();
+
+    VkShaderModule CSModule = *CSModOrErr;
+    auto ShaderModuleCleanUp = llvm::scope_exit(
+        [&] { vkDestroyShaderModule(Device, CSModule, nullptr); });
+
+    llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
+    llvm::SmallVector<char> SpecData;
+    VkSpecializationInfo SpecInfo = {};
+    if (auto Err = parseSpecializationConstants(
+            CS.SpecializationConstants, SpecEntries, SpecData, SpecInfo))
+      return Err;
+
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     if (auto Err =
@@ -1113,49 +1475,13 @@ public:
         vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
     });
 
-    // Create compute shader module.
-    auto CSModOrErr = createShaderModule(CS.Shader, "compute");
-    if (!CSModOrErr) {
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      return CSModOrErr.takeError();
-    }
-    VkShaderModule CSModule = *CSModOrErr;
-
     VkPipelineShaderStageCreateInfo StageCI = {};
     StageCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     StageCI.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     StageCI.module = CSModule;
     StageCI.pName = CS.EntryPoint.c_str();
-
-    llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
-    llvm::SmallVector<char> SpecData;
-    VkSpecializationInfo SpecInfo = {};
-    if (!CS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-
-      for (const auto &SpecConst : CS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, SpecData)) {
-          vkDestroyShaderModule(Device, CSModule, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          return Err;
-        }
-        SpecEntries.push_back(Entry);
-      }
-      SpecInfo.mapEntryCount = SpecEntries.size();
-      SpecInfo.pMapEntries = SpecEntries.data();
-      SpecInfo.dataSize = SpecData.size();
-      SpecInfo.pData = SpecData.data();
-      StageCI.pSpecializationInfo = &SpecInfo;
-    }
+    StageCI.pSpecializationInfo =
+        CS.SpecializationConstants.empty() ? nullptr : &SpecInfo;
 
     VkComputePipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -1166,17 +1492,12 @@ public:
                                                         1, &PipelineCI, nullptr,
                                                         &Pipeline),
                                "Failed to create compute pipeline.")) {
-      vkDestroyShaderModule(Device, CSModule, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       return Err;
     }
 
-    // No longer need shader modules after pipeline compilation.
-    vkDestroyShaderModule(Device, CSModule, nullptr);
-
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
-        VK_NULL_HANDLE);
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -1185,122 +1506,99 @@ public:
                      llvm::ArrayRef<Format> RTFormats,
                      std::optional<Format> DSFormat, ShaderContainer VS,
                      ShaderContainer PS) override {
-    const VkShaderStageFlags GraphicsFlags =
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 5> ShaderStages;
+    auto ShaderModuleCleanUp = llvm::scope_exit([&] {
+      for (auto &Stage : ShaderStages)
+        vkDestroyShaderModule(Device, Stage.module, nullptr);
+    });
+
+    llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
+    llvm::SmallVector<char> VSSpecData;
+    VkSpecializationInfo VSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(VS.SpecializationConstants,
+                                                  VSSpecEntries, VSSpecData,
+                                                  VSSpecInfo))
+        return Err;
+
+      auto VSModOrErr = createShaderModule(VS.Shader, "mesh");
+      if (!VSModOrErr)
+        return VSModOrErr.takeError();
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+      ShaderStage.module = *VSModOrErr;
+      ShaderStage.pName = VS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(PS.SpecializationConstants,
+                                                  PSSpecEntries, PSSpecData,
+                                                  PSSpecInfo))
+        return Err;
+
+      auto PSModOrErr = createShaderModule(PS.Shader, "pixel");
+      if (!PSModOrErr)
+        return PSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      ShaderStage.module = *PSModOrErr;
+      ShaderStage.pName = PS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    // Build a RenderPassDesc from the PSO's RT/DS formats.
+    RenderPassDesc PassDesc;
+    PassDesc.ColorAttachments.reserve(RTFormats.size());
+    for (const Format F : RTFormats) {
+      ColorAttachmentFormatDesc CA = {};
+      CA.Fmt = F;
+      CA.Load = LoadAction::DontCare;
+      CA.Store = StoreAction::DontCare;
+      PassDesc.ColorAttachments.push_back(CA);
+    }
+    if (DSFormat) {
+      DepthStencilAttachmentFormatDesc DS = {};
+      DS.Fmt = *DSFormat;
+      DS.DepthLoad = LoadAction::DontCare;
+      DS.DepthStore = StoreAction::DontCare;
+      DS.StencilLoad = LoadAction::DontCare;
+      DS.StencilStore = StoreAction::DontCare;
+      PassDesc.DepthStencil = DS;
+    }
+
+    // NOTE: After pipeline creation this render pass can be dropped. Later
+    // render passes just need to be compatible with this render pass, or in
+    // other words: the format, sample count and number of targets (rt and ds),
+    // need to match.
+    auto RenderPassOrErr = createRenderPass(PassDesc);
+    if (!RenderPassOrErr)
+      return RenderPassOrErr.takeError();
+    const std::unique_ptr<offloadtest::RenderPass> RenderPass =
+        std::move(*RenderPassOrErr);
+    VkRenderPass RenderPassHandle =
+        llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
 
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
                                         PipelineLayout))
       return Err;
-
-    auto RenderPassOrErr = createRenderPass(RTFormats, DSFormat);
-    if (!RenderPassOrErr) {
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
-      return RenderPassOrErr.takeError();
-    }
-    VkRenderPass RenderPass = *RenderPassOrErr;
-    llvm::outs() << "Render pass created.\n";
-
-    std::vector<VkShaderModule> ShaderModules;
-    auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
-    if (!VSModOrErr) {
-      vkDestroyRenderPass(Device, RenderPass, nullptr);
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
-      return VSModOrErr.takeError();
-    }
-    ShaderModules.push_back(*VSModOrErr);
-
-    auto PSModOrErr = createShaderModule(PS.Shader, "pixel");
-    if (!PSModOrErr) {
-      for (auto *M : ShaderModules)
-        vkDestroyShaderModule(Device, M, nullptr);
-      vkDestroyRenderPass(Device, RenderPass, nullptr);
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
-      return PSModOrErr.takeError();
-    }
-    ShaderModules.push_back(*PSModOrErr);
-
-    // Build specialization info for vertex shader.
-    llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
-    llvm::SmallVector<char> VSSpecData;
-    VkSpecializationInfo VSSpecInfo = {};
-    if (!VS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-      for (const auto &SpecConst : VS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, VSSpecData)) {
-          for (auto *M : ShaderModules)
-            vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyRenderPass(Device, RenderPass, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
-          return Err;
-        }
-        VSSpecEntries.push_back(Entry);
-      }
-      VSSpecInfo.mapEntryCount = VSSpecEntries.size();
-      VSSpecInfo.pMapEntries = VSSpecEntries.data();
-      VSSpecInfo.dataSize = VSSpecData.size();
-      VSSpecInfo.pData = VSSpecData.data();
-    }
-
-    // Build specialization info for pixel/fragment shader.
-    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
-    llvm::SmallVector<char> PSSpecData;
-    VkSpecializationInfo PSSpecInfo = {};
-    if (!PS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-      for (const auto &SpecConst : PS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, PSSpecData)) {
-          for (auto *M : ShaderModules)
-            vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyRenderPass(Device, RenderPass, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
-          return Err;
-        }
-        PSSpecEntries.push_back(Entry);
-      }
-      PSSpecInfo.mapEntryCount = PSSpecEntries.size();
-      PSSpecInfo.pMapEntries = PSSpecEntries.data();
-      PSSpecInfo.dataSize = PSSpecData.size();
-      PSSpecInfo.pData = PSSpecData.data();
-    }
-
-    const std::array<VkPipelineShaderStageCreateInfo, 2> Stages = {{
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-         VK_SHADER_STAGE_VERTEX_BIT, ShaderModules[0], VS.EntryPoint.c_str(),
-         VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-         VK_SHADER_STAGE_FRAGMENT_BIT, ShaderModules[1], PS.EntryPoint.c_str(),
-         PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo},
-    }};
 
     // Build vertex input attribute and binding descriptions from InputLayout.
     uint32_t Stride = 0;
@@ -1388,8 +1686,8 @@ public:
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    PipelineCI.stageCount = static_cast<uint32_t>(Stages.size());
-    PipelineCI.pStages = Stages.data();
+    PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
+    PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
     PipelineCI.pInputAssemblyState = &InputAssemblyCI;
     PipelineCI.pViewportState = &ViewportCI;
@@ -1399,29 +1697,219 @@ public:
     PipelineCI.pColorBlendState = &BlendCI;
     PipelineCI.pDynamicState = &DynamicCI;
     PipelineCI.layout = PipelineLayout;
-    PipelineCI.renderPass = RenderPass;
+    PipelineCI.renderPass = RenderPassHandle;
 
     VkPipeline Pipeline = VK_NULL_HANDLE;
     if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
                                                          1, &PipelineCI,
                                                          nullptr, &Pipeline),
                                "Failed to create graphics pipeline.")) {
-      for (auto *M : ShaderModules)
-        vkDestroyShaderModule(Device, M, nullptr);
-      vkDestroyRenderPass(Device, RenderPass, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
       return Err;
     }
 
-    // No longer need shader modules after pipeline compilation.
-    for (auto *M : ShaderModules)
-      vkDestroyShaderModule(Device, M, nullptr);
+    return std::make_unique<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       std::optional<ShaderContainer> AS, ShaderContainer MS,
+                       std::optional<ShaderContainer> PS) /*override*/ {
+    assert(RTFormats.size() <= 8);
+
+    VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> ShaderStages;
+    auto ShaderModuleCleanUp = llvm::scope_exit([&] {
+      for (auto &Stage : ShaderStages)
+        vkDestroyShaderModule(Device, Stage.module, nullptr);
+    });
+
+    llvm::SmallVector<VkSpecializationMapEntry> MSSpecEntries;
+    llvm::SmallVector<char> MSSpecData;
+    VkSpecializationInfo MSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(MS.SpecializationConstants,
+                                                  MSSpecEntries, MSSpecData,
+                                                  MSSpecInfo))
+        return Err;
+
+      auto MSModOrErr = createShaderModule(MS.Shader, "mesh");
+      if (!MSModOrErr)
+        return MSModOrErr.takeError();
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+      ShaderStage.module = *MSModOrErr;
+      ShaderStage.pName = MS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          MS.SpecializationConstants.empty() ? nullptr : &MSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> ASSpecEntries;
+    llvm::SmallVector<char> ASSpecData;
+    VkSpecializationInfo ASSpecInfo = {};
+    if (AS) {
+      if (auto Err = parseSpecializationConstants((*AS).SpecializationConstants,
+                                                  ASSpecEntries, ASSpecData,
+                                                  ASSpecInfo))
+        return Err;
+
+      auto ASModOrErr = createShaderModule((*AS).Shader, "task");
+      if (!ASModOrErr)
+        return ASModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TASK_BIT_EXT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TASK_BIT_EXT;
+      ShaderStage.module = *ASModOrErr;
+      ShaderStage.pName = (*AS).EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          (*AS).SpecializationConstants.empty() ? nullptr : &ASSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    if (PS) {
+      if (auto Err = parseSpecializationConstants((*PS).SpecializationConstants,
+                                                  PSSpecEntries, PSSpecData,
+                                                  PSSpecInfo))
+        return Err;
+
+      auto PSModOrErr = createShaderModule((*PS).Shader, "pixel");
+      if (!PSModOrErr)
+        return PSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      ShaderStage.module = *PSModOrErr;
+      ShaderStage.pName = (*PS).EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          (*PS).SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    // Build a RenderPassDesc from the PSO's RT/DS formats.
+    RenderPassDesc PassDesc;
+    PassDesc.ColorAttachments.reserve(RTFormats.size());
+    for (const Format F : RTFormats) {
+      ColorAttachmentFormatDesc CA = {};
+      CA.Fmt = F;
+      CA.Load = LoadAction::DontCare;
+      CA.Store = StoreAction::DontCare;
+      PassDesc.ColorAttachments.push_back(CA);
+    }
+    if (DSFormat) {
+      DepthStencilAttachmentFormatDesc DS = {};
+      DS.Fmt = *DSFormat;
+      DS.DepthLoad = LoadAction::DontCare;
+      DS.DepthStore = StoreAction::DontCare;
+      DS.StencilLoad = LoadAction::DontCare;
+      DS.StencilStore = StoreAction::DontCare;
+      PassDesc.DepthStencil = DS;
+    }
+
+    // NOTE: After pipeline creation this render pass can be dropped. Later
+    // render passes just need to be compatible with this render pass, or in
+    // other words: the format, sample count and number of targets (rt and ds),
+    // need to match.
+    auto RenderPassOrErr = createRenderPass(PassDesc);
+    if (!RenderPassOrErr)
+      return RenderPassOrErr.takeError();
+    const std::unique_ptr<offloadtest::RenderPass> RenderPass =
+        std::move(*RenderPassOrErr);
+    VkRenderPass RenderPassHandle =
+        llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
+
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
+                                        PipelineLayout))
+      return Err;
+
+    VkPipelineViewportStateCreateInfo ViewportCI = {};
+    ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewportCI.viewportCount = 1;
+    ViewportCI.scissorCount = 1;
+
+    const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                        VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo DynamicCI = {};
+    DynamicCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicCI.dynamicStateCount = 2;
+    DynamicCI.pDynamicStates = DynStates;
+
+    VkPipelineRasterizationStateCreateInfo RastCI = {};
+    RastCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RastCI.polygonMode = VK_POLYGON_MODE_FILL;
+    RastCI.cullMode = VK_CULL_MODE_NONE;
+    RastCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RastCI.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
+    MultisampleCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
+    DepthStencilCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    DepthStencilCI.depthTestEnable = VK_TRUE;
+    DepthStencilCI.depthWriteEnable = VK_TRUE;
+    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    DepthStencilCI.front = DepthStencilCI.back;
+
+    llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
+        RTFormats.size());
+    for (auto &BA : BlendAttachments)
+      BA.colorWriteMask = 0xf;
+    VkPipelineColorBlendStateCreateInfo BlendCI = {};
+    BlendCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    BlendCI.attachmentCount = static_cast<uint32_t>(BlendAttachments.size());
+    BlendCI.pAttachments = BlendAttachments.data();
+
+    VkGraphicsPipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
+    PipelineCI.pStages = ShaderStages.data();
+    PipelineCI.pViewportState = &ViewportCI;
+    PipelineCI.pRasterizationState = &RastCI;
+    PipelineCI.pMultisampleState = &MultisampleCI;
+    PipelineCI.pDepthStencilState = &DepthStencilCI;
+    PipelineCI.pColorBlendState = &BlendCI;
+    PipelineCI.pDynamicState = &DynamicCI;
+    PipelineCI.layout = PipelineLayout;
+    PipelineCI.renderPass = RenderPassHandle;
+
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
+                                                         1, &PipelineCI,
+                                                         nullptr, &Pipeline),
+                               "Failed to create mesh shader pipeline.")) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
-        RenderPass);
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -1657,7 +2145,78 @@ public:
   createCommandBuffer() override {
     return VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
+    llvm::SmallVector<VkAttachmentReference, 8> ColorRefs;
+
+    for (const ColorAttachmentFormatDesc &Color : Desc.ColorAttachments) {
+      VkAttachmentDescription AD = {};
+      AD.format = getVulkanFormat(Color.Fmt);
+      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.loadOp = getVkLoadOp(Color.Load);
+      AD.storeOp = getVkStoreOp(Color.Store);
+      AD.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      AD.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      AD.initialLayout = Color.Load == LoadAction::Load
+                             ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_UNDEFINED;
+      AD.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      VkAttachmentReference Ref = {};
+      Ref.attachment = static_cast<uint32_t>(Attachments.size());
+      Ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      Attachments.push_back(AD);
+      ColorRefs.push_back(Ref);
+    }
+
+    VkAttachmentReference DepthReference = {};
+    bool HasDS = false;
+    if (Desc.DepthStencil) {
+      const auto &DS = *Desc.DepthStencil;
+      VkAttachmentDescription AD = {};
+      AD.format = getVulkanFormat(DS.Fmt);
+      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.loadOp = getVkLoadOp(DS.DepthLoad);
+      AD.storeOp = getVkStoreOp(DS.DepthStore);
+      AD.stencilLoadOp = getVkLoadOp(DS.StencilLoad);
+      AD.stencilStoreOp = getVkStoreOp(DS.StencilStore);
+      AD.initialLayout = (DS.DepthLoad == LoadAction::Load ||
+                          DS.StencilLoad == LoadAction::Load)
+                             ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_UNDEFINED;
+      AD.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+      DepthReference.attachment = static_cast<uint32_t>(Attachments.size());
+      DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+      Attachments.push_back(AD);
+      HasDS = true;
+    }
+
+    VkSubpassDescription Subpass = {};
+    Subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    Subpass.colorAttachmentCount = static_cast<uint32_t>(ColorRefs.size());
+    Subpass.pColorAttachments = ColorRefs.data();
+    Subpass.pDepthStencilAttachment = HasDS ? &DepthReference : nullptr;
+
+    VkRenderPassCreateInfo RPCI = {};
+    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
+    RPCI.pAttachments = Attachments.data();
+    RPCI.subpassCount = 1;
+    RPCI.pSubpasses = &Subpass;
+
+    VkRenderPass Handle = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(vkCreateRenderPass(Device, &RPCI, nullptr, &Handle),
+                        "Failed to create render pass."))
+      return Err;
+    return std::make_unique<VulkanRenderPass>(Device, Handle, Desc);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -1924,24 +2483,22 @@ public:
       }
     }
 
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       if (auto Err = createRenderTarget(P, IS))
         return Err;
       // TODO: Always created for graphics pipelines. Consider making this
       // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
+    }
 
-      if (P.Bindings.VertexBufferPtr == nullptr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No Vertex buffer specified for graphics pipeline.");
-
+    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
       auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
           *this, *P.Bindings.VertexBufferPtr);
       if (!VBOrErr)
         return VBOrErr.takeError();
       IS.VB = std::move(*VBOrErr);
+      llvm::outs() << "Vertex buffer created.\n";
     }
 
     return llvm::Error::success();
@@ -2181,87 +2738,16 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Expected<VkRenderPass>
-  createRenderPass(llvm::ArrayRef<Format> RTFormats,
-                   std::optional<Format> DSFormat) {
-    // Only 8 render targets can be bound + 1 depth stencil target.
-    llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
-    llvm::SmallVector<VkAttachmentReference, 8> ColorReferences;
-    for (size_t I = 0, N = RTFormats.size(); I < N; ++I) {
-      VkAttachmentDescription AttachmentDesc = {};
-      AttachmentDesc.format = getVulkanFormat(RTFormats[I]);
-      AttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
-      AttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-      AttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-      AttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-      AttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      AttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      AttachmentDesc.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      Attachments.push_back(AttachmentDesc);
-
-      VkAttachmentReference ColorReference = {};
-      ColorReference.attachment = I;
-      ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-      ColorReferences.push_back(ColorReference);
-    }
-
-    VkAttachmentReference DepthReference = {};
-    if (DSFormat.has_value()) {
-      VkAttachmentDescription AttachmentDesc = {};
-      AttachmentDesc.format = getVulkanFormat(*DSFormat);
-      AttachmentDesc.samples = VK_SAMPLE_COUNT_1_BIT;
-      AttachmentDesc.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-      AttachmentDesc.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      AttachmentDesc.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-      AttachmentDesc.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-      AttachmentDesc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      AttachmentDesc.finalLayout =
-          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-      Attachments.push_back(AttachmentDesc);
-
-      DepthReference.attachment = Attachments.size() - 1;
-      DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    }
-
-    VkSubpassDescription SubpassDescription = {};
-    SubpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    SubpassDescription.colorAttachmentCount = ColorReferences.size();
-    SubpassDescription.pColorAttachments = ColorReferences.data();
-    SubpassDescription.pDepthStencilAttachment =
-        DSFormat.has_value() ? &DepthReference : nullptr;
-    SubpassDescription.inputAttachmentCount = 0;
-    SubpassDescription.pInputAttachments = nullptr;
-    SubpassDescription.preserveAttachmentCount = 0;
-    SubpassDescription.pPreserveAttachments = nullptr;
-    SubpassDescription.pResolveAttachments = nullptr;
-
-    VkRenderPassCreateInfo RPCI = {};
-    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
-    RPCI.pAttachments = Attachments.data();
-    RPCI.subpassCount = 1;
-    RPCI.pSubpasses = &SubpassDescription;
-    // RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
-    // RPCI.pDependencies = Dependencies.data();
-
-    VkRenderPass RenderPass = VK_NULL_HANDLE;
-    if (auto Err =
-            VK::toError(vkCreateRenderPass(Device, &RPCI, nullptr, &RenderPass),
-                        "Failed to create render pass."))
-      return Err;
-    return RenderPass;
-  }
-
   llvm::Error createFrameBuffer(InvocationState &IS) {
     auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
     auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-    auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
 
     std::array<VkImageView, 2> Views = {RT.View, DS.View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    FbufCreateInfo.renderPass = PipelineState.RenderPass;
+    FbufCreateInfo.renderPass =
+        llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
     FbufCreateInfo.width = RT.Desc.Width;
@@ -2275,10 +2761,10 @@ public:
     return llvm::Error::success();
   }
 
-  static llvm::Error
+  static llvm::Expected<VkSpecializationMapEntry>
   parseSpecializationConstant(const SpecializationConstant &SpecConst,
-                              VkSpecializationMapEntry &Entry,
-                              llvm::SmallVector<char> &SpecData) {
+                              llvm::SmallVectorImpl<char> &SpecData) {
+    VkSpecializationMapEntry Entry = {};
     Entry.constantID = SpecConst.ConstantID;
     Entry.offset = SpecData.size();
     switch (SpecConst.Type) {
@@ -2371,6 +2857,40 @@ public:
     default:
       llvm_unreachable("Unsupported specialization constant type");
     }
+
+    return Entry;
+  }
+
+  static llvm::Error parseSpecializationConstants(
+      llvm::ArrayRef<SpecializationConstant> SpecializationConstants,
+      llvm::SmallVectorImpl<VkSpecializationMapEntry> &SpecEntries,
+      llvm::SmallVectorImpl<char> &SpecData, VkSpecializationInfo &SpecInfo) {
+
+    if (SpecializationConstants.empty()) {
+      SpecInfo = {};
+      return llvm::Error::success();
+    }
+
+    llvm::DenseSet<uint32_t> SeenConstantIDs;
+    for (const auto &SpecConst : SpecializationConstants) {
+      if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Test configuration contains multiple entries for "
+            "specialization constant ID %u.",
+            SpecConst.ConstantID);
+
+      auto EntryOrErr = parseSpecializationConstant(SpecConst, SpecData);
+      if (!EntryOrErr)
+        return EntryOrErr.takeError();
+      SpecEntries.push_back(*EntryOrErr);
+    }
+
+    SpecInfo.mapEntryCount = SpecEntries.size();
+    SpecInfo.pMapEntries = SpecEntries.data();
+    SpecInfo.dataSize = SpecData.size();
+    SpecInfo.pData = SpecData.data();
+
     return llvm::Error::success();
   }
 
@@ -2644,63 +3164,6 @@ public:
     for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
-    if (P.isTraditionalRaster()) {
-      auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
-      auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-      auto &PipelineState = llvm::cast<VulkanPipelineState>(*IS.Pipeline);
-
-      const auto *ColorCV =
-          std::get_if<ClearColor>(&*RT.Desc.OptimizedClearValue);
-      if (!ColorCV)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Render target clear value must be a ClearColor.");
-      const auto *DepthCV =
-          std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
-      if (!DepthCV)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Depth/stencil clear value must be a ClearDepthStencil.");
-      VkClearValue ClearValues[2] = {};
-      ClearValues[0].color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
-      ClearValues[1].depthStencil = {DepthCV->Depth, DepthCV->Stencil};
-
-      VkRenderPassBeginInfo RenderPassBeginInfo = {};
-      RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      RenderPassBeginInfo.renderPass = PipelineState.RenderPass;
-      RenderPassBeginInfo.framebuffer = IS.FrameBuffer;
-      RenderPassBeginInfo.renderArea.extent.width =
-          P.Bindings.RTargetBufferPtr->OutputProps.Width;
-      RenderPassBeginInfo.renderArea.extent.height =
-          P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      RenderPassBeginInfo.clearValueCount = 2;
-      RenderPassBeginInfo.pClearValues = ClearValues;
-
-      vkCmdBeginRenderPass(IS.CB->CmdBuffer, &RenderPassBeginInfo,
-                           VK_SUBPASS_CONTENTS_INLINE);
-
-      // Negative viewport height (with Y origin at the bottom) flips clip->
-      // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
-      // triangle is front-facing on every backend.
-      VkViewport Viewport = {};
-      Viewport.x = 0.0f;
-      Viewport.y =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Viewport.width =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
-      Viewport.height =
-          -static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Viewport.minDepth = 0.0f;
-      Viewport.maxDepth = 1.0f;
-      vkCmdSetViewport(IS.CB->CmdBuffer, 0, 1, &Viewport);
-
-      VkRect2D Scissor = {};
-      Scissor.offset = {0, 0};
-      Scissor.extent.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
-      Scissor.extent.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      vkCmdSetScissor(IS.CB->CmdBuffer, 0, 1, &Scissor);
-    }
-
     const VkPipelineBindPoint BindPoint = P.isTraditionalRaster()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
@@ -2735,21 +3198,55 @@ public:
                    << P.DispatchParameters.DispatchGroupCount[0] << ", "
                    << P.DispatchParameters.DispatchGroupCount[1] << ", "
                    << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
-    } else {
-      VkDeviceSize Offsets[1]{0};
-      assert(IS.VB);
-      VkBuffer VBHandle = llvm::cast<VulkanBuffer>(*IS.VB).Buffer;
-      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
-      // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CB->CmdBuffer, P.getVertexCount(), 1, 0, 0);
-      llvm::outs() << "Drew " << P.getVertexCount() << " vertices.\n";
-      vkCmdEndRenderPass(IS.CB->CmdBuffer);
+    } else if (P.isRaster()) {
+      RenderPassBeginDesc BeginDesc = {};
+      BeginDesc.Pass = IS.RenderPass.get();
+      BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
+      BeginDesc.DepthStencil = IS.DepthStencil.get();
+
+      auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      auto &Encoder = *EncOrErr.get();
+
+      Viewport VP;
+      VP.Width =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
+      VP.Height =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
+      Encoder.setViewport(VP);
+
+      ScissorRect Scissor;
+      Scissor.Width = static_cast<uint32_t>(VP.Width);
+      Scissor.Height = static_cast<uint32_t>(VP.Height);
+      Encoder.setScissor(Scissor);
+
+      if (P.isTraditionalRaster()) {
+        if (IS.VB)
+          Encoder.setVertexBuffer(0, IS.VB.get(), 0,
+                                  P.Bindings.getVertexStride());
+
+        if (auto Err =
+                Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                      /*InstanceCount=*/1))
+          return Err;
+      } else if (P.isMeshShaderRaster()) {
+        if (auto Err = Encoder.dispatchMesh(
+                *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+                P.DispatchParameters.DispatchGroupCount[1],
+                P.DispatchParameters.DispatchGroupCount[2]))
+          return Err;
+      }
+      Encoder.endEncoding();
+
       copyTextureToReadback(IS.CB->CmdBuffer,
                             llvm::cast<VulkanTexture>(*IS.RenderTarget),
                             llvm::cast<VulkanBuffer>(*IS.RTReadback),
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+    } else {
+      assert(false && "Unhandled test pipeline variant.");
     }
 
     for (auto &R : IS.Resources)
@@ -2799,7 +3296,7 @@ public:
     }
 
     // Copy back the frame buffer data if this was a graphics pipeline.
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
 
       VkMappedMemoryRange Range = {};
@@ -2875,7 +3372,7 @@ public:
 
     auto CBOrErr = VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
@@ -2939,50 +3436,110 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
-    } else if (P.isTraditionalRaster()) {
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
-      for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-          VS.SpecializationConstants = Shader.SpecializationConstants;
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-          PS.SpecializationConstants = Shader.SpecializationConstants;
-        }
-      }
+    } else if (P.isRaster()) {
+      ColorAttachmentFormatDesc ColorAttachment = {};
+      ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
+      ColorAttachment.Load = LoadAction::Clear;
+      ColorAttachment.Store = StoreAction::Store;
 
-      // Create the input layout based on the vertex attributes.
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
-      for (auto &Attr : P.Bindings.VertexAttributes) {
-        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+      DepthStencilAttachmentFormatDesc DSAttachment = {};
+      DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
+      DSAttachment.DepthLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::Store;
+      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilStore = StoreAction::DontCare;
+
+      RenderPassDesc PassDesc;
+      PassDesc.ColorAttachments.push_back(ColorAttachment);
+      PassDesc.DepthStencil = DSAttachment;
+
+      auto RenderPassOrErr = createRenderPass(PassDesc);
+      if (!RenderPassOrErr)
+        return RenderPassOrErr.takeError();
+      State.RenderPass = std::move(*RenderPassOrErr);
+      llvm::outs() << "Render pass created.\n";
+
+      if (P.isTraditionalRaster()) {
+        ShaderContainer VS = {};
+        ShaderContainer PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Vertex) {
+            VS.EntryPoint = Shader.Entry;
+            VS.Shader = Shader.Shader.get();
+            VS.SpecializationConstants = Shader.SpecializationConstants;
+          } else if (Shader.Stage == Stages::Pixel) {
+            PS.EntryPoint = Shader.Entry;
+            PS.Shader = Shader.Shader.get();
+            PS.SpecializationConstants = Shader.SpecializationConstants;
+          }
+        }
+
+        // Create the input layout based on the vertex attributes.
+        llvm::SmallVector<InputLayoutDesc> InputLayout;
+        for (auto &Attr : P.Bindings.VertexAttributes) {
+          auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+          if (!FormatOrErr)
+            return FormatOrErr.takeError();
+
+          InputLayoutDesc Desc = {};
+          Desc.Name = Attr.Name;
+          Desc.Fmt = *FormatOrErr;
+          Desc.OffsetInBytes = Attr.Offset;
+          InputLayout.push_back(Desc);
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr = createPipelineVsPs(
+            "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
+            Format::D32FloatS8Uint, VS, PS);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Graphics Pipeline created.\n";
+      } else if (P.isMeshShaderRaster()) {
+        std::optional<ShaderContainer> AS = {};
+        ShaderContainer MS = {};
+        std::optional<ShaderContainer> PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Amplification) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            AS = Container;
+          } else if (Shader.Stage == Stages::Mesh) {
+            MS.EntryPoint = Shader.Entry;
+            MS.Shader = Shader.Shader.get();
+          } else if (Shader.Stage == Stages::Pixel) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            PS = Container;
+          }
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr =
+            createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
+                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
-
-      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
-                                  P.Bindings.RTargetBufferPtr->Channels);
-      if (!FormatOrErr)
-        return FormatOrErr.takeError();
-
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
-      if (!PipelineStateOrErr)
-        return PipelineStateOrErr.takeError();
-      State.Pipeline = std::move(*PipelineStateOrErr);
-      llvm::outs() << "Graphics Pipeline created.\n";
 
       if (auto Err = createFrameBuffer(State))
         return Err;
@@ -3001,7 +3558,7 @@ public:
     llvm::outs() << "Executed copy command buffer.\n";
     auto DispatchCBOrErr = VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
     if (!DispatchCBOrErr)
       return DispatchCBOrErr.takeError();
     State.CB = std::move(*DispatchCBOrErr);

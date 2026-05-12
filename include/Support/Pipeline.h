@@ -26,15 +26,25 @@
 
 namespace offloadtest {
 
-enum class Stages { Compute, Vertex, Pixel };
+enum class Stages {
+  // Compute
+  Compute,
+
+  // Traditional Raster
+  Vertex,
+  Pixel,
+
+  // Mesh Shader
+  Amplification,
+  Mesh
+};
 inline constexpr std::array AllStages = {
-    Stages::Compute,
-    Stages::Vertex,
-    Stages::Pixel,
+    Stages::Compute,       Stages::Vertex, Stages::Pixel,
+    Stages::Amplification, Stages::Mesh,
 };
 inline constexpr size_t NumStages = AllStages.size();
 
-enum class ShaderPipelineKind { Compute, TraditionalRaster };
+enum class ShaderPipelineKind { Compute, TraditionalRaster, MeshShaderRaster };
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -383,11 +393,11 @@ struct VertexAttribute {
 
 struct IOBindings {
   std::string VertexBuffer;
-  CPUBuffer *VertexBufferPtr;
+  CPUBuffer *VertexBufferPtr = nullptr;
   llvm::SmallVector<VertexAttribute> VertexAttributes;
 
   std::string RenderTarget;
-  CPUBuffer *RTargetBufferPtr;
+  CPUBuffer *RTargetBufferPtr = nullptr;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
@@ -501,6 +511,12 @@ struct Pipeline {
   bool isCompute() const { return Kind == ShaderPipelineKind::Compute; }
   bool isTraditionalRaster() const {
     return Kind == ShaderPipelineKind::TraditionalRaster;
+  }
+  bool isMeshShaderRaster() const {
+    return Kind == ShaderPipelineKind::MeshShaderRaster;
+  }
+  bool isRaster() const {
+    return isTraditionalRaster() || isMeshShaderRaster();
   }
 };
 } // namespace offloadtest
@@ -712,6 +728,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
     ENUM_CASE(Compute);
     ENUM_CASE(Vertex);
     ENUM_CASE(Pixel);
+    ENUM_CASE(Amplification);
+    ENUM_CASE(Mesh);
 #undef ENUM_CASE
   }
 };
