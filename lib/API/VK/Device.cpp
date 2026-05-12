@@ -878,12 +878,12 @@ public:
     // Stride is needed in DX12 at binding time, ignore parameter here.
     if (!VB) {
       VkBuffer NullBuf = VK_NULL_HANDLE;
-      VkDeviceSize Zero = 0;
+      const VkDeviceSize Zero = 0;
       vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &NullBuf, &Zero);
       return;
     }
     VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
-    VkDeviceSize VKOffset = Offset;
+    const VkDeviceSize VKOffset = Offset;
     vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &Handle, &VKOffset);
   }
 
@@ -1478,7 +1478,7 @@ public:
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
     PassDesc.ColorAttachments.reserve(RTFormats.size());
-    for (Format F : RTFormats) {
+    for (const Format F : RTFormats) {
       ColorAttachmentFormatDesc CA = {};
       CA.Fmt = F;
       CA.Load = LoadAction::DontCare;
@@ -1506,7 +1506,7 @@ public:
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
       return RenderPassOrErr.takeError();
     }
-    std::unique_ptr<offloadtest::RenderPass> RenderPass =
+    const std::unique_ptr<offloadtest::RenderPass> RenderPass =
         std::move(*RenderPassOrErr);
     VkRenderPass RenderPassHandle =
         llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
