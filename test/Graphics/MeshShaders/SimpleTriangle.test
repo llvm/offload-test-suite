@@ -72,7 +72,7 @@ DescriptorSets: []
 ...
 #--- end
 
-# UNSUPPORTED: Vulkan || Metal
+# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
