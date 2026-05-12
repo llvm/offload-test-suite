@@ -507,7 +507,7 @@ public:
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
-  ComPtr<ID3D12GraphicsCommandList> CmdList;
+  ComPtr<ID3D12GraphicsCommandList6> CmdList;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
 
@@ -748,6 +748,15 @@ public:
       return Err;
     CB.CmdList->DrawInstanced(VertexCount, InstanceCount, FirstVertex,
                               FirstInstance);
+    return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    if (auto Err = bindCommonDrawState(PSO))
+      return Err;
+    CB.CmdList->DispatchMesh(GroupCountX, GroupCountY, GroupCountZ);
     return llvm::Error::success();
   }
 
@@ -2251,12 +2260,23 @@ public:
     Scissor.Height = static_cast<uint32_t>(VP.Height);
     Encoder.setScissor(Scissor);
 
-    if (IS.VB)
-      Encoder.setVertexBuffer(0, IS.VB.get(), 0, P.Bindings.getVertexStride());
+    if (P.isTraditionalRaster()) {
+      if (IS.VB)
+        Encoder.setVertexBuffer(0, IS.VB.get(), 0,
+                                P.Bindings.getVertexStride());
 
-    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
-                                         /*InstanceCount=*/1))
-      return Err;
+      if (auto Err =
+              Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                    /*InstanceCount=*/1))
+        return Err;
+    } else {
+      if (auto Err = Encoder.dispatchMesh(
+              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
+        return Err;
+    }
+
     Encoder.endEncoding();
 
     // Transition the render target to copy source and copy to the readback
@@ -2386,49 +2406,7 @@ public:
         return Err;
       llvm::outs() << "Compute command list created.\n";
 
-    } else if (P.isTraditionalRaster()) {
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
-      for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-        }
-      }
-
-      // Create the input layout based on the vertex attributes.
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
-      for (auto &Attr : P.Bindings.VertexAttributes) {
-        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
-        if (!FormatOrErr)
-          return FormatOrErr.takeError();
-
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
-      }
-
-      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
-                                  P.Bindings.RTargetBufferPtr->Channels);
-      if (!FormatOrErr)
-        return FormatOrErr.takeError();
-
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Traditional Raster Pipeline State", BindingsDesc, InputLayout,
-          RTFormats, Format::D32FloatS8Uint, VS, PS);
-      if (!PipelineStateOrErr)
-        return PipelineStateOrErr.takeError();
-      State.Pipeline = std::move(*PipelineStateOrErr);
-      llvm::outs() << "Traditional Raster Pipeline created.\n";
-
+    } else if (P.isRaster()) {
       // Begin a render pass: bind RT/DSV and clear depth-stencil. Color
       // load action is Load — the existing inline code didn't clear color.
       ColorAttachmentFormatDesc ColorAttachment = {};
@@ -2453,49 +2431,93 @@ public:
       State.RenderPass = std::move(*RenderPassOrErr);
       llvm::outs() << "Render pass created.\n";
 
+      if (P.isTraditionalRaster()) {
+        ShaderContainer VS = {};
+        ShaderContainer PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Vertex) {
+            VS.EntryPoint = Shader.Entry;
+            VS.Shader = Shader.Shader.get();
+          } else if (Shader.Stage == Stages::Pixel) {
+            PS.EntryPoint = Shader.Entry;
+            PS.Shader = Shader.Shader.get();
+          }
+        }
+
+        // Create the input layout based on the vertex attributes.
+        llvm::SmallVector<InputLayoutDesc> InputLayout;
+        for (auto &Attr : P.Bindings.VertexAttributes) {
+          auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+          if (!FormatOrErr)
+            return FormatOrErr.takeError();
+
+          InputLayoutDesc Desc = {};
+          Desc.Name = Attr.Name;
+          Desc.Fmt = *FormatOrErr;
+          Desc.OffsetInBytes = Attr.Offset;
+          InputLayout.push_back(Desc);
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr = createPipelineVsPs(
+            "Traditional Raster Pipeline State", BindingsDesc, InputLayout,
+            RTFormats, Format::D32FloatS8Uint, VS, PS);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Traditional Raster Pipeline created.\n";
+
+      } else if (P.isMeshShaderRaster()) {
+        std::optional<ShaderContainer> AS = {};
+        ShaderContainer MS = {};
+        std::optional<ShaderContainer> PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Amplification) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            AS = Container;
+          } else if (Shader.Stage == Stages::Mesh) {
+            MS.EntryPoint = Shader.Entry;
+            MS.Shader = Shader.Shader.get();
+          } else if (Shader.Stage == Stages::Pixel) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            PS = Container;
+          }
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr =
+            createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
+                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Mesh Shader Pipeline created.\n";
+      }
+
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
-    } else if (P.isMeshShaderRaster()) {
-      std::optional<ShaderContainer> AS = {};
-      ShaderContainer MS = {};
-      std::optional<ShaderContainer> PS = {};
-      for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Amplification) {
-          ShaderContainer Container;
-          Container.EntryPoint = Shader.Entry;
-          Container.Shader = Shader.Shader.get();
-          AS = Container;
-        } else if (Shader.Stage == Stages::Mesh) {
-          MS.EntryPoint = Shader.Entry;
-          MS.Shader = Shader.Shader.get();
-        } else if (Shader.Stage == Stages::Pixel) {
-          ShaderContainer Container;
-          Container.EntryPoint = Shader.Entry;
-          Container.Shader = Shader.Shader.get();
-          PS = Container;
-        }
-      }
-
-      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
-                                  P.Bindings.RTargetBufferPtr->Channels);
-      if (!FormatOrErr)
-        return FormatOrErr.takeError();
-
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr =
-          createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
-                               RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
-
-      if (!PipelineStateOrErr)
-        return PipelineStateOrErr.takeError();
-      State.Pipeline = std::move(*PipelineStateOrErr);
-      llvm::outs() << "Mesh Shader Pipeline created.\n";
     } else {
-      return llvm::createStringError(
-          "Pipeline was neither Compute nor Traditional Raster");
+      return llvm::createStringError("Pipeline was neither Compute nor Raster");
     }
 
     auto SubmitResult = executeCommandList(State);
