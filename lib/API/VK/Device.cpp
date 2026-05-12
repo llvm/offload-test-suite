@@ -1373,6 +1373,21 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                    ShaderContainer CS) override {
+    auto CSModOrErr = createShaderModule(CS.Shader, "compute");
+    if (!CSModOrErr)
+      return CSModOrErr.takeError();
+
+    VkShaderModule CSModule = *CSModOrErr;
+    auto ShaderModuleCleanUp = llvm::scope_exit(
+        [&] { vkDestroyShaderModule(Device, CSModule, nullptr); });
+
+    llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
+    llvm::SmallVector<char> SpecData;
+    VkSpecializationInfo SpecInfo = {};
+    if (auto Err = parseSpecializationConstants(
+            CS.SpecializationConstants, SpecEntries, SpecData, SpecInfo))
+      return Err;
+
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     if (auto Err =
@@ -1385,49 +1400,13 @@ public:
         vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
     });
 
-    // Create compute shader module.
-    auto CSModOrErr = createShaderModule(CS.Shader, "compute");
-    if (!CSModOrErr) {
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      return CSModOrErr.takeError();
-    }
-    VkShaderModule CSModule = *CSModOrErr;
-
     VkPipelineShaderStageCreateInfo StageCI = {};
     StageCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     StageCI.stage = VK_SHADER_STAGE_COMPUTE_BIT;
     StageCI.module = CSModule;
     StageCI.pName = CS.EntryPoint.c_str();
-
-    llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
-    llvm::SmallVector<char> SpecData;
-    VkSpecializationInfo SpecInfo = {};
-    if (!CS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-
-      for (const auto &SpecConst : CS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, SpecData)) {
-          vkDestroyShaderModule(Device, CSModule, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          return Err;
-        }
-        SpecEntries.push_back(Entry);
-      }
-      SpecInfo.mapEntryCount = SpecEntries.size();
-      SpecInfo.pMapEntries = SpecEntries.data();
-      SpecInfo.dataSize = SpecData.size();
-      SpecInfo.pData = SpecData.data();
-      StageCI.pSpecializationInfo = &SpecInfo;
-    }
+    StageCI.pSpecializationInfo =
+        CS.SpecializationConstants.empty() ? nullptr : &SpecInfo;
 
     VkComputePipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
@@ -1438,13 +1417,9 @@ public:
                                                         1, &PipelineCI, nullptr,
                                                         &Pipeline),
                                "Failed to create compute pipeline.")) {
-      vkDestroyShaderModule(Device, CSModule, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       return Err;
     }
-
-    // No longer need shader modules after pipeline compilation.
-    vkDestroyShaderModule(Device, CSModule, nullptr);
 
     return std::make_unique<VulkanPipelineState>(
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
@@ -1456,14 +1431,61 @@ public:
                      llvm::ArrayRef<Format> RTFormats,
                      std::optional<Format> DSFormat, ShaderContainer VS,
                      ShaderContainer PS) override {
-    const VkShaderStageFlags GraphicsFlags =
-        VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
-    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
-    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
-                                        PipelineLayout))
-      return Err;
+    VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 5> ShaderStages;
+    auto ShaderModuleCleanUp = llvm::scope_exit([&] {
+      for (auto &Stage : ShaderStages)
+        vkDestroyShaderModule(Device, Stage.module, nullptr);
+    });
+
+    llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
+    llvm::SmallVector<char> VSSpecData;
+    VkSpecializationInfo VSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(VS.SpecializationConstants,
+                                                  VSSpecEntries, VSSpecData,
+                                                  VSSpecInfo))
+        return Err;
+
+      auto VSModOrErr = createShaderModule(VS.Shader, "mesh");
+      if (!VSModOrErr)
+        return VSModOrErr.takeError();
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+      ShaderStage.module = *VSModOrErr;
+      ShaderStage.pName = VS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(PS.SpecializationConstants,
+                                                  PSSpecEntries, PSSpecData,
+                                                  PSSpecInfo))
+        return Err;
+
+      auto PSModOrErr = createShaderModule(PS.Shader, "pixel");
+      if (!PSModOrErr)
+        return PSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      ShaderStage.module = *PSModOrErr;
+      ShaderStage.pName = PS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
 
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
@@ -1490,110 +1512,18 @@ public:
     // other words: the format, sample count and number of targets (rt and ds),
     // need to match, but Load/Store ops (and initial/final layout) are ignored.
     auto RenderPassOrErr = createRenderPass(PassDesc);
-    if (!RenderPassOrErr) {
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+    if (!RenderPassOrErr)
       return RenderPassOrErr.takeError();
-    }
     const std::unique_ptr<offloadtest::RenderPass> RenderPass =
         std::move(*RenderPassOrErr);
     VkRenderPass RenderPassHandle =
         llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
 
-    std::vector<VkShaderModule> ShaderModules;
-    auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
-    if (!VSModOrErr) {
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
-      return VSModOrErr.takeError();
-    }
-    ShaderModules.push_back(*VSModOrErr);
-
-    auto PSModOrErr = createShaderModule(PS.Shader, "pixel");
-    if (!PSModOrErr) {
-      for (auto *M : ShaderModules)
-        vkDestroyShaderModule(Device, M, nullptr);
-      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-      for (auto *L : SetLayouts)
-        vkDestroyDescriptorSetLayout(Device, L, nullptr);
-      return PSModOrErr.takeError();
-    }
-    ShaderModules.push_back(*PSModOrErr);
-
-    // Build specialization info for vertex shader.
-    llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
-    llvm::SmallVector<char> VSSpecData;
-    VkSpecializationInfo VSSpecInfo = {};
-    if (!VS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-      for (const auto &SpecConst : VS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, VSSpecData)) {
-          for (auto *M : ShaderModules)
-            vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
-          return Err;
-        }
-        VSSpecEntries.push_back(Entry);
-      }
-      VSSpecInfo.mapEntryCount = VSSpecEntries.size();
-      VSSpecInfo.pMapEntries = VSSpecEntries.data();
-      VSSpecInfo.dataSize = VSSpecData.size();
-      VSSpecInfo.pData = VSSpecData.data();
-    }
-
-    // Build specialization info for pixel/fragment shader.
-    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
-    llvm::SmallVector<char> PSSpecData;
-    VkSpecializationInfo PSSpecInfo = {};
-    if (!PS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-      for (const auto &SpecConst : PS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, PSSpecData)) {
-          for (auto *M : ShaderModules)
-            vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
-          return Err;
-        }
-        PSSpecEntries.push_back(Entry);
-      }
-      PSSpecInfo.mapEntryCount = PSSpecEntries.size();
-      PSSpecInfo.pMapEntries = PSSpecEntries.data();
-      PSSpecInfo.dataSize = PSSpecData.size();
-      PSSpecInfo.pData = PSSpecData.data();
-    }
-
-    const std::array<VkPipelineShaderStageCreateInfo, 2> Stages = {{
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-         VK_SHADER_STAGE_VERTEX_BIT, ShaderModules[0], VS.EntryPoint.c_str(),
-         VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo},
-        {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
-         VK_SHADER_STAGE_FRAGMENT_BIT, ShaderModules[1], PS.EntryPoint.c_str(),
-         PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo},
-    }};
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
+                                        PipelineLayout))
+      return Err;
 
     // Build vertex input attribute and binding descriptions from InputLayout.
     uint32_t Stride = 0;
@@ -1681,8 +1611,8 @@ public:
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    PipelineCI.stageCount = static_cast<uint32_t>(Stages.size());
-    PipelineCI.pStages = Stages.data();
+    PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
+    PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
     PipelineCI.pInputAssemblyState = &InputAssemblyCI;
     PipelineCI.pViewportState = &ViewportCI;
@@ -2564,10 +2494,10 @@ public:
     return llvm::Error::success();
   }
 
-  static llvm::Error
+  static llvm::Expected<VkSpecializationMapEntry>
   parseSpecializationConstant(const SpecializationConstant &SpecConst,
-                              VkSpecializationMapEntry &Entry,
-                              llvm::SmallVector<char> &SpecData) {
+                              llvm::SmallVectorImpl<char> &SpecData) {
+    VkSpecializationMapEntry Entry = {};
     Entry.constantID = SpecConst.ConstantID;
     Entry.offset = SpecData.size();
     switch (SpecConst.Type) {
@@ -2660,6 +2590,40 @@ public:
     default:
       llvm_unreachable("Unsupported specialization constant type");
     }
+
+    return Entry;
+  }
+
+  static llvm::Error parseSpecializationConstants(
+      llvm::ArrayRef<SpecializationConstant> SpecializationConstants,
+      llvm::SmallVectorImpl<VkSpecializationMapEntry> &SpecEntries,
+      llvm::SmallVectorImpl<char> &SpecData, VkSpecializationInfo &SpecInfo) {
+
+    if (SpecializationConstants.empty()) {
+      SpecInfo = {};
+      return llvm::Error::success();
+    }
+
+    llvm::DenseSet<uint32_t> SeenConstantIDs;
+    for (const auto &SpecConst : SpecializationConstants) {
+      if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Test configuration contains multiple entries for "
+            "specialization constant ID %u.",
+            SpecConst.ConstantID);
+
+      auto EntryOrErr = parseSpecializationConstant(SpecConst, SpecData);
+      if (!EntryOrErr)
+        return EntryOrErr.takeError();
+      SpecEntries.push_back(*EntryOrErr);
+    }
+
+    SpecInfo.mapEntryCount = SpecEntries.size();
+    SpecInfo.pMapEntries = SpecEntries.data();
+    SpecInfo.dataSize = SpecData.size();
+    SpecInfo.pData = SpecData.data();
+
     return llvm::Error::success();
   }
 
