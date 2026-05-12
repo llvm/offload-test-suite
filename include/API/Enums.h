@@ -31,6 +31,19 @@ enum ShaderContainerType {
   Metal,
 };
 
+/// Action applied to an attachment when a render pass begins.
+enum class LoadAction {
+  Load,     ///< Preserve existing contents.
+  Clear,    ///< Clear to the texture's OptimizedClearValue at encoder time.
+  DontCare, ///< Contents are undefined; the driver may discard.
+};
+
+/// Action applied to an attachment when a render pass ends.
+enum class StoreAction {
+  Store,    ///< Write the rendered contents back to memory.
+  DontCare, ///< Contents may be discarded after the pass.
+};
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_ENUMS_H

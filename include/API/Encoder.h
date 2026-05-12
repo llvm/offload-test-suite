@@ -20,6 +20,7 @@
 namespace offloadtest {
 
 class Buffer;
+class PipelineState;
 
 /// Base class for all command encoders. An encoder records commands into a
 /// command buffer. Call endEncoding() when done recording. Barriers are
@@ -41,12 +42,6 @@ public:
 
   GPUAPI getAPI() const { return API; }
   bool isEnded() const { return Ended; }
-
-  /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
-  /// \p DstOffset.
-  virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
-                                         Buffer &Dst, size_t DstOffset,
-                                         size_t Size) = 0;
 
   /// Begin a named debug group. Visible in GPU debuggers (PIX, RenderDoc,
   /// Xcode). Must be balanced by a corresponding popDebugGroup() call.
@@ -80,6 +75,44 @@ public:
   /// pipeline state (e.g. the shader's numthreads attribute).
   virtual llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
                                uint32_t GroupCountZ) = 0;
+
+  /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
+  /// \p DstOffset.
+  virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
+                                         Buffer &Dst, size_t DstOffset,
+                                         size_t Size) = 0;
+};
+
+struct Viewport {
+  float X = 0.0f, Y = 0.0f;
+  float Width = 0.0f, Height = 0.0f;
+  float MinDepth = 0.0f, MaxDepth = 1.0f;
+};
+
+struct ScissorRect {
+  int32_t X = 0, Y = 0;
+  uint32_t Width = 0, Height = 0;
+};
+
+class RenderEncoder : public CommandEncoder {
+public:
+  using CommandEncoder::CommandEncoder;
+
+  virtual void setViewport(const Viewport &VP) = 0;
+  virtual void setScissor(const ScissorRect &Rect) = 0;
+
+  virtual void setVertexBuffer(uint32_t Slot, Buffer *VB, size_t Offset,
+                               uint32_t Stride) = 0;
+
+  virtual llvm::Error drawInstanced(const PipelineState &PSO,
+                                    uint32_t VertexCount,
+                                    uint32_t InstanceCount,
+                                    uint32_t FirstVertex = 0,
+                                    uint32_t FirstInstance = 0) = 0;
+
+  virtual llvm::Error dispatchMesh(const PipelineState &PSO,
+                                   uint32_t GroupCountX, uint32_t GroupCountY,
+                                   uint32_t GroupCountZ) = 0;
 };
 
 } // namespace offloadtest
