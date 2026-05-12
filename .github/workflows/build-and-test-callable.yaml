@@ -319,11 +319,13 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
-            mkdir -p $GITHUB_WORKSPACE/install $GITHUB_WORKSPACE/install-dxc
-            # Pipe the archive in via stdin so tar doesn't try to parse the
-            # source path as a remote host (Windows drive letter issue).
-            tar xf - -C $GITHUB_WORKSPACE/install < "$RUNNER_TEMP/build-artifacts.tar"
-            tar xf - -C $GITHUB_WORKSPACE/install-dxc < "$RUNNER_TEMP/dxc-artifacts.tar"
+            cd $GITHUB_WORKSPACE
+            mkdir -p install install-dxc
+            # Pipe the archive in via stdin and use a relative -C path so
+            # tar doesn't try to parse the Windows drive letter or treat
+            # backslashes as escape characters.
+            tar xf - -C install < "$RUNNER_TEMP/build-artifacts.tar"
+            tar xf - -C install-dxc < "$RUNNER_TEMP/dxc-artifacts.tar"
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
@@ -341,6 +343,12 @@ jobs:
           # available so we can't pip install -r requirements.txt. Keep
           # this list in sync with OffloadTest/test/requirements.txt.
           pip-install: lit pyyaml
+      - name: Ensure lit is installed
+        shell: bash
+        run: |
+            set -euxo pipefail
+            python -m pip install --upgrade pip
+            python -m pip install lit pyyaml
       - name: Dump GPU Info (test runner)
         shell: bash
         run: |
@@ -383,7 +391,7 @@ jobs:
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
             suite='${{ steps.suite.outputs.suite }}'
-            python -m lit -v "run/test/$suite" \
+            lit -v "run/test/$suite" \
               --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
