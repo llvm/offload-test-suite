@@ -1931,17 +1931,15 @@ public:
       // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
+    }
 
-      if (P.Bindings.VertexBufferPtr == nullptr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No Vertex buffer specified for graphics pipeline.");
-
+    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
       auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
           *this, *P.Bindings.VertexBufferPtr);
       if (!VBOrErr)
         return VBOrErr.takeError();
       IS.VB = std::move(*VBOrErr);
+      llvm::outs() << "Vertex buffer created.\n";
     }
 
     return llvm::Error::success();
@@ -2737,9 +2735,10 @@ public:
                    << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
     } else {
       VkDeviceSize Offsets[1]{0};
-      assert(IS.VB);
-      VkBuffer VBHandle = llvm::cast<VulkanBuffer>(*IS.VB).Buffer;
-      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
+      if (IS.VB) {
+        VkBuffer VBHandle = llvm::cast<VulkanBuffer>(*IS.VB).Buffer;
+        vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1, &VBHandle, Offsets);
+      }
       // instanceCount must be >=1 to draw; previously was 0 which draws nothing
       vkCmdDraw(IS.CB->CmdBuffer, P.getVertexCount(), 1, 0, 0);
       llvm::outs() << "Drew " << P.getVertexCount() << " vertices.\n";

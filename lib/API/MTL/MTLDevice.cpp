@@ -955,17 +955,13 @@ class MTLDevice : public offloadtest::Device {
       }
     }
 
-    if (P.isTraditionalRaster()) {
-      if (!P.Bindings.VertexBufferPtr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No vertex buffer specified for graphics pipeline.");
-
+    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
       auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
           *this, *P.Bindings.VertexBufferPtr);
       if (!VBOrErr)
         return VBOrErr.takeError();
       IS.VB = std::move(*VBOrErr);
+      llvm::outs() << "Vertex buffer created.\n";
     }
     return llvm::Error::success();
   }
@@ -1146,9 +1142,10 @@ class MTLDevice : public offloadtest::Device {
     CmdEncoder->setCullMode(MTL::CullModeNone);
     CmdEncoder->setFrontFacingWinding(MTL::WindingCounterClockwise);
 
-    // Bind vertex buffer at slot 0 to match the vertex descriptor which
-    // references buffer index 0.
-    CmdEncoder->setVertexBuffer(llvm::cast<MTLBuffer>(*IS.VB).Buf, 0, 0);
+    if (IS.VB)
+      // Bind vertex buffer at slot 0 to match the vertex descriptor which
+      // references buffer index 0.
+      CmdEncoder->setVertexBuffer(llvm::cast<MTLBuffer>(*IS.VB).Buf, 0, 0);
 
     CmdEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0),
                                P.getVertexCount());
@@ -1388,8 +1385,8 @@ public:
             "Mismatch between vertex shader attribute count and pipeline "
             "vertex input count.");
 
-      // Collect the attribute indices the shader expects so that we can map the
-      // specified attributes onto the correct indices.
+      // Collect the attribute indices the shader expects so that we can map
+      // the specified attributes onto the correct indices.
       llvm::StringMap<uint32_t> ShaderAttrIndices;
       for (uint32_t I = 0; I < FnAttrs->count(); ++I) {
         auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(I));
