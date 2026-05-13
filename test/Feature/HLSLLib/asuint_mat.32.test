@@ -35,6 +35,9 @@ void main() {
   Out0[14] = uint4(u43[2], 0);
   Out0[15] = uint4(u43[3], 0);
 
+  uint2x2 u22_const = asuint(uint2x2(0xffffffffu, 0u, 0x80000000u, 100u));
+  Out0[16] = uint4(u22_const[0], u22_const[1]);
+
   // int -> uint matrices
   uint2x2 i22 = asuint(int2x2(In1[0].xy, In1[0].zw));
   uint3x2 i32 = asuint(int3x2(In1[1].xyz, In1[2].xyz));
@@ -61,6 +64,9 @@ void main() {
   Out1[14] = uint4(i43[2], 0);
   Out1[15] = uint4(i43[3], 0);
 
+  uint2x2 i22_const = asuint(int2x2(-1, 2, 0, 2147483647));
+  Out1[16] = uint4(i22_const[0], i22_const[1]);
+
   // float -> uint matrices
   uint2x2 f22 = asuint(float2x2(In2[0].xy, In2[0].zw));
   uint3x2 f32 = asuint(float3x2(In2[1].xyz, In2[2].xyz));
@@ -86,6 +92,9 @@ void main() {
   Out2[13] = uint4(f43[1], 0);
   Out2[14] = uint4(f43[2], 0);
   Out2[15] = uint4(f43[3], 0);
+
+  uint2x2 f22_const = asuint(float2x2(10.0, 0.0, 0.5, 1.0));
+  Out2[16] = uint4(f22_const[0], f22_const[1]);
 }
 //--- pipeline.yaml
 
@@ -154,7 +163,7 @@ Buffers:
   - Name: Out0
     Format: UInt32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut0
     Format: UInt32
     Stride: 16
@@ -173,11 +182,12 @@ Buffers:
             10, 20, 30, 0,
             40, 50, 60, 0,
             70, 80, 90, 0,
-            0x80000000, 0xffffffff, 1000, 0 ]
+            0x80000000, 0xffffffff, 1000, 0,
+            0xffffffff, 0, 0x80000000, 100 ]
   - Name: Out1
     Format: UInt32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut1
     Format: UInt32
     Stride: 16
@@ -196,11 +206,12 @@ Buffers:
             1, 2, 3, 0,
             4294967295, 4294967294, 4294967293, 0,
             10, 20, 30, 0,
-            4294967286, 4294967276, 4294967266, 0 ]
+            4294967286, 4294967276, 4294967266, 0,
+            4294967295, 2, 0, 2147483647 ]
   - Name: Out2
     Format: UInt32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut2
     Format: UInt32
     Stride: 16
@@ -219,7 +230,8 @@ Buffers:
             1065353216, 1073741824, 1077936128, 0,
             3212836864, 3221225472, 3225419776, 0,
             1056964608, 1069547520, 1075838976, 0,
-            1092616192, 1101004800, 1106247680, 0 ]
+            1092616192, 1101004800, 1106247680, 0,
+            1092616192, 0, 1056964608, 1065353216 ]
 Results:
   - Result: Test0
     Rule: BufferExact

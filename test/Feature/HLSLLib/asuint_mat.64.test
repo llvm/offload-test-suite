@@ -61,6 +61,12 @@ void main() {
   Highs[13] = uint4(high43[1], 0);
   Highs[14] = uint4(high43[2], 0);
   Highs[15] = uint4(high43[3], 0);
+
+  // 2x2 constant-folded
+  uint2x2 low22_const, high22_const;
+  asuint(double2x2(1.0, 2.0, 2.0, 4.0), low22_const, high22_const);
+  Lows[16]  = uint4(low22_const[0],  low22_const[1]);
+  Highs[16] = uint4(high22_const[0], high22_const[1]);
 }
 //--- pipeline.yaml
 
@@ -91,7 +97,7 @@ Buffers:
   - Name: Lows
     Format: UInt32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedLows
     Format: UInt32
     Stride: 16
@@ -110,11 +116,12 @@ Buffers:
             0, 0, 0, 0,
             0, 0, 0, 0,
             0, 0, 0, 0,
+            0, 0, 0, 0,
             0, 0, 0, 0 ]
   - Name: Highs
     Format: UInt32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedHighs
     Format: UInt32
     Stride: 16
@@ -133,7 +140,8 @@ Buffers:
             1072693248, 3221225472, 1074003968, 0,
             1073741824, 3221749760, 1076101120, 0,
             1074266112, 1071644672, 1077149696, 0,
-            3220176896, 1073217536, 1077805056, 0 ]
+            3220176896, 1073217536, 1077805056, 0,
+            1072693248, 1073741824, 1073741824, 1074790400 ]
 Results:
   - Result: Test0
     Rule: BufferExact

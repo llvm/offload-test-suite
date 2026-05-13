@@ -35,6 +35,9 @@ void main() {
   Out0[14] = float4(f43[2], 0.0);
   Out0[15] = float4(f43[3], 0.0);
 
+  float2x2 f22_const = asfloat(float2x2(0.0, 1.0, -1.0, 0.5));
+  Out0[16] = float4(f22_const[0], f22_const[1]);
+
   // uint -> float matrices
   float2x2 u22 = asfloat(uint2x2(In1[0].xy, In1[0].zw));
   float3x2 u32 = asfloat(uint3x2(In1[1].xyz, In1[2].xyz));
@@ -61,6 +64,9 @@ void main() {
   Out1[14] = float4(u43[2], 0.0);
   Out1[15] = float4(u43[3], 0.0);
 
+  float2x2 u22_const = asfloat(uint2x2(0u, 1u, 10u, 100u));
+  Out1[16] = float4(u22_const[0], u22_const[1]);
+
   // int -> float matrices
   float2x2 i22 = asfloat(int2x2(In2[0].xy, In2[0].zw));
   float3x2 i32 = asfloat(int3x2(In2[1].xyz, In2[2].xyz));
@@ -86,6 +92,9 @@ void main() {
   Out2[13] = float4(i43[1], 0.0);
   Out2[14] = float4(i43[2], 0.0);
   Out2[15] = float4(i43[3], 0.0);
+
+  float2x2 i22_const = asfloat(int2x2(-1, 0, 50, 100));
+  Out2[16] = float4(i22_const[0], i22_const[1]);
 }
 //--- pipeline.yaml
 
@@ -154,7 +163,7 @@ Buffers:
   - Name: Out0
     Format: Float32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
@@ -173,11 +182,12 @@ Buffers:
             1.0, 2.0, 3.0, 0.0,
             -1.0, -2.0, -3.0, 0.0,
             0.5, 1.5, 2.5, 0.0,
-            10.0, 20.0, 30.0, 0.0 ]
+            10.0, 20.0, 30.0, 0.0,
+            0.0, 1.0, -1.0, 0.5 ]
   - Name: Out1
     Format: Float32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut1
     Format: Float32
     Stride: 16
@@ -196,11 +206,12 @@ Buffers:
             1.4013e-44, 2.8026e-44, 4.2039e-44, 0,
             5.6052e-44, 7.0065e-44, 8.4078e-44, 0,
             1.4013e-43, 2.8026e-43, 4.2039e-43, 0,
-            1.4013e-42, 2.8026e-42, 4.2039e-42, 0 ]
+            1.4013e-42, 2.8026e-42, 4.2039e-42, 0,
+            0, 1.4013e-45, 1.4013e-44, 1.4013e-43 ]
   - Name: Out2
     Format: Float32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut2
     Format: Float32
     Stride: 16
@@ -219,7 +230,8 @@ Buffers:
             -nan, 0, 7.0065e-44, 0,
             -nan, 1.4013e-43, -nan, 0,
             1.4013e-44, 1.4013e-43, 1.4013e-42, 0,
-            1.4013e-41, -nan, nan, 0 ]
+            1.4013e-41, -nan, nan, 0,
+            -nan, 0, 7.0065e-44, 1.4013e-43 ]
 Results:
   - Result: Test0
     Rule: BufferFloatEpsilon
