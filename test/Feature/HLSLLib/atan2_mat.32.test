@@ -24,6 +24,9 @@ void main() {
   float4x3 r43 = atan2(float4x3(In0[12].xyz, In0[13].xyz, In0[14].xyz, In0[15].xyz),
                        float4x3(In1[12].xyz, In1[13].xyz, In1[14].xyz, In1[15].xyz));
 
+  float2x2 r22_const = atan2(float2x2(1.0, 0.0, -1.0, 1.0),
+                             float2x2(1.0, 1.0, -1.0, 0.0));
+
   Out0[0] = float4(r22[0], r22[1]);
   Out0[1] = float4(r32[0], r32[1]);
   Out0[2] = float4(r32[2], 0.0, 0.0);
@@ -40,6 +43,7 @@ void main() {
   Out0[13] = float4(r43[1], 0.0);
   Out0[14] = float4(r43[2], 0.0);
   Out0[15] = float4(r43[3], 0.0);
+  Out0[16] = float4(r22_const[0], r22_const[1]);
 }
 //--- pipeline.yaml
 
@@ -89,7 +93,7 @@ Buffers:
   - Name: Out0
     Format: Float32
     Stride: 16
-    FillSize: 256
+    FillSize: 272
   - Name: ExpectedOut0
     Format: Float32
     Stride: 16
@@ -108,7 +112,8 @@ Buffers:
             0.78540, 0.78540, 0.78540, 0.0,
             -2.35619, -2.35619, -2.35619, 0.0,
             0.0, 1.57080, -0.78540, 0.0,
-            0.78540, -2.35619, 0.78540, 0.0 ]
+            0.78540, -2.35619, 0.78540, 0.0,
+            0.78540, 0.0, -2.35619, 1.57080 ]
 Results:
   - Result: Test0
     Rule: BufferFloatEpsilon
