@@ -348,9 +348,22 @@ jobs:
             # for why dxc-dist/lib needs to be on the platform DLL search
             # path.
             libdir="$GITHUB_WORKSPACE/dxc-dist/lib"
-            echo "$libdir" >> "$GITHUB_PATH"
-            echo "LD_LIBRARY_PATH=$libdir:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
-            echo "DYLD_LIBRARY_PATH=$libdir:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
+            bindir="$GITHUB_WORKSPACE/dxc-dist/bin"
+            case "$RUNNER_OS" in
+              Windows)
+                # Windows DLL search puts System32 / Windows / cwd ahead of
+                # PATH, so `PATH+=lib` isn't reliable -- a stray dxcompiler
+                # in the cwd or system dirs (e.g. shipped by other SDKs)
+                # would win. Copy the DLLs next to dxc.exe so they're
+                # found via the app-directory search (#1).
+                cp "$libdir"/*.dll "$bindir"/ ;;
+              Linux)
+                echo "LD_LIBRARY_PATH=$libdir:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+              macOS)
+                echo "DYLD_LIBRARY_PATH=$libdir:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
+              *)
+                echo "Unsupported RUNNER_OS=$RUNNER_OS" >&2; exit 1 ;;
+            esac
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main

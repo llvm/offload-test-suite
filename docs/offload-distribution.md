@@ -122,9 +122,13 @@ Because the DXC prefix uses a conventional `bin/` + `lib/` split,
 loader is told where they live. Add the prefix's `lib/` to the
 platform's DLL search path before invoking lit:
 
-- Windows: prepend `<dxc-dist>/lib` to `PATH`.
-- Linux:   prepend `<dxc-dist>/lib` to `LD_LIBRARY_PATH`.
-- macOS:   prepend `<dxc-dist>/lib` to `DYLD_LIBRARY_PATH`.
+- Windows: copy `<dxc-dist>/lib/*.dll` into `<dxc-dist>/bin/` so the DLLs
+  sit next to `dxc.exe`. Putting `lib/` on `PATH` is unreliable because
+  Windows' DLL search checks `System32`, the Windows directory, and the
+  current working directory before `PATH`, so a stray `dxcompiler.dll`
+  from another SDK can win.
+- Linux: prepend `<dxc-dist>/lib` to `LD_LIBRARY_PATH`.
+- macOS: prepend `<dxc-dist>/lib` to `DYLD_LIBRARY_PATH`.
 
 Then run lit:
 
