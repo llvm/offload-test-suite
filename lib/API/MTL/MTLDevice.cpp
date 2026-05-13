@@ -1164,11 +1164,6 @@ class MTLDevice : public offloadtest::Device {
     return llvm::Error::success();
   }
 
-  llvm::Expected<offloadtest::SubmitResult>
-  executeCommands(InvocationState &IS) {
-    return GraphicsQueue.submit(std::move(IS.CB));
-  }
-
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
     auto MemCpyBack = [](ResourcePair &Pair) -> llvm::Error {
       const Resource &R = *Pair.first;
@@ -1553,7 +1548,7 @@ public:
         return Err;
     }
 
-    auto SubmitResult = executeCommands(IS);
+    auto SubmitResult = GraphicsQueue.submit(std::move(IS.CB));
     if (!SubmitResult)
       return SubmitResult.takeError();
 

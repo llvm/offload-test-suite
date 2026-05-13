@@ -1945,11 +1945,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Expected<offloadtest::SubmitResult>
-  executeCommandBuffer(InvocationState &IS) {
-    return GraphicsQueue.submit(std::move(IS.CB));
-  }
-
   llvm::Error createDescriptorPool(Pipeline &P, InvocationState &IS) {
 
     constexpr VkDescriptorType DescriptorTypes[] = {
@@ -2994,7 +2989,7 @@ public:
     llvm::outs() << "Memory buffers created.\n";
     // No explicit wait: the next submit's GPU-side timeline semaphore
     // dependency ensures the copy completes before the dispatch runs.
-    auto CopyResult = executeCommandBuffer(State);
+    auto CopyResult = GraphicsQueue.submit(std::move(State.CB));
     if (!CopyResult)
       return CopyResult.takeError();
     llvm::outs() << "Executed copy command buffer.\n";
@@ -3014,7 +3009,7 @@ public:
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    auto DispatchResult = executeCommandBuffer(State);
+    auto DispatchResult = GraphicsQueue.submit(std::move(State.CB));
     if (!DispatchResult)
       return DispatchResult.takeError();
     llvm::outs() << "Executed compute command buffer.\n";
