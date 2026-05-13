@@ -40,6 +40,10 @@ A complete deployment consists of two install prefixes:
      binaries so crash dumps and live debugger sessions can resolve
      symbols. The Windows debugger looks for `.pdb` files next to the
      `.exe` / `.dll`, so no symbol-server configuration is required.
+     PDBs are shipped only when the build config produces them (any
+     config that enables `/Zi`, e.g. `Debug` or `RelWithDebInfo`); a
+     pure `Release` build omits them and the distribution simply has
+     no PDBs.
    - `lib/dxcompiler.lib`, `lib/dxil.lib` — Windows import libraries
      for downstream consumers that link against the DLLs.
 
