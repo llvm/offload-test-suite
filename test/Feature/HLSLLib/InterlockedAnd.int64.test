@@ -128,6 +128,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99125
+# XFAIL: Clang
+
 # REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
