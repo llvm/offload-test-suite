@@ -373,6 +373,7 @@ static const std::string getBufferStr(offloadtest::CPUBuffer *B) {
     return formatBuffer<uint32_t>(B); // Because sizeof(bool) is 1 but HLSL
                                       // represents a bool using 4 bytes.
   }
+  llvm_unreachable("All cases handled");
 }
 
 llvm::Error verifyResult(offloadtest::Result R) {
