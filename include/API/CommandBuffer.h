@@ -49,20 +49,11 @@ public:
   /// Create a compute command encoder for recording dispatch commands.
   /// Barriers are automatically inserted between commands.
   virtual llvm::Expected<std::unique_ptr<ComputeEncoder>>
-  createComputeEncoder() {
-    return llvm::createStringError(
-        std::errc::not_supported,
-        "createComputeEncoder not implemented for this backend");
-  }
+  createComputeEncoder() = 0;
 
   /// Create a render command encoder for recording draw commands.
   virtual llvm::Expected<std::unique_ptr<RenderEncoder>>
-  createRenderEncoder(const RenderPassBeginDesc &Desc) {
-    (void)Desc;
-    return llvm::createStringError(
-        std::errc::not_supported,
-        "createRenderEncoder not implemented for this backend");
-  }
+  createRenderEncoder(const RenderPassBeginDesc &Desc) = 0;
 };
 
 } // namespace offloadtest
