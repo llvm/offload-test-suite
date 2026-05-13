@@ -50,18 +50,12 @@ def get_runs(token):
     """Fetch runs that are queued, in_progress, or recently completed."""
     results = []
     for status in ("queued", "in_progress"):
-        path = (
-            f"/repos/{OWNER}/{REPO}/actions/runs"
-            f"?status={status}&per_page=100"
-        )
+        path = f"/repos/{OWNER}/{REPO}/actions/runs" f"?status={status}&per_page=100"
         results.extend(api_get(path, token)["workflow_runs"])
 
     # Also grab recently completed runs (within COMPLETED_WINDOW_HOURS)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=COMPLETED_WINDOW_HOURS)
-    path = (
-        f"/repos/{OWNER}/{REPO}/actions/runs"
-        f"?status=completed&per_page=50"
-    )
+    path = f"/repos/{OWNER}/{REPO}/actions/runs" f"?status=completed&per_page=50"
     for r in api_get(path, token)["workflow_runs"]:
         updated = datetime.fromisoformat(r["updated_at"].replace("Z", "+00:00"))
         if updated >= cutoff:
@@ -129,7 +123,8 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache, token):
         # Match by label OR by runner name containing the vendor (covers
         # workflow_dispatch runs that didn't pin a vendor SKU label).
         vendor_jobs = [
-            j for j in jobs
+            j
+            for j in jobs
             if label in j.get("labels", [])
             or vendor.lower() in (j.get("runner_name") or "").lower()
         ]
