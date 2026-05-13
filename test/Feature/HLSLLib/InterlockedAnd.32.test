@@ -81,7 +81,7 @@ Buffers:
   - Name: OutOrigBitSet
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 128
+    FillSize: 128
   - Name: ExpectedOrigBitSet
     Format: UInt32
     Stride: 4
@@ -90,7 +90,7 @@ Buffers:
   - Name: OutFinal
     Format: UInt32
     Stride: 4
-    ZeroInitSize: 16
+    FillSize: 16
   - Name: ExpectedFinal
     Format: UInt32
     Stride: 4
