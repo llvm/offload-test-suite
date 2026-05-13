@@ -808,7 +808,7 @@ public:
   }
 };
 
-class VKRenderEncoder : public offloadtest::RenderEncoder {
+class VulkanRenderEncoder : public offloadtest::RenderEncoder {
   VulkanCommandBuffer &CB;
 
   // Encoder contract: viewport and scissor must both be set before draw().
@@ -816,10 +816,14 @@ class VKRenderEncoder : public offloadtest::RenderEncoder {
   bool ScissorSet = false;
 
 public:
-  VKRenderEncoder(VulkanCommandBuffer &CB)
+  VulkanRenderEncoder(VulkanCommandBuffer &CB)
       : RenderEncoder(GPUAPI::Vulkan), CB(CB) {}
+  VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
+  VulkanRenderEncoder(VulkanRenderEncoder &&CB) = delete;
+  VulkanRenderEncoder &operator=(VulkanRenderEncoder &CB) = delete;
+  VulkanRenderEncoder &operator=(const VulkanRenderEncoder &&CB) = delete;
 
-  ~VKRenderEncoder() override { endEncoding(); }
+  ~VulkanRenderEncoder() override { endEncoding(); }
 
   static bool classof(const CommandEncoder *E) {
     return E->getAPI() == GPUAPI::Vulkan;
@@ -1034,7 +1038,7 @@ VulkanCommandBuffer::createRenderEncoder(
 
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  auto Enc = std::make_unique<VKRenderEncoder>(*this);
+  auto Enc = std::make_unique<VulkanRenderEncoder>(*this);
   Enc->pushDebugGroup("RenderEncoder");
   return Enc;
 }

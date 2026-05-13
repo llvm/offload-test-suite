@@ -694,6 +694,10 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
 public:
   DXRenderEncoder(DXCommandBuffer &CB)
       : RenderEncoder(GPUAPI::DirectX), CB(CB) {}
+  DXRenderEncoder(const DXRenderEncoder &CB) = delete;
+  DXRenderEncoder(DXRenderEncoder &&CB) = delete;
+  DXRenderEncoder &operator=(DXRenderEncoder &CB) = delete;
+  DXRenderEncoder &operator=(const DXRenderEncoder &&CB) = delete;
 
   ~DXRenderEncoder() override { endEncoding(); }
 

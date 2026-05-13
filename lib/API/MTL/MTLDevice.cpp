@@ -593,6 +593,10 @@ class MTLRenderEncoder : public offloadtest::RenderEncoder {
 public:
   MTLRenderEncoder(MTL::RenderCommandEncoder *Enc)
       : RenderEncoder(GPUAPI::Metal), RenderEnc(Enc) {}
+  MTLRenderEncoder(const MTLRenderEncoder &CB) = delete;
+  MTLRenderEncoder(MTLRenderEncoder &&CB) = delete;
+  MTLRenderEncoder &operator=(MTLRenderEncoder &CB) = delete;
+  MTLRenderEncoder &operator=(const MTLRenderEncoder &&CB) = delete;
 
   ~MTLRenderEncoder() override { endEncoding(); }
 
