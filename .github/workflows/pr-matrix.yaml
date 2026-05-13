@@ -22,6 +22,15 @@ jobs:
       matrix:
         SKU: [windows-intel]
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        include:
+          - SKU: windows-amd
+            TestTarget: check-hlsl-d3d12
+          - SKU: windows-amd
+            TestTarget: check-hlsl-clang-d3d12
+          - SKU: windows-nvidia
+            TestTarget: check-hlsl-d3d12
+          - SKU: windows-nvidia
+            TestTarget: check-hlsl-clang-d3d12
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
@@ -57,8 +66,23 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        SKU: [windows-nvidia, windows-amd, windows-qc]
-        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        include:
+          - SKU: windows-nvidia
+            TestTarget: check-hlsl-vk
+          - SKU: windows-nvidia
+            TestTarget: check-hlsl-clang-vk
+          - SKU: windows-amd
+            TestTarget: check-hlsl-vk
+          - SKU: windows-amd
+            TestTarget: check-hlsl-clang-vk
+          - SKU: windows-qc
+            TestTarget: check-hlsl-d3d12
+          - SKU: windows-qc
+            TestTarget: check-hlsl-vk
+          - SKU: windows-qc
+            TestTarget: check-hlsl-clang-d3d12
+          - SKU: windows-qc
+            TestTarget: check-hlsl-clang-vk
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
