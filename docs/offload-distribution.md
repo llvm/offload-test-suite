@@ -27,30 +27,32 @@ A complete deployment consists of two install prefixes:
 2. **DXC prefix** — a hand-curated `bin/` + `lib/` tree containing just
    the DXC binaries the test runner needs. Kept separate from the LLVM
    prefix to avoid header / binary conflicts between Clang's HLSL-related
-   headers and DXC's. Contains:
-   - `bin/dxc[.exe]`, `bin/dxv[.exe]` — the DXC compiler and validator.
-   - `lib/dxcompiler.{dll,so,dylib}` — DXC's compiler shared library.
-   - `lib/dxil.{dll,so,dylib}` — DXC's signing / validation library.
+   headers and DXC's. Contents:
 
-   We don't ship DXC's full `cmake --install` output because DXC defines
-   install rules for many LLVM tools (e.g. `llvm-as`) that aren't built
-   by the default `ninja` target, so a top-level install fails. Instead
-   we use DXC's per-component install targets and copy a couple of
-   libraries that lack install rules out of the build directory:
+   Windows:
+   - `bin/dxc.exe`, `bin/dxv.exe` — DXC compiler and validator.
+   - `bin/dxcompiler.dll` — DXC's compiler shared library (placed
+     next to the executables so Windows' DLL search finds it via the
+     app-directory rule, no `PATH` munging required).
+   - `bin/dxil.dll` — DXC's signing / validation library.
+   - `lib/dxcompiler.lib`, `lib/dxil.lib` — Windows import libraries
+     for downstream consumers that link against the DLLs.
 
-   ```
-   ninja install-dxc install-dxcompiler   # installs into <dxc-staging>
-   # Cherry-pick dxc, dxv, dxcompiler, dxil into the shipped tree:
-   #   <dxc-staging>/bin/dxc[.exe]            -> <dxc-dist>/bin/
-   #   <dxc-staging>/bin/dxcompiler.dll       -> <dxc-dist>/lib/   (Windows)
-   #   <dxc-staging>/lib/libdxcompiler.{so,dylib} -> <dxc-dist>/lib/ (Unix)
-   #   <dxc-build>/bin/dxv[.exe]              -> <dxc-dist>/bin/
-   #   <dxc-build>/bin/dxil.{dll,so,dylib}    -> <dxc-dist>/lib/
-   ```
+   Linux / macOS:
+   - `bin/dxc`, `bin/dxv`.
+   - `lib/libdxcompiler.{so,dylib}`, `lib/libdxil.{so,dylib}` — the
+     binaries have RUNPATH set to find them via `../lib`.
 
-   `dxv` has no `install-dxv` custom target and `dxil` has no install
-   rule at all (it's a prebuilt signing library bundled with DXC), so
-   both are copied straight from the build directory.
+   We don't ship DXC's `cmake --install` output. A top-level `ninja
+   install` walks every `cmake_install.cmake`, including LLVM tools
+   (e.g. `llvm-as`) that aren't built by the default `ninja` target, so
+   it fails. The per-component install targets (`install-dxc`,
+   `install-dxcompiler`) work but only cover a subset of the files we
+   need: `dxv` has no `install-dxv` custom target, `dxil` has no install
+   rule at all (it's a prebuilt signing library bundled with DXC source),
+   and the Windows import libraries (`.lib`) aren't installed either.
+   Instead we copy everything we need straight out of the build
+   directory's `bin/` and `lib/`.
 
 ## Building
 
@@ -69,9 +71,20 @@ cmake -G Ninja \
 
 ninja install-distribution install-offload-tools install-offload-test-suite
 
-# See "DXC prefix" above for why we use per-component install targets
-# instead of `cmake --install`.
-ninja -C <dxc-build> install-dxc install-dxcompiler
+# See "DXC prefix" above for why we copy from the build folder instead
+# of using `cmake --install` or per-component install targets.
+```
+
+Then assemble the DXC prefix by copying the relevant files out of
+`<dxc-build>` into a clean `<dxc-dist>` tree, e.g. on Windows:
+
+```
+<dxc-build>/bin/dxc.exe         -> <dxc-dist>/bin/
+<dxc-build>/bin/dxv.exe         -> <dxc-dist>/bin/
+<dxc-build>/bin/dxcompiler.dll  -> <dxc-dist>/bin/
+<dxc-build>/bin/dxil.dll        -> <dxc-dist>/bin/
+<dxc-build>/lib/dxcompiler.lib  -> <dxc-dist>/lib/
+<dxc-build>/lib/dxil.lib        -> <dxc-dist>/lib/
 ```
 
 The HLSL.cmake cache file enforces that `OffloadTest` is in
@@ -117,18 +130,10 @@ python configure-test-suite.py \
 
 This emits a fully-substituted `run/test/<suite>/lit.site.cfg.py`.
 
-Because the DXC prefix uses a conventional `bin/` + `lib/` split,
-`dxc[.exe]` won't find `dxcompiler` / `dxil` at runtime unless the
-loader is told where they live. Add the prefix's `lib/` to the
-platform's DLL search path before invoking lit:
-
-- Windows: copy `<dxc-dist>/lib/*.dll` into `<dxc-dist>/bin/` so the DLLs
-  sit next to `dxc.exe`. Putting `lib/` on `PATH` is unreliable because
-  Windows' DLL search checks `System32`, the Windows directory, and the
-  current working directory before `PATH`, so a stray `dxcompiler.dll`
-  from another SDK can win.
-- Linux: prepend `<dxc-dist>/lib` to `LD_LIBRARY_PATH`.
-- macOS: prepend `<dxc-dist>/lib` to `DYLD_LIBRARY_PATH`.
+`dxc[.exe]` finds its runtime libraries automatically: on Windows the
+DLLs sit next to the executable in `bin/`, and on Linux/macOS the
+binaries have RUNPATH set to locate `../lib`. No `PATH` /
+`LD_LIBRARY_PATH` / `DYLD_LIBRARY_PATH` setup is required.
 
 Then run lit:
 

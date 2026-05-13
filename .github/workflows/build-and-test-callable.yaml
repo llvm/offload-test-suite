@@ -192,7 +192,7 @@ jobs:
             cd DXC
             mkdir build
             cd build
-            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/dxc-install-staging ${{ github.workspace }}/DXC/
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
             ninja
       - name: Build LLVM
         run: |
@@ -255,35 +255,35 @@ jobs:
             cd $GITHUB_WORKSPACE/llvm-project/build
             ninja install-distribution install-offload-tools install-offload-test-suite
             # Stage DXC into a portable bin/+lib/ tree at dxc-dist.
-            # See docs/offload-distribution.md ("DXC prefix") for why
-            # we use per-component install targets and copy dxv/dxil
-            # straight from the build directory.
-            cd $GITHUB_WORKSPACE/DXC/build
-            ninja install-dxc install-dxcompiler
-            mkdir -p $GITHUB_WORKSPACE/dxc-dist/bin $GITHUB_WORKSPACE/dxc-dist/lib
-            staging=$GITHUB_WORKSPACE/dxc-install-staging
+            # See docs/offload-distribution.md ("DXC prefix") for the
+            # rationale (DXC's install targets don't cover everything we
+            # need, so we cherry-pick from the build directory).
             buildbin=$GITHUB_WORKSPACE/DXC/build/bin
+            buildlib=$GITHUB_WORKSPACE/DXC/build/lib
+            distbin=$GITHUB_WORKSPACE/dxc-dist/bin
+            distlib=$GITHUB_WORKSPACE/dxc-dist/lib
+            mkdir -p "$distbin" "$distlib"
             case "$RUNNER_OS" in
               Windows)
-                dxc_exe=dxc.exe; dxv_exe=dxv.exe
-                dxcompiler_lib=dxcompiler.dll; dxil_lib=dxil.dll
-                # On Windows dxcompiler.dll is installed to bin/ (RUNTIME).
-                dxcompiler_src=$staging/bin/$dxcompiler_lib ;;
+                cp "$buildbin/dxc.exe"          "$distbin/"
+                cp "$buildbin/dxv.exe"          "$distbin/"
+                cp "$buildbin/dxcompiler.dll"   "$distbin/"
+                cp "$buildbin/dxil.dll"         "$distbin/"
+                cp "$buildlib/dxcompiler.lib"   "$distlib/"
+                cp "$buildlib/dxil.lib"         "$distlib/" ;;
               Linux)
-                dxc_exe=dxc; dxv_exe=dxv
-                dxcompiler_lib=libdxcompiler.so; dxil_lib=libdxil.so
-                dxcompiler_src=$staging/lib/$dxcompiler_lib ;;
+                cp "$buildbin/dxc"              "$distbin/"
+                cp "$buildbin/dxv"              "$distbin/"
+                cp "$buildlib/libdxcompiler.so" "$distlib/"
+                cp "$buildlib/libdxil.so"       "$distlib/" ;;
               macOS)
-                dxc_exe=dxc; dxv_exe=dxv
-                dxcompiler_lib=libdxcompiler.dylib; dxil_lib=libdxil.dylib
-                dxcompiler_src=$staging/lib/$dxcompiler_lib ;;
+                cp "$buildbin/dxc"                  "$distbin/"
+                cp "$buildbin/dxv"                  "$distbin/"
+                cp "$buildlib/libdxcompiler.dylib"  "$distlib/"
+                cp "$buildlib/libdxil.dylib"        "$distlib/" ;;
               *)
                 echo "Unsupported RUNNER_OS=$RUNNER_OS" >&2; exit 1 ;;
             esac
-            cp "$staging/bin/$dxc_exe"   $GITHUB_WORKSPACE/dxc-dist/bin/
-            cp "$buildbin/$dxv_exe"      $GITHUB_WORKSPACE/dxc-dist/bin/
-            cp "$dxcompiler_src"         $GITHUB_WORKSPACE/dxc-dist/lib/
-            cp "$buildbin/$dxil_lib"     $GITHUB_WORKSPACE/dxc-dist/lib/
       - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
@@ -340,30 +340,6 @@ jobs:
             # backslashes as escape characters.
             tar xf - -C install < "$RUNNER_TEMP/build-artifacts.tar"
             tar xf - -C dxc-dist < "$RUNNER_TEMP/dxc-artifacts.tar"
-      - name: Expose DXC runtime libraries
-        shell: bash
-        run: |
-            set -euxo pipefail
-            # See docs/offload-distribution.md ("Configuring and running")
-            # for why dxc-dist/lib needs to be on the platform DLL search
-            # path.
-            libdir="$GITHUB_WORKSPACE/dxc-dist/lib"
-            bindir="$GITHUB_WORKSPACE/dxc-dist/bin"
-            case "$RUNNER_OS" in
-              Windows)
-                # Windows DLL search puts System32 / Windows / cwd ahead of
-                # PATH, so `PATH+=lib` isn't reliable -- a stray dxcompiler
-                # in the cwd or system dirs (e.g. shipped by other SDKs)
-                # would win. Copy the DLLs next to dxc.exe so they're
-                # found via the app-directory search (#1).
-                cp "$libdir"/*.dll "$bindir"/ ;;
-              Linux)
-                echo "LD_LIBRARY_PATH=$libdir:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-              macOS)
-                echo "DYLD_LIBRARY_PATH=$libdir:${DYLD_LIBRARY_PATH:-}" >> "$GITHUB_ENV" ;;
-              *)
-                echo "Unsupported RUNNER_OS=$RUNNER_OS" >&2; exit 1 ;;
-            esac
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
