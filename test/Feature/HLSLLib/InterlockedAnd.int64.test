@@ -80,7 +80,6 @@ void main(uint3 GTID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: OutOrigBitSet
     Format: UInt32
