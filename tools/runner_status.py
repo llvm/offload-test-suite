@@ -4,22 +4,24 @@ Show runner job status across all workflows in llvm/offload-test-suite.
 Includes queued/in-progress runs and recently completed runs so you
 can see what is (or was) occupying the runners.
 
+Requires the GitHub CLI (`gh`) to be installed and authenticated
+(`gh auth login`). API calls are issued through `gh api`.
+
 Usage:
-    python runner_status.py <GITHUB_TOKEN> [vendor]
+    python runner_status.py [vendor]
 
     vendor: intel | amd | nvidia | qc   (omit to show all vendors)
 """
 
 import sys
 import os
-import urllib.request
 import json
+import subprocess
 from datetime import datetime, timezone, timedelta
 
 OWNER = "llvm"
 REPO = "offload-test-suite"
 VALID_VENDORS = ("intel", "amd", "nvidia", "qc")
-API = "https://api.github.com"
 COMPLETED_WINDOW_HOURS = 3
 
 
@@ -27,36 +29,41 @@ def runner_label(vendor):
     return f"hlsl-windows-{vendor}"
 
 
-def api_get(path, token):
-    url = f"{API}{path}"
-    req = urllib.request.Request(url)
-    req.add_header("Authorization", f"Bearer {token}")
-    req.add_header("Accept", "application/vnd.github+json")
-    with urllib.request.urlopen(req) as resp:
-        return json.loads(resp.read())
+def api_get(path):
+    """Issue a GitHub API GET via `gh api` and return the parsed JSON.
+
+    Raises subprocess.CalledProcessError on non-zero exit (e.g. 403).
+    """
+    result = subprocess.run(
+        ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
 
 
-def get_runners(label, token):
-    """Fetch self-hosted runners that have the given label. Returns None on 403."""
+def get_runners(label):
+    """Fetch self-hosted runners that have the given label. Returns None on error."""
     try:
         path = f"/repos/{OWNER}/{REPO}/actions/runners?per_page=100"
-        runners = api_get(path, token).get("runners", [])
+        runners = api_get(path).get("runners", [])
         return [r for r in runners if label in [l["name"] for l in r.get("labels", [])]]
-    except urllib.error.HTTPError:
+    except subprocess.CalledProcessError:
         return None
 
 
-def get_runs(token):
+def get_runs():
     """Fetch runs that are queued, in_progress, or recently completed."""
     results = []
     for status in ("queued", "in_progress"):
-        path = f"/repos/{OWNER}/{REPO}/actions/runs" f"?status={status}&per_page=100"
-        results.extend(api_get(path, token)["workflow_runs"])
+        path = f"/repos/{OWNER}/{REPO}/actions/runs?status={status}&per_page=100"
+        results.extend(api_get(path)["workflow_runs"])
 
     # Also grab recently completed runs (within COMPLETED_WINDOW_HOURS)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=COMPLETED_WINDOW_HOURS)
-    path = f"/repos/{OWNER}/{REPO}/actions/runs" f"?status=completed&per_page=50"
-    for r in api_get(path, token)["workflow_runs"]:
+    path = f"/repos/{OWNER}/{REPO}/actions/runs?status=completed&per_page=50"
+    for r in api_get(path)["workflow_runs"]:
         updated = datetime.fromisoformat(r["updated_at"].replace("Z", "+00:00"))
         if updated >= cutoff:
             results.append(r)
@@ -71,9 +78,9 @@ def get_runs(token):
     return unique
 
 
-def get_jobs(run_id, token):
+def get_jobs(run_id):
     path = f"/repos/{OWNER}/{REPO}/actions/runs/{run_id}/jobs?per_page=100"
-    return api_get(path, token)["jobs"]
+    return api_get(path)["jobs"]
 
 
 def tz_abbrev(dt):
@@ -97,13 +104,13 @@ def format_time(iso_str):
     return f"{lh}:{local.minute:02d} {lampm} {tz} / {utc}"
 
 
-def print_vendor_table(vendor, runs, jobs_cache, runners_cache, token):
+def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
     """Print the status table for a single vendor. Returns True if any rows."""
     label = runner_label(vendor)
 
     # Fetch and cache runners for this label
     if label not in runners_cache:
-        runners_cache[label] = get_runners(label, token)
+        runners_cache[label] = get_runners(label)
     runners = runners_cache[label]
     if runners is not None:
         online = len([r for r in runners if r.get("status") == "online"])
@@ -117,7 +124,7 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache, token):
     for run in runs:
         run_id = run["id"]
         if run_id not in jobs_cache:
-            jobs_cache[run_id] = get_jobs(run_id, token)
+            jobs_cache[run_id] = get_jobs(run_id)
         jobs = jobs_cache[run_id]
 
         # Match by label OR by runner name containing the vendor (covers
@@ -208,23 +215,17 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache, token):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: python {os.path.basename(__file__)} <GITHUB_TOKEN> [vendor]")
-        print(f"  vendor: {' | '.join(VALID_VENDORS)}  (omit to show all)")
-        sys.exit(1)
-
-    token = sys.argv[1]
-
-    if len(sys.argv) >= 3:
-        vendor = sys.argv[2].lower()
+    if len(sys.argv) >= 2:
+        vendor = sys.argv[1].lower()
         if vendor not in VALID_VENDORS:
             print(f"Unknown vendor '{vendor}'. Choose from: {', '.join(VALID_VENDORS)}")
+            print(f"Usage: python {os.path.basename(__file__)} [vendor]")
             sys.exit(1)
         vendors = [vendor]
     else:
         vendors = list(VALID_VENDORS)
 
-    runs = get_runs(token)
+    runs = get_runs()
     if not runs:
         print("No queued, in-progress, or recently completed runs found.")
         return
@@ -236,7 +237,7 @@ def main():
     runners_cache = {}
 
     for v in vendors:
-        print_vendor_table(v, runs, jobs_cache, runners_cache, token)
+        print_vendor_table(v, runs, jobs_cache, runners_cache)
 
 
 if __name__ == "__main__":
