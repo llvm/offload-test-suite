@@ -35,6 +35,11 @@ A complete deployment consists of two install prefixes:
      next to the executables so Windows' DLL search finds it via the
      app-directory rule, no `PATH` munging required).
    - `bin/dxil.dll` — DXC's signing / validation library.
+   - `bin/dxc.pdb`, `bin/dxv.pdb`, `bin/dxcompiler.pdb`, `bin/dxil.pdb` —
+     debug symbol files (PDBs) shipped alongside their corresponding
+     binaries so crash dumps and live debugger sessions can resolve
+     symbols. The Windows debugger looks for `.pdb` files next to the
+     `.exe` / `.dll`, so no symbol-server configuration is required.
    - `lib/dxcompiler.lib`, `lib/dxil.lib` — Windows import libraries
      for downstream consumers that link against the DLLs.
 
@@ -83,6 +88,10 @@ Then assemble the DXC prefix by copying the relevant files out of
 <dxc-build>/bin/dxv.exe         -> <dxc-dist>/bin/
 <dxc-build>/bin/dxcompiler.dll  -> <dxc-dist>/bin/
 <dxc-build>/bin/dxil.dll        -> <dxc-dist>/bin/
+<dxc-build>/bin/dxc.pdb         -> <dxc-dist>/bin/
+<dxc-build>/bin/dxv.pdb         -> <dxc-dist>/bin/
+<dxc-build>/bin/dxcompiler.pdb  -> <dxc-dist>/bin/
+<dxc-build>/bin/dxil.pdb        -> <dxc-dist>/bin/
 <dxc-build>/lib/dxcompiler.lib  -> <dxc-dist>/lib/
 <dxc-build>/lib/dxil.lib        -> <dxc-dist>/lib/
 ```
