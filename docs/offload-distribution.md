@@ -24,11 +24,33 @@ A complete deployment consists of two install prefixes:
    - `share/hlsl-test-suite/` — test sources, `lit.site.cfg.py.in` template,
      `configure-test-suite.py`, and golden images.
 
-2. **DXC prefix** — produced by `cmake --install <DXC-build> --prefix <dxc-prefix>`.
-   Kept separate from the LLVM prefix to avoid header / binary conflicts
-   between Clang's HLSL-related headers and DXC's. Contains:
-   - `bin/dxc[.exe]` — the DXC compiler.
-   - DXC's own headers and libraries.
+2. **DXC prefix** — a hand-curated `bin/` + `lib/` tree containing just
+   the DXC binaries the test runner needs. Kept separate from the LLVM
+   prefix to avoid header / binary conflicts between Clang's HLSL-related
+   headers and DXC's. Contains:
+   - `bin/dxc[.exe]`, `bin/dxv[.exe]` — the DXC compiler and validator.
+   - `lib/dxcompiler.{dll,so,dylib}` — DXC's compiler shared library.
+   - `lib/dxil.{dll,so,dylib}` — DXC's signing / validation library.
+
+   We don't ship DXC's full `cmake --install` output because DXC defines
+   install rules for many LLVM tools (e.g. `llvm-as`) that aren't built
+   by the default `ninja` target, so a top-level install fails. Instead
+   we use DXC's per-component install targets and copy a couple of
+   libraries that lack install rules out of the build directory:
+
+   ```
+   ninja install-dxc install-dxcompiler   # installs into <dxc-staging>
+   # Cherry-pick dxc, dxv, dxcompiler, dxil into the shipped tree:
+   #   <dxc-staging>/bin/dxc[.exe]            -> <dxc-dist>/bin/
+   #   <dxc-staging>/bin/dxcompiler.dll       -> <dxc-dist>/lib/   (Windows)
+   #   <dxc-staging>/lib/libdxcompiler.{so,dylib} -> <dxc-dist>/lib/ (Unix)
+   #   <dxc-build>/bin/dxv[.exe]              -> <dxc-dist>/bin/
+   #   <dxc-build>/bin/dxil.{dll,so,dylib}    -> <dxc-dist>/lib/
+   ```
+
+   `dxv` has no `install-dxv` custom target and `dxil` has no install
+   rule at all (it's a prebuilt signing library bundled with DXC), so
+   both are copied straight from the build directory.
 
 ## Building
 
@@ -47,8 +69,9 @@ cmake -G Ninja \
 
 ninja install-distribution install-offload-tools install-offload-test-suite
 
-# Build DXC separately (or use a prebuilt DXC), then install into its own prefix.
-cmake --install <dxc-build> --prefix <dxc-prefix>
+# See "DXC prefix" above for why we use per-component install targets
+# instead of `cmake --install`.
+ninja -C <dxc-build> install-dxc install-dxcompiler
 ```
 
 The HLSL.cmake cache file enforces that `OffloadTest` is in
@@ -64,7 +87,7 @@ Tar each prefix and ship the tarballs to the test runner:
 
 ```
 tar cf llvm-prefix.tar -C <install-prefix> .
-tar cf dxc-prefix.tar  -C <dxc-prefix>     .
+tar cf dxc-prefix.tar  -C <dxc-dist>       .
 ```
 
 ## Test runner prerequisites
@@ -82,20 +105,31 @@ Extract both prefixes, then run the configure script with `--dxc-path`
 pointing at the DXC binary in its prefix:
 
 ```
-mkdir install install-dxc
+mkdir install dxc-dist
 tar xf llvm-prefix.tar -C install
-tar xf dxc-prefix.tar  -C install-dxc
+tar xf dxc-prefix.tar  -C dxc-dist
 
 cd install/share/hlsl-test-suite
 python configure-test-suite.py \
     --suite clang-d3d12 \
-    --dxc-path ../../../install-dxc/bin/dxc
+    --dxc-path ../../../dxc-dist/bin/dxc[.exe]
 ```
 
-This emits a fully-substituted `run/test/<suite>/lit.site.cfg.py`. Then:
+This emits a fully-substituted `run/test/<suite>/lit.site.cfg.py`.
+
+Because the DXC prefix uses a conventional `bin/` + `lib/` split,
+`dxc[.exe]` won't find `dxcompiler` / `dxil` at runtime unless the
+loader is told where they live. Add the prefix's `lib/` to the
+platform's DLL search path before invoking lit:
+
+- Windows: prepend `<dxc-dist>/lib` to `PATH`.
+- Linux:   prepend `<dxc-dist>/lib` to `LD_LIBRARY_PATH`.
+- macOS:   prepend `<dxc-dist>/lib` to `DYLD_LIBRARY_PATH`.
+
+Then run lit:
 
 ```
-python -m lit -v run/test/clang-d3d12
+lit -v run/test/clang-d3d12
 ```
 
 `configure-test-suite.py --list-suites` prints the available suite names.

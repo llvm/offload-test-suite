@@ -254,38 +254,36 @@ jobs:
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/llvm-project/build
             ninja install-distribution install-offload-tools install-offload-test-suite
-            # Run DXC's install target to populate a staging install
-            # prefix at $GITHUB_WORKSPACE/dxc-install-staging. That prefix
-            # bundles a lot of unrelated LLVM tooling we don't want to
-            # ship, so we don't tar it directly. Instead, cherry-pick dxc,
-            # dxv, dxcompiler, and dxil into a clean
-            # $GITHUB_WORKSPACE/dxc-dist tree with the conventional bin/ +
-            # lib/ layout, and ship that as the DXC artifact.
-            #
-            # DXC's install rules follow CMake convention (verified in
-            # tools/clang/tools/{dxc,dxv,dxcompiler}/CMakeLists.txt):
-            #   * dxc / dxv               -> bin/  (RUNTIME DESTINATION)
-            #   * dxcompiler.dll (Win)    -> bin/  (RUNTIME DESTINATION)
-            #   * libdxcompiler.{so,dylib}-> lib/  (LIBRARY DESTINATION)
-            # dxil has no install rule (it's a prebuilt signing library
-            # bundled with DXC), so we copy it from the build directory.
+            # Stage DXC into a portable bin/+lib/ tree at dxc-dist.
+            # See docs/offload-distribution.md ("DXC prefix") for why
+            # we use per-component install targets and copy dxv/dxil
+            # straight from the build directory.
             cd $GITHUB_WORKSPACE/DXC/build
-            ninja install
+            ninja install-dxc install-dxcompiler
             mkdir -p $GITHUB_WORKSPACE/dxc-dist/bin $GITHUB_WORKSPACE/dxc-dist/lib
             staging=$GITHUB_WORKSPACE/dxc-install-staging
-            for exe in dxc dxc.exe dxv dxv.exe; do
-              [ -f "$staging/bin/$exe" ] && cp "$staging/bin/$exe" $GITHUB_WORKSPACE/dxc-dist/bin/
-            done
-            # dxcompiler: Windows DLL is in bin/; Unix shared lib is in lib/.
-            [ -f "$staging/bin/dxcompiler.dll" ] && cp "$staging/bin/dxcompiler.dll" $GITHUB_WORKSPACE/dxc-dist/lib/
-            for lib in libdxcompiler.so libdxcompiler.dylib; do
-              [ -f "$staging/lib/$lib" ] && cp "$staging/lib/$lib" $GITHUB_WORKSPACE/dxc-dist/lib/
-            done
-            # dxil isn't installed by DXC's CMake -- pull it from the build dir.
             buildbin=$GITHUB_WORKSPACE/DXC/build/bin
-            for lib in dxil.dll libdxil.so libdxil.dylib; do
-              [ -f "$buildbin/$lib" ] && cp "$buildbin/$lib" $GITHUB_WORKSPACE/dxc-dist/lib/
-            done
+            case "$RUNNER_OS" in
+              Windows)
+                dxc_exe=dxc.exe; dxv_exe=dxv.exe
+                dxcompiler_lib=dxcompiler.dll; dxil_lib=dxil.dll
+                # On Windows dxcompiler.dll is installed to bin/ (RUNTIME).
+                dxcompiler_src=$staging/bin/$dxcompiler_lib ;;
+              Linux)
+                dxc_exe=dxc; dxv_exe=dxv
+                dxcompiler_lib=libdxcompiler.so; dxil_lib=libdxil.so
+                dxcompiler_src=$staging/lib/$dxcompiler_lib ;;
+              macOS)
+                dxc_exe=dxc; dxv_exe=dxv
+                dxcompiler_lib=libdxcompiler.dylib; dxil_lib=libdxil.dylib
+                dxcompiler_src=$staging/lib/$dxcompiler_lib ;;
+              *)
+                echo "Unsupported RUNNER_OS=$RUNNER_OS" >&2; exit 1 ;;
+            esac
+            cp "$staging/bin/$dxc_exe"   $GITHUB_WORKSPACE/dxc-dist/bin/
+            cp "$buildbin/$dxv_exe"      $GITHUB_WORKSPACE/dxc-dist/bin/
+            cp "$dxcompiler_src"         $GITHUB_WORKSPACE/dxc-dist/lib/
+            cp "$buildbin/$dxil_lib"     $GITHUB_WORKSPACE/dxc-dist/lib/
       - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
@@ -346,11 +344,9 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
-            # The DXC artifact follows the conventional bin/ + lib/ split,
-            # so dxc.exe / dxc won't find dxcompiler / dxil at runtime
-            # without help. Add dxc-dist/lib to the platform DLL search
-            # paths (PATH on Windows, LD_LIBRARY_PATH on Linux,
-            # DYLD_LIBRARY_PATH on macOS) for the rest of the job.
+            # See docs/offload-distribution.md ("Configuring and running")
+            # for why dxc-dist/lib needs to be on the platform DLL search
+            # path.
             libdir="$GITHUB_WORKSPACE/dxc-dist/lib"
             echo "$libdir" >> "$GITHUB_PATH"
             echo "LD_LIBRARY_PATH=$libdir:${LD_LIBRARY_PATH:-}" >> "$GITHUB_ENV"
