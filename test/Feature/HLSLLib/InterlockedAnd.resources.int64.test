@@ -1,0 +1,178 @@
+#--- source.hlsl
+
+// This test exercises InterlockedAnd against the HLSL-legal 64-bit
+// non-groupshared (resource) destination types. 64-bit atomics on UAVs
+// were introduced in Shader Model 6.6.
+//
+//   * RWStructuredBuffer<uint64_t>[i]        (free function, 2-arg)
+//   * RWStructuredBuffer<int64_t>[i]         (free function, 3-arg, signed)
+//   * RWByteAddressBuffer::InterlockedAnd64  (method, 2-arg and 3-arg)
+//
+// 64-bit atomics on typed RWBuffer / RWTexture require the optional
+// "AtomicInt64OnTypedResource" capability and are intentionally not
+// covered here, to keep this test portable across implementations.
+//
+// For each destination, 64 threads of a single threadgroup atomically
+// AND `~(1ull << tid)` into a single accumulator slot whose initial value
+// is 0xFFFFFFFFFFFFFFFF. With correct atomic semantics every thread's
+// bit-clear must take effect, so each accumulator must end at exactly 0.
+// If any read-modify-write were lost, the corresponding bit would remain
+// set.
+//
+// Per-thread sanity for the 3-argument forms: the returned "original"
+// value must have *this* thread's bit set, since no other thread ever
+// clears that bit.
+
+RWStructuredBuffer<uint64_t> SBufU : register(u0);
+RWStructuredBuffer<int64_t>  SBufI : register(u1);
+RWByteAddressBuffer          BABuf : register(u2);
+
+RWStructuredBuffer<uint> OutOrigBitSetSBufI : register(u3);
+RWStructuredBuffer<uint> OutOrigBitSetBABuf : register(u4);
+
+[numthreads(64, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufU[0] = 0xFFFFFFFFFFFFFFFFull;
+    SBufI[0] = (int64_t)-1;
+    BABuf.Store<uint64_t>(0, 0xFFFFFFFFFFFFFFFFull); // accumulator for 2-arg method form
+    BABuf.Store<uint64_t>(8, 0xFFFFFFFFFFFFFFFFull); // accumulator for 3-arg method form
+  }
+  OutOrigBitSetSBufI[GTID.x] = 0u;
+  OutOrigBitSetBABuf[GTID.x] = 0u;
+  DeviceMemoryBarrierWithGroupSync();
+
+  uint64_t ThreadBit  = 1ull << GTID.x;
+  uint64_t ThreadMask = ~ThreadBit;
+
+  // RWStructuredBuffer<uint64_t>: 2-argument free function.
+  InterlockedAnd(SBufU[0], ThreadMask);
+
+  // RWStructuredBuffer<int64_t>: 3-argument free function (signed).
+  int64_t OrigI;
+  InterlockedAnd(SBufI[0], (int64_t)ThreadMask, OrigI);
+  OutOrigBitSetSBufI[GTID.x] = (((uint64_t)OrigI & ThreadBit) != 0ull) ? 1u : 0u;
+
+  // RWByteAddressBuffer 64-bit method: 2-argument form.
+  BABuf.InterlockedAnd64(0, ThreadMask);
+
+  // RWByteAddressBuffer 64-bit method: 3-argument form.
+  uint64_t OrigBA;
+  BABuf.InterlockedAnd64(8, ThreadMask, OrigBA);
+  OutOrigBitSetBABuf[GTID.x] = ((OrigBA & ThreadBit) != 0ull) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt64
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedSBufU
+    Format: UInt64
+    Stride: 8
+    Data: [ 0 ]
+  - Name: SBufI
+    Format: Int64
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedSBufI
+    Format: Int64
+    Stride: 8
+    Data: [ 0 ]
+  - Name: BABuf
+    Format: Hex64
+    Stride: 8
+    FillSize: 16
+  - Name: ExpectedBABuf
+    Format: Hex64
+    Stride: 8
+    Data: [ 0x0000000000000000, 0x0000000000000000 ]
+  - Name: OutOrigBitSetSBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: ExpectedOrigBitSet
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutOrigBitSetBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestOrigBitSetSBufI
+    Rule: BufferExact
+    Actual: OutOrigBitSetSBufI
+    Expected: ExpectedOrigBitSet
+  - Result: TestOrigBitSetBABuf
+    Rule: BufferExact
+    Actual: OutOrigBitSetBABuf
+    Expected: ExpectedOrigBitSet
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutOrigBitSetSBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutOrigBitSetBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99125
+# XFAIL: Clang
+
+# REQUIRES: Int64
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
