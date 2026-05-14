@@ -146,5 +146,6 @@ add_subdirectory(test)
 # single `install-offload-tools` target that builds + installs all of them.
 if (NOT LLVM_ENABLE_IDE)
   add_llvm_install_targets(install-offload-tools
-    COMPONENT offload-tools)
+    COMPONENT offload-tools
+    DEPENDS api-query imgdiff offloader)
 endif()
