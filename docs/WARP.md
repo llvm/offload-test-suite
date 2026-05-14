@@ -11,7 +11,7 @@ will generate test targets for `check-hlsl-warp-d3d12` and
 There are some useful CMake options to tweak the configuration to better utilize
 WARP:
 
-* **OFFLOADTEST_WARP_ONLY** - Skips generating non-WRAP test configurations
+* **OFFLOADTEST_WARP_ONLY** - Skips generating non-WARP test configurations
   and backends. This is useful if you're running Windows in a VM and only
   have a working WARP implementation.
 
