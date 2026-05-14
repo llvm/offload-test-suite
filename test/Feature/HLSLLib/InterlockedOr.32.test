@@ -1,0 +1,130 @@
+#--- source.hlsl
+
+// This test exercises InterlockedOr against non-resource (groupshared)
+// destinations. A single threadgroup of 32 threads concurrently updates
+// shared counters, so the test actually exercises atomic behavior.
+//
+// Both the 2-argument and 3-argument overloads are covered for int and uint.
+//
+// Atomicity is verified by starting a counter at 0 and having each of 32
+// threads atomically set its own unique bit (OR with (1 << tid)). If any
+// read-modify-write were non-atomic, some thread's bit set would be lost
+// and the final value would not be all-ones. With true atomicity, the
+// counter must end at exactly 0xFFFFFFFF.
+//
+// For the 3-argument form we additionally verify, per-thread, that the
+// returned "original value" had this thread's bit clear when the OR was
+// performed -- this must always be true under atomic semantics, since no
+// other thread ever sets that bit.
+
+RWStructuredBuffer<uint> OutOrigBitClear : register(u0);
+RWStructuredBuffer<uint> OutFinal : register(u1);
+
+groupshared uint CounterU;          // 3-arg form, unsigned: bit-set test
+groupshared uint CounterUNoOrig;    // 2-arg form, unsigned: bit-set test
+groupshared int  CounterI;          // 3-arg form, signed: bit-set test on 0
+groupshared uint MaskedU;           // deterministic mask test (all threads
+                                    // OR with the same constant)
+
+groupshared uint OrigBitClear[32];  // per-thread: was my bit clear in the
+                                    // original value I observed?
+
+[numthreads(32, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    CounterU = 0u;
+    CounterUNoOrig = 0u;
+    CounterI = 0;
+    MaskedU = 0xAAAAAAAAu;
+  }
+  OrigBitClear[GTID.x] = 0;
+  GroupMemoryBarrierWithGroupSync();
+
+  uint ThreadBit = 1u << GTID.x;
+
+  // 3-argument form: capture original, then check our bit was clear in it.
+  uint OrigU;
+  InterlockedOr(CounterU, ThreadBit, OrigU);
+  OrigBitClear[GTID.x] = ((OrigU & ThreadBit) == 0u) ? 1u : 0u;
+
+  // 3-argument form, signed.
+  int OrigI;
+  InterlockedOr(CounterI, (int)ThreadBit, OrigI);
+
+  // 2-argument form: no original captured.
+  InterlockedOr(CounterUNoOrig, ThreadBit);
+
+  // 2-argument form: every thread ORs with the same constant. Result
+  // is deterministic regardless of ordering: 0xAAAAAAAA | 0x0F0F0F0F.
+  InterlockedOr(MaskedU, 0x0F0F0F0Fu);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  OutOrigBitClear[GTID.x] = OrigBitClear[GTID.x];
+
+  if (GTID.x == 0) {
+    OutFinal[0] = CounterU;          // 0xFFFFFFFF
+    OutFinal[1] = (uint)CounterI;    // 0xFFFFFFFF
+    OutFinal[2] = CounterUNoOrig;    // 0xFFFFFFFF
+    OutFinal[3] = MaskedU;           // 0xAAAAAAAA | 0x0F0F0F0F = 0xAFAFAFAF
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutOrigBitClear
+    Format: UInt32
+    Stride: 4
+    FillSize: 128
+  - Name: ExpectedOrigBitClear
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutFinal
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedFinal
+    Format: UInt32
+    Stride: 4
+    Data: [ 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xAFAFAFAF ]
+Results:
+  - Result: TestOrigBitClear
+    Rule: BufferExact
+    Actual: OutOrigBitClear
+    Expected: ExpectedOrigBitClear
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutOrigBitClear
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99126
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

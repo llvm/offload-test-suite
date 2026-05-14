@@ -1,0 +1,136 @@
+#--- source.hlsl
+
+// This test exercises InterlockedOr against non-resource (groupshared)
+// destinations using 64-bit integer types. A single threadgroup of 64
+// threads concurrently updates shared counters, so the test actually
+// exercises atomic behavior.
+//
+// Both the 2-argument and 3-argument overloads are covered for int64_t
+// and uint64_t.
+//
+// Atomicity is verified by starting a counter at 0 and having each of 64
+// threads atomically set its own unique bit (OR with (1ull << tid)). If
+// any read-modify-write were non-atomic, some thread's bit set would be
+// lost and the final value would not be all-ones. With true atomicity,
+// the counter must end at exactly 0xFFFFFFFFFFFFFFFF.
+//
+// For the 3-argument form we additionally verify, per-thread, that the
+// returned "original value" had this thread's bit clear when the OR was
+// performed -- this must always be true under atomic semantics, since no
+// other thread ever sets that bit.
+
+RWStructuredBuffer<uint> OutOrigBitClear : register(u0);
+RWStructuredBuffer<uint64_t> OutFinal : register(u1);
+
+groupshared uint64_t CounterU;          // 3-arg form, unsigned: bit-set test
+groupshared uint64_t CounterUNoOrig;    // 2-arg form, unsigned: bit-set test
+groupshared int64_t  CounterI;          // 3-arg form, signed: bit-set test on 0
+groupshared uint64_t MaskedU;           // deterministic mask test (all threads
+                                        // OR with the same constant)
+
+groupshared uint OrigBitClear[64];      // per-thread: was my bit clear in the
+                                        // original value I observed?
+
+[numthreads(64, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    CounterU = 0ull;
+    CounterUNoOrig = 0ull;
+    CounterI = (int64_t)0;
+    MaskedU = 0xAAAAAAAAAAAAAAAAull;
+  }
+  OrigBitClear[GTID.x] = 0;
+  GroupMemoryBarrierWithGroupSync();
+
+  uint64_t ThreadBit = 1ull << GTID.x;
+
+  // 3-argument form: capture original, then check our bit was clear in it.
+  uint64_t OrigU;
+  InterlockedOr(CounterU, ThreadBit, OrigU);
+  OrigBitClear[GTID.x] = ((OrigU & ThreadBit) == 0ull) ? 1u : 0u;
+
+  // 3-argument form, signed.
+  int64_t OrigI;
+  InterlockedOr(CounterI, (int64_t)ThreadBit, OrigI);
+
+  // 2-argument form: no original captured.
+  InterlockedOr(CounterUNoOrig, ThreadBit);
+
+  // 2-argument form: every thread ORs with the same constant. Result
+  // is deterministic regardless of ordering. The mask exercises both the
+  // low and high 32-bit halves.
+  InterlockedOr(MaskedU, 0x0F0F0F0F0F0F0F0Full);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  OutOrigBitClear[GTID.x] = OrigBitClear[GTID.x];
+
+  if (GTID.x == 0) {
+    OutFinal[0] = CounterU;             // 0xFFFFFFFFFFFFFFFF
+    OutFinal[1] = (uint64_t)CounterI;   // 0xFFFFFFFFFFFFFFFF
+    OutFinal[2] = CounterUNoOrig;       // 0xFFFFFFFFFFFFFFFF
+    OutFinal[3] = MaskedU;              // 0xAFAFAFAFAFAFAFAF
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutOrigBitClear
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: ExpectedOrigBitClear
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutFinal
+    Format: UInt64
+    Stride: 8
+    FillSize: 32
+  - Name: ExpectedFinal
+    Format: UInt64
+    Stride: 8
+    Data: [ 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0xAFAFAFAFAFAFAFAF ]
+Results:
+  - Result: TestOrigBitClear
+    Rule: BufferExact
+    Actual: OutOrigBitClear
+    Expected: ExpectedOrigBitClear
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutOrigBitClear
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99126
+# XFAIL: Clang
+
+# REQUIRES: Int64
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
