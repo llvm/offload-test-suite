@@ -28,5 +28,6 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
+      BuildType: Debug
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
