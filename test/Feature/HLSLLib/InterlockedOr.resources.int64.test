@@ -173,7 +173,10 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: Metal && DXC
 
-# REQUIRES: Int64
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# REQUIRES: Int64 && SM_6_6
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

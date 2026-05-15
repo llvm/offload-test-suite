@@ -136,6 +136,25 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("AVX512")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
+    sm_major, sm_minor = HighestShaderModel
+    # Add SM_6_X availability features for every SM 6.x version the device
+    # supports. D3D12 guarantees a contiguous range from 6.0 up to the
+    # reported HighestShaderModel for any DXIL-capable device, so we
+    # iterate from 0 up to sm_minor. Tests can gate on the minimum SM
+    # they require (e.g. `# REQUIRES: SM_6_6`).
+
+    # Highest SM 6.x version currently shipped by DXC.
+    HIGHEST_KNOWN_SM6_MINOR = 9
+    if device["API"] == "DirectX":
+        if sm_major == 6:
+            for minor in range(sm_minor + 1):
+                config.available_features.add(f"SM_6_{minor}")
+    else:
+        # Vulkan and Metal aren't gated by D3D shader model caps; DXC's
+        # SPIR-V and Metal codegen paths accept any SM 6.x.
+        for minor in range(HIGHEST_KNOWN_SM6_MINOR + 1):
+            config.available_features.add(f"SM_6_{minor}")
+
     if (6, 6) <= HighestShaderModel:
         # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
         config.available_features.add("DerivativesInCompute")
