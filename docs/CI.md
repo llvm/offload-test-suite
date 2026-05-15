@@ -13,7 +13,6 @@ When these configurations fail it should be high priority to correct them.
 Configurations:
 * Windows Intel GPU DirectX
 * Windows Intel GPU Vulkan
-* Windows AMD GPU DirectX
 * Windows NVIDIA GPU DirectX
 * Windows WARP LKG x64
 * Windows WARP LKG arm64
@@ -42,6 +41,7 @@ Experimental configurations should be promoted out to other tiers once they are
 robustly passing.
 
 Configurations:
+* Windows AMD GPU DirectX
 * Windows AMD GPU Vulkan
 * Windows NVIDIA GPU Vulkan
 * Windows QC GPU DirectX
