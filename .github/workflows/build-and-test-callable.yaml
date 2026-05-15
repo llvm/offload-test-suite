@@ -198,6 +198,18 @@ jobs:
             cd llvm-project
             cd build
             ./bin/api-query
+      - name: Configure WER for offloader.exe crash dumps (Windows only)
+        if: inputs.OS == 'windows' && inputs.SplitBuild != true
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path C:\CrashDumps | Out-Null
+          Remove-Item -Path C:\CrashDumps\*.dmp -Force -ErrorAction SilentlyContinue
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\offloader.exe'
+          New-Item -Path $key -Force | Out-Null
+          Set-ItemProperty -Path $key -Name DumpFolder -Value 'C:\CrashDumps' -Type ExpandString
+          Set-ItemProperty -Path $key -Name DumpType   -Value 2  -Type DWord
+          Set-ItemProperty -Path $key -Name DumpCount  -Value 20 -Type DWord
+          Write-Host "WER LocalDumps configured for offloader.exe -> C:\CrashDumps"
       - name: Run HLSL Tests
         if: inputs.SplitBuild != true
         run: |
@@ -205,6 +217,35 @@ jobs:
             cd build
             ninja check-hlsl-unit
             ninja ${{ inputs.TestTarget }}
+      - name: Copy crash dumps into test results folder (Windows only)
+        if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
+        shell: pwsh
+        run: |
+          $dest = "${{ github.workspace }}\llvm-project\build\test-results\CrashDumps"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $dumps = Get-ChildItem -Path C:\CrashDumps -Filter *.dmp -ErrorAction SilentlyContinue
+          if ($dumps) {
+            Copy-Item -Path $dumps.FullName -Destination $dest -Force
+            Write-Host "Copied $($dumps.Count) dump file(s) to $dest"
+          } else {
+            Write-Host "No crash dumps found in C:\CrashDumps"
+          }
+      - name: Upload offloader.exe crash dumps (Windows only)
+        if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-dumps-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: C:\CrashDumps\*.dmp
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Cleanup WER LocalDumps registry (Windows only)
+        if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\offloader.exe'
+          Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path C:\CrashDumps -Recurse -Force -ErrorAction SilentlyContinue
+          Write-Host "WER LocalDumps registry and dump folder cleaned up"
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: >-
