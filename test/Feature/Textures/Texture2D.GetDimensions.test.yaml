@@ -117,6 +117,9 @@ Results:
 # Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
 # XFAIL: DirectX || Metal
 
+# Bug https://github.com/llvm/llvm-project/issues/197837
+# XFAIL: Clang && Vulkan
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/compute.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
