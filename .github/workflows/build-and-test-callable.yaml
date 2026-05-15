@@ -200,7 +200,7 @@ jobs:
             ./bin/api-query
       - name: Configure WER for offloader.exe crash dumps (Windows only)
         if: inputs.OS == 'windows' && inputs.SplitBuild != true
-        shell: pwsh
+        shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path C:\CrashDumps | Out-Null
           Remove-Item -Path C:\CrashDumps\*.dmp -Force -ErrorAction SilentlyContinue
@@ -219,7 +219,7 @@ jobs:
             ninja ${{ inputs.TestTarget }}
       - name: Copy crash dumps into test results folder (Windows only)
         if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
-        shell: pwsh
+        shell: powershell
         run: |
           $dest = "${{ github.workspace }}\llvm-project\build\test-results\CrashDumps"
           New-Item -ItemType Directory -Force -Path $dest | Out-Null
@@ -240,7 +240,7 @@ jobs:
           retention-days: 14
       - name: Cleanup WER LocalDumps registry (Windows only)
         if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
-        shell: pwsh
+        shell: powershell
         run: |
           $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\offloader.exe'
           Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
