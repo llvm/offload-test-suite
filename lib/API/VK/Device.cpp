@@ -561,6 +561,9 @@ public:
   PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
   PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
 
+  /// Keep-alive list for Framebuffers constructed by RencderEncoders.
+  llvm::SmallVector<VkFramebuffer, 4> OwnedFramebuffers;
+
   static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
   create(VkDevice Device, uint32_t QueueFamilyIdx,
          PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
@@ -638,8 +641,28 @@ public:
     PendingDstAccess = 0;
   }
 
-  /// Keep-alive list for Framebuffers constructed by RencderEncoders.
-  llvm::SmallVector<VkFramebuffer, 4> OwnedFramebuffers;
+  void pushDebugGroup(llvm::StringRef Label) {
+    if (CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CmdBeginDebugUtilsLabel(CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() {
+    if (CmdEndDebugUtilsLabel)
+      CmdEndDebugUtilsLabel(CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) {
+    if (!CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CmdInsertDebugUtilsLabel(CmdBuffer, &LabelInfo);
+  }
 
   ~VulkanCommandBuffer() override {
     for (VkFramebuffer FB : OwnedFramebuffers)
@@ -681,26 +704,11 @@ public:
   }
 
   void pushDebugGroup(llvm::StringRef Label) override {
-    if (!CB.CmdBeginDebugUtilsLabel)
-      return;
-    VkDebugUtilsLabelEXT LabelInfo = {};
-    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-    LabelInfo.pLabelName = Label.data();
-    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+    CB.pushDebugGroup(Label);
   }
-
-  void popDebugGroup() override {
-    if (CB.CmdEndDebugUtilsLabel)
-      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
-  }
-
+  void popDebugGroup() override { CB.popDebugGroup(); }
   void insertDebugSignpost(llvm::StringRef Label) override {
-    if (!CB.CmdInsertDebugUtilsLabel)
-      return;
-    VkDebugUtilsLabelEXT LabelInfo = {};
-    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-    LabelInfo.pLabelName = Label.data();
-    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+    CB.insertDebugSignpost(Label);
   }
 
   llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
@@ -830,26 +838,11 @@ public:
   }
 
   void pushDebugGroup(llvm::StringRef Label) override {
-    if (!CB.CmdBeginDebugUtilsLabel)
-      return;
-    VkDebugUtilsLabelEXT LabelInfo = {};
-    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-    LabelInfo.pLabelName = Label.data();
-    CB.CmdBeginDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+    CB.pushDebugGroup(Label);
   }
-
-  void popDebugGroup() override {
-    if (CB.CmdEndDebugUtilsLabel)
-      CB.CmdEndDebugUtilsLabel(CB.CmdBuffer);
-  }
-
+  void popDebugGroup() override { CB.popDebugGroup(); }
   void insertDebugSignpost(llvm::StringRef Label) override {
-    if (!CB.CmdInsertDebugUtilsLabel)
-      return;
-    VkDebugUtilsLabelEXT LabelInfo = {};
-    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
-    LabelInfo.pLabelName = Label.data();
-    CB.CmdInsertDebugUtilsLabel(CB.CmdBuffer, &LabelInfo);
+    CB.insertDebugSignpost(Label);
   }
 
   void setViewport(const offloadtest::Viewport &VP) override {
