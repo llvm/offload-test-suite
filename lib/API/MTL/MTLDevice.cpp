@@ -605,8 +605,8 @@ public:
   }
 
   /// Access the underlying Metal encoder for state that the abstract
-  /// RenderEncoder API does not yet cover (depth-stencil state, cull
-  /// mode, etc.). Returns nullptr after endEncoding().
+  /// RenderEncoder API does not yet cover.
+  /// Returns nullptr after endEncoding().
   MTL::RenderCommandEncoder *getNative() const { return RenderEnc; }
 
   void pushDebugGroup(llvm::StringRef Label) override {
