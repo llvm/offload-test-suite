@@ -1971,6 +1971,11 @@ public:
       AD.storeOp = getVkStoreOp(Color.Store);
       AD.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
       AD.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      // If we are loading, the layout MUST be defined and in color attachment
+      // optimal state.
+      // If we are NOT loading (clearing or don't care), we are discarding the
+      // original contents of the texture, and use an undefined layout. This
+      // allows us to use _any_ layout including unitialized textures.
       AD.initialLayout = Color.Load == LoadAction::Load
                              ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                              : VK_IMAGE_LAYOUT_UNDEFINED;
