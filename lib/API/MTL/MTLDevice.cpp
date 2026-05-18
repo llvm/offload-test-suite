@@ -1147,8 +1147,10 @@ class MTLDevice : public offloadtest::Device {
       // references buffer index 0.
       CmdEncoder->setVertexBuffer(llvm::cast<MTLBuffer>(*IS.VB).Buf, 0, 0);
 
-    CmdEncoder->drawPrimitives(MTL::PrimitiveTypeTriangle, NS::UInteger(0),
-                               P.getVertexCount());
+    // IRRuntimeDrawPrimitives also sets the DrawParams / DrawInfo argument
+    // buffers that metal-irconverter consults for SV_VertexID and friends.
+    IRRuntimeDrawPrimitives(CmdEncoder, MTL::PrimitiveTypeTriangle,
+                            NS::UInteger(0), P.getVertexCount());
 
     CmdEncoder->endEncoding();
 
