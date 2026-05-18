@@ -650,11 +650,19 @@ public:
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
     // Stride is needed in DX12 at binding time, ignore parameter here.
+    // Metal Shader Converter reserves low buffer indices for its own tables;
+    // vertex buffers start at kIRVertexBufferBindPoint. See
+    // https://developer.apple.com/metal/shader-converter/ ("Metal vertex
+    // fetch").
+    const NS::UInteger BufIdx = kIRVertexBufferBindPoint + Slot;
+    assert(Slot <
+               sizeof(IRRuntimeVertexBuffers) / sizeof(IRRuntimeVertexBuffer) &&
+           "Vertex buffer slot exceeds Metal Shader Converter limit");
     if (VB) {
       auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
-      RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, Slot);
+      RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, BufIdx);
     } else {
-      RenderEnc->setVertexBuffer(nullptr, 0, Slot);
+      RenderEnc->setVertexBuffer(nullptr, 0, BufIdx);
     }
   }
 
@@ -1656,7 +1664,7 @@ public:
         const uint32_t ElemSize = getFormatSizeInBytes(Elem.Fmt);
         MTL::VertexAttributeDescriptor *AttrDesc =
             MTL::VertexAttributeDescriptor::alloc()->init();
-        AttrDesc->setBufferIndex(0);
+        AttrDesc->setBufferIndex(kIRVertexBufferBindPoint);
         AttrDesc->setOffset(Elem.OffsetInBytes);
         AttrDesc->setFormat(getMetalVertexFormat(Elem.Fmt));
         VtxDesc->attributes()->setObject(AttrDesc, ShaderAttrIndices[AttrName]);
@@ -1669,7 +1677,7 @@ public:
       LDesc->setStride(Stride);
       LDesc->setStepRate(1);
       LDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
-      VtxDesc->layouts()->setObject(LDesc, 0);
+      VtxDesc->layouts()->setObject(LDesc, kIRVertexBufferBindPoint);
       LDesc->release();
 
       Desc->setVertexDescriptor(VtxDesc);
