@@ -175,3 +175,46 @@ offloadtest::createBufferWithData(
 
   return Buffer;
 }
+
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createTextureWithData(Device &Dev, std::string Name,
+                      const TextureCreateDesc &Desc, const void *Data,
+                      size_t SizeInBytes, ComputeEncoder *Encoder,
+                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
+
+  // TODO(manon): Validate texture size with data to upload
+
+  auto BufferOrErr = Dev.createTexture(Name, Desc);
+  if (!BufferOrErr)
+    return BufferOrErr.takeError();
+  auto Buffer = std::move(*BufferOrErr);
+
+  if (Desc.Location == MemoryLocation::GpuOnly) {
+    if (OutUploadBuffer == nullptr)
+      return llvm::createStringError("An upload buffer is required to create a "
+                                     "GpuOnly texture with data.");
+
+    // Create Upload buffer
+    const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+    std::string UploadBufferName = Name + " (Upload Buffer)";
+    auto UploadBufferOrErr = createBufferWithData(
+        Dev, UploadBufferName, UploadDesc, Data, SizeInBytes, Encoder, nullptr);
+    if (!UploadBufferOrErr)
+      return UploadBufferOrErr.takeError();
+    *OutUploadBuffer = std::move(*UploadBufferOrErr);
+
+    // Copy Buffer to Buffer
+    Encoder->copyBufferToTexture(*UploadBuffer, 0, *Texture, 0, SizeInBytes);
+
+  } else {
+    // Copy data over
+    auto MappedPtrOrErr = Texture->map();
+    if (!MappedPtrOrErr)
+      return MappedPtrOrErr.takeError();
+    void *MappedPtr = *MappedPtrOrErr;
+    memcpy(MappedPtr, Data, SizeInBytes);
+    Texture->unmap();
+  }
+
+  return Texture;
+}

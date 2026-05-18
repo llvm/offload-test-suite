@@ -308,6 +308,10 @@ public:
             size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
+  MTLBuffer(const MTLBuffer &) = delete;
+  MTLBuffer(MTLBuffer &&) = delete;
+  MTLBuffer &operator=(const MTLBuffer &) = delete;
+  MTLBuffer &operator=(MTLBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
@@ -1547,6 +1551,9 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+    assert(!Desc.HasCounter &&
+           "Metal Backend does not support buffers with a counter.");
+
     MTL::Buffer *Buf = Device->newBuffer(
         SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)
