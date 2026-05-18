@@ -1495,7 +1495,7 @@ public:
     // NOTE: After pipeline creation this render pass can be dropped. Later
     // render passes just need to be compatible with this render pass, or in
     // other words: the format, sample count and number of targets (rt and ds),
-    // need to match.
+    // need to match, but Load/Store ops (and initial/final layout) are ignored.
     auto RenderPassOrErr = createRenderPass(PassDesc);
     if (!RenderPassOrErr) {
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
