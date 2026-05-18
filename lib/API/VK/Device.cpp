@@ -1260,76 +1260,80 @@ public:
       ShaderModules.push_back(GSModule);
     }
 
-    // Build specialization info for vertex shader.
+    // Marshals one stage's SpecializationConstants into Vulkan's
+    // VkSpecializationInfo. Storage for Entries/Data is owned by the caller
+    // because Info points into them and must remain valid until pipeline
+    // creation finishes.
+    auto BuildSpecInfo =
+        [](llvm::ArrayRef<SpecializationConstant> SpecConsts,
+           llvm::SmallVector<VkSpecializationMapEntry> &Entries,
+           llvm::SmallVector<char> &Data,
+           VkSpecializationInfo &Info) -> llvm::Error {
+      if (SpecConsts.empty())
+        return llvm::Error::success();
+      llvm::DenseSet<uint32_t> SeenConstantIDs;
+      for (const auto &SpecConst : SpecConsts) {
+        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "Test configuration contains multiple entries for "
+              "specialization constant ID %u.",
+              SpecConst.ConstantID);
+        VkSpecializationMapEntry Entry;
+        if (auto Err = parseSpecializationConstant(SpecConst, Entry, Data))
+          return Err;
+        Entries.push_back(Entry);
+      }
+      Info.mapEntryCount = Entries.size();
+      Info.pMapEntries = Entries.data();
+      Info.dataSize = Data.size();
+      Info.pData = Data.data();
+      return llvm::Error::success();
+    };
+
     llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
     llvm::SmallVector<char> VSSpecData;
     VkSpecializationInfo VSSpecInfo = {};
-    if (!VS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-      for (const auto &SpecConst : VS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, VSSpecData)) {
-          for (auto *M : ShaderModules)
-            vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyRenderPass(Device, RenderPass, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
-          return Err;
-        }
-        VSSpecEntries.push_back(Entry);
-      }
-      VSSpecInfo.mapEntryCount = VSSpecEntries.size();
-      VSSpecInfo.pMapEntries = VSSpecEntries.data();
-      VSSpecInfo.dataSize = VSSpecData.size();
-      VSSpecInfo.pData = VSSpecData.data();
+    if (auto Err = BuildSpecInfo(VS.SpecializationConstants, VSSpecEntries,
+                                 VSSpecData, VSSpecInfo)) {
+      for (auto *M : ShaderModules)
+        vkDestroyShaderModule(Device, M, nullptr);
+      vkDestroyRenderPass(Device, RenderPass, nullptr);
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
     }
 
-    // Build specialization info for pixel/fragment shader.
     llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
     llvm::SmallVector<char> PSSpecData;
     VkSpecializationInfo PSSpecInfo = {};
-    if (!PS.SpecializationConstants.empty()) {
-      llvm::DenseSet<uint32_t> SeenConstantIDs;
-      for (const auto &SpecConst : PS.SpecializationConstants) {
-        if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "Test configuration contains multiple entries for "
-              "specialization constant ID %u.",
-              SpecConst.ConstantID);
-
-        VkSpecializationMapEntry Entry;
-        if (auto Err =
-                parseSpecializationConstant(SpecConst, Entry, PSSpecData)) {
-          for (auto *M : ShaderModules)
-            vkDestroyShaderModule(Device, M, nullptr);
-          vkDestroyRenderPass(Device, RenderPass, nullptr);
-          vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
-          for (auto *L : SetLayouts)
-            vkDestroyDescriptorSetLayout(Device, L, nullptr);
-          return Err;
-        }
-        PSSpecEntries.push_back(Entry);
-      }
-      PSSpecInfo.mapEntryCount = PSSpecEntries.size();
-      PSSpecInfo.pMapEntries = PSSpecEntries.data();
-      PSSpecInfo.dataSize = PSSpecData.size();
-      PSSpecInfo.pData = PSSpecData.data();
+    if (auto Err = BuildSpecInfo(PS.SpecializationConstants, PSSpecEntries,
+                                 PSSpecData, PSSpecInfo)) {
+      for (auto *M : ShaderModules)
+        vkDestroyShaderModule(Device, M, nullptr);
+      vkDestroyRenderPass(Device, RenderPass, nullptr);
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
     }
 
-    if (GS && !GS->SpecializationConstants.empty())
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Specialization constants on geometry shaders are not supported.");
+    llvm::SmallVector<VkSpecializationMapEntry> GSSpecEntries;
+    llvm::SmallVector<char> GSSpecData;
+    VkSpecializationInfo GSSpecInfo = {};
+    if (GS) {
+      if (auto Err = BuildSpecInfo(GS->SpecializationConstants, GSSpecEntries,
+                                   GSSpecData, GSSpecInfo)) {
+        for (auto *M : ShaderModules)
+          vkDestroyShaderModule(Device, M, nullptr);
+        vkDestroyRenderPass(Device, RenderPass, nullptr);
+        vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+        for (auto *L : SetLayouts)
+          vkDestroyDescriptorSetLayout(Device, L, nullptr);
+        return Err;
+      }
+    }
 
     llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> Stages;
     Stages.push_back(
@@ -1337,9 +1341,10 @@ public:
          VK_SHADER_STAGE_VERTEX_BIT, ShaderModules[0], VS.EntryPoint.c_str(),
          VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo});
     if (GS)
-      Stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                        nullptr, 0, VK_SHADER_STAGE_GEOMETRY_BIT, GSModule,
-                        GS->EntryPoint.c_str(), nullptr});
+      Stages.push_back(
+          {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
+           VK_SHADER_STAGE_GEOMETRY_BIT, GSModule, GS->EntryPoint.c_str(),
+           GS->SpecializationConstants.empty() ? nullptr : &GSSpecInfo});
     Stages.push_back(
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
          VK_SHADER_STAGE_FRAGMENT_BIT, ShaderModules[1], PS.EntryPoint.c_str(),

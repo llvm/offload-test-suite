@@ -962,8 +962,8 @@ public:
                      std::optional<Format> DSFormat, ShaderContainer VS,
                      ShaderContainer PS) override {
     return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
-                                  DSFormat, PrimitiveTopology::TriangleList,
-                                  VS, std::nullopt, PS);
+                                  DSFormat, PrimitiveTopology::TriangleList, VS,
+                                  std::nullopt, PS);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
