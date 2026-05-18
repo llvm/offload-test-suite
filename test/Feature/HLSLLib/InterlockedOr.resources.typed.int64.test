@@ -1,0 +1,129 @@
+#--- source.hlsl
+
+// This test exercises InterlockedOr on 64-bit typed RWBuffer resources.
+// 64-bit atomics on typed UAVs are an optional Shader Model 6.6 capability
+// (D3D12 cap AtomicInt64OnTypedResourceSupported, Vulkan feature
+// shaderBufferInt64Atomics), surfaced to lit as `Int64TypedResourceAtomics`.
+//
+//   * RWBuffer<uint64_t>[i]  (free function, 2-arg)
+//   * RWBuffer<int64_t>[i]   (free function, 3-arg, signed)
+//
+// 64-bit typed-image atomics (RWTexture<int64_t>) live behind an additional
+// Vulkan extension (VK_EXT_shader_image_atomic_int64) and are not covered
+// here.
+//
+// 64 threads of a single threadgroup atomically OR their own unique bit
+// (1ull << tid) into a single accumulator slot. With correct atomic
+// semantics every bit must be set, so each accumulator must end at
+// exactly 0xFFFFFFFFFFFFFFFF. If any read-modify-write were lost, the
+// corresponding bit would remain clear.
+//
+// Per-thread sanity for the 3-argument form: the returned "original"
+// value must have *this* thread's bit clear, since no other thread ever
+// sets that bit.
+
+RWBuffer<uint64_t> TBufU : register(u0);
+RWBuffer<int64_t>  TBufI : register(u1);
+
+RWStructuredBuffer<uint> OutOrigBitClear : register(u2);
+
+[numthreads(64, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    TBufU[0] = 0ull;
+    TBufI[0] = (int64_t)0;
+  }
+  OutOrigBitClear[GTID.x] = 0u;
+  DeviceMemoryBarrierWithGroupSync();
+
+  uint64_t ThreadBit = 1ull << GTID.x;
+
+  // RWBuffer<uint64_t>: 2-argument free function.
+  InterlockedOr(TBufU[0], ThreadBit);
+
+  // RWBuffer<int64_t>: 3-argument free function (signed).
+  int64_t OrigI;
+  InterlockedOr(TBufI[0], (int64_t)ThreadBit, OrigI);
+  OutOrigBitClear[GTID.x] = (((uint64_t)OrigI & ThreadBit) == 0ull) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: TBufU
+    Format: UInt64
+    Channels: 1
+    FillSize: 8
+  - Name: ExpectedTBufU
+    Format: UInt64
+    Channels: 1
+    Data: [ 0xFFFFFFFFFFFFFFFF ]
+  - Name: TBufI
+    Format: Int64
+    Channels: 1
+    FillSize: 8
+  - Name: ExpectedTBufI
+    Format: Int64
+    Channels: 1
+    Data: [ -1 ]
+  - Name: OutOrigBitClear
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: ExpectedOrigBitClear
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: TestTBufU
+    Rule: BufferExact
+    Actual: TBufU
+    Expected: ExpectedTBufU
+  - Result: TestTBufI
+    Rule: BufferExact
+    Actual: TBufI
+    Expected: ExpectedTBufI
+  - Result: TestOrigBitClear
+    Rule: BufferExact
+    Actual: OutOrigBitClear
+    Expected: ExpectedOrigBitClear
+DescriptorSets:
+  - Resources:
+    - Name: TBufU
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TBufI
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutOrigBitClear
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99126
+# XFAIL: Clang
+
+# REQUIRES: Int64TypedResourceAtomics && SM_6_6
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
