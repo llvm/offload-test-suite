@@ -1,0 +1,95 @@
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : SV_POSITION;
+};
+
+// Pass-through vertex shader: a single input point travels unchanged to the
+// geometry stage, which is responsible for expanding it into a quad.
+VSOutput main(float4 position : POSITION) {
+  VSOutput o;
+  o.position = position;
+  return o;
+}
+
+#--- geometry.hlsl
+struct GSInput {
+  float4 position : SV_POSITION;
+};
+
+struct GSOutput {
+  float4 position : SV_POSITION;
+};
+
+// Expand the single input point into a fullscreen quad (two triangles via a
+// triangle strip). The emitted clip-space positions cover the whole viewport
+// so every pixel of the 2x2 render target is rasterized.
+[maxvertexcount(4)]
+void main(point GSInput input[1], inout TriangleStream<GSOutput> stream) {
+  GSOutput v;
+  v.position = float4(-1.0, -1.0, 0.0, 1.0);
+  stream.Append(v);
+  v.position = float4(-1.0,  1.0, 0.0, 1.0);
+  stream.Append(v);
+  v.position = float4( 1.0, -1.0, 0.0, 1.0);
+  stream.Append(v);
+  v.position = float4( 1.0,  1.0, 0.0, 1.0);
+  stream.Append(v);
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET {
+  return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Geometry
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16 # 1 vertex, 16 bytes
+    Data: [ 0.0, 0.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  Topology: PointList
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# Metal has no native geometry shader stage (equivalents would require mesh or
+# tessellation shaders). Skip this test on that backend entirely.
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T gs_6_0 -Fo %t-geometry.o %t/geometry.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-geometry.o %t-pixel.o | FileCheck %s
+
+# All 4 pixels of the 2x2 render target must be opaque red.
+# CHECK: Name: Output
+# CHECK: Data: [ 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1 ]

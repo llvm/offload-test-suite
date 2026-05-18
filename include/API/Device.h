@@ -165,6 +165,14 @@ public:
                      std::optional<Format> DSFormat, ShaderContainer VS,
                      ShaderContainer PS) = 0;
 
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsGsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       PrimitiveTopology Topology, ShaderContainer VS,
+                       ShaderContainer GS, ShaderContainer PS) = 0;
+
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
 

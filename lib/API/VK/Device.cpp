@@ -204,10 +204,22 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_COMPUTE_BIT;
   case Stages::Vertex:
     return VK_SHADER_STAGE_VERTEX_BIT;
+  case Stages::Geometry:
+    return VK_SHADER_STAGE_GEOMETRY_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
+  switch (Topology) {
+  case PrimitiveTopology::TriangleList:
+    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  case PrimitiveTopology::PointList:
+    return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
 static std::string getMessageSeverityString(
@@ -1180,13 +1192,18 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
-    const VkShaderStageFlags GraphicsFlags =
+  createGraphicsPipeline(llvm::StringRef Name,
+                         const BindingsDesc &BindingsDesc,
+                         llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                         llvm::ArrayRef<Format> RTFormats,
+                         std::optional<Format> DSFormat,
+                         PrimitiveTopology Topology, ShaderContainer VS,
+                         std::optional<ShaderContainer> GS,
+                         ShaderContainer PS) {
+    VkShaderStageFlags GraphicsFlags =
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    if (GS)
+      GraphicsFlags |= VK_SHADER_STAGE_GEOMETRY_BIT;
 
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
@@ -1226,6 +1243,22 @@ public:
       return PSModOrErr.takeError();
     }
     ShaderModules.push_back(*PSModOrErr);
+
+    VkShaderModule GSModule = VK_NULL_HANDLE;
+    if (GS) {
+      auto GSModOrErr = createShaderModule(GS->Shader, "geometry");
+      if (!GSModOrErr) {
+        for (auto *M : ShaderModules)
+          vkDestroyShaderModule(Device, M, nullptr);
+        vkDestroyRenderPass(Device, RenderPass, nullptr);
+        vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+        for (auto *L : SetLayouts)
+          vkDestroyDescriptorSetLayout(Device, L, nullptr);
+        return GSModOrErr.takeError();
+      }
+      GSModule = *GSModOrErr;
+      ShaderModules.push_back(GSModule);
+    }
 
     // Build specialization info for vertex shader.
     llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
@@ -1293,14 +1326,24 @@ public:
       PSSpecInfo.pData = PSSpecData.data();
     }
 
-    const std::array<VkPipelineShaderStageCreateInfo, 2> Stages = {{
+    if (GS && !GS->SpecializationConstants.empty())
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Specialization constants on geometry shaders are not supported.");
+
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> Stages;
+    Stages.push_back(
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
          VK_SHADER_STAGE_VERTEX_BIT, ShaderModules[0], VS.EntryPoint.c_str(),
-         VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo},
+         VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo});
+    if (GS)
+      Stages.push_back({VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                        nullptr, 0, VK_SHADER_STAGE_GEOMETRY_BIT, GSModule,
+                        GS->EntryPoint.c_str(), nullptr});
+    Stages.push_back(
         {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0,
          VK_SHADER_STAGE_FRAGMENT_BIT, ShaderModules[1], PS.EntryPoint.c_str(),
-         PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo},
-    }};
+         PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo});
 
     // Build vertex input attribute and binding descriptions from InputLayout.
     uint32_t Stride = 0;
@@ -1340,7 +1383,7 @@ public:
     VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
     InputAssemblyCI.sType =
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    InputAssemblyCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    InputAssemblyCI.topology = getVkPrimitiveTopology(Topology);
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -1422,6 +1465,29 @@ public:
     return std::make_unique<VulkanPipelineState>(
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
         RenderPass);
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                     llvm::ArrayRef<Format> RTFormats,
+                     std::optional<Format> DSFormat, ShaderContainer VS,
+                     ShaderContainer PS) override {
+    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
+                                  DSFormat, PrimitiveTopology::TriangleList,
+                                  std::move(VS), std::nullopt, std::move(PS));
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsGsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       PrimitiveTopology Topology, ShaderContainer VS,
+                       ShaderContainer GS, ShaderContainer PS) override {
+    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
+                                  DSFormat, Topology, std::move(VS),
+                                  std::move(GS), std::move(PS));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -2936,11 +3002,18 @@ public:
     } else if (P.isTraditionalRaster()) {
       ShaderContainer VS = {};
       ShaderContainer PS = {};
+      std::optional<ShaderContainer> GS;
       for (auto &Shader : P.Shaders) {
         if (Shader.Stage == Stages::Vertex) {
           VS.EntryPoint = Shader.Entry;
           VS.Shader = Shader.Shader.get();
           VS.SpecializationConstants = Shader.SpecializationConstants;
+        } else if (Shader.Stage == Stages::Geometry) {
+          ShaderContainer GSContainer = {};
+          GSContainer.EntryPoint = Shader.Entry;
+          GSContainer.Shader = Shader.Shader.get();
+          GSContainer.SpecializationConstants = Shader.SpecializationConstants;
+          GS = std::move(GSContainer);
         } else if (Shader.Stage == Stages::Pixel) {
           PS.EntryPoint = Shader.Entry;
           PS.Shader = Shader.Shader.get();
@@ -2970,9 +3043,14 @@ public:
       llvm::SmallVector<Format> RTFormats;
       RTFormats.push_back(*FormatOrErr);
 
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr =
+          GS ? createPipelineVsGsPs("Graphics Pipeline State", BindingsDesc,
+                                    InputLayout, RTFormats,
+                                    Format::D32FloatS8Uint, P.Bindings.Topology,
+                                    VS, *GS, PS)
+             : createPipelineVsPs("Graphics Pipeline State", BindingsDesc,
+                                  InputLayout, RTFormats,
+                                  Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);

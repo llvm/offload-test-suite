@@ -159,6 +159,28 @@ static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
   return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
 }
 
+static D3D12_PRIMITIVE_TOPOLOGY_TYPE
+getDXPrimitiveTopologyType(PrimitiveTopology Topology) {
+  switch (Topology) {
+  case PrimitiveTopology::TriangleList:
+    return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+  case PrimitiveTopology::PointList:
+    return D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
+}
+
+static D3D_PRIMITIVE_TOPOLOGY
+getDXPrimitiveTopology(PrimitiveTopology Topology) {
+  switch (Topology) {
+  case PrimitiveTopology::TriangleList:
+    return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
+  case PrimitiveTopology::PointList:
+    return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
+}
+
 static uint32_t getUAVBufferSize(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) +
@@ -865,12 +887,12 @@ public:
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
+  llvm::Expected<std::unique_ptr<PipelineState>> createGraphicsPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      llvm::ArrayRef<InputLayoutDesc> InputLayout,
+      llvm::ArrayRef<Format> RTFormats, std::optional<Format> DSFormat,
+      PrimitiveTopology Topology, ShaderContainer VS,
+      std::optional<ShaderContainer> GS, ShaderContainer PS) {
     assert(RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
@@ -903,6 +925,9 @@ public:
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Graphics pipeline requires both a vertex "
                                      "shader and a pixel shader.");
+    if (GS)
+      PSODesc.GS = {GS->Shader->getBuffer().data(),
+                    GS->Shader->getBuffer().size()};
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     PSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
@@ -913,7 +938,7 @@ public:
     PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
     PSODesc.SampleMask = UINT_MAX;
-    PSODesc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    PSODesc.PrimitiveTopologyType = getDXPrimitiveTopologyType(Topology);
     PSODesc.NumRenderTargets = static_cast<UINT>(RTFormats.size());
     if (DSFormat)
       PSODesc.DSVFormat = getDXGIFormat(*DSFormat);
@@ -928,6 +953,28 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                     llvm::ArrayRef<Format> RTFormats,
+                     std::optional<Format> DSFormat, ShaderContainer VS,
+                     ShaderContainer PS) override {
+    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
+                                  DSFormat, PrimitiveTopology::TriangleList,
+                                  VS, std::nullopt, PS);
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsGsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<InputLayoutDesc> InputLayout,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       PrimitiveTopology Topology, ShaderContainer VS,
+                       ShaderContainer GS, ShaderContainer PS) override {
+    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
+                                  DSFormat, Topology, VS, GS, PS);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -1967,7 +2014,8 @@ public:
       IS.CB->CmdList->IASetVertexBuffers(0, 1, &VBView);
     }
 
-    IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    IS.CB->CmdList->IASetPrimitiveTopology(
+        getDXPrimitiveTopology(P.Bindings.Topology));
 
     IS.CB->CmdList->DrawInstanced(P.getVertexCount(), 1, 0, 0);
 
@@ -2099,10 +2147,16 @@ public:
 
       ShaderContainer VS = {};
       ShaderContainer PS = {};
+      std::optional<ShaderContainer> GS;
       for (auto &Shader : P.Shaders) {
         if (Shader.Stage == Stages::Vertex) {
           VS.EntryPoint = Shader.Entry;
           VS.Shader = Shader.Shader.get();
+        } else if (Shader.Stage == Stages::Geometry) {
+          ShaderContainer GSContainer = {};
+          GSContainer.EntryPoint = Shader.Entry;
+          GSContainer.Shader = Shader.Shader.get();
+          GS = std::move(GSContainer);
         } else if (Shader.Stage == Stages::Pixel) {
           PS.EntryPoint = Shader.Entry;
           PS.Shader = Shader.Shader.get();
@@ -2131,9 +2185,14 @@ public:
       llvm::SmallVector<Format> RTFormats;
       RTFormats.push_back(*FormatOrErr);
 
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr =
+          GS ? createPipelineVsGsPs("Graphics Pipeline State", BindingsDesc,
+                                    InputLayout, RTFormats,
+                                    Format::D32FloatS8Uint, P.Bindings.Topology,
+                                    VS, *GS, PS)
+             : createPipelineVsPs("Graphics Pipeline State", BindingsDesc,
+                                  InputLayout, RTFormats,
+                                  Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);

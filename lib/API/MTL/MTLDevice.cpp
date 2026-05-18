@@ -130,6 +130,8 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageCompute;
   case Stages::Vertex:
     return IRShaderStageVertex;
+  case Stages::Geometry:
+    llvm_unreachable("Geometry shaders are not supported on Metal.");
   case Stages::Pixel:
     return IRShaderStageFragment;
   }
@@ -1455,6 +1457,17 @@ public:
                                               std::move(ArgBuffer), PSO);
   }
 
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineVsGsPs(llvm::StringRef, const BindingsDesc &,
+                       llvm::ArrayRef<InputLayoutDesc>, llvm::ArrayRef<Format>,
+                       std::optional<Format>, PrimitiveTopology,
+                       ShaderContainer, ShaderContainer,
+                       ShaderContainer) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal: Geometry shaders are not supported on this backend.");
+  }
+
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
 
@@ -1506,10 +1519,16 @@ public:
     } else {
       ShaderContainer VS = {};
       ShaderContainer PS = {};
+      std::optional<ShaderContainer> GS;
       for (auto &Shader : P.Shaders) {
         if (Shader.Stage == Stages::Vertex) {
           VS.EntryPoint = Shader.Entry;
           VS.Shader = Shader.Shader.get();
+        } else if (Shader.Stage == Stages::Geometry) {
+          ShaderContainer GSContainer = {};
+          GSContainer.EntryPoint = Shader.Entry;
+          GSContainer.Shader = Shader.Shader.get();
+          GS = std::move(GSContainer);
         } else if (Shader.Stage == Stages::Pixel) {
           PS.EntryPoint = Shader.Entry;
           PS.Shader = Shader.Shader.get();
@@ -1538,8 +1557,13 @@ public:
       RTFormats.push_back(*FormatOrErr);
 
       auto PipelineStateOrErr =
-          createPipelineVsPs("Graphics Pipeline State", Bindings, InputLayout,
-                             RTFormats, Format::D32FloatS8Uint, VS, PS);
+          GS ? createPipelineVsGsPs("Graphics Pipeline State", Bindings,
+                                    InputLayout, RTFormats,
+                                    Format::D32FloatS8Uint, P.Bindings.Topology,
+                                    VS, *GS, PS)
+             : createPipelineVsPs("Graphics Pipeline State", Bindings,
+                                  InputLayout, RTFormats,
+                                  Format::D32FloatS8Uint, VS, PS);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
