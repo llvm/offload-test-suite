@@ -1371,11 +1371,11 @@ public:
           PS.EntryPoint.c_str());
     auto PSFnScope = llvm::scope_exit([&] { PSFn->release(); });
 
-    MTL::RenderPipelineDescriptor *Desc =
+    MTL::RenderPipelineDescriptor *RPDesc =
         MTL::RenderPipelineDescriptor::alloc()->init();
-    auto DescScope = llvm::scope_exit([&] { Desc->release(); });
-    Desc->setVertexFunction(VSFn);
-    Desc->setFragmentFunction(PSFn);
+    auto RPDescScope = llvm::scope_exit([&] { RPDesc->release(); });
+    RPDesc->setVertexFunction(VSFn);
+    RPDesc->setFragmentFunction(PSFn);
 
     // Build vertex descriptor from InputLayout.
     if (!InputLayout.empty()) {
@@ -1440,7 +1440,7 @@ public:
       VtxDesc->layouts()->setObject(LDesc, 0);
       LDesc->release();
 
-      Desc->setVertexDescriptor(VtxDesc);
+      RPDesc->setVertexDescriptor(VtxDesc);
     }
 
     // Configure render target color attachments.
@@ -1448,20 +1448,20 @@ public:
       MTL::RenderPipelineColorAttachmentDescriptor *RPCA =
           MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
       RPCA->setPixelFormat(getMetalPixelFormat(RTFormats[I]));
-      Desc->colorAttachments()->setObject(RPCA, I);
+      RPDesc->colorAttachments()->setObject(RPCA, I);
       RPCA->release();
     }
 
     // Configure depth/stencil attachment.
     if (DSFormat) {
       const MTL::PixelFormat DSPixelFormat = getMetalPixelFormat(*DSFormat);
-      Desc->setDepthAttachmentPixelFormat(DSPixelFormat);
+      RPDesc->setDepthAttachmentPixelFormat(DSPixelFormat);
       if (isStencilFormat(*DSFormat))
-        Desc->setStencilAttachmentPixelFormat(DSPixelFormat);
+        RPDesc->setStencilAttachmentPixelFormat(DSPixelFormat);
     }
 
     MTL::RenderPipelineState *PSO =
-        Device->newRenderPipelineState(Desc, &Error);
+        Device->newRenderPipelineState(RPDesc, &Error);
     if (Error)
       return toError(Error);
 

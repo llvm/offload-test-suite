@@ -170,8 +170,7 @@ public:
                    ShaderContainer CS) = 0;
 
   virtual llvm::Expected<std::unique_ptr<PipelineState>>
-  createGraphicsPipeline(llvm::StringRef Name,
-                         const BindingsDesc &BindingsDesc,
+  createGraphicsPipeline(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                          const GraphicsPipelineCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
