@@ -642,7 +642,7 @@ public:
   }
 
   void pushDebugGroup(llvm::StringRef Label) {
-    if (CmdBeginDebugUtilsLabel)
+    if (!CmdBeginDebugUtilsLabel)
       return;
     VkDebugUtilsLabelEXT LabelInfo = {};
     LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
