@@ -1201,10 +1201,10 @@ public:
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = *Desc.PS;
     const std::optional<ShaderContainer> &GS = Desc.GS;
-    llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
-    llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
-    std::optional<Format> DSFormat = Desc.DSFormat;
-    PrimitiveTopology Topology = Desc.Topology;
+    const llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
+    const llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
+    const std::optional<Format> DSFormat = Desc.DSFormat;
+    const PrimitiveTopology Topology = Desc.Topology;
 
     VkShaderStageFlags GraphicsFlags =
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
