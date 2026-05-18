@@ -933,8 +933,8 @@ VulkanCommandBuffer::createRenderEncoder(
 
   llvm::SmallVector<VkImageView, 9> Views;
   llvm::SmallVector<VkClearValue, 9> ClearValues;
-  uint32_t Width = 0;
-  uint32_t Height = 0;
+  uint32_t Width = ~0u;
+  uint32_t Height = ~0u;
 
   for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
     if (!Desc.ColorAttachments[I])
@@ -963,9 +963,9 @@ VulkanCommandBuffer::createRenderEncoder(
     }
     ClearValues.push_back(CV);
 
-    if (Tex.Desc.Width > Width)
+    if (Tex.Desc.Width < Width)
       Width = Tex.Desc.Width;
-    if (Tex.Desc.Height > Height)
+    if (Tex.Desc.Height < Height)
       Height = Tex.Desc.Height;
   }
 
@@ -994,9 +994,9 @@ VulkanCommandBuffer::createRenderEncoder(
     }
     ClearValues.push_back(CV);
 
-    if (Tex.Desc.Width > Width)
+    if (Tex.Desc.Width < Width)
       Width = Tex.Desc.Width;
-    if (Tex.Desc.Height > Height)
+    if (Tex.Desc.Height < Height)
       Height = Tex.Desc.Height;
   }
 
