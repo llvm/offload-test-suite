@@ -1,0 +1,62 @@
+#--- source.hlsl
+
+// Test that a local resource array with only some elements initialized
+// (others left default) compiles successfully.
+
+RWByteAddressBuffer Out : register(u0);
+
+[numthreads(1,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer arr[4];
+    arr[0] = Out;
+    arr[1] = Out;
+    arr[tid.x & 3].Store(0, 42);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192538
+# Metal is included because it uses the DXIL backend (Metal IR Converter takes
+# DXIL as input), so it hits the same DXILLegalizePass assertion as DirectX.
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8379
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

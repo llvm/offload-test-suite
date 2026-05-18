@@ -1,0 +1,72 @@
+#--- source.hlsl
+// Test that swapping two local resources through a temporary works correctly.
+RWByteAddressBuffer gBuf0 : register(u0);
+RWByteAddressBuffer gBuf1 : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer a = gBuf0;
+    RWByteAddressBuffer b = gBuf1;
+    RWByteAddressBuffer temp = a;
+    a = b;
+    b = temp;
+    a.Store(0, 1);
+    b.Store(0, 2);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf0
+    Format: Int32
+    Stride: 4
+    Data: [2]
+  - Name: gBuf1
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf1
+    Format: Int32
+    Stride: 4
+    Data: [1]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf0
+    Expected: ExpectedGBuf0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: gBuf1
+    Expected: ExpectedGBuf1
+DescriptorSets:
+  - Resources:
+    - Name: gBuf0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gBuf1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

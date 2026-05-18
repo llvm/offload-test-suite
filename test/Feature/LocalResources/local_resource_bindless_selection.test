@@ -1,0 +1,67 @@
+#--- source.hlsl
+
+// Test that a local resource can be reassigned from different elements
+// of a global resource array (bindless selection pattern).
+
+RWByteAddressBuffer gBufArray[4] : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer buf;
+    buf = gBufArray[2];
+    buf = gBufArray[3];
+    buf.Store(0, 42);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBufArray
+    Format: Int32
+    Stride: 4
+    ArraySize: 4
+    Data:
+      - [0]
+      - [0]
+      - [0]
+      - [0]
+  - Name: ExpectedGBufArray
+    Format: Int32
+    Stride: 4
+    ArraySize: 4
+    Data:
+      - [0]
+      - [0]
+      - [0]
+      - [42]
+Results:
+  - Result: ArrayCheck
+    Rule: BufferExact
+    Actual: gBufArray
+    Expected: ExpectedGBufArray
+DescriptorSets:
+  - Resources:
+    - Name: gBufArray
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/305
+# UNSUPPORTED: Metal
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
