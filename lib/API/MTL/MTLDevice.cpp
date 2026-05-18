@@ -1661,13 +1661,21 @@ public:
         // We'll need to revisit this if we ever support indexed attributes.
         AttrName += "0";
 
+        auto It = ShaderAttrIndices.find(AttrName);
+        if (It == ShaderAttrIndices.end())
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "Input layout element '%s' does not match any active vertex "
+              "shader attribute.",
+              AttrName.c_str());
+
         const uint32_t ElemSize = getFormatSizeInBytes(Elem.Fmt);
         MTL::VertexAttributeDescriptor *AttrDesc =
             MTL::VertexAttributeDescriptor::alloc()->init();
         AttrDesc->setBufferIndex(kIRVertexBufferBindPoint);
         AttrDesc->setOffset(Elem.OffsetInBytes);
         AttrDesc->setFormat(getMetalVertexFormat(Elem.Fmt));
-        VtxDesc->attributes()->setObject(AttrDesc, ShaderAttrIndices[AttrName]);
+        VtxDesc->attributes()->setObject(AttrDesc, It->getValue());
         AttrDesc->release();
         Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
       }
