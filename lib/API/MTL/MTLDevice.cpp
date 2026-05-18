@@ -1628,14 +1628,10 @@ public:
             std::errc::invalid_argument,
             "Vertex shader has no vertex attributes.");
 
-      if (FnAttrs->count() != InputLayout.size())
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Mismatch between vertex shader attribute count and pipeline "
-            "vertex input count.");
-
       // Collect the attribute indices the shader expects so that we can map
-      // the specified attributes onto the correct indices.
+      // the specified attributes onto the correct indices. Only active
+      // attributes are exposed via stage_in; inactive entries are dropped by
+      // the optimizer and have no corresponding [[attribute(N)]] slot.
       llvm::StringMap<uint32_t> ShaderAttrIndices;
       for (uint32_t I = 0; I < FnAttrs->count(); ++I) {
         auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(I));
@@ -1646,6 +1642,12 @@ public:
                        << " at index " << A->attributeIndex() << "\n";
         }
       }
+
+      if (ShaderAttrIndices.size() != InputLayout.size())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Mismatch between vertex shader active attribute count and "
+            "pipeline vertex input count.");
 
       MTL::VertexDescriptor *VtxDesc = MTL::VertexDescriptor::alloc()->init();
       auto VtxDescScope = llvm::scope_exit([&] { VtxDesc->release(); });
