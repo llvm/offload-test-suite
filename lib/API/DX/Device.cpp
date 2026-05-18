@@ -361,6 +361,8 @@ public:
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource), Name(Name),
         Desc(Desc) {}
 
+  const TextureCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::DirectX;
   }
@@ -546,6 +548,9 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
   createComputeEncoder() override;
 
+  llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+  createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
+
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
 };
@@ -652,6 +657,208 @@ DXCommandBuffer::createComputeEncoder() {
   return Enc;
 }
 
+class DXRenderPass final : public offloadtest::RenderPass {
+public:
+  offloadtest::RenderPassDesc Desc;
+
+  explicit DXRenderPass(offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::DirectX), Desc(std::move(Desc)) {}
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::DirectX;
+  }
+};
+
+class DXRenderEncoder : public offloadtest::RenderEncoder {
+  DXCommandBuffer &CB;
+
+  // Encoder contract: viewport and scissor must both be set before draw().
+  bool ViewportSet = false;
+  bool ScissorSet = false;
+
+  llvm::Error bindCommonDrawState(const offloadtest::PipelineState &PSO) {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &DXPSO = llvm::cast<DXPipelineState>(PSO);
+    CB.CmdList->SetGraphicsRootSignature(DXPSO.RootSig.Get());
+    CB.CmdList->SetPipelineState(DXPSO.PSO.Get());
+    CB.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    return llvm::Error::success();
+  }
+
+public:
+  DXRenderEncoder(DXCommandBuffer &CB)
+      : RenderEncoder(GPUAPI::DirectX), CB(CB) {}
+  DXRenderEncoder(const DXRenderEncoder &CB) = delete;
+  DXRenderEncoder(DXRenderEncoder &&CB) = delete;
+  DXRenderEncoder &operator=(DXRenderEncoder &CB) = delete;
+  DXRenderEncoder &operator=(const DXRenderEncoder &&CB) = delete;
+
+  ~DXRenderEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::DirectX;
+  }
+
+  // See DXComputeEncoder for why these are no-ops.
+  void pushDebugGroup(llvm::StringRef Label) override {}
+  void popDebugGroup() override {}
+  void insertDebugSignpost(llvm::StringRef Label) override {}
+
+  void setViewport(const offloadtest::Viewport &VP) override {
+    D3D12_VIEWPORT DXVP = {};
+    DXVP.TopLeftX = VP.X;
+    DXVP.TopLeftY = VP.Y;
+    DXVP.Width = VP.Width;
+    DXVP.Height = VP.Height;
+    DXVP.MinDepth = VP.MinDepth;
+    DXVP.MaxDepth = VP.MaxDepth;
+    CB.CmdList->RSSetViewports(1, &DXVP);
+    ViewportSet = true;
+  }
+
+  void setScissor(const offloadtest::ScissorRect &Rect) override {
+    const D3D12_RECT DXRect = {Rect.X, Rect.Y,
+                               static_cast<LONG>(Rect.X + Rect.Width),
+                               static_cast<LONG>(Rect.Y + Rect.Height)};
+    CB.CmdList->RSSetScissorRects(1, &DXRect);
+    ScissorSet = true;
+  }
+
+  void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
+                       uint32_t Stride) override {
+    if (VB) {
+      auto &DXVB = llvm::cast<DXBuffer>(*VB);
+      D3D12_VERTEX_BUFFER_VIEW VBView = {};
+      VBView.BufferLocation = DXVB.Buffer->GetGPUVirtualAddress() + Offset;
+      VBView.SizeInBytes = static_cast<UINT>(DXVB.getSizeInBytes() - Offset);
+      VBView.StrideInBytes = Stride;
+      CB.CmdList->IASetVertexBuffers(Slot, 1, &VBView);
+    } else {
+      CB.CmdList->IASetVertexBuffers(Slot, 1, nullptr);
+    }
+  }
+
+  llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
+                            uint32_t VertexCount, uint32_t InstanceCount,
+                            uint32_t FirstVertex,
+                            uint32_t FirstInstance) override {
+    if (auto Err = bindCommonDrawState(PSO))
+      return Err;
+    CB.CmdList->DrawInstanced(VertexCount, InstanceCount, FirstVertex,
+                              FirstInstance);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override { popDebugGroup(); }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+DXCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries format / load / store policy; the begin desc supplies
+  // the actual textures. Walk both in lockstep.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &DXPass = llvm::cast<DXRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = DXPass.Desc;
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  // Validate attachments and gather the RTV / DSV CPU handles. RT and DSV
+  // descriptors are owned by the textures themselves; this just collects
+  // them for OMSetRenderTargets.
+  llvm::SmallVector<DXTexture *, 8> RTTextures;
+  llvm::SmallVector<D3D12_CPU_DESCRIPTOR_HANDLE, 8> RTVHandles;
+  RTTextures.reserve(Desc.ColorAttachments.size());
+  RTVHandles.reserve(Desc.ColorAttachments.size());
+  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+    if (!Tex)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &DXTex = llvm::cast<DXTexture>(*Tex);
+    if (DXTex.RTVHandle.ptr == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture was not created with RenderTarget usage.");
+    RTTextures.push_back(&DXTex);
+    RTVHandles.push_back(DXTex.RTVHandle);
+  }
+
+  DXTexture *DSTexture = nullptr;
+  D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
+  const D3D12_CPU_DESCRIPTOR_HANDLE *DSVPtr = nullptr;
+  if (Desc.DepthStencil) {
+    auto &DXDS = llvm::cast<DXTexture>(*Desc.DepthStencil);
+    if (DXDS.DSVHandle.ptr == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil texture was not created with DepthStencil usage.");
+    DSTexture = &DXDS;
+    DSVHandle = DXDS.DSVHandle;
+    DSVPtr = &DSVHandle;
+  }
+
+  CmdList->OMSetRenderTargets(
+      static_cast<UINT>(RTVHandles.size()), RTVHandles.data(),
+      /*RTsSingleHandleToDescriptorRange=*/false, DSVPtr);
+
+  for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
+    if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)
+      continue;
+    if (!RTTextures[I]->Desc.OptimizedClearValue)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "LoadAction::Clear requires the render target to have been "
+          "created with an OptimizedClearValue.");
+    const auto *CV =
+        std::get_if<ClearColor>(&*RTTextures[I]->Desc.OptimizedClearValue);
+    assert(CV && "RenderTarget OptimizedClearValue must be a ClearColor");
+    const float ClearArr[4] = {CV->R, CV->G, CV->B, CV->A};
+    CmdList->ClearRenderTargetView(RTVHandles[I], ClearArr, 0, nullptr);
+  }
+  if (PassDesc.DepthStencil) {
+    D3D12_CLEAR_FLAGS Flags = static_cast<D3D12_CLEAR_FLAGS>(0);
+    if (PassDesc.DepthStencil->DepthLoad == offloadtest::LoadAction::Clear)
+      Flags |= D3D12_CLEAR_FLAG_DEPTH;
+    if (PassDesc.DepthStencil->StencilLoad == offloadtest::LoadAction::Clear)
+      Flags |= D3D12_CLEAR_FLAG_STENCIL;
+    if (Flags != 0) {
+      if (!DSTexture->Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *CV =
+          std::get_if<ClearDepthStencil>(&*DSTexture->Desc.OptimizedClearValue);
+      assert(CV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CmdList->ClearDepthStencilView(DSVHandle, Flags, CV->Depth, CV->Stencil,
+                                     0, nullptr);
+    }
+  }
+
+  auto Enc = std::make_unique<DXRenderEncoder>(*this);
+  Enc->pushDebugGroup("RenderEncoder");
+  return Enc;
+}
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
@@ -687,9 +894,10 @@ private:
     std::unique_ptr<PipelineState> Pipeline;
 
     // Resources for graphics pipelines.
-    std::unique_ptr<offloadtest::Texture> RT;
+    std::unique_ptr<offloadtest::RenderPass> RenderPass;
+    std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
-    std::unique_ptr<offloadtest::Texture> DS;
+    std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -1153,6 +1361,11 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
     return DXCommandBuffer::create(Device);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    return std::make_unique<DXRenderPass>(Desc);
   }
 
   void addResourceUploadCommands(Resource &R, InvocationState &IS,
@@ -1862,7 +2075,7 @@ public:
 
     // Query the copy footprint to get the actual padded row pitch used by
     // the copy operation (D3D12 requires 256-byte aligned rows).
-    auto &RT = llvm::cast<DXTexture>(*IS.RT);
+    auto &RT = llvm::cast<DXTexture>(*IS.RenderTarget);
     const D3D12_RESOURCE_DESC RTDesc = RT.Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
     uint32_t NumRows = 0;
@@ -1888,7 +2101,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RT = std::move(*TexOrErr);
+    IS.RenderTarget = std::move(*TexOrErr);
 
     // Create readback buffer sized for the pixel data with row pitch padded
     // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
@@ -1912,13 +2125,13 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DS = std::move(*TexOrErr);
+    IS.DepthStencil = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    auto &RT = llvm::cast<DXTexture>(*IS.RT);
-    auto &DS = llvm::cast<DXTexture>(*IS.DS);
+    auto &RT = llvm::cast<DXTexture>(*IS.RenderTarget);
+    auto &DS = llvm::cast<DXTexture>(*IS.DepthStencil);
     auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
 
     const DXPipelineState &DXPipeline =
@@ -1930,46 +2143,36 @@ public:
       IS.CB->CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
-    IS.CB->CmdList->SetPipelineState(DXPipeline.PSO.Get());
 
-    IS.CB->CmdList->OMSetRenderTargets(1, &RT.RTVHandle, false, &DS.DSVHandle);
+    RenderPassBeginDesc BeginDesc = {};
+    BeginDesc.Pass = IS.RenderPass.get();
+    BeginDesc.ColorAttachments.push_back(&RT);
+    BeginDesc.DepthStencil = &DS;
 
-    const auto *DepthCV =
-        std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
-    if (!DepthCV)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Depth/stencil clear value must be a ClearDepthStencil.");
-    IS.CB->CmdList->ClearDepthStencilView(
-        DS.DSVHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-        DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
+    auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
+    if (!EncOrErr)
+      return EncOrErr.takeError();
+    auto &Encoder = *EncOrErr.get();
 
-    D3D12_VIEWPORT VP = {};
+    Viewport VP;
     VP.Width =
         static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
     VP.Height =
         static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    VP.MinDepth = 0.0f;
-    VP.MaxDepth = 1.0f;
-    VP.TopLeftX = 0.0f;
-    VP.TopLeftY = 0.0f;
-    IS.CB->CmdList->RSSetViewports(1, &VP);
-    const D3D12_RECT Scissor = {0, 0, static_cast<LONG>(VP.Width),
-                                static_cast<LONG>(VP.Height)};
-    IS.CB->CmdList->RSSetScissorRects(1, &Scissor);
+    Encoder.setViewport(VP);
 
-    if (IS.VB) {
-      auto &VBBuf = llvm::cast<DXBuffer>(*IS.VB);
-      D3D12_VERTEX_BUFFER_VIEW VBView = {};
-      VBView.BufferLocation = VBBuf.Buffer->GetGPUVirtualAddress();
-      VBView.SizeInBytes = static_cast<UINT>(IS.VB->getSizeInBytes());
-      VBView.StrideInBytes = P.Bindings.getVertexStride();
-      IS.CB->CmdList->IASetVertexBuffers(0, 1, &VBView);
-    }
+    ScissorRect Scissor;
+    Scissor.Width = static_cast<uint32_t>(VP.Width);
+    Scissor.Height = static_cast<uint32_t>(VP.Height);
+    Encoder.setScissor(Scissor);
 
-    IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    if (IS.VB)
+      Encoder.setVertexBuffer(0, IS.VB.get(), 0, P.Bindings.getVertexStride());
 
-    IS.CB->CmdList->DrawInstanced(P.getVertexCount(), 1, 0, 0);
+    if (auto Err = Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                         /*InstanceCount=*/1))
+      return Err;
+    Encoder.endEncoding();
 
     // Transition the render target to copy source and copy to the readback
     // buffer.
@@ -2138,6 +2341,31 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Graphics Pipeline created.\n";
+
+      // Begin a render pass: bind RT/DSV and clear depth-stencil. Color
+      // load action is Load — the existing inline code didn't clear color.
+      ColorAttachmentFormatDesc ColorAttachment = {};
+      ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
+      ColorAttachment.Load = LoadAction::Load;
+      ColorAttachment.Store = StoreAction::Store;
+
+      DepthStencilAttachmentFormatDesc DSAttachment = {};
+      DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
+      DSAttachment.DepthLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::Store;
+      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilStore = StoreAction::DontCare;
+
+      RenderPassDesc PassDesc;
+      PassDesc.ColorAttachments.push_back(ColorAttachment);
+      PassDesc.DepthStencil = DSAttachment;
+
+      auto RenderPassOrErr = createRenderPass(PassDesc);
+      if (!RenderPassOrErr)
+        return RenderPassOrErr.takeError();
+      State.RenderPass = std::move(*RenderPassOrErr);
+      llvm::outs() << "Render pass created.\n";
+
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
