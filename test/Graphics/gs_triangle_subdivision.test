@@ -1,0 +1,128 @@
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : SV_POSITION;
+};
+
+VSOutput main(float4 position : POSITION) {
+  VSOutput o;
+  o.position = position;
+  return o;
+}
+
+#--- geometry.hlsl
+struct GSInput {
+  float4 position : SV_POSITION;
+};
+
+struct GSOutput {
+  float4 position : SV_POSITION;
+};
+
+// Subdivide the input triangle into four sub-triangles by joining the
+// edge midpoints (three corner triangles + one inverted central one).
+// Their union exactly tiles the parent triangle, so the rasterized
+// coverage of the subdivided primitive must equal that of the original —
+// every pixel inside the parent triangle is covered by exactly one
+// sub-triangle. Exercises a non-trivial [maxvertexcount(N)], multiple
+// Append() loops, and RestartStrip() between emitted triangles.
+[maxvertexcount(12)]
+void main(triangle GSInput input[3], inout TriangleStream<GSOutput> stream) {
+  float4 v0 = input[0].position;
+  float4 v1 = input[1].position;
+  float4 v2 = input[2].position;
+  float4 m01 = 0.5 * (v0 + v1);
+  float4 m12 = 0.5 * (v1 + v2);
+  float4 m02 = 0.5 * (v0 + v2);
+
+  GSOutput o;
+
+  // Corner triangle at v0.
+  o.position = v0;  stream.Append(o);
+  o.position = m01; stream.Append(o);
+  o.position = m02; stream.Append(o);
+  stream.RestartStrip();
+
+  // Corner triangle at v1.
+  o.position = m01; stream.Append(o);
+  o.position = v1;  stream.Append(o);
+  o.position = m12; stream.Append(o);
+  stream.RestartStrip();
+
+  // Corner triangle at v2.
+  o.position = m02; stream.Append(o);
+  o.position = m12; stream.Append(o);
+  o.position = v2;  stream.Append(o);
+  stream.RestartStrip();
+
+  // Central triangle.
+  o.position = m01; stream.Append(o);
+  o.position = m12; stream.Append(o);
+  o.position = m02; stream.Append(o);
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET {
+  return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Geometry
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # One oversized triangle that covers the full 2x2 viewport in clip space.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16 # 3 vertices, 16 bytes each
+    Data: [ -1.0, -1.0, 0.0, 1.0,
+             3.0, -1.0, 0.0, 1.0,
+            -1.0,  3.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# Metal has no native geometry shader stage (equivalents would require mesh or
+# tessellation shaders). Skip this test on that backend entirely.
+# UNSUPPORTED: Metal
+
+# Clang's HLSL frontend does not yet support geometry shader stream types
+# (e.g. TriangleStream<T>::Append), so compiling geometry.hlsl with clang-dxc
+# fails on both D3D12 and Vulkan code paths.
+# Tracked upstream: https://github.com/llvm/llvm-project/issues/136963
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T gs_6_0 -Fo %t-geometry.o %t/geometry.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-geometry.o %t-pixel.o | FileCheck %s
+
+# All 4 pixels of the 2x2 render target must be opaque red — the union of the
+# four sub-triangles equals the parent.
+# CHECK: Name: Output
+# CHECK: Data: [ 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1 ]
