@@ -318,6 +318,10 @@ public:
             size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
+  MTLBuffer(const MTLBuffer &) = delete;
+  MTLBuffer(MTLBuffer &&) = delete;
+  MTLBuffer &operator=(const MTLBuffer &) = delete;
+  MTLBuffer &operator=(MTLBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
@@ -341,6 +345,8 @@ public:
       Buf->release();
   }
 
+  const BufferCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Metal;
   }
@@ -361,6 +367,24 @@ public:
   }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
+
+  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Cannot query mapped row pitch of a GpuOnly texture.");
+    // Metal host-visible textures are accessed via getBytes/replaceRegion with
+    // a caller-supplied bytesPerRow, so a tightly packed stride is valid.
+    return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  }
+
+  llvm::Expected<void *> map() override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Mapping textures is not supported on the Metal backend.");
+  }
+
+  void unmap() override {}
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Metal;
@@ -618,6 +642,37 @@ public:
                             MTL::Origin(0, 0, 0));
     addBarrierScope(MTL::BarrierScopeTextures);
 
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyCounterToBuffer(offloadtest::Buffer &,
+                                  offloadtest::Buffer &) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Counter buffers are not supported on the Metal backend.");
+  }
+
+  llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
+                                  offloadtest::Buffer &Dst) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLSrc = static_cast<MTLTexture &>(Src);
+    auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+
+    // The readback buffer is linear with a tightly packed row stride, so the
+    // destination bytes-per-row is the texture width times the element size.
+    const size_t ElemSize = getFormatSizeInBytes(MTLSrc.Desc.Fmt);
+    const size_t RowBytes = MTLSrc.Desc.Width * ElemSize;
+    const size_t ImageBytes = RowBytes * MTLSrc.Desc.Height;
+    const MTL::Size CopySize(MTLSrc.Desc.Width, MTLSrc.Desc.Height, 1);
+
+    insertDebugSignpost(llvm::formatv("copyTextureToBuffer {0} -> {1}",
+                                      MTLSrc.Name, MTLDst.Name)
+                            .str());
+    BlitEnc->copyFromTexture(MTLSrc.Tex, /*sourceSlice=*/0, /*sourceLevel=*/0,
+                             MTL::Origin(0, 0, 0), CopySize, MTLDst.Buf,
+                             /*destinationOffset=*/0, RowBytes, ImageBytes);
+    addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
   }
 
@@ -1420,12 +1475,7 @@ class MTLDevice : public offloadtest::Device {
           for (const auto &Inst : R.first->TLASPtr->Instances)
             Contributions.push_back(Inst.InstanceContributionToHitGroupIndex &
                                     0xFFFFFFu);
-          const BufferCreateDesc Desc{MemoryLocation::GpuToCpu,
-                                      MemoryBacking::Automatic,
-                                      BufferUsage::Storage,
-                                      BufferShaderAccessType::Raw,
-                                      {},
-                                      false};
+          const BufferCreateDesc Desc = DescBufferCreateDesc::uploadBuffer();
           auto ContribBufOrErr = createBufferWithData(
               *IS.CB->Dev, "AS-Contributions", Desc, Contributions.data(),
               InstCount * sizeof(uint32_t), nullptr, nullptr);
@@ -1719,6 +1769,16 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+    if (Desc.HasCounter)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Metal backend does not support buffers with a counter.");
+
+    if (Desc.Backing == MemoryBacking::Sparse)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Metal backend does not support sparse memory backing.");
+
     MTL::Buffer *Buf = Device->newBuffer(
         SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)

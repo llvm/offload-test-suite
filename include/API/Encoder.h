@@ -24,6 +24,7 @@ namespace offloadtest {
 class Buffer;
 class Texture;
 class PipelineState;
+class Texture;
 class AccelerationStructure;
 struct BLASBuildRequest;
 struct TLASBuildRequest;
@@ -102,6 +103,10 @@ public:
   /// striding using the stride acquired from
   /// `Device::getTextureUploadRowStrideInBytes`.
   virtual llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) = 0;
+
+  virtual llvm::Error copyCounterToBuffer(Buffer &Src, Buffer &Dst) = 0;
+
+  virtual llvm::Error copyTextureToBuffer(Texture &Src, Buffer &Dst) = 0;
 
   /// Build a batch of acceleration structures in a single barrier slot. All
   /// items in `Items` must be independent — no item may depend on another's

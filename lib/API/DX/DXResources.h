@@ -83,6 +83,17 @@ inline DXGI_FORMAT getDXGIFormat(Format Fmt) {
   llvm_unreachable("All Format cases handled");
 }
 
+inline DXGI_FORMAT getDXGIFormatSRV(Format Fmt) {
+  switch (Fmt) {
+  case Format::D32Float:
+    return DXGI_FORMAT_R32_FLOAT;
+  case Format::D32FloatS8Uint:
+    return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+  default:
+    return getDXGIFormat(Fmt);
+  }
+}
+
 inline D3D12_RESOURCE_FLAGS getDXResourceFlags(TextureUsage Usage) {
   D3D12_RESOURCE_FLAGS Flags = D3D12_RESOURCE_FLAG_NONE;
   if ((Usage & TextureUsage::Storage) != 0)

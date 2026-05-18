@@ -20,7 +20,7 @@
 
 namespace offloadtest {
 
-enum class BufferShaderAccessType : uint32_t {
+enum class BufferShaderAccessType {
   Raw,
   Typed,
   Structured,
@@ -31,7 +31,7 @@ union BufferShaderAccessTypeParams {
   uint32_t StructureStride; // Structured Only
 };
 
-enum class BufferUsage : uint32_t {
+enum class BufferUsage {
   // Generic storage buffer (UAV/SSBO). Also covers acceleration-structure
   // build inputs (vertex/index/instance buffers): backends widen this with
   // any native AS-input flags they need.
@@ -95,6 +95,7 @@ public:
   Buffer &operator=(const Buffer &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  virtual const BufferCreateDesc &getDesc() const = 0;
 
 protected:
   explicit Buffer(GPUAPI API) : API(API) {}
