@@ -316,6 +316,18 @@ createBufferWithData(Device &Dev, std::string Name,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createBufferWithData(Device &Dev, std::string Name,
+                     const BufferCreateDesc &Desc, const void *Data,
+                     size_t SizeInBytes, ComputeEncoder *Encoder,
+                     std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
+
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createTextureWithData(Device &Dev, std::string Name,
+                      const TextureCreateDesc &Desc, const void *Data,
+                      size_t SizeInBytes, ComputeEncoder *Encoder,
+                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_DEVICE_H

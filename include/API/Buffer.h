@@ -57,7 +57,12 @@ struct BufferCreateDesc {
   }
 
   static BufferCreateDesc readbackBuffer() {
-    return BufferCreateDesc{MemoryLocation::GpuToCpu, BufferUsage::Storage};
+    return BufferCreateDesc{MemoryLocation::GpuToCpu,
+                            MemoryBacking::Automatic,
+                            BufferUsage::Storage,
+                            BufferShaderAccessType::Raw,
+                            {},
+                            false};
   }
 };
 
