@@ -825,7 +825,9 @@ class VulkanRenderEncoder : public offloadtest::RenderEncoder {
 
 public:
   VulkanRenderEncoder(VulkanCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {}
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {
+    pushDebugGroup("RenderEncoder");
+  }
   VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
   VulkanRenderEncoder(VulkanRenderEncoder &&CB) = delete;
   VulkanRenderEncoder &operator=(VulkanRenderEncoder &CB) = delete;
@@ -1031,9 +1033,7 @@ VulkanCommandBuffer::createRenderEncoder(
 
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  auto Enc = std::make_unique<VulkanRenderEncoder>(*this);
-  Enc->pushDebugGroup("RenderEncoder");
-  return Enc;
+  return std::make_unique<VulkanRenderEncoder>(*this);
 }
 
 class VulkanDevice : public offloadtest::Device {
