@@ -647,12 +647,12 @@ public:
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
     // Stride is needed in DX12 at binding time, ignore parameter here.
-    if (!VB) {
+    if (VB) {
+      auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
+      RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, Slot);
+    } else {
       RenderEnc->setVertexBuffer(nullptr, 0, Slot);
-      return;
     }
-    auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
-    RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, Slot);
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,

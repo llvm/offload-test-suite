@@ -732,16 +732,16 @@ public:
 
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t Stride) override {
-    if (!VB) {
+    if (VB) {
+      auto &DXVB = llvm::cast<DXBuffer>(*VB);
+      D3D12_VERTEX_BUFFER_VIEW VBView = {};
+      VBView.BufferLocation = DXVB.Buffer->GetGPUVirtualAddress() + Offset;
+      VBView.SizeInBytes = static_cast<UINT>(DXVB.getSizeInBytes() - Offset);
+      VBView.StrideInBytes = Stride;
+      CB.CmdList->IASetVertexBuffers(Slot, 1, &VBView);
+    } else {
       CB.CmdList->IASetVertexBuffers(Slot, 1, nullptr);
-      return;
     }
-    auto &DXVB = llvm::cast<DXBuffer>(*VB);
-    D3D12_VERTEX_BUFFER_VIEW VBView = {};
-    VBView.BufferLocation = DXVB.Buffer->GetGPUVirtualAddress() + Offset;
-    VBView.SizeInBytes = static_cast<UINT>(DXVB.getSizeInBytes() - Offset);
-    VBView.StrideInBytes = Stride;
-    CB.CmdList->IASetVertexBuffers(Slot, 1, &VBView);
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,

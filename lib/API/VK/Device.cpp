@@ -875,15 +875,15 @@ public:
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
     // Stride is needed in DX12 at binding time, ignore parameter here.
-    if (!VB) {
+    if (VB) {
+      VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
+      const VkDeviceSize VKOffset = Offset;
+      vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &Handle, &VKOffset);
+    } else {
       VkBuffer NullBuf = VK_NULL_HANDLE;
       const VkDeviceSize Zero = 0;
       vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &NullBuf, &Zero);
-      return;
     }
-    VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
-    const VkDeviceSize VKOffset = Offset;
-    vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &Handle, &VKOffset);
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
