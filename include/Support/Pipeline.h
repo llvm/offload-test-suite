@@ -392,9 +392,6 @@ struct IOBindings {
 
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
-  // Input-side default for compute pipelines (which have no Bindings: block in
-  // YAML, so the mapOptional default in Pipeline.cpp never fires) — kept here
-  // so a default-constructed IOBindings can be safely (re-)serialized.
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
   uint32_t getVertexStride() const {
@@ -727,8 +724,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
 
 template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
   static void enumeration(IO &I, offloadtest::PrimitiveTopology &V) {
-#define ENUM_CASE(Val)                                                         \
-  I.enumCase(V, #Val, offloadtest::PrimitiveTopology::Val)
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::PrimitiveTopology::Val)
     ENUM_CASE(TriangleList);
     ENUM_CASE(PointList);
 #undef ENUM_CASE

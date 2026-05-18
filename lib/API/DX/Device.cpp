@@ -888,8 +888,7 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createGraphicsPipeline(llvm::StringRef Name,
-                         const BindingsDesc &BindingsDesc,
+  createGraphicsPipeline(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
                          const GraphicsPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
     if (!Desc.PS)
