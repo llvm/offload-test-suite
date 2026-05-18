@@ -198,6 +198,21 @@ jobs:
             cd llvm-project
             cd build
             ./bin/api-query
+      - name: Configure WER for offloader.exe crash dumps (Windows only)
+        if: inputs.OS == 'windows' && inputs.SplitBuild != true
+        shell: powershell
+        run: |
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\offloader.exe'
+          # Defensive: scrub any stale state left over by a prior aborted run on this self-hosted runner
+          Remove-Item -Path $key -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path C:\CrashDumps -Recurse -Force -ErrorAction SilentlyContinue
+          # Fresh configuration
+          New-Item -ItemType Directory -Force -Path C:\CrashDumps | Out-Null
+          New-Item -Path $key -Force | Out-Null
+          Set-ItemProperty -Path $key -Name DumpFolder -Value 'C:\CrashDumps' -Type ExpandString
+          Set-ItemProperty -Path $key -Name DumpType   -Value 2  -Type DWord
+          Set-ItemProperty -Path $key -Name DumpCount  -Value 20 -Type DWord
+          Write-Host "WER LocalDumps configured for offloader.exe -> C:\CrashDumps"
       - name: Run HLSL Tests
         if: inputs.SplitBuild != true
         run: |
@@ -205,6 +220,69 @@ jobs:
             cd build
             ninja check-hlsl-unit
             ninja ${{ inputs.TestTarget }}
+      - name: Copy crash dumps into test results folder (Windows only)
+        if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
+        shell: powershell
+        run: |
+          $dest = "${{ github.workspace }}\llvm-project\build\test-results\CrashDumps"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $dumps = Get-ChildItem -Path C:\CrashDumps -Filter *.dmp -ErrorAction SilentlyContinue
+          if ($dumps) {
+            Copy-Item -Path $dumps.FullName -Destination $dest -Force
+            Write-Host "Copied $($dumps.Count) dump file(s) to $dest"
+          } else {
+            Write-Host "No crash dumps found in C:\CrashDumps"
+          }
+      - name: Upload offloader.exe crash dumps (Windows only)
+        if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: crash-dumps-${{ github.run_id }}-${{ github.run_attempt }}-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: C:\CrashDumps\*.dmp
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Cleanup WER LocalDumps registry (Windows only)
+        # Always run, even on test failure / cancellation, so the runner is left
+        # in its original state. We never want this PR to permanently reconfigure
+        # the test machine.
+        if: always() && inputs.OS == 'windows' && inputs.SplitBuild != true
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\offloader.exe'
+
+          # Best-effort registry cleanup
+          try {
+            if (Test-Path -Path $key) {
+              Remove-Item -Path $key -Recurse -Force -ErrorAction Stop
+              Write-Host "Removed registry key: $key"
+            } else {
+              Write-Host "Registry key already absent: $key"
+            }
+          } catch {
+            Write-Host "##[warning]Failed to remove registry key '$key': $_"
+          }
+
+          # Best-effort dump folder cleanup (WER-created dumps may be owned by SYSTEM)
+          try {
+            if (Test-Path -Path C:\CrashDumps) {
+              Remove-Item -Path C:\CrashDumps -Recurse -Force -ErrorAction Stop
+              Write-Host "Removed dump folder: C:\CrashDumps"
+            } else {
+              Write-Host "Dump folder already absent: C:\CrashDumps"
+            }
+          } catch {
+            Write-Host "##[warning]Failed to remove dump folder C:\CrashDumps: $_"
+          }
+
+          # Verify the runner is back to its original state and emit a clear signal
+          $regGone = -not (Test-Path -Path $key)
+          $dirGone = -not (Test-Path -Path C:\CrashDumps)
+          if ($regGone -and $dirGone) {
+            Write-Host "Runner machine state restored (registry key + dump folder both removed)."
+          } else {
+            Write-Host "##[warning]Cleanup incomplete -- regGone=$regGone, dirGone=$dirGone. Manual cleanup of HLSLPC-AMD01 may be required."
+          }
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: >-
