@@ -200,6 +200,8 @@ jobs:
             ./bin/api-query
       - name: Run HLSL Tests
         if: inputs.SplitBuild != true
+        env:
+          LIT_OPTS: '-j 1'
         run: |
             cd llvm-project
             cd build
