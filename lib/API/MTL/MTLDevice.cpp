@@ -716,6 +716,9 @@ MTLCommandBuffer::createRenderEncoder(
                                    "RenderPassBeginDesc depth-stencil "
                                    "presence does not match its RenderPass.");
 
+  uint32_t Width = ~0u;
+  uint32_t Height = ~0u;
+
   MTL::RenderPassDescriptor *MTLDesc =
       MTL::RenderPassDescriptor::alloc()->init();
   auto DescScope = llvm::scope_exit([&] { MTLDesc->release(); });
@@ -748,6 +751,11 @@ MTLCommandBuffer::createRenderEncoder(
     }
     MTLDesc->colorAttachments()->setObject(CADesc, I);
     CADesc->release();
+
+    if (Tex.Desc.Width < Width)
+      Width = Tex.Desc.Width;
+    if (Tex.Desc.Height < Height)
+      Height = Tex.Desc.Height;
   }
 
   if (Desc.DepthStencil) {
@@ -781,7 +789,20 @@ MTLCommandBuffer::createRenderEncoder(
       if (DS.StencilLoad == offloadtest::LoadAction::Clear)
         SADesc->setClearStencil(CV->Stencil);
     }
+
+    if (Tex.Desc.Width < Width)
+      Width = Tex.Desc.Width;
+    if (Tex.Desc.Height < Height)
+      Height = Tex.Desc.Height;
   }
+
+  if (Width == ~0u && Height == ~0u) {
+    Width = 0;
+    Height = 0;
+  }
+
+  MTLDesc->setRenderTargetWidth(Width);
+  MTLDesc->setRenderTargetHeight(Height);
 
   MTL::RenderCommandEncoder *NativeEncoder =
       CmdBuffer->renderCommandEncoder(MTLDesc);
