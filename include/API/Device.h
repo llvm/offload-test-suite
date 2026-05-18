@@ -80,6 +80,17 @@ struct ShaderContainer {
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
 
+struct GraphicsPipelineCreateDesc {
+  llvm::SmallVector<InputLayoutDesc> InputLayout;
+  llvm::SmallVector<Format> RTFormats;
+  std::optional<Format> DSFormat;
+  PrimitiveTopology Topology;
+  ShaderContainer VS;
+  // TODO: Optional Hull & Domain Shaders
+  std::optional<ShaderContainer> GS;
+  std::optional<ShaderContainer> PS;
+};
+
 class PipelineState {
 public:
   GPUAPI API;
@@ -159,19 +170,9 @@ public:
                    ShaderContainer CS) = 0;
 
   virtual llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) = 0;
-
-  virtual llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsGsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                       llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                       llvm::ArrayRef<Format> RTFormats,
-                       std::optional<Format> DSFormat,
-                       PrimitiveTopology Topology, ShaderContainer VS,
-                       ShaderContainer GS, ShaderContainer PS) = 0;
+  createGraphicsPipeline(llvm::StringRef Name,
+                         const BindingsDesc &BindingsDesc,
+                         const GraphicsPipelineCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;

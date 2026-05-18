@@ -887,22 +887,24 @@ public:
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>> createGraphicsPipeline(
-      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-      llvm::ArrayRef<InputLayoutDesc> InputLayout,
-      llvm::ArrayRef<Format> RTFormats, std::optional<Format> DSFormat,
-      PrimitiveTopology Topology, ShaderContainer VS,
-      std::optional<ShaderContainer> GS, ShaderContainer PS) {
-    assert(RTFormats.size() <= 8);
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createGraphicsPipeline(llvm::StringRef Name,
+                         const BindingsDesc &BindingsDesc,
+                         const GraphicsPipelineCreateDesc &Desc) override {
+    assert(Desc.RTFormats.size() <= 8);
+    if (!Desc.PS)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Graphics pipeline requires a pixel "
+                                     "shader on this backend.");
 
     ComPtr<ID3D12RootSignature> RootSig;
-    if (auto Err = createRootSignature(Name, BindingsDesc, VS,
+    if (auto Err = createRootSignature(Name, BindingsDesc, Desc.VS,
                                        /*IsGraphics=*/true, RootSig))
       return Err;
 
     std::vector<D3D12_INPUT_ELEMENT_DESC> DXInputLayout;
-    DXInputLayout.reserve(InputLayout.size());
-    for (const InputLayoutDesc &Elem : InputLayout) {
+    DXInputLayout.reserve(Desc.InputLayout.size());
+    for (const InputLayoutDesc &Elem : Desc.InputLayout) {
       assert(!Elem.InstanceStepRate &&
              "Instance step rate is currently not supported.");
 
@@ -919,15 +921,17 @@ public:
     D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc = {};
     PSODesc.InputLayout = {DXInputLayout.data(), (UINT)DXInputLayout.size()};
     PSODesc.pRootSignature = RootSig.Get();
-    PSODesc.VS = {VS.Shader->getBuffer().data(), VS.Shader->getBuffer().size()};
-    PSODesc.PS = {PS.Shader->getBuffer().data(), PS.Shader->getBuffer().size()};
+    PSODesc.VS = {Desc.VS.Shader->getBuffer().data(),
+                  Desc.VS.Shader->getBuffer().size()};
+    PSODesc.PS = {Desc.PS->Shader->getBuffer().data(),
+                  Desc.PS->Shader->getBuffer().size()};
     if (PSODesc.VS.BytecodeLength == 0 || PSODesc.PS.BytecodeLength == 0)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Graphics pipeline requires both a vertex "
                                      "shader and a pixel shader.");
-    if (GS)
-      PSODesc.GS = {GS->Shader->getBuffer().data(),
-                    GS->Shader->getBuffer().size()};
+    if (Desc.GS)
+      PSODesc.GS = {Desc.GS->Shader->getBuffer().data(),
+                    Desc.GS->Shader->getBuffer().size()};
 
     PSODesc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     PSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
@@ -938,12 +942,12 @@ public:
     PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
     PSODesc.DepthStencilState.StencilEnable = false;
     PSODesc.SampleMask = UINT_MAX;
-    PSODesc.PrimitiveTopologyType = getDXPrimitiveTopologyType(Topology);
-    PSODesc.NumRenderTargets = static_cast<UINT>(RTFormats.size());
-    if (DSFormat)
-      PSODesc.DSVFormat = getDXGIFormat(*DSFormat);
-    for (size_t I = 0; I < RTFormats.size(); ++I)
-      PSODesc.RTVFormats[I] = getDXGIFormat(RTFormats[I]);
+    PSODesc.PrimitiveTopologyType = getDXPrimitiveTopologyType(Desc.Topology);
+    PSODesc.NumRenderTargets = static_cast<UINT>(Desc.RTFormats.size());
+    if (Desc.DSFormat)
+      PSODesc.DSVFormat = getDXGIFormat(*Desc.DSFormat);
+    for (size_t I = 0; I < Desc.RTFormats.size(); ++I)
+      PSODesc.RTVFormats[I] = getDXGIFormat(Desc.RTFormats[I]);
     PSODesc.SampleDesc.Count = 1;
 
     ComPtr<ID3D12PipelineState> PSO;
@@ -953,28 +957,6 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
-  }
-
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
-    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
-                                  DSFormat, PrimitiveTopology::TriangleList, VS,
-                                  std::nullopt, PS);
-  }
-
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsGsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                       llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                       llvm::ArrayRef<Format> RTFormats,
-                       std::optional<Format> DSFormat,
-                       PrimitiveTopology Topology, ShaderContainer VS,
-                       ShaderContainer GS, ShaderContainer PS) override {
-    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
-                                  DSFormat, Topology, VS, GS, PS);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -2145,54 +2127,42 @@ public:
         return Err;
       llvm::outs() << "Depth stencil created.\n";
 
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
-      std::optional<ShaderContainer> GS;
+      GraphicsPipelineCreateDesc PipelineDesc = {};
+      PipelineDesc.Topology = P.Bindings.Topology;
+      PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-        } else if (Shader.Stage == Stages::Geometry) {
-          ShaderContainer GSContainer = {};
-          GSContainer.EntryPoint = Shader.Entry;
-          GSContainer.Shader = Shader.Shader.get();
-          GS = std::move(GSContainer);
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-        }
+        ShaderContainer SC = {};
+        SC.EntryPoint = Shader.Entry;
+        SC.Shader = Shader.Shader.get();
+        if (Shader.Stage == Stages::Vertex)
+          PipelineDesc.VS = std::move(SC);
+        else if (Shader.Stage == Stages::Geometry)
+          PipelineDesc.GS = std::move(SC);
+        else if (Shader.Stage == Stages::Pixel)
+          PipelineDesc.PS = std::move(SC);
       }
 
       // Create the input layout based on the vertex attributes.
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
       for (auto &Attr : P.Bindings.VertexAttributes) {
         auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        InputLayoutDesc Layout = {};
+        Layout.Name = Attr.Name;
+        Layout.Fmt = *FormatOrErr;
+        Layout.OffsetInBytes = Attr.Offset;
+        PipelineDesc.InputLayout.push_back(Layout);
       }
 
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                   P.Bindings.RTargetBufferPtr->Channels);
       if (!FormatOrErr)
         return FormatOrErr.takeError();
+      PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr =
-          GS ? createPipelineVsGsPs("Graphics Pipeline State", BindingsDesc,
-                                    InputLayout, RTFormats,
-                                    Format::D32FloatS8Uint, P.Bindings.Topology,
-                                    VS, *GS, PS)
-             : createPipelineVsPs("Graphics Pipeline State", BindingsDesc,
-                                  InputLayout, RTFormats,
-                                  Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr = createGraphicsPipeline(
+          "Graphics Pipeline State", BindingsDesc, PipelineDesc);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);

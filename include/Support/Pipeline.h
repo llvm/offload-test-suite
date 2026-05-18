@@ -392,6 +392,9 @@ struct IOBindings {
 
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
+  // Input-side default for compute pipelines (which have no Bindings: block in
+  // YAML, so the mapOptional default in Pipeline.cpp never fires) — kept here
+  // so a default-constructed IOBindings can be safely (re-)serialized.
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
   uint32_t getVertexStride() const {

@@ -1194,12 +1194,19 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>>
   createGraphicsPipeline(llvm::StringRef Name,
                          const BindingsDesc &BindingsDesc,
-                         llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                         llvm::ArrayRef<Format> RTFormats,
-                         std::optional<Format> DSFormat,
-                         PrimitiveTopology Topology, ShaderContainer VS,
-                         std::optional<ShaderContainer> GS,
-                         ShaderContainer PS) {
+                         const GraphicsPipelineCreateDesc &Desc) override {
+    if (!Desc.PS)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Graphics pipeline requires a pixel "
+                                     "shader on this backend.");
+    const ShaderContainer &VS = Desc.VS;
+    const ShaderContainer &PS = *Desc.PS;
+    const std::optional<ShaderContainer> &GS = Desc.GS;
+    llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
+    llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
+    std::optional<Format> DSFormat = Desc.DSFormat;
+    PrimitiveTopology Topology = Desc.Topology;
+
     VkShaderStageFlags GraphicsFlags =
         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     if (GS)
@@ -1470,29 +1477,6 @@ public:
     return std::make_unique<VulkanPipelineState>(
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
         RenderPass);
-  }
-
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
-    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
-                                  DSFormat, PrimitiveTopology::TriangleList,
-                                  std::move(VS), std::nullopt, std::move(PS));
-  }
-
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsGsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                       llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                       llvm::ArrayRef<Format> RTFormats,
-                       std::optional<Format> DSFormat,
-                       PrimitiveTopology Topology, ShaderContainer VS,
-                       ShaderContainer GS, ShaderContainer PS) override {
-    return createGraphicsPipeline(Name, BindingsDesc, InputLayout, RTFormats,
-                                  DSFormat, Topology, std::move(VS),
-                                  std::move(GS), std::move(PS));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -3005,57 +2989,43 @@ public:
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
     } else if (P.isTraditionalRaster()) {
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
-      std::optional<ShaderContainer> GS;
+      GraphicsPipelineCreateDesc PipelineDesc = {};
+      PipelineDesc.Topology = P.Bindings.Topology;
+      PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-          VS.SpecializationConstants = Shader.SpecializationConstants;
-        } else if (Shader.Stage == Stages::Geometry) {
-          ShaderContainer GSContainer = {};
-          GSContainer.EntryPoint = Shader.Entry;
-          GSContainer.Shader = Shader.Shader.get();
-          GSContainer.SpecializationConstants = Shader.SpecializationConstants;
-          GS = std::move(GSContainer);
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-          PS.SpecializationConstants = Shader.SpecializationConstants;
-        }
+        ShaderContainer SC = {};
+        SC.EntryPoint = Shader.Entry;
+        SC.Shader = Shader.Shader.get();
+        SC.SpecializationConstants = Shader.SpecializationConstants;
+        if (Shader.Stage == Stages::Vertex)
+          PipelineDesc.VS = std::move(SC);
+        else if (Shader.Stage == Stages::Geometry)
+          PipelineDesc.GS = std::move(SC);
+        else if (Shader.Stage == Stages::Pixel)
+          PipelineDesc.PS = std::move(SC);
       }
 
       // Create the input layout based on the vertex attributes.
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
       for (auto &Attr : P.Bindings.VertexAttributes) {
         auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        InputLayoutDesc Layout = {};
+        Layout.Name = Attr.Name;
+        Layout.Fmt = *FormatOrErr;
+        Layout.OffsetInBytes = Attr.Offset;
+        PipelineDesc.InputLayout.push_back(Layout);
       }
 
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                   P.Bindings.RTargetBufferPtr->Channels);
       if (!FormatOrErr)
         return FormatOrErr.takeError();
+      PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr =
-          GS ? createPipelineVsGsPs("Graphics Pipeline State", BindingsDesc,
-                                    InputLayout, RTFormats,
-                                    Format::D32FloatS8Uint, P.Bindings.Topology,
-                                    VS, *GS, PS)
-             : createPipelineVsPs("Graphics Pipeline State", BindingsDesc,
-                                  InputLayout, RTFormats,
-                                  Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr = createGraphicsPipeline(
+          "Graphics Pipeline State", BindingsDesc, PipelineDesc);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);

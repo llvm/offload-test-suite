@@ -1304,11 +1304,24 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
+  createGraphicsPipeline(llvm::StringRef Name,
+                         const BindingsDesc &BindingsDesc,
+                         const GraphicsPipelineCreateDesc &Desc) override {
+    if (Desc.GS)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Metal: Geometry shaders are not supported on this backend.");
+    if (!Desc.PS)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Graphics pipeline requires a pixel "
+                                     "shader on this backend.");
+    (void)Desc.Topology;
+    const ShaderContainer &VS = Desc.VS;
+    const ShaderContainer &PS = *Desc.PS;
+    llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
+    llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
+    std::optional<Format> DSFormat = Desc.DSFormat;
+
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
@@ -1457,17 +1470,6 @@ public:
                                               std::move(ArgBuffer), PSO);
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsGsPs(llvm::StringRef, const BindingsDesc &,
-                       llvm::ArrayRef<InputLayoutDesc>, llvm::ArrayRef<Format>,
-                       std::optional<Format>, PrimitiveTopology,
-                       ShaderContainer, ShaderContainer,
-                       ShaderContainer) override {
-    return llvm::createStringError(
-        std::errc::not_supported,
-        "Metal: Geometry shaders are not supported on this backend.");
-  }
-
   llvm::Error executeProgram(Pipeline &P) override {
     InvocationState IS;
 
@@ -1517,53 +1519,41 @@ public:
       if (auto Err = createComputeCommands(P, IS))
         return Err;
     } else {
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
-      std::optional<ShaderContainer> GS;
+      GraphicsPipelineCreateDesc PipelineDesc = {};
+      PipelineDesc.Topology = P.Bindings.Topology;
+      PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-        } else if (Shader.Stage == Stages::Geometry) {
-          ShaderContainer GSContainer = {};
-          GSContainer.EntryPoint = Shader.Entry;
-          GSContainer.Shader = Shader.Shader.get();
-          GS = std::move(GSContainer);
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-        }
+        ShaderContainer SC = {};
+        SC.EntryPoint = Shader.Entry;
+        SC.Shader = Shader.Shader.get();
+        if (Shader.Stage == Stages::Vertex)
+          PipelineDesc.VS = std::move(SC);
+        else if (Shader.Stage == Stages::Geometry)
+          PipelineDesc.GS = std::move(SC);
+        else if (Shader.Stage == Stages::Pixel)
+          PipelineDesc.PS = std::move(SC);
       }
 
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
       for (auto &Attr : P.Bindings.VertexAttributes) {
         auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        InputLayoutDesc Layout = {};
+        Layout.Name = Attr.Name;
+        Layout.Fmt = *FormatOrErr;
+        Layout.OffsetInBytes = Attr.Offset;
+        PipelineDesc.InputLayout.push_back(Layout);
       }
 
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                   P.Bindings.RTargetBufferPtr->Channels);
       if (!FormatOrErr)
         return FormatOrErr.takeError();
+      PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr =
-          GS ? createPipelineVsGsPs("Graphics Pipeline State", Bindings,
-                                    InputLayout, RTFormats,
-                                    Format::D32FloatS8Uint, P.Bindings.Topology,
-                                    VS, *GS, PS)
-             : createPipelineVsPs("Graphics Pipeline State", Bindings,
-                                  InputLayout, RTFormats,
-                                  Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr = createGraphicsPipeline(
+          "Graphics Pipeline State", Bindings, PipelineDesc);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);
