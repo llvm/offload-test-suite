@@ -1794,8 +1794,8 @@ public:
       DepthStencilAttachmentFormatDesc DSAttachment = {};
       DSAttachment.Fmt = Format::D32FloatS8Uint;
       DSAttachment.DepthLoad = LoadAction::Clear;
-      DSAttachment.DepthStore = StoreAction::DontCare;
-      DSAttachment.StencilLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::Store;
+      DSAttachment.StencilLoad = LoadAction::DontCare;
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
