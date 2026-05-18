@@ -610,20 +610,20 @@ public:
   MTL::RenderCommandEncoder *getNative() const { return RenderEnc; }
 
   void pushDebugGroup(llvm::StringRef Label) override {
-    if (RenderEnc)
-      RenderEnc->pushDebugGroup(
-          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+    assert(RenderEnc);
+    RenderEnc->pushDebugGroup(
+        NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
   void popDebugGroup() override {
-    if (RenderEnc)
-      RenderEnc->popDebugGroup();
+    assert(RenderEnc);
+    RenderEnc->popDebugGroup();
   }
 
   void insertDebugSignpost(llvm::StringRef Label) override {
-    if (RenderEnc)
-      RenderEnc->insertDebugSignpost(
-          NS::String::string(Label.data(), NS::UTF8StringEncoding));
+    assert(RenderEnc);
+    RenderEnc->insertDebugSignpost(
+        NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
   void setViewport(const offloadtest::Viewport &VP) override {
