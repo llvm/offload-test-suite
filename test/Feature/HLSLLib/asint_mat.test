@@ -1,0 +1,302 @@
+#--- source.hlsl
+
+StructuredBuffer<int4> In1 : register(t0);
+StructuredBuffer<uint4> In2 : register(t1);
+StructuredBuffer<float4> In3 : register(t2);
+
+RWStructuredBuffer<int4> Out1 : register(u3);
+RWStructuredBuffer<int4> Out2 : register(u4);
+RWStructuredBuffer<int4> Out3 : register(u5);
+
+[numthreads(1,1,1)]
+void main() {
+  // int -> int matrices (identity bit-cast)
+  int2x2 i22 = asint(int2x2(In1[0].xy, In1[0].zw));
+  int3x2 i32 = asint(int3x2(In1[1].xyz, In1[2].xyz));
+  int2x4 i24 = asint(int2x4(In1[3], In1[4]));
+  int4x4 i44 = asint(int4x4(In1[5], In1[6], In1[7], In1[8]));
+  int3x3 i33 = asint(int3x3(In1[9].xyz, In1[10].xyz, In1[11].xyz));
+  int4x3 i43 = asint(int4x3(In1[12].xyz, In1[13].xyz,
+                            In1[14].xyz, In1[15].xyz));
+
+  Out1[0] = int4(i22[0], i22[1]);
+  Out1[1] = int4(i32[0], i32[1]);
+  Out1[2] = int4(i32[2], 0, 0);
+  Out1[3] = i24[0];
+  Out1[4] = i24[1];
+  Out1[5] = i44[0];
+  Out1[6] = i44[1];
+  Out1[7] = i44[2];
+  Out1[8] = i44[3];
+  Out1[9]  = int4(i33[0], 0);
+  Out1[10] = int4(i33[1], 0);
+  Out1[11] = int4(i33[2], 0);
+  Out1[12] = int4(i43[0], 0);
+  Out1[13] = int4(i43[1], 0);
+  Out1[14] = int4(i43[2], 0);
+  Out1[15] = int4(i43[3], 0);
+
+  int2x2 i22_const = asint(int2x2(-1, 2, 0, 2147483647));
+  Out1[16] = int4(i22_const[0], i22_const[1]);
+
+  // uint -> int matrices
+  int2x2 u22 = asint(uint2x2(In2[0].xy, In2[0].zw));
+  int3x2 u32 = asint(uint3x2(In2[1].xyz, In2[2].xyz));
+  int2x4 u24 = asint(uint2x4(In2[3], In2[4]));
+  int4x4 u44 = asint(uint4x4(In2[5], In2[6], In2[7], In2[8]));
+  int3x3 u33 = asint(uint3x3(In2[9].xyz, In2[10].xyz, In2[11].xyz));
+  int4x3 u43 = asint(uint4x3(In2[12].xyz, In2[13].xyz,
+                             In2[14].xyz, In2[15].xyz));
+
+  Out2[0] = int4(u22[0], u22[1]);
+  Out2[1] = int4(u32[0], u32[1]);
+  Out2[2] = int4(u32[2], 0, 0);
+  Out2[3] = u24[0];
+  Out2[4] = u24[1];
+  Out2[5] = u44[0];
+  Out2[6] = u44[1];
+  Out2[7] = u44[2];
+  Out2[8] = u44[3];
+  Out2[9]  = int4(u33[0], 0);
+  Out2[10] = int4(u33[1], 0);
+  Out2[11] = int4(u33[2], 0);
+  Out2[12] = int4(u43[0], 0);
+  Out2[13] = int4(u43[1], 0);
+  Out2[14] = int4(u43[2], 0);
+  Out2[15] = int4(u43[3], 0);
+
+  int2x2 u22_const = asint(uint2x2(0xffffffffu, 0u, 0x80000000u, 100u));
+  Out2[16] = int4(u22_const[0], u22_const[1]);
+
+  // float -> int matrices
+  int2x2 f22 = asint(float2x2(In3[0].xy, In3[0].zw));
+  int3x2 f32 = asint(float3x2(In3[1].xyz, In3[2].xyz));
+  int2x4 f24 = asint(float2x4(In3[3], In3[4]));
+  int4x4 f44 = asint(float4x4(In3[5], In3[6], In3[7], In3[8]));
+  int3x3 f33 = asint(float3x3(In3[9].xyz, In3[10].xyz, In3[11].xyz));
+  int4x3 f43 = asint(float4x3(In3[12].xyz, In3[13].xyz,
+                              In3[14].xyz, In3[15].xyz));
+
+  Out3[0] = int4(f22[0], f22[1]);
+  Out3[1] = int4(f32[0], f32[1]);
+  Out3[2] = int4(f32[2], 0, 0);
+  Out3[3] = f24[0];
+  Out3[4] = f24[1];
+  Out3[5] = f44[0];
+  Out3[6] = f44[1];
+  Out3[7] = f44[2];
+  Out3[8] = f44[3];
+  Out3[9]  = int4(f33[0], 0);
+  Out3[10] = int4(f33[1], 0);
+  Out3[11] = int4(f33[2], 0);
+  Out3[12] = int4(f43[0], 0);
+  Out3[13] = int4(f43[1], 0);
+  Out3[14] = int4(f43[2], 0);
+  Out3[15] = int4(f43[3], 0);
+
+  int2x2 f22_const = asint(float2x2(10.0, 0.0, 0.5, 1.0));
+  Out3[16] = int4(f22_const[0], f22_const[1]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In1
+    Format: Int32
+    Stride: 16
+    Data: [ -1, 2, 0, 2147483647,
+            -1, 0, 100, 0,
+            -2147483648, 2147483647, 50, 0,
+            -1, 0, 1, 2,
+            -10, 10, -100, 100,
+            -1, 2, 0, 2147483647,
+            -2147483648, 100, -100, 50,
+            1, 2, 3, 4,
+            -1, -2, -3, -4,
+            -1, 0, 1, 0,
+            -10, 10, -100, 0,
+            100, -2147483648, 2147483647, 0,
+            1, 2, 3, 0,
+            -1, -2, -3, 0,
+            10, 20, 30, 0,
+            -10, -20, -30, 0 ]
+  - Name: In2
+    Format: UInt32
+    Stride: 16
+    Data: [ 0xffffffff, 0, 0x80000000, 100,
+            1, 10, 100, 0,
+            1000, 0x80000000, 0xffffffff, 0,
+            0, 1, 10, 100,
+            0x80000000, 0x80000001, 0xfffffffe, 0xffffffff,
+            0, 1, 2, 3,
+            10, 100, 1000, 10000,
+            0x80000000, 0x7FFFFFFF, 0xffffffff, 0xfffffffe,
+            50, 60, 70, 80,
+            0, 1, 2, 0,
+            3, 4, 5, 0,
+            0x80000000, 0xffffffff, 100, 0,
+            10, 20, 30, 0,
+            40, 50, 60, 0,
+            70, 80, 90, 0,
+            0x80000000, 0xffffffff, 1000, 0 ]
+  - Name: In3
+    Format: Float32
+    Stride: 16
+    Data: [ 10.0, 0.0, 0.5, 1.0,
+            2.0, 4.0, 8.0, 0.0,
+            0.25, 0.5, 1.0, 0.0,
+            0.0, 0.5, 1.0, 2.0,
+            4.0, 8.0, 10.0, 100.0,
+            0.0, 1.0, 2.0, 3.0,
+            4.0, 8.0, 10.0, 16.0,
+            -1.0, -2.0, -4.0, -8.0,
+            0.5, 0.25, 0.125, 1.5,
+            0.0, 1.0, 2.0, 0.0,
+            -1.0, -2.0, 0.5, 0.0,
+            0.25, 1.5, 3.0, 0.0,
+            1.0, 2.0, 3.0, 0.0,
+            -1.0, -2.0, -3.0, 0.0,
+            0.5, 1.5, 2.5, 0.0,
+            10.0, 20.0, 30.0, 0.0 ]
+  - Name: Out1
+    Format: Int32
+    Stride: 16
+    FillSize: 272
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 16
+    Data: [ -1, 2, 0, 2147483647,
+            -1, 0, 100, -2147483648,
+            2147483647, 50, 0, 0,
+            -1, 0, 1, 2,
+            -10, 10, -100, 100,
+            -1, 2, 0, 2147483647,
+            -2147483648, 100, -100, 50,
+            1, 2, 3, 4,
+            -1, -2, -3, -4,
+            -1, 0, 1, 0,
+            -10, 10, -100, 0,
+            100, -2147483648, 2147483647, 0,
+            1, 2, 3, 0,
+            -1, -2, -3, 0,
+            10, 20, 30, 0,
+            -10, -20, -30, 0,
+            -1, 2, 0, 2147483647 ]
+  - Name: Out2
+    Format: Int32
+    Stride: 16
+    FillSize: 272
+  - Name: ExpectedOut2
+    Format: Int32
+    Stride: 16
+    Data: [ -1, 0, -2147483648, 100,
+            1, 10, 100, 1000,
+            -2147483648, -1, 0, 0,
+            0, 1, 10, 100,
+            -2147483648, -2147483647, -2, -1,
+            0, 1, 2, 3,
+            10, 100, 1000, 10000,
+            -2147483648, 2147483647, -1, -2,
+            50, 60, 70, 80,
+            0, 1, 2, 0,
+            3, 4, 5, 0,
+            -2147483648, -1, 100, 0,
+            10, 20, 30, 0,
+            40, 50, 60, 0,
+            70, 80, 90, 0,
+            -2147483648, -1, 1000, 0,
+            -1, 0, -2147483648, 100 ]
+  - Name: Out3
+    Format: Int32
+    Stride: 16
+    FillSize: 272
+  - Name: ExpectedOut3
+    Format: Int32
+    Stride: 16
+    Data: [ 1092616192, 0, 1056964608, 1065353216,
+            1073741824, 1082130432, 1090519040, 1048576000,
+            1056964608, 1065353216, 0, 0,
+            0, 1056964608, 1065353216, 1073741824,
+            1082130432, 1090519040, 1092616192, 1120403456,
+            0, 1065353216, 1073741824, 1077936128,
+            1082130432, 1090519040, 1092616192, 1098907648,
+            -1082130432, -1073741824, -1065353216, -1056964608,
+            1056964608, 1048576000, 1040187392, 1069547520,
+            0, 1065353216, 1073741824, 0,
+            -1082130432, -1073741824, 1056964608, 0,
+            1048576000, 1069547520, 1077936128, 0,
+            1065353216, 1073741824, 1077936128, 0,
+            -1082130432, -1073741824, -1069547520, 0,
+            1056964608, 1069547520, 1075838976, 0,
+            1092616192, 1101004800, 1106247680, 0,
+            1092616192, 0, 1056964608, 1065353216 ]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+  - Result: Test3
+    Rule: BufferExact
+    Actual: Out3
+    Expected: ExpectedOut3
+DescriptorSets:
+  - Resources:
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In3
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out3
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/186864
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
