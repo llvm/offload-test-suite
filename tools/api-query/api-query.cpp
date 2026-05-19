@@ -39,6 +39,7 @@ int main(int ArgC, char **ArgV) {
     outs() << "- API: " << D->getAPIName() << "\n";
     outs() << "  Description: " << D->getDescription() << "\n";
     outs() << "  Driver: " << D->getDriverName() << "\n";
+    outs() << "  Driver Version: " << D->getDriverVersion() << "\n";
     outs() << "  Features: \n";
     for (const auto &C : D->getCapabilities()) {
       outs() << "    ";
