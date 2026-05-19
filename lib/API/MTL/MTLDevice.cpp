@@ -956,11 +956,17 @@ class MTLDevice : public offloadtest::Device {
     }
 
     if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
-      auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
-          *this, *P.Bindings.VertexBufferPtr);
-      if (!VBOrErr)
-        return VBOrErr.takeError();
-      IS.VB = std::move(*VBOrErr);
+      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::CpuToGpu;
+      BufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
+                                           VBuffer->Data[0].get(),
+                                           VBuffer->size(), nullptr, nullptr);
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.VB = std::move(*BufOrErr);
       llvm::outs() << "Vertex buffer created.\n";
     }
     return llvm::Error::success();
