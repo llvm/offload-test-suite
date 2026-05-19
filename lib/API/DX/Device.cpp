@@ -699,11 +699,12 @@ private:
 public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
-           std::string Desc)
+           std::string Desc, std::string VendorName)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)) {
     Description = Desc;
+    DriverName = std::move(VendorName);
   }
   DXDevice(const DXDevice &) = delete;
   DXDevice &operator=(const DXDevice &) = delete;
@@ -1047,6 +1048,23 @@ public:
     return Tex;
   }
 
+  static llvm::StringRef vendorNameForID(uint32_t VendorID) {
+    switch (VendorID) {
+    case 0x1002:
+      return "AMD";
+    case 0x10DE:
+      return "NVIDIA";
+    case 0x8086:
+      return "Intel";
+    case 0x1414:
+      return "Microsoft";
+    case 0x5143:
+      return "Qualcomm";
+    default:
+      return "";
+    }
+  }
+
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
   create(ComPtr<IDXCoreAdapter> Adapter, const DeviceConfig &Config) {
     ComPtr<ID3D12Device> Device;
@@ -1073,6 +1091,21 @@ public:
     std::vector<char> DescVec(BufferSize);
     Adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, BufferSize,
                          (void *)DescVec.data());
+
+    std::string VendorName;
+    if (Adapter->IsPropertySupported(DXCoreAdapterProperty::HardwareID)) {
+      DXCoreHardwareID HwID = {};
+      if (SUCCEEDED(Adapter->GetProperty(DXCoreAdapterProperty::HardwareID,
+                                         sizeof(HwID), &HwID))) {
+        const llvm::StringRef Vendor = vendorNameForID(HwID.vendorID);
+        if (!Vendor.empty())
+          VendorName = Vendor.str();
+        else
+          VendorName =
+              llvm::formatv("Unknown vendor (0x{0:X4})", HwID.vendorID).str();
+      }
+    }
+
     if (Config.EnableDebugLayer || Config.EnableValidationLayer)
       if (auto Err = configureInfoQueue(Device.Get()))
         return Err;
@@ -1094,7 +1127,7 @@ public:
     return std::make_unique<DXDevice>(
         Adapter, Device, std::move(*GraphicsQueueOrErr),
         std::move(*RTVHeapOrErr), std::move(*DSVHeapOrErr),
-        std::string(DescVec.data()));
+        std::string(DescVec.data()), std::move(VendorName));
   }
 
   const Capabilities &getCapabilities() override {
