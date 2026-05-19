@@ -47,6 +47,8 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Signals.h"
 
+#include "../Util.h"
+
 #include <atomic>
 #include <codecvt>
 #include <locale>
@@ -779,6 +781,9 @@ DXCommandBuffer::createRenderEncoder(
     return llvm::createStringError(std::errc::invalid_argument,
                                    "RenderPassBeginDesc depth-stencil "
                                    "presence does not match its RenderPass.");
+
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, nullptr, nullptr))
+    return Err;
 
   // Validate attachments and gather the RTV / DSV CPU handles. RT and DSV
   // descriptors are owned by the textures themselves; this just collects

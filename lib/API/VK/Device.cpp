@@ -20,6 +20,8 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
 
+#include "../Util.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -922,7 +924,6 @@ VulkanCommandBuffer::createRenderEncoder(
         "RenderPassBeginDesc is missing its RenderPass.");
   auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
   const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
-
   if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -933,10 +934,12 @@ VulkanCommandBuffer::createRenderEncoder(
                                    "RenderPassBeginDesc depth-stencil "
                                    "presence does not match its RenderPass.");
 
+  uint32_t Width = 0, Height = 0;
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+    return Err;
+
   llvm::SmallVector<VkImageView, 9> Views;
   llvm::SmallVector<VkClearValue, 9> ClearValues;
-  uint32_t Width = ~0u;
-  uint32_t Height = ~0u;
 
   for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
     if (!Desc.ColorAttachments[I])
@@ -964,11 +967,6 @@ VulkanCommandBuffer::createRenderEncoder(
       CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
     }
     ClearValues.push_back(CV);
-
-    if (Tex.Desc.Width < Width)
-      Width = Tex.Desc.Width;
-    if (Tex.Desc.Height < Height)
-      Height = Tex.Desc.Height;
   }
 
   if (Desc.DepthStencil) {
@@ -995,11 +993,6 @@ VulkanCommandBuffer::createRenderEncoder(
       CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
     }
     ClearValues.push_back(CV);
-
-    if (Tex.Desc.Width < Width)
-      Width = Tex.Desc.Width;
-    if (Tex.Desc.Height < Height)
-      Height = Tex.Desc.Height;
   }
 
   VkFramebufferCreateInfo FBCI = {};

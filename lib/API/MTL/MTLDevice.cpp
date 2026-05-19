@@ -32,6 +32,9 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "../Util.h"
+
 #include <algorithm>
 #include <memory>
 
@@ -716,8 +719,9 @@ MTLCommandBuffer::createRenderEncoder(
                                    "RenderPassBeginDesc depth-stencil "
                                    "presence does not match its RenderPass.");
 
-  uint32_t Width = ~0u;
-  uint32_t Height = ~0u;
+  uint32_t Width = 0, Height = 0;
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+    return Err;
 
   MTL::RenderPassDescriptor *MTLDesc =
       MTL::RenderPassDescriptor::alloc()->init();
@@ -751,11 +755,6 @@ MTLCommandBuffer::createRenderEncoder(
     }
     MTLDesc->colorAttachments()->setObject(CADesc, I);
     CADesc->release();
-
-    if (Tex.Desc.Width < Width)
-      Width = Tex.Desc.Width;
-    if (Tex.Desc.Height < Height)
-      Height = Tex.Desc.Height;
   }
 
   if (Desc.DepthStencil) {
@@ -789,16 +788,6 @@ MTLCommandBuffer::createRenderEncoder(
       if (DS.StencilLoad == offloadtest::LoadAction::Clear)
         SADesc->setClearStencil(CV->Stencil);
     }
-
-    if (Tex.Desc.Width < Width)
-      Width = Tex.Desc.Width;
-    if (Tex.Desc.Height < Height)
-      Height = Tex.Desc.Height;
-  }
-
-  if (Width == ~0u && Height == ~0u) {
-    Width = 0;
-    Height = 0;
   }
 
   MTLDesc->setRenderTargetWidth(Width);

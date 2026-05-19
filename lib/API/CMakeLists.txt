@@ -34,6 +34,7 @@ endif()
 add_offloadtest_library(API
   Capabilities.cpp
   Device.cpp
+  Util.cpp
   ${api_sources})
 
 target_include_directories(OffloadTestAPI SYSTEM BEFORE ${api_headers})
