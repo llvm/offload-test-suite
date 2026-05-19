@@ -105,6 +105,33 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   return Dev.createTexture("DepthStencil", Desc);
 }
 
+// This is a separate function because recursion is not allowed in this code
+// base.
+static llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createUploadBufferWithData(Device &Dev, std::string Name, const void *Data,
+                           size_t SizeInBytes) {
+
+  // Create Upload buffer
+  const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+  const std::string UploadBufferName = Name + " (Upload Buffer)";
+
+  auto UploadBufferOrErr =
+      Dev.createBuffer(UploadBufferName, UploadDesc, SizeInBytes);
+  if (!UploadBufferOrErr)
+    return UploadBufferOrErr.takeError();
+  auto UploadBuffer = std::move(*UploadBufferOrErr);
+
+  // Copy data over
+  auto MappedPtrOrErr = UploadBuffer->map();
+  if (!MappedPtrOrErr)
+    return MappedPtrOrErr.takeError();
+  void *MappedPtr = *MappedPtrOrErr;
+  memcpy(MappedPtr, Data, SizeInBytes);
+  UploadBuffer->unmap();
+
+  return std::move(UploadBuffer);
+}
+
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 offloadtest::createBufferWithData(
     Device &Dev, std::string Name, const BufferCreateDesc &Desc,
@@ -121,10 +148,8 @@ offloadtest::createBufferWithData(
           "An upload buffer is required to create a GpuOnly buffer with data.");
 
     // Create Upload buffer
-    const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
-    const std::string UploadBufferName = Name + " (Upload Buffer)";
-    auto UploadBufferOrErr = createBufferWithData(
-        Dev, UploadBufferName, UploadDesc, Data, SizeInBytes, nullptr, nullptr);
+    auto UploadBufferOrErr =
+        createUploadBufferWithData(Dev, Name, Data, SizeInBytes);
     if (!UploadBufferOrErr)
       return UploadBufferOrErr.takeError();
     *OutUploadBuffer = std::move(*UploadBufferOrErr);
