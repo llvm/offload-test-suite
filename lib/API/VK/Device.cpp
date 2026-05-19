@@ -208,6 +208,8 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_VERTEX_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
+  case Stages::Amplification:
+    return VK_SHADER_STAGE_TASK_BIT_EXT;
   case Stages::Mesh:
     return VK_SHADER_STAGE_MESH_BIT_EXT;
   }

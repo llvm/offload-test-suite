@@ -135,6 +135,10 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageVertex;
   case Stages::Pixel:
     return IRShaderStageFragment;
+  case Stages::Amplification:
+    return IRShaderStageAmplification;
+  case Stages::Mesh:
+    return IRShaderStageMesh;
   }
   llvm_unreachable("All cases handled");
 }
