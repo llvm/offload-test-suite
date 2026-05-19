@@ -26,15 +26,18 @@
 
 namespace offloadtest {
 
-enum class Stages { Compute, Vertex, Pixel };
+enum class Stages { Compute, Vertex, Geometry, Pixel };
 inline constexpr std::array AllStages = {
     Stages::Compute,
     Stages::Vertex,
+    Stages::Geometry,
     Stages::Pixel,
 };
 inline constexpr size_t NumStages = AllStages.size();
 
 enum class ShaderPipelineKind { Compute, TraditionalRaster };
+
+enum class PrimitiveTopology { TriangleList, PointList };
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -389,6 +392,7 @@ struct IOBindings {
 
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
+  PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
@@ -712,7 +716,17 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
     ENUM_CASE(Compute);
     ENUM_CASE(Vertex);
+    ENUM_CASE(Geometry);
     ENUM_CASE(Pixel);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
+  static void enumeration(IO &I, offloadtest::PrimitiveTopology &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::PrimitiveTopology::Val)
+    ENUM_CASE(TriangleList);
+    ENUM_CASE(PointList);
 #undef ENUM_CASE
   }
 };

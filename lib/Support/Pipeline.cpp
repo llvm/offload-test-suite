@@ -425,6 +425,8 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("VertexBuffer", B.VertexBuffer);
   I.mapOptional("VertexAttributes", B.VertexAttributes);
   I.mapOptional("RenderTarget", B.RenderTarget);
+  I.mapOptional("Topology", B.Topology,
+                offloadtest::PrimitiveTopology::TriangleList);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -601,6 +603,10 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
     Kind = ShaderPipelineKind::TraditionalRaster;
     return llvm::Error::success();
   }
+
+  if (HasShaderType[llvm::to_underlying(Stages::Geometry)])
+    return llvm::createStringError(
+        "Pipeline has a Geometry Shader but no Vertex Shader.");
 
   // As we add more pipeline types this error message should be updated with
   // more required shader types.
