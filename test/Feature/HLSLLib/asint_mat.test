@@ -39,6 +39,18 @@ void main() {
   int2x2 i22_const = asint(int2x2(-1, 2, 0, 2147483647));
   Out1[16] = int4(i22_const[0], i22_const[1]);
 
+  int1x1 i11 = asint(int1x1(In1[0].x));
+  Out1[17] = int4(i11[0].x, 0, 0, 0);
+
+  int4x4 i44_const = asint(int4x4(-1, 2, 0, 2147483647,
+                                  -2147483648, 100, -100, 50,
+                                  1, 2, 3, 4,
+                                  -1, -2, -3, -4));
+  Out1[18] = i44_const[0];
+  Out1[19] = i44_const[1];
+  Out1[20] = i44_const[2];
+  Out1[21] = i44_const[3];
+
   // uint -> int matrices
   int2x2 u22 = asint(uint2x2(In2[0].xy, In2[0].zw));
   int3x2 u32 = asint(uint3x2(In2[1].xyz, In2[2].xyz));
@@ -68,6 +80,18 @@ void main() {
   int2x2 u22_const = asint(uint2x2(0xffffffffu, 0u, 0x80000000u, 100u));
   Out2[16] = int4(u22_const[0], u22_const[1]);
 
+  int1x1 u11 = asint(uint1x1(In2[0].x));
+  Out2[17] = int4(u11[0].x, 0, 0, 0);
+
+  int4x4 u44_const = asint(uint4x4(0xffffffffu, 0u, 0x80000000u, 100u,
+                                   1u, 10u, 100u, 1000u,
+                                   0u, 1u, 2u, 3u,
+                                   10u, 100u, 1000u, 10000u));
+  Out2[18] = u44_const[0];
+  Out2[19] = u44_const[1];
+  Out2[20] = u44_const[2];
+  Out2[21] = u44_const[3];
+
   // float -> int matrices
   int2x2 f22 = asint(float2x2(In3[0].xy, In3[0].zw));
   int3x2 f32 = asint(float3x2(In3[1].xyz, In3[2].xyz));
@@ -96,6 +120,18 @@ void main() {
 
   int2x2 f22_const = asint(float2x2(10.0, 0.0, 0.5, 1.0));
   Out3[16] = int4(f22_const[0], f22_const[1]);
+
+  int1x1 f11 = asint(float1x1(In3[0].x));
+  Out3[17] = int4(f11[0].x, 0, 0, 0);
+
+  int4x4 f44_const = asint(float4x4(10.0, 0.0, 0.5, 1.0,
+                                    2.0, 4.0, 8.0, 0.0,
+                                    0.0, 0.5, 1.0, 2.0,
+                                    4.0, 8.0, 10.0, 16.0));
+  Out3[18] = f44_const[0];
+  Out3[19] = f44_const[1];
+  Out3[20] = f44_const[2];
+  Out3[21] = f44_const[3];
 }
 
 //--- pipeline.yaml
@@ -165,7 +201,7 @@ Buffers:
   - Name: Out1
     Format: Int32
     Stride: 16
-    FillSize: 272
+    FillSize: 352
   - Name: ExpectedOut1
     Format: Int32
     Stride: 16
@@ -185,11 +221,16 @@ Buffers:
             -1, -2, -3, 0,
             10, 20, 30, 0,
             -10, -20, -30, 0,
-            -1, 2, 0, 2147483647 ]
+            -1, 2, 0, 2147483647,
+            -1, 0, 0, 0,
+            -1, 2, 0, 2147483647,
+            -2147483648, 100, -100, 50,
+            1, 2, 3, 4,
+            -1, -2, -3, -4 ]
   - Name: Out2
     Format: Int32
     Stride: 16
-    FillSize: 272
+    FillSize: 352
   - Name: ExpectedOut2
     Format: Int32
     Stride: 16
@@ -209,11 +250,16 @@ Buffers:
             40, 50, 60, 0,
             70, 80, 90, 0,
             -2147483648, -1, 1000, 0,
-            -1, 0, -2147483648, 100 ]
+            -1, 0, -2147483648, 100,
+            -1, 0, 0, 0,
+            -1, 0, -2147483648, 100,
+            1, 10, 100, 1000,
+            0, 1, 2, 3,
+            10, 100, 1000, 10000 ]
   - Name: Out3
     Format: Int32
     Stride: 16
-    FillSize: 272
+    FillSize: 352
   - Name: ExpectedOut3
     Format: Int32
     Stride: 16
@@ -233,7 +279,12 @@ Buffers:
             -1082130432, -1073741824, -1069547520, 0,
             1056964608, 1069547520, 1075838976, 0,
             1092616192, 1101004800, 1106247680, 0,
-            1092616192, 0, 1056964608, 1065353216 ]
+            1092616192, 0, 1056964608, 1065353216,
+            1092616192, 0, 0, 0,
+            1092616192, 0, 1056964608, 1065353216,
+            1073741824, 1082130432, 1090519040, 0,
+            0, 1056964608, 1065353216, 1073741824,
+            1082130432, 1090519040, 1092616192, 1098907648 ]
 Results:
   - Result: Test1
     Rule: BufferExact

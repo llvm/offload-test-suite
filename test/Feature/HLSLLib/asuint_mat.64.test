@@ -86,6 +86,32 @@ void main() {
   asuint(in22_const[1], low22_const[1], high22_const[1]);
   Lows[16]  = uint4(low22_const[0],  low22_const[1]);
   Highs[16] = uint4(high22_const[0], high22_const[1]);
+
+  // 1x1
+  uint1x1 low11, high11;
+  double1x1 in11 = double1x1(In0[0].x);
+  asuint(in11._11, low11._11, high11._11);
+  Lows[17]  = uint4(low11._11,  0, 0, 0);
+  Highs[17] = uint4(high11._11, 0, 0, 0);
+
+  // 4x4 constant-folded
+  uint4x4 low44_const, high44_const;
+  double4x4 in44_const = double4x4(1.0, 2.0, 4.0, 8.0,
+                                   16.0, 0.5, 0.25, 0.125,
+                                   -1.0, -2.0, -4.0, -8.0,
+                                   1.5, 2.5, 3.0, 0.0);
+  asuint(in44_const[0], low44_const[0], high44_const[0]);
+  asuint(in44_const[1], low44_const[1], high44_const[1]);
+  asuint(in44_const[2], low44_const[2], high44_const[2]);
+  asuint(in44_const[3], low44_const[3], high44_const[3]);
+  Lows[18]  = low44_const[0];
+  Lows[19]  = low44_const[1];
+  Lows[20]  = low44_const[2];
+  Lows[21]  = low44_const[3];
+  Highs[18] = high44_const[0];
+  Highs[19] = high44_const[1];
+  Highs[20] = high44_const[2];
+  Highs[21] = high44_const[3];
 }
 //--- pipeline.yaml
 
@@ -116,7 +142,7 @@ Buffers:
   - Name: Lows
     Format: UInt32
     Stride: 16
-    FillSize: 272
+    FillSize: 352
   - Name: ExpectedLows
     Format: UInt32
     Stride: 16
@@ -125,11 +151,13 @@ Buffers:
             2576980378, 1717986918, 858993459, 2696277389, 2680059593,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
   - Name: Highs
     Format: UInt32
     Stride: 16
-    FillSize: 272
+    FillSize: 352
   - Name: ExpectedHighs
     Format: UInt32
     Stride: 16
@@ -144,7 +172,12 @@ Buffers:
             1070596096, 1073217536, 1074266112, 0, 1072693248, 1073741824,
             1074266112, 0, 3220176896, 3221225472, 3221749760, 0,
             1071644672, 1073217536, 1074003968, 0, 1076101120, 1077149696,
-            1077805056, 0, 1072693248, 1073741824, 1073741824, 1074790400 ]
+            1077805056, 0, 1072693248, 1073741824, 1073741824, 1074790400,
+            1076101120, 0, 0, 0,
+            1072693248, 1073741824, 1074790400, 1075838976,
+            1076887552, 1071644672, 1070596096, 1069547520,
+            3220176896, 3221225472, 3222274048, 3223322624,
+            1073217536, 1074003968, 1074266112, 0 ]
 Results:
   - Result: Test0
     Rule: BufferExact
