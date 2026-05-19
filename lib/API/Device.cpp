@@ -122,7 +122,7 @@ offloadtest::createBufferWithData(
 
     // Create Upload buffer
     const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
-    std::string UploadBufferName = Name + " (Upload Buffer)";
+    const std::string UploadBufferName = Name + " (Upload Buffer)";
     auto UploadBufferOrErr = createBufferWithData(
         Dev, UploadBufferName, UploadDesc, Data, SizeInBytes, nullptr, nullptr);
     if (!UploadBufferOrErr)
@@ -130,7 +130,9 @@ offloadtest::createBufferWithData(
     *OutUploadBuffer = std::move(*UploadBufferOrErr);
 
     // Copy Buffer to Buffer
-    Encoder->copyBufferToBuffer(**OutUploadBuffer, 0, *Buffer, 0, SizeInBytes);
+    if (auto Err = Encoder->copyBufferToBuffer(**OutUploadBuffer, 0, *Buffer, 0,
+                                               SizeInBytes))
+      return Err;
 
   } else {
     // Copy data over
