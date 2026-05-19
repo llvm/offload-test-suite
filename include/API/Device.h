@@ -18,6 +18,7 @@
 #include "API/Buffer.h"
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
+#include "API/RenderPass.h"
 #include "API/Texture.h"
 
 #include "Support/Pipeline.h"
@@ -174,6 +175,9 @@ public:
 
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<RenderPass>>
+  createRenderPass(const RenderPassDesc &Desc) = 0;
 
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
