@@ -51,6 +51,7 @@
 #include <codecvt>
 #include <locale>
 #include <mutex>
+#include <optional>
 
 using namespace offloadtest;
 using Microsoft::WRL::ComPtr;
@@ -1048,7 +1049,7 @@ public:
     return Tex;
   }
 
-  static llvm::StringRef vendorNameForID(uint32_t VendorID) {
+  static std::optional<llvm::StringRef> vendorNameForID(uint32_t VendorID) {
     switch (VendorID) {
     case 0x1002:
       return "AMD";
@@ -1061,7 +1062,7 @@ public:
     case 0x5143:
       return "Qualcomm";
     default:
-      return "";
+      return std::nullopt;
     }
   }
 
@@ -1097,9 +1098,10 @@ public:
       DXCoreHardwareID HwID = {};
       if (SUCCEEDED(Adapter->GetProperty(DXCoreAdapterProperty::HardwareID,
                                          sizeof(HwID), &HwID))) {
-        const llvm::StringRef Vendor = vendorNameForID(HwID.vendorID);
-        if (!Vendor.empty())
-          VendorName = Vendor.str();
+        const std::optional<llvm::StringRef> Vendor =
+            vendorNameForID(HwID.vendorID);
+        if (Vendor)
+          VendorName = Vendor->str();
         else
           VendorName =
               llvm::formatv("Unknown vendor (0x{0:X4})", HwID.vendorID).str();
