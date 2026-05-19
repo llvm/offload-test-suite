@@ -914,6 +914,11 @@ public:
   llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
                            uint32_t GroupCountX, uint32_t GroupCountY,
                            uint32_t GroupCountZ) override {
+    (void)PSO;
+    (void)GroupCountX;
+    (void)GroupCountY;
+    (void)GroupCountZ;
+
     return llvm::createStringError(
         "dispatchMesh is unimplemented in the Vulkan backend.");
   }

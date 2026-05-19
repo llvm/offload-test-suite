@@ -1165,8 +1165,8 @@ public:
                                        /*IsGraphics=*/true, RootSig))
       return Err;
 
-    D3D12_SHADER_BYTECODE MSBytecode = {MS.Shader->getBuffer().data(),
-                                        MS.Shader->getBuffer().size()};
+    const D3D12_SHADER_BYTECODE MSBytecode = {MS.Shader->getBuffer().data(),
+                                              MS.Shader->getBuffer().size()};
     if (MSBytecode.BytecodeLength == 0)
       return llvm::createStringError(
           std::errc::invalid_argument,
