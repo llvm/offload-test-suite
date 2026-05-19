@@ -527,13 +527,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
-                           uint32_t GroupCountX, uint32_t GroupCountY,
-                           uint32_t GroupCountZ) override {
-    return llvm::createStringError(
-        "dispatchMesh is unimplemented in the Metal backend.");
-  }
-
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
@@ -699,6 +692,13 @@ public:
                             static_cast<NS::UInteger>(FirstInstance));
 
     return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    return llvm::createStringError(
+        "dispatchMesh is unimplemented in the Metal backend.");
   }
 
   void endEncodingImpl() override {
