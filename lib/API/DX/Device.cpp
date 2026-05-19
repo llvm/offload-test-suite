@@ -703,7 +703,7 @@ public:
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)) {
-    Description = Desc;
+    Description = std::move(Desc);
     DriverName = std::move(VendorName);
   }
   DXDevice(const DXDevice &) = delete;
