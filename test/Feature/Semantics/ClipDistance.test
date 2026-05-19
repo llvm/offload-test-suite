@@ -1,0 +1,95 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 pos      : POSITION;
+    float  clipDist : CLIPDIST;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    float  clipDist : SV_ClipDistance0;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput o;
+    o.position = input.pos;
+    o.clipDist = input.clipDist;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET {
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Fullscreen quad over a 4x1 render target. Pixel centers in NDC fall at
+  # x in {-0.75, -0.25, +0.25, +0.75}. In the vertex data below the CLIPDIST
+  # attribute (5th column) is initialized to equal POSITION.x (1st column)
+  # at every vertex; the vertex shader passes it through to SV_ClipDistance0
+  # unchanged, so the rasterizer-interpolated value at each pixel center
+  # matches that pixel's NDC x:
+  #   * Pixels 0, 1 (x < 0)  -> clipDist < 0 -> pixel clipped, RT untouched
+  #   * Pixels 2, 3 (x > 0)  -> clipDist > 0 -> pixel rendered (red)
+  - Name: VertexData
+    Format: Float32
+    Stride: 20  # float4 pos (16) + float clipDist (4)
+    Data: [
+      -1.0, -1.0, 0.0, 1.0,  -1.0,
+      -1.0,  1.0, 0.0, 1.0,  -1.0,
+       1.0,  1.0, 0.0, 1.0,   1.0,
+       1.0,  1.0, 0.0, 1.0,   1.0,
+       1.0, -1.0, 0.0, 1.0,   1.0,
+      -1.0, -1.0, 0.0, 1.0,  -1.0,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+    - Format: Float32
+      Channels: 1
+      Offset: 16
+      Name: CLIPDIST
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# SV_ClipDistance: per-pixel clipping. A fragment is discarded by the
+# rasterizer when its interpolated clip-distance is negative; positive values
+# pass through unchanged. Tracked under
+# https://github.com/llvm/wg-hlsl/issues/25.
+# Clang's HLSL frontend does not yet lower SV_ClipDistance on either the
+# DXIL or SPIR-V path.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
+
+# Pixels 0,1 clipped -> zero-initialized clear (0,0,0,0).
+# Pixels 2,3 rendered red (1,0,0,1).
+# CHECK: Name: Output
+# CHECK: Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1 ]
