@@ -1629,17 +1629,11 @@ public:
                                                          1, &PipelineCI,
                                                          nullptr, &Pipeline),
                                "Failed to create graphics pipeline.")) {
-      for (auto *M : ShaderModules)
-        vkDestroyShaderModule(Device, M, nullptr);
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
       return Err;
     }
-
-    // No longer need shader modules after pipeline compilation.
-    for (auto *M : ShaderModules)
-      vkDestroyShaderModule(Device, M, nullptr);
 
     return std::make_unique<VulkanPipelineState>(
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
