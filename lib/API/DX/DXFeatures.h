@@ -32,6 +32,11 @@ enum RootSignature {
 #include "DXFeatures.def"
 };
 
+#define MESH_SHADER_TIER_ENUM(NewCase, Str, Value) NewCase = Value,
+enum MeshShaderTier {
+#include "DXFeatures.def"
+};
+
 } // namespace directx
 
 template <> struct CapabilityPrinter<directx::ShaderModel> {
@@ -40,6 +45,10 @@ template <> struct CapabilityPrinter<directx::ShaderModel> {
 
 template <> struct CapabilityPrinter<directx::RootSignature> {
   static std::string toString(const directx::RootSignature &V);
+};
+
+template <> struct CapabilityPrinter<directx::MeshShaderTier> {
+  static std::string toString(const directx::MeshShaderTier &V);
 };
 
 } // namespace offloadtest

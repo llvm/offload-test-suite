@@ -59,6 +59,7 @@ using Microsoft::WRL::ComPtr;
 
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
+template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12Device *> SignalHandlerDevices;
