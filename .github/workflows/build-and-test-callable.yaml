@@ -269,12 +269,16 @@ jobs:
                 cp "$buildbin/dxv.exe"          "$distbin/"
                 cp "$buildbin/dxcompiler.dll"   "$distbin/"
                 cp "$buildbin/dxil.dll"         "$distbin/"
-                # Copy PDBs if they exist. If DXC is built with the Release config,
-                # then the PDBs won't exist, so we silently skip copying them.
-                cp "$buildbin/dxc.pdb"          "$distbin/" 2>/dev/null || true
-                cp "$buildbin/dxv.pdb"          "$distbin/" 2>/dev/null || true
-                cp "$buildbin/dxcompiler.pdb"   "$distbin/" 2>/dev/null || true
-                cp "$buildbin/dxil.pdb"         "$distbin/" 2>/dev/null || true
+                # PDBs only exist for configs that emit /Zi (Debug,
+                # RelWithDebInfo). Release / MinSizeRel produce no
+                # .pdb files, so we skip the copy in those cases.
+                case "${{ inputs.BuildType }}" in
+                  Debug|RelWithDebInfo)
+                    cp "$buildbin/dxc.pdb"        "$distbin/"
+                    cp "$buildbin/dxv.pdb"        "$distbin/"
+                    cp "$buildbin/dxcompiler.pdb" "$distbin/"
+                    cp "$buildbin/dxil.pdb"       "$distbin/" ;;
+                esac
                 cp "$buildlib/dxcompiler.lib"   "$distlib/"
                 cp "$buildlib/dxil.lib"         "$distlib/" ;;
               Linux)
@@ -391,10 +395,10 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
-            cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
+            cd "$GITHUB_WORKSPACE/install/share/hlsl-test-suite"
             # Locate dxc in the separate DXC install prefix. .exe on Windows,
             # bare name elsewhere.
-            dxc_path=$GITHUB_WORKSPACE/dxc-dist/bin/dxc
+            dxc_path="$GITHUB_WORKSPACE/dxc-dist/bin/dxc"
             if [ -x "${dxc_path}.exe" ]; then dxc_path="${dxc_path}.exe"; fi
             python configure-test-suite.py \
               --suite "${{ steps.suite.outputs.suite }}" \
