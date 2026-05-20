@@ -44,7 +44,7 @@ int main(int ArgC, char **ArgV) {
     // "Driver Build: ..."). Emit as a double-quoted YAML scalar so
     // lit.cfg.py's yaml.safe_load() can parse the output.
     outs() << "  Driver Version: \"";
-    for (char C : D->getDriverVersion()) {
+    for (const char C : D->getDriverVersion()) {
       if (C == '"' || C == '\\')
         outs() << '\\';
       outs() << C;
