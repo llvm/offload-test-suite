@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // Helper functions that are shared between the various backends, but which
-// should not be exposed to the uesr of the graphics layer.
+// should not be exposed to the user of the graphics layer.
 //
 //===----------------------------------------------------------------------===//
 

@@ -1894,7 +1894,8 @@ public:
       // optimal state.
       // If we are NOT loading (clearing or don't care), we are discarding the
       // original contents of the texture, and use an undefined layout. This
-      // allows us to use _any_ layout including unitialized textures.
+      // allows us to receive a texture in _any_ layout including uninitialized
+      // textures.
       AD.initialLayout = Color.Load == LoadAction::Load
                              ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                              : VK_IMAGE_LAYOUT_UNDEFINED;
