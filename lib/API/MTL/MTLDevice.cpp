@@ -701,11 +701,10 @@ public:
   }
 
   void endEncodingImpl() override {
-    if (RenderEnc) {
-      RenderEnc->popDebugGroup();
-      RenderEnc->endEncoding();
-      RenderEnc = nullptr;
-    }
+    assert(RenderEnc);
+    RenderEnc->popDebugGroup();
+    RenderEnc->endEncoding();
+    RenderEnc = nullptr;
   }
 };
 
