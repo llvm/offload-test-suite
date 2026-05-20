@@ -1909,7 +1909,6 @@ public:
     }
 
     VkAttachmentReference DepthReference = {};
-    bool HasDS = false;
     if (Desc.DepthStencil) {
       const auto &DS = *Desc.DepthStencil;
       VkAttachmentDescription AD = {};
@@ -1929,14 +1928,14 @@ public:
       DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
       Attachments.push_back(AD);
-      HasDS = true;
     }
 
     VkSubpassDescription Subpass = {};
     Subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     Subpass.colorAttachmentCount = static_cast<uint32_t>(ColorRefs.size());
     Subpass.pColorAttachments = ColorRefs.data();
-    Subpass.pDepthStencilAttachment = HasDS ? &DepthReference : nullptr;
+    Subpass.pDepthStencilAttachment =
+        Desc.DepthStencil ? &DepthReference : nullptr;
 
     VkRenderPassCreateInfo RPCI = {};
     RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;

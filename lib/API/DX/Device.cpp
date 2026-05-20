@@ -808,7 +808,6 @@ DXCommandBuffer::createRenderEncoder(
 
   DXTexture *DSTexture = nullptr;
   D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
-  const D3D12_CPU_DESCRIPTOR_HANDLE *DSVPtr = nullptr;
   if (Desc.DepthStencil) {
     auto &DXDS = llvm::cast<DXTexture>(*Desc.DepthStencil);
     if (DXDS.DSVHandle.ptr == 0)
@@ -817,12 +816,12 @@ DXCommandBuffer::createRenderEncoder(
           "Depth-stencil texture was not created with DepthStencil usage.");
     DSTexture = &DXDS;
     DSVHandle = DXDS.DSVHandle;
-    DSVPtr = &DSVHandle;
   }
 
-  CmdList->OMSetRenderTargets(
-      static_cast<UINT>(RTVHandles.size()), RTVHandles.data(),
-      /*RTsSingleHandleToDescriptorRange=*/false, DSVPtr);
+  CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
+                              RTVHandles.data(),
+                              /*RTsSingleHandleToDescriptorRange=*/false,
+                              Desc.DepthStencil ? &DSVHandle : nullptr);
 
   for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
     if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)
