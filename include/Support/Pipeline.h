@@ -34,7 +34,7 @@ enum class Stages {
   Vertex,
   Pixel,
 
-  // Mesh Shader
+  // Mesh Shader Raster
   Amplification,
   Mesh
 };

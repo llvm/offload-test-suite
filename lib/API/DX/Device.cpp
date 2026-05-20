@@ -1157,7 +1157,7 @@ public:
                        llvm::ArrayRef<Format> RTFormats,
                        std::optional<Format> DSFormat,
                        std::optional<ShaderContainer> AS, ShaderContainer MS,
-                       std::optional<ShaderContainer> PS) /*override*/ {
+                       std::optional<ShaderContainer> PS) {
     assert(RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
@@ -2377,8 +2377,7 @@ public:
     }
 
     if (P.isRaster()) {
-      // Create render target, depth/stencil, readback and vertex buffer and
-      // PSO.
+      // Create render target and depth/stencil
       if (auto Err = createRenderTarget(P, State))
         return Err;
       llvm::outs() << "Render target created.\n";
