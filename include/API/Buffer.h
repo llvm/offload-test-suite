@@ -30,8 +30,7 @@ struct BufferCreateDesc {
   BufferUsage Usage;
 
   static BufferCreateDesc uploadBuffer() {
-    return BufferCreateDesc{.Location = MemoryLocation::CpuToGpu,
-                            .Usage = BufferUsage::Storage};
+    return BufferCreateDesc{MemoryLocation::CpuToGpu, BufferUsage::Storage};
   }
 };
 
