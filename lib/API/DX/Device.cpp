@@ -58,6 +58,7 @@ using namespace offloadtest;
 using Microsoft::WRL::ComPtr;
 
 using ID3D12DeviceX = ID3D12Device2;
+using ID3D12GraphicsCommandListX = ID3D12GraphicsCommandList6;
 
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
@@ -512,7 +513,7 @@ public:
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
-  ComPtr<ID3D12GraphicsCommandList6> CmdList;
+  ComPtr<ID3D12GraphicsCommandListX> CmdList;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
 
