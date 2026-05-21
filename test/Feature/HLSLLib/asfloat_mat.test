@@ -39,7 +39,7 @@ void main() {
   Out0[16] = float4(f22_const[0], f22_const[1]);
 
   float1x1 f11 = asfloat(float1x1(In0[0].x));
-  Out0[17] = float4(f11[0]);
+  Out0[17] = float4(f11[0], 0.0, 0.0, 0.0);
 
   float4x4 f44_const = asfloat(float4x4(0.0, 1.0, -1.0, 0.5,
                                         10.5, -10.5, 100.0, 0.0,
@@ -80,7 +80,7 @@ void main() {
   Out1[16] = float4(u22_const[0], u22_const[1]);
 
   float1x1 u11 = asfloat(uint1x1(In1[0].x));
-  Out1[17] = float4(u11[0]);
+  Out1[17] = float4(u11[0], 0.0, 0.0, 0.0);
 
   float4x4 u44_const = asfloat(uint4x4(0u, 1u, 10u, 100u,
                                        50u, 100u, 1000u, 0u,
@@ -121,7 +121,7 @@ void main() {
   Out2[16] = float4(i22_const[0], i22_const[1]);
 
   float1x1 i11 = asfloat(int1x1(In2[0].x));
-  Out2[17] = float4(i11[0]);
+  Out2[17] = float4(i11[0], 0.0, 0.0, 0.0);
 
   float4x4 i44_const = asfloat(int4x4(-1, 0, 50, 100,
                                       1, 10, 100, 0,
@@ -278,7 +278,7 @@ Buffers:
             1.4013e-44, 1.4013e-43, 1.4013e-42, 0,
             1.4013e-41, -nan, nan, 0,
             -nan, 0, 7.0065e-44, 1.4013e-43,
-            -nan, -nan, -nan, -nan,
+            -nan, 0, 0, 0,
             -nan, 0, 7.0065e-44, 1.4013e-43,
             1.4013e-45, 1.4013e-44, 1.4013e-43, 0,
             -nan, 0, 1.4013e-45, 2.8026e-45,
