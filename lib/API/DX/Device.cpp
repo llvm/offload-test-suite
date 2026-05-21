@@ -627,12 +627,15 @@ public:
   void popDebugGroup() override {}
   void insertDebugSignpost(llvm::StringRef Label) override {}
 
-  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+  llvm::Error dispatch(const offloadtest::PipelineState &PSO,
+                       uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ) override {
+    const auto &DXPSO = llvm::cast<DXPipelineState>(PSO);
     addUAVBarrier();
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
                                       GroupCountY, GroupCountZ)
                             .str());
+    CB.CmdList->SetPipelineState(DXPSO.PSO.Get());
     CB.CmdList->Dispatch(GroupCountX, GroupCountY, GroupCountZ);
     return llvm::Error::success();
   }
@@ -1908,7 +1911,6 @@ public:
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
     IS.CB->CmdList->SetComputeRootSignature(DXPipeline.RootSig.Get());
-    IS.CB->CmdList->SetPipelineState(DXPipeline.PSO.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1983,10 +1985,10 @@ public:
       if (!EncoderOrErr)
         return EncoderOrErr.takeError();
       auto &Encoder = *EncoderOrErr.get();
-      if (auto Err =
-              Encoder.dispatch(P.DispatchParameters.DispatchGroupCount[0],
-                               P.DispatchParameters.DispatchGroupCount[1],
-                               P.DispatchParameters.DispatchGroupCount[2]))
+      if (auto Err = Encoder.dispatch(
+              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
         return Err;
       Encoder.endEncoding();
     }

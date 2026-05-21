@@ -71,10 +71,11 @@ public:
   using CommandEncoder::CommandEncoder;
 
   /// Dispatch a compute grid. GroupCount specifies how many workgroups to
-  /// launch in each dimension. The workgroup size is derived from the bound
-  /// pipeline state (e.g. the shader's numthreads attribute).
-  virtual llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
-                               uint32_t GroupCountZ) = 0;
+  /// launch in each dimension. The workgroup size is derived from \p PSO
+  /// (e.g. the shader's numthreads attribute), which is also bound for the
+  /// dispatch.
+  virtual llvm::Error dispatch(const PipelineState &PSO, uint32_t GroupCountX,
+                               uint32_t GroupCountY, uint32_t GroupCountZ) = 0;
 
   /// Copy \p Size bytes from \p Src at \p SrcOffset to \p Dst at
   /// \p DstOffset.
