@@ -734,6 +734,8 @@ public:
 
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t Stride) override {
+    assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
+           "Vertex buffer slot exceeds D3D12 IA input resource slot count");
     if (VB) {
       auto &DXVB = llvm::cast<DXBuffer>(*VB);
       D3D12_VERTEX_BUFFER_VIEW VBView = {};
