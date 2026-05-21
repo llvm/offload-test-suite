@@ -72,6 +72,8 @@ DescriptorSets: []
 ...
 #--- end
 
+REQUIRES: MeshShader
+
 # Unimplemented https://github.com/llvm/llvm-project/issues/136966
 # XFAIL Clang
 
