@@ -75,7 +75,7 @@ DescriptorSets: []
 REQUIRES: MeshShader
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/136966
-# XFAIL Clang
+# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
