@@ -57,16 +57,18 @@
 using namespace offloadtest;
 using Microsoft::WRL::ComPtr;
 
+using ID3D12DeviceX = ID3D12Device2;
+
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
-static llvm::SmallVector<ID3D12Device *> SignalHandlerDevices;
+static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
 
 static void dumpD3DInfoQueues(void *) {
   const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
-  for (ID3D12Device *Device : SignalHandlerDevices) {
+  for (ID3D12DeviceX *Device : SignalHandlerDevices) {
     ComPtr<ID3D12InfoQueue> InfoQueue;
     HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
     if (FAILED(HR)) {
@@ -405,7 +407,7 @@ public:
   int Event;
 #endif
 
-  static llvm::Expected<std::unique_ptr<DXFence>> create(ID3D12Device *Device,
+  static llvm::Expected<std::unique_ptr<DXFence>> create(ID3D12DeviceX *Device,
                                                          llvm::StringRef Name) {
     ComPtr<ID3D12Fence> Fence;
     if (auto Err = HR::toError(
@@ -488,7 +490,7 @@ public:
   ~DXQueue() override {}
 
   static llvm::Expected<DXQueue>
-  createGraphicsQueue(ComPtr<ID3D12Device> Device) {
+  createGraphicsQueue(ComPtr<ID3D12DeviceX> Device) {
     const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
                                            D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
     ComPtr<ID3D12CommandQueue> CmdQueue;
@@ -515,7 +517,7 @@ public:
   bool PendingUAVBarrier = false;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
-  create(ComPtr<ID3D12Device> Device) {
+  create(ComPtr<ID3D12DeviceX> Device) {
     auto CB = std::unique_ptr<DXCommandBuffer>(new DXCommandBuffer());
     if (auto Err = HR::toError(
             Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -565,7 +567,7 @@ struct DescriptorAllocator {
   uint32_t Capacity;
 
   static llvm::Expected<DescriptorAllocator>
-  create(ID3D12Device *Device, D3D12_DESCRIPTOR_HEAP_TYPE Type,
+  create(ID3D12DeviceX *Device, D3D12_DESCRIPTOR_HEAP_TYPE Type,
          uint32_t Capacity) {
     ComPtr<ID3D12DescriptorHeap> Heap;
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
@@ -877,7 +879,7 @@ DXCommandBuffer::createRenderEncoder(
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
-  ComPtr<ID3D12Device> Device;
+  ComPtr<ID3D12DeviceX> Device;
   DXQueue GraphicsQueue;
   Capabilities Caps;
   DescriptorAllocator RTVAllocator;
@@ -920,7 +922,7 @@ private:
   };
 
 public:
-  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
            std::string Desc)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
@@ -1223,14 +1225,9 @@ public:
     const D3D12_PIPELINE_STATE_STREAM_DESC StreamDesc = {sizeof(Stream),
                                                          &Stream};
 
-    ComPtr<ID3D12Device2> Device2;
-    if (auto Err =
-            HR::toError(Device.As(&Device2), "Failed to query ID3D12Device2."))
-      return Err;
-
     ComPtr<ID3D12PipelineState> PSO;
     if (auto Err = HR::toError(
-            Device2->CreatePipelineState(&StreamDesc, IID_PPV_ARGS(&PSO)),
+            Device->CreatePipelineState(&StreamDesc, IID_PPV_ARGS(&PSO)),
             "Failed to create mesh shader PSO."))
       return Err;
 
@@ -1356,7 +1353,7 @@ public:
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
   create(ComPtr<IDXCoreAdapter> Adapter, const DeviceConfig &Config) {
-    ComPtr<ID3D12Device> Device;
+    ComPtr<ID3D12DeviceX> Device;
     if (auto Err =
             HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
                                           IID_PPV_ARGS(&Device)),
@@ -1430,7 +1427,7 @@ public:
 #include "DXFeatures.def"
   }
 
-  static llvm::Error configureInfoQueue(ID3D12Device *Device) {
+  static llvm::Error configureInfoQueue(ID3D12DeviceX *Device) {
 #ifdef _WIN32
     ComPtr<ID3D12InfoQueue> InfoQueue;
     if (auto Err = HR::toError(Device->QueryInterface(InfoQueue.GetAddressOf()),
