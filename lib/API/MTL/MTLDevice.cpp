@@ -678,6 +678,8 @@ public:
     if (MTLPSO.DepthStencilState)
       RenderEnc->setDepthStencilState(MTLPSO.DepthStencilState);
     RenderEnc->setCullMode(MTLPSO.CullMode);
+    // Match the DX/VK convention (CCW = front) hardcoded in those backends.
+    RenderEnc->setFrontFacingWinding(MTL::WindingCounterClockwise);
 
     // IRRuntimeDrawPrimitives also sets the DrawParams / DrawInfo argument
     // buffers that metal-irconverter consults for SV_VertexID and friends.
