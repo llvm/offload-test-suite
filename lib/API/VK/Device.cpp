@@ -1378,6 +1378,7 @@ public:
       return CSModOrErr.takeError();
 
     VkShaderModule CSModule = *CSModOrErr;
+    // No longer need shader modules after pipeline compilation.
     auto ShaderModuleCleanUp = llvm::scope_exit(
         [&] { vkDestroyShaderModule(Device, CSModule, nullptr); });
 
@@ -1434,6 +1435,7 @@ public:
 
     VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_VERTEX_BIT;
     llvm::SmallVector<VkPipelineShaderStageCreateInfo, 5> ShaderStages;
+    // No longer need shader modules after pipeline compilation.
     auto ShaderModuleCleanUp = llvm::scope_exit([&] {
       for (auto &Stage : ShaderStages)
         vkDestroyShaderModule(Device, Stage.module, nullptr);
