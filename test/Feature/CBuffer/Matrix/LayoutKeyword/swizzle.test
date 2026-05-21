@@ -12,33 +12,33 @@ RWBuffer<float> OutRM : register(u0);
 RWBuffer<float> OutCM : register(u1);
 
 // Zero-based row swizzle getters
-export float3 row_swizzle_m_rm(int row, row_major float2x3 m) {
+float3 row_swizzle_m_rm(int row, row_major float2x3 m) {
     return row == 0 ? m._m00_m01_m02 : m._m10_m11_m12;
 }
 
-export float3 row_swizzle_m_cm(int row, column_major float2x3 m) {
+float3 row_swizzle_m_cm(int row, column_major float2x3 m) {
     return row == 0 ? m._m00_m01_m02 : m._m10_m11_m12;
 }
 
 // Zero-based column swizzle getters
-export float2 col_swizzle_m_rm(int col, row_major float2x3 m) {
+float2 col_swizzle_m_rm(int col, row_major float2x3 m) {
     if (col == 0) return m._m00_m10;
     if (col == 1) return m._m01_m11;
     return m._m02_m12;
 }
 
-export float2 col_swizzle_m_cm(int col, column_major float2x3 m) {
+float2 col_swizzle_m_cm(int col, column_major float2x3 m) {
     if (col == 0) return m._m00_m10;
     if (col == 1) return m._m01_m11;
     return m._m02_m12;
 }
 
 // One-based row swizzle getters
-export float3 row_swizzle_1_rm(int row, row_major float2x3 m) {
+float3 row_swizzle_1_rm(int row, row_major float2x3 m) {
     return row == 0 ? m._11_12_13 : m._21_22_23;
 }
 
-export float3 row_swizzle_1_cm(int row, column_major float2x3 m) {
+float3 row_swizzle_1_cm(int row, column_major float2x3 m) {
     return row == 0 ? m._11_12_13 : m._21_22_23;
 }
 
