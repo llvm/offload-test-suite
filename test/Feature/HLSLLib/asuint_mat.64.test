@@ -8,17 +8,14 @@ void main() {
   // 2x2
   uint2x2 low22, high22;
   double2x2 in22 = double2x2(In0[0].xy, In0[0].zw);
-  asuint(in22[0], low22[0], high22[0]);
-  asuint(in22[1], low22[1], high22[1]);
+  asuint(in22, low22, high22);
   Lows[0]  = uint4(low22[0],  low22[1]);
   Highs[0] = uint4(high22[0], high22[1]);
 
   // 3x2
   uint3x2 low32, high32;
   double3x2 in32 = double3x2(In0[1].xyz, In0[2].xyz);
-  asuint(in32[0], low32[0], high32[0]);
-  asuint(in32[1], low32[1], high32[1]);
-  asuint(in32[2], low32[2], high32[2]);
+  asuint(in32, low32, high32);
   Lows[1]  = uint4(low32[0],  low32[1]);
   Lows[2]  = uint4(low32[2],  0, 0);
   Highs[1] = uint4(high32[0], high32[1]);
@@ -27,8 +24,7 @@ void main() {
   // 2x4
   uint2x4 low24, high24;
   double2x4 in24 = double2x4(In0[3], In0[4]);
-  asuint(in24[0], low24[0], high24[0]);
-  asuint(in24[1], low24[1], high24[1]);
+  asuint(in24, low24, high24);
   Lows[3]  = low24[0];
   Lows[4]  = low24[1];
   Highs[3] = high24[0];
@@ -37,10 +33,7 @@ void main() {
   // 4x4
   uint4x4 low44, high44;
   double4x4 in44 = double4x4(In0[5], In0[6], In0[7], In0[8]);
-  asuint(in44[0], low44[0], high44[0]);
-  asuint(in44[1], low44[1], high44[1]);
-  asuint(in44[2], low44[2], high44[2]);
-  asuint(in44[3], low44[3], high44[3]);
+  asuint(in44, low44, high44);
   Lows[5]  = low44[0];
   Lows[6]  = low44[1];
   Lows[7]  = low44[2];
@@ -53,9 +46,7 @@ void main() {
   // 3x3
   uint3x3 low33, high33;
   double3x3 in33 = double3x3(In0[9].xyz, In0[10].xyz, In0[11].xyz);
-  asuint(in33[0], low33[0], high33[0]);
-  asuint(in33[1], low33[1], high33[1]);
-  asuint(in33[2], low33[2], high33[2]);
+  asuint(in33, low33, high33);
   Lows[9]   = uint4(low33[0],  0);
   Lows[10]  = uint4(low33[1],  0);
   Lows[11]  = uint4(low33[2],  0);
@@ -66,10 +57,7 @@ void main() {
   // 4x3
   uint4x3 low43, high43;
   double4x3 in43 = double4x3(In0[12].xyz, In0[13].xyz, In0[14].xyz, In0[15].xyz);
-  asuint(in43[0], low43[0], high43[0]);
-  asuint(in43[1], low43[1], high43[1]);
-  asuint(in43[2], low43[2], high43[2]);
-  asuint(in43[3], low43[3], high43[3]);
+  asuint(in43, low43, high43);
   Lows[12]  = uint4(low43[0],  0);
   Lows[13]  = uint4(low43[1],  0);
   Lows[14]  = uint4(low43[2],  0);
@@ -82,15 +70,14 @@ void main() {
   // 2x2 constant-folded
   uint2x2 low22_const, high22_const;
   double2x2 in22_const = double2x2(1.0, 2.0, 2.0, 4.0);
-  asuint(in22_const[0], low22_const[0], high22_const[0]);
-  asuint(in22_const[1], low22_const[1], high22_const[1]);
+  asuint(in22_const, low22_const, high22_const);
   Lows[16]  = uint4(low22_const[0],  low22_const[1]);
   Highs[16] = uint4(high22_const[0], high22_const[1]);
 
   // 1x1
   uint1x1 low11, high11;
   double1x1 in11 = double1x1(In0[0].x);
-  asuint(in11._11, low11._11, high11._11);
+  asuint(in11, low11, high11);
   Lows[17]  = uint4(low11._11,  0, 0, 0);
   Highs[17] = uint4(high11._11, 0, 0, 0);
 
@@ -100,10 +87,7 @@ void main() {
                                    16.0, 0.5, 0.25, 0.125,
                                    -1.0, -2.0, -4.0, -8.0,
                                    1.5, 2.5, 3.0, 0.0);
-  asuint(in44_const[0], low44_const[0], high44_const[0]);
-  asuint(in44_const[1], low44_const[1], high44_const[1]);
-  asuint(in44_const[2], low44_const[2], high44_const[2]);
-  asuint(in44_const[3], low44_const[3], high44_const[3]);
+  asuint(in44_const, low44_const, high44_const);
   Lows[18]  = low44_const[0];
   Lows[19]  = low44_const[1];
   Lows[20]  = low44_const[2];
@@ -213,6 +197,9 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Double
+
+# Not Implemented: https://github.com/llvm/llvm-project/issues/199069
+# XFAIL: Clang
 
 # Bug: https://github.com/llvm/llvm-project/issues/186864
 # XFAIL: Clang && Vulkan
