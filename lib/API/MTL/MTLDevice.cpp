@@ -658,6 +658,7 @@ public:
     assert(Slot <
                sizeof(IRRuntimeVertexBuffers) / sizeof(IRRuntimeVertexBuffer) &&
            "Vertex buffer slot exceeds Metal Shader Converter limit");
+    assert(Slot == 0 && "Pipeline vertex descriptor only describes slot 0");
     if (VB) {
       auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
       RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, BufIdx);

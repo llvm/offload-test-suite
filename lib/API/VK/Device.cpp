@@ -877,6 +877,7 @@ public:
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
     // Stride is needed in DX12 at binding time, ignore parameter here.
+    assert(Slot == 0 && "Pipeline vertex input only describes binding 0");
     if (VB) {
       VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
       const VkDeviceSize VKOffset = Offset;

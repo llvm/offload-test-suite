@@ -736,6 +736,7 @@ public:
                        uint32_t Stride) override {
     assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
            "Vertex buffer slot exceeds D3D12 IA input resource slot count");
+    assert(Slot == 0 && "Pipeline input layout only describes slot 0");
     if (VB) {
       auto &DXVB = llvm::cast<DXBuffer>(*VB);
       D3D12_VERTEX_BUFFER_VIEW VBView = {};
