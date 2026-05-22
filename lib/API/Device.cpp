@@ -92,29 +92,6 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
   return Dev.createTexture("RenderTarget", Desc);
 }
 
-llvm::Expected<std::unique_ptr<Buffer>>
-offloadtest::createVertexBufferFromCPUBuffer(Device &Dev,
-                                             const CPUBuffer &Buf) {
-  BufferCreateDesc BufDesc = {};
-  BufDesc.Location = MemoryLocation::CpuToGpu;
-  BufDesc.Usage = BufferUsage::VertexBuffer;
-  auto BufOrErr = Dev.createBuffer("VertexBuffer", BufDesc, Buf.size());
-  if (!BufOrErr)
-    return BufOrErr.takeError();
-  auto VB = std::move(*BufOrErr);
-
-  // TODO: Currently uses a single CpuToGpu mapped buffer.
-  // On discrete GPUs consider using a staging buffer + copy to a GpuOnly vertex
-  // buffer for optimal GPU read performance.
-  auto PtrOrErr = VB->map();
-  if (!PtrOrErr)
-    return PtrOrErr.takeError();
-  memcpy(*PtrOrErr, Buf.Data[0].get(), Buf.size());
-  VB->unmap();
-
-  return VB;
-}
-
 llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
                                              uint32_t Height) {
@@ -128,4 +105,71 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
 
   return Dev.createTexture("DepthStencil", Desc);
+}
+
+// This is a separate function because recursion is not allowed in this code
+// base.
+static llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createUploadBufferWithData(Device &Dev, std::string Name, const void *Data,
+                           size_t SizeInBytes) {
+
+  // Create Upload buffer
+  const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+  const std::string UploadBufferName = Name + " (Upload Buffer)";
+
+  auto UploadBufferOrErr =
+      Dev.createBuffer(UploadBufferName, UploadDesc, SizeInBytes);
+  if (!UploadBufferOrErr)
+    return UploadBufferOrErr.takeError();
+  auto UploadBuffer = std::move(*UploadBufferOrErr);
+
+  // Copy data over
+  auto MappedPtrOrErr = UploadBuffer->map();
+  if (!MappedPtrOrErr)
+    return MappedPtrOrErr.takeError();
+  void *MappedPtr = *MappedPtrOrErr;
+  memcpy(MappedPtr, Data, SizeInBytes);
+  UploadBuffer->unmap();
+
+  return std::move(UploadBuffer);
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+offloadtest::createBufferWithData(
+    Device &Dev, std::string Name, const BufferCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
+    std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
+  auto BufferOrErr = Dev.createBuffer(Name, Desc, SizeInBytes);
+  if (!BufferOrErr)
+    return BufferOrErr.takeError();
+  auto Buffer = std::move(*BufferOrErr);
+
+  if (Desc.Location == MemoryLocation::GpuOnly) {
+    if (OutUploadBuffer == nullptr)
+      return llvm::createStringError(
+          "An upload buffer is required to create a GpuOnly buffer with data.");
+
+    // Create Upload buffer
+    auto UploadBufferOrErr =
+        createUploadBufferWithData(Dev, Name, Data, SizeInBytes);
+    if (!UploadBufferOrErr)
+      return UploadBufferOrErr.takeError();
+    *OutUploadBuffer = std::move(*UploadBufferOrErr);
+
+    // Copy Buffer to Buffer
+    if (auto Err = Encoder->copyBufferToBuffer(**OutUploadBuffer, 0, *Buffer, 0,
+                                               SizeInBytes))
+      return Err;
+
+  } else {
+    // Copy data over
+    auto MappedPtrOrErr = Buffer->map();
+    if (!MappedPtrOrErr)
+      return MappedPtrOrErr.takeError();
+    void *MappedPtr = *MappedPtrOrErr;
+    memcpy(MappedPtr, Data, SizeInBytes);
+    Buffer->unmap();
+  }
+
+  return Buffer;
 }
