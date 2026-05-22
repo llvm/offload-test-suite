@@ -123,7 +123,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1110
-# XFAIL: Intel && Vulkan && DXC
+# XFAIL: Intel && Vulkan
 
 # REQUIRES: Int64
 # RUN: split-file %s %t

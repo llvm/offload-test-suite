@@ -11,6 +11,11 @@ on:
         required: false
         default: 'main'
         type: string
+      OffloadTest-fork:
+        description: 'Test Suite fork'
+        required: false
+        default: 'llvm'
+        type: string
       LLVM-branch:
         description: 'LLVM Branch'
         required: false
@@ -70,6 +75,11 @@ on:
         description: 'Test Suite Branch'
         required: false
         default: 'main'
+        type: string
+      OffloadTest-fork:
+        description: 'Test Suite Fork'
+        required: false
+        default: 'llvm'
         type: string
       LLVM-branch:
         description: 'LLVM Branch'
@@ -147,13 +157,12 @@ jobs:
       - name: Checkout OffloadTest
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
-          repository: llvm/offload-test-suite
+          repository: ${{ inputs.OffloadTest-fork }}/offload-test-suite
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1
       - name: Checkout Golden Images
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        if: inputs.SplitBuild != true
         with:
           repository: llvm/offload-golden-images
           ref: main
@@ -190,9 +199,9 @@ jobs:
             cd llvm-project
             mkdir build
             cd build
-            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images ${{ github.workspace }}/llvm-project/llvm/
+            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ${{ github.workspace }}/llvm-project/llvm/
             ninja hlsl-test-depends
-      - name: Dump GPU Info
+      - name: Dump GPU Info (build runner)
         if: inputs.SplitBuild != true
         run: |
             cd llvm-project
@@ -232,25 +241,82 @@ jobs:
           name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
           path: ${{ runner.temp }}/dxdiag.txt
 
-      # When SplitBuild is true, package and upload build
-      # artifacts for the test job.
-      - name: Package build artifacts
+      # When SplitBuild is true, install the LLVM/DXC distribution and the
+      # standalone offload test suite into a single portable prefix, then
+      # tar that prefix for the test job. The prefix is fully self-contained:
+      # tools under bin/, test sources + configure script under
+      # share/hlsl-test-suite/. No CMake, ninja, or compiler toolchain is
+      # required on the test runner.
+      - name: Install distribution
+        if: inputs.SplitBuild == true
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE/llvm-project/build
+            ninja install-distribution install-offload-tools install-offload-test-suite
+            # Stage DXC into a portable bin/+lib/ tree at dxc-dist.
+            # See docs/offload-distribution.md ("DXC prefix") for the
+            # rationale (DXC's install targets don't cover everything we
+            # need, so we cherry-pick from the build directory).
+            buildbin=$GITHUB_WORKSPACE/DXC/build/bin
+            buildlib=$GITHUB_WORKSPACE/DXC/build/lib
+            distbin=$GITHUB_WORKSPACE/dxc-dist/bin
+            distlib=$GITHUB_WORKSPACE/dxc-dist/lib
+            mkdir -p "$distbin" "$distlib"
+            case "$RUNNER_OS" in
+              Windows)
+                cp "$buildbin/dxc.exe"          "$distbin/"
+                cp "$buildbin/dxv.exe"          "$distbin/"
+                cp "$buildbin/dxcompiler.dll"   "$distbin/"
+                cp "$buildbin/dxil.dll"         "$distbin/"
+                # PDBs only exist for configs that emit /Zi (Debug,
+                # RelWithDebInfo). Release / MinSizeRel produce no
+                # .pdb files, so we skip the copy in those cases.
+                case "${{ inputs.BuildType }}" in
+                  Debug|RelWithDebInfo)
+                    cp "$buildbin/dxc.pdb"        "$distbin/"
+                    cp "$buildbin/dxv.pdb"        "$distbin/"
+                    cp "$buildbin/dxcompiler.pdb" "$distbin/"
+                    cp "$buildbin/dxil.pdb"       "$distbin/" ;;
+                esac
+                cp "$buildlib/dxcompiler.lib"   "$distlib/"
+                cp "$buildlib/dxil.lib"         "$distlib/" ;;
+              Linux)
+                cp "$buildbin/dxc"              "$distbin/"
+                cp "$buildbin/dxv"              "$distbin/"
+                cp "$buildlib/libdxcompiler.so" "$distlib/"
+                cp "$buildlib/libdxil.so"       "$distlib/" ;;
+              macOS)
+                cp "$buildbin/dxc"                  "$distbin/"
+                cp "$buildbin/dxv"                  "$distbin/"
+                cp "$buildlib/libdxcompiler.dylib"  "$distlib/"
+                cp "$buildlib/libdxil.dylib"        "$distlib/" ;;
+              *)
+                echo "Unsupported RUNNER_OS=$RUNNER_OS" >&2; exit 1 ;;
+            esac
+      - name: Package install prefix
         if: inputs.SplitBuild == true
         shell: bash
         run: |
             cd $GITHUB_WORKSPACE
-            tar cf $RUNNER_TEMP/build-artifacts.tar \
-              --exclude='*.obj' \
-              --exclude='*.o' \
-              --exclude='*.ilk' \
-              --exclude='*.pdb' \
-              DXC/build/bin llvm-project/build
+            # Use stdout redirection so tar doesn't try to parse the
+            # destination Windows drive letter (e.g. C:\...) as a remote
+            # host:path tuple.
+            tar cf - -C install . > "$RUNNER_TEMP/build-artifacts.tar"
+            tar cf - -C dxc-dist . > "$RUNNER_TEMP/dxc-artifacts.tar"
       - name: Upload build artifacts
         if: inputs.SplitBuild == true
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}/build-artifacts.tar
+          retention-days: 1
+      - name: Upload DXC artifacts
+        if: inputs.SplitBuild == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxc-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ runner.temp }}/dxc-artifacts.tar
           retention-days: 1
 
   test:
@@ -260,53 +326,30 @@ jobs:
       checks: write
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
-      - name: Checkout DXC
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: Microsoft/DirectXShaderCompiler
-          ref: ${{ inputs.DXC-branch }}
-          path: DXC
-          fetch-depth: 1
-          submodules: true
-      - name: Checkout LLVM
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: ${{ inputs.LLVM-fork }}/llvm-project
-          ref: ${{ inputs.LLVM-branch }}
-          path: llvm-project
-          fetch-depth: 1
-      - name: Checkout OffloadTest
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: llvm/offload-test-suite
-          ref: ${{ inputs.OffloadTest-branch }}
-          path: OffloadTest
-          fetch-depth: 1
-      - name: Checkout Golden Images
-        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
-        with:
-          repository: llvm/offload-golden-images
-          ref: main
-          path: golden-images
-          fetch-depth: 1
+      # Test job consumes ONLY the install tarball produced by the build job.
+      # No source checkouts of llvm-project / DXC / OffloadTest are needed
+      # here -- everything required to run lit lives inside the prefix.
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: build-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: ${{ runner.temp }}
-      - name: Extract build artifacts
+      - name: Download DXC artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dxc-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ runner.temp }}
+      - name: Extract install prefix
         shell: bash
         run: |
+            set -euxo pipefail
             cd $GITHUB_WORKSPACE
-            tar xf $RUNNER_TEMP/build-artifacts.tar
-      - name: Refresh artifact timestamps
-        shell: python
-        run: |
-          import pathlib
-          for d in ['DXC/build/bin', 'llvm-project/build']:
-              for f in pathlib.Path(d).rglob('*'):
-                  if f.is_file():
-                      f.touch()
+            mkdir -p install dxc-dist
+            # Pipe the archive in via stdin and use a relative -C path so
+            # tar doesn't try to parse the Windows drive letter or treat
+            # backslashes as escape characters.
+            tar xf - -C install < "$RUNNER_TEMP/build-artifacts.tar"
+            tar xf - -C dxc-dist < "$RUNNER_TEMP/dxc-artifacts.tar"
       - name: Setup Windows x64
         if: inputs.OS == 'windows' && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
@@ -320,24 +363,60 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
-          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
-      - name: Dump GPU Info
+          # The test runner needs only lit + pyyaml; no source checkout is
+          # available so we can't pip install -r requirements.txt. Keep
+          # this list in sync with OffloadTest/test/requirements.txt.
+          pip-install: lit pyyaml
+      - name: Dump GPU Info (test runner)
+        shell: bash
         run: |
-            cd llvm-project
-            cd build
-            ./bin/api-query
+            $GITHUB_WORKSPACE/install/bin/api-query
+      - name: Resolve lit suite from TestTarget
+        id: suite
+        shell: bash
+        run: |
+            # SplitBuild callers always pass a single specific suite as
+            # TestTarget=check-hlsl-<suite>. Strip the prefix to get the
+            # suite name configure-test-suite.py understands.
+            set -euxo pipefail
+            target='${{ inputs.TestTarget }}'
+            case "$target" in
+              check-hlsl-*)
+                suite="${target#check-hlsl-}"
+                ;;
+              *)
+                echo "::error::SplitBuild requires TestTarget=check-hlsl-<suite>, got: $target"
+                exit 1
+                ;;
+            esac
+            echo "suite=$suite" >> $GITHUB_OUTPUT
+            echo "Will run lit suite: $suite"
+      - name: Configure standalone test suite
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE/install/share/hlsl-test-suite"
+            # Locate dxc in the separate DXC install prefix. .exe on Windows,
+            # bare name elsewhere.
+            dxc_path="$GITHUB_WORKSPACE/dxc-dist/bin/dxc"
+            if [ -x "${dxc_path}.exe" ]; then dxc_path="${dxc_path}.exe"; fi
+            python configure-test-suite.py \
+              --suite "${{ steps.suite.outputs.suite }}" \
+              --dxc-path "$dxc_path"
       - name: Run HLSL Tests
+        shell: bash
         run: |
-            cd llvm-project
-            cd build
-            ninja check-hlsl-unit
-            ninja ${{ inputs.TestTarget }}
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
+            suite='${{ steps.suite.outputs.suite }}'
+            lit -v "run/test/$suite" \
+              --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
           comment_mode: off
-          files: llvm-project/build/**/testresults.xunit.xml
+          files: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
       - name: Run dxdiag (Windows only)
         if: inputs.OS == 'windows' && failure()
         shell: powershell
