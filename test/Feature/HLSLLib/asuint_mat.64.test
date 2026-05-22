@@ -1,4 +1,6 @@
 #--- source.hlsl
+#pragma pack_matrix(row_major)
+
 StructuredBuffer<double4> In0 : register(t0);
 RWStructuredBuffer<uint4> Lows : register(u1);
 RWStructuredBuffer<uint4> Highs : register(u2);
