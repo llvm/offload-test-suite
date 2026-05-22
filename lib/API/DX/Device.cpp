@@ -1268,7 +1268,7 @@ public:
             "Failed to create mesh shader PSO."))
       return Err;
 
-    return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
+    return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>

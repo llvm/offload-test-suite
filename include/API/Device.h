@@ -104,7 +104,9 @@ struct GraphicsPipelineCreateDesc {
       PS = std::move(SC);
       break;
     case Stages::Compute:
-      llvm_unreachable("Creating graphics pipeline for compute?");
+    case Stages::Amplification:
+    case Stages::Mesh:
+      llvm_unreachable("Not a traditional raster pipeline stage.");
     }
   }
 };
