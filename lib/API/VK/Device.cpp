@@ -208,6 +208,10 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_VERTEX_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
+  case Stages::Amplification:
+    return VK_SHADER_STAGE_TASK_BIT_EXT;
+  case Stages::Mesh:
+    return VK_SHADER_STAGE_MESH_BIT_EXT;
   }
   llvm_unreachable("All cases handled");
 }
@@ -906,6 +910,18 @@ public:
     vkCmdDraw(CB.CmdBuffer, VertexCount, InstanceCount, FirstVertex,
               FirstInstance);
     return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    (void)PSO;
+    (void)GroupCountX;
+    (void)GroupCountY;
+    (void)GroupCountZ;
+
+    return llvm::createStringError(
+        "dispatchMesh is unimplemented in the Vulkan backend.");
   }
 
   void endEncodingImpl() override {
@@ -2218,7 +2234,7 @@ public:
       }
     }
 
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       if (auto Err = createRenderTarget(P, IS))
         return Err;
       // TODO: Always created for graphics pipelines. Consider making this
@@ -3022,7 +3038,7 @@ public:
     }
 
     // Copy back the frame buffer data if this was a graphics pipeline.
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
 
       VkMappedMemoryRange Range = {};

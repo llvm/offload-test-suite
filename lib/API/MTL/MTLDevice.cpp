@@ -135,6 +135,10 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageVertex;
   case Stages::Pixel:
     return IRShaderStageFragment;
+  case Stages::Amplification:
+    return IRShaderStageAmplification;
+  case Stages::Mesh:
+    return IRShaderStageMesh;
   }
   llvm_unreachable("All cases handled");
 }
@@ -699,6 +703,18 @@ public:
                             static_cast<NS::UInteger>(FirstInstance));
 
     return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    (void)PSO;
+    (void)GroupCountX;
+    (void)GroupCountY;
+    (void)GroupCountZ;
+
+    return llvm::createStringError(
+        "dispatchMesh is unimplemented in the Metal backend.");
   }
 
   void endEncodingImpl() override {
@@ -1451,7 +1467,7 @@ class MTLDevice : public offloadtest::Device {
         if (auto Err = MemCpyBack(R))
           return Err;
 
-    if (P.isTraditionalRaster()) {
+    if (P.isRaster()) {
       auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
       auto *RT = P.Bindings.RTargetBufferPtr;
       RT->copyFromTexture(FBReadback.Buf->contents(), RT->getImageRowBytes());

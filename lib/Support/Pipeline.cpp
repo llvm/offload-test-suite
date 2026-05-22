@@ -598,23 +598,34 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
   }
 
   if (HasShaderType[llvm::to_underlying(Stages::Vertex)]) {
+    if (HasShaderType[llvm::to_underlying(Stages::Amplification)] ||
+        HasShaderType[llvm::to_underlying(Stages::Mesh)])
+      return llvm::createStringError("Vertex and Mesh/Amplification Shaders "
+                                     "cannot be used in the same pipeline.");
+
     Kind = ShaderPipelineKind::TraditionalRaster;
+    return llvm::Error::success();
+  }
+
+  if (HasShaderType[llvm::to_underlying(Stages::Mesh)]) {
+    Kind = ShaderPipelineKind::MeshShaderRaster;
     return llvm::Error::success();
   }
 
   // As we add more pipeline types this error message should be updated with
   // more required shader types.
   return llvm::createStringError(
-      "The pipeline misses a Compute or Vertex Shader.");
+      "The pipeline misses a Compute, Vertex or Mesh Shader.");
 }
 
 llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
   switch (Kind) {
   case ShaderPipelineKind::Compute:
+  case ShaderPipelineKind::MeshShaderRaster:
     if (DispatchParameters.VertexCount)
       return llvm::createStringError(
-          "DispatchParameters.VertexCount set on a Compute pipeline. Only "
-          "allowed on a TraditionalRaster pipeline.");
+          "DispatchParameters.VertexCount set on a Compute or Mesh Shader "
+          "pipeline. Only allowed on a TraditionalRaster pipeline.");
     break;
   case ShaderPipelineKind::TraditionalRaster:
     if (DispatchParameters.DispatchGroupCount !=
