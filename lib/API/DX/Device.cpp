@@ -734,6 +734,9 @@ public:
 
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t Stride) override {
+    assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
+           "Vertex buffer slot exceeds D3D12 IA input resource slot count");
+    assert(Slot == 0 && "Pipeline input layout only describes slot 0");
     if (VB) {
       auto &DXVB = llvm::cast<DXBuffer>(*VB);
       D3D12_VERTEX_BUFFER_VIEW VBView = {};
@@ -808,7 +811,6 @@ DXCommandBuffer::createRenderEncoder(
 
   DXTexture *DSTexture = nullptr;
   D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
-  const D3D12_CPU_DESCRIPTOR_HANDLE *DSVPtr = nullptr;
   if (Desc.DepthStencil) {
     auto &DXDS = llvm::cast<DXTexture>(*Desc.DepthStencil);
     if (DXDS.DSVHandle.ptr == 0)
@@ -817,12 +819,12 @@ DXCommandBuffer::createRenderEncoder(
           "Depth-stencil texture was not created with DepthStencil usage.");
     DSTexture = &DXDS;
     DSVHandle = DXDS.DSVHandle;
-    DSVPtr = &DSVHandle;
   }
 
-  CmdList->OMSetRenderTargets(
-      static_cast<UINT>(RTVHandles.size()), RTVHandles.data(),
-      /*RTsSingleHandleToDescriptorRange=*/false, DSVPtr);
+  CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
+                              RTVHandles.data(),
+                              /*RTsSingleHandleToDescriptorRange=*/false,
+                              Desc.DepthStencil ? &DSVHandle : nullptr);
 
   for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
     if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)

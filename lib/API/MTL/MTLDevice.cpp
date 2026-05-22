@@ -650,11 +650,20 @@ public:
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
     // Stride is needed in DX12 at binding time, ignore parameter here.
+    // Metal Shader Converter reserves low buffer indices for its own tables;
+    // vertex buffers start at kIRVertexBufferBindPoint. See
+    // https://developer.apple.com/metal/shader-converter/ ("Metal vertex
+    // fetch").
+    const NS::UInteger BufIdx = kIRVertexBufferBindPoint + Slot;
+    assert(Slot <
+               sizeof(IRRuntimeVertexBuffers) / sizeof(IRRuntimeVertexBuffer) &&
+           "Vertex buffer slot exceeds Metal Shader Converter limit");
+    assert(Slot == 0 && "Pipeline vertex descriptor only describes slot 0");
     if (VB) {
       auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
-      RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, Slot);
+      RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, BufIdx);
     } else {
-      RenderEnc->setVertexBuffer(nullptr, 0, Slot);
+      RenderEnc->setVertexBuffer(nullptr, 0, BufIdx);
     }
   }
 
@@ -693,11 +702,10 @@ public:
   }
 
   void endEncodingImpl() override {
-    if (RenderEnc) {
-      RenderEnc->popDebugGroup();
-      RenderEnc->endEncoding();
-      RenderEnc = nullptr;
-    }
+    assert(RenderEnc);
+    RenderEnc->popDebugGroup();
+    RenderEnc->endEncoding();
+    RenderEnc = nullptr;
   }
 };
 
@@ -1620,14 +1628,10 @@ public:
             std::errc::invalid_argument,
             "Vertex shader has no vertex attributes.");
 
-      if (FnAttrs->count() != InputLayout.size())
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Mismatch between vertex shader attribute count and pipeline "
-            "vertex input count.");
-
       // Collect the attribute indices the shader expects so that we can map
-      // the specified attributes onto the correct indices.
+      // the specified attributes onto the correct indices. Only active
+      // attributes are exposed via stage_in; inactive entries are dropped by
+      // the optimizer and have no corresponding [[attribute(N)]] slot.
       llvm::StringMap<uint32_t> ShaderAttrIndices;
       for (uint32_t I = 0; I < FnAttrs->count(); ++I) {
         auto *A = static_cast<MTL::VertexAttribute *>(FnAttrs->object(I));
@@ -1638,6 +1642,12 @@ public:
                        << " at index " << A->attributeIndex() << "\n";
         }
       }
+
+      if (ShaderAttrIndices.size() != InputLayout.size())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Mismatch between vertex shader active attribute count and "
+            "pipeline vertex input count.");
 
       MTL::VertexDescriptor *VtxDesc = MTL::VertexDescriptor::alloc()->init();
       auto VtxDescScope = llvm::scope_exit([&] { VtxDesc->release(); });
@@ -1653,13 +1663,21 @@ public:
         // We'll need to revisit this if we ever support indexed attributes.
         AttrName += "0";
 
+        auto It = ShaderAttrIndices.find(AttrName);
+        if (It == ShaderAttrIndices.end())
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "Input layout element '%s' does not match any active vertex "
+              "shader attribute.",
+              AttrName.c_str());
+
         const uint32_t ElemSize = getFormatSizeInBytes(Elem.Fmt);
         MTL::VertexAttributeDescriptor *AttrDesc =
             MTL::VertexAttributeDescriptor::alloc()->init();
-        AttrDesc->setBufferIndex(0);
+        AttrDesc->setBufferIndex(kIRVertexBufferBindPoint);
         AttrDesc->setOffset(Elem.OffsetInBytes);
         AttrDesc->setFormat(getMetalVertexFormat(Elem.Fmt));
-        VtxDesc->attributes()->setObject(AttrDesc, ShaderAttrIndices[AttrName]);
+        VtxDesc->attributes()->setObject(AttrDesc, It->getValue());
         AttrDesc->release();
         Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
       }
@@ -1669,7 +1687,7 @@ public:
       LDesc->setStride(Stride);
       LDesc->setStepRate(1);
       LDesc->setStepFunction(MTL::VertexStepFunctionPerVertex);
-      VtxDesc->layouts()->setObject(LDesc, 0);
+      VtxDesc->layouts()->setObject(LDesc, kIRVertexBufferBindPoint);
       LDesc->release();
 
       Desc->setVertexDescriptor(VtxDesc);

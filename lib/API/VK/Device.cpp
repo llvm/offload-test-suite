@@ -877,6 +877,7 @@ public:
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t /*Stride*/) override {
     // Stride is needed in DX12 at binding time, ignore parameter here.
+    assert(Slot == 0 && "Pipeline vertex input only describes binding 0");
     if (VB) {
       VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
       const VkDeviceSize VKOffset = Offset;
@@ -1894,7 +1895,8 @@ public:
       // optimal state.
       // If we are NOT loading (clearing or don't care), we are discarding the
       // original contents of the texture, and use an undefined layout. This
-      // allows us to use _any_ layout including unitialized textures.
+      // allows us to receive a texture in _any_ layout including uninitialized
+      // textures.
       AD.initialLayout = Color.Load == LoadAction::Load
                              ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
                              : VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1909,7 +1911,6 @@ public:
     }
 
     VkAttachmentReference DepthReference = {};
-    bool HasDS = false;
     if (Desc.DepthStencil) {
       const auto &DS = *Desc.DepthStencil;
       VkAttachmentDescription AD = {};
@@ -1929,14 +1930,14 @@ public:
       DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
       Attachments.push_back(AD);
-      HasDS = true;
     }
 
     VkSubpassDescription Subpass = {};
     Subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     Subpass.colorAttachmentCount = static_cast<uint32_t>(ColorRefs.size());
     Subpass.pColorAttachments = ColorRefs.data();
-    Subpass.pDepthStencilAttachment = HasDS ? &DepthReference : nullptr;
+    Subpass.pDepthStencilAttachment =
+        Desc.DepthStencil ? &DepthReference : nullptr;
 
     VkRenderPassCreateInfo RPCI = {};
     RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
