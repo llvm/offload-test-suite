@@ -192,6 +192,8 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("shaderSharedInt64Atomics", False):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("shaderBufferInt64Atomics", False):
+            config.available_features.add("VulkanInt64BufferAtomics")
+        if device["Features"].get("shaderImageInt64Atomics", False):
             config.available_features.add("Int64TypedResourceAtomics")
 
         # Add supported extensions.

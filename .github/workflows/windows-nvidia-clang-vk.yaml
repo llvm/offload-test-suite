@@ -21,5 +21,9 @@ jobs:
       OS: windows
       SKU: windows-nvidia
       TestTarget: check-hlsl-clang-vk
-      OffloadTest-branch: ${{ github.ref }}
+      OffloadTest-branch: fix-test-job-regen
+      OffloadTest-fork: bob80905
+      LLVM-branch: hlsl-offload-distribution
+      LLVM-fork: bob80905
+      SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On

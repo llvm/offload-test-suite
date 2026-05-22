@@ -1,16 +1,21 @@
 #--- source.hlsl
 
 // This test exercises InterlockedOr on 64-bit typed RWBuffer resources.
-// 64-bit atomics on typed UAVs are an optional Shader Model 6.6 capability
-// (D3D12 cap AtomicInt64OnTypedResourceSupported, Vulkan feature
-// shaderBufferInt64Atomics), surfaced to lit as `Int64TypedResourceAtomics`.
+// 64-bit atomics on typed UAVs are an optional Shader Model 6.6 capability:
+//
+//   * DirectX:  cap AtomicInt64OnTypedResourceSupported
+//   * Vulkan:   shaderImageInt64Atomics, from the (non-core) extension
+//               VK_EXT_shader_image_atomic_int64. RWBuffer<T> in HLSL maps
+//               to a SPIR-V image (not an SSBO), so RWBuffer atomics on
+//               Vulkan require this image-atomics extension, not
+//               shaderBufferInt64Atomics. The same Vulkan feature also
+//               covers RWTexture<int64_t> typed-image atomics; this test
+//               only exercises RWBuffer.
+//
+// Both are surfaced to lit as `Int64TypedResourceAtomics`.
 //
 //   * RWBuffer<uint64_t>[i]  (free function, 2-arg)
 //   * RWBuffer<int64_t>[i]   (free function, 3-arg, signed)
-//
-// 64-bit typed-image atomics (RWTexture<int64_t>) live behind an additional
-// Vulkan extension (VK_EXT_shader_image_atomic_int64) and are not covered
-// here.
 //
 // 64 threads of a single threadgroup atomically OR their own unique bit
 // (1ull << tid) into a single accumulator slot. With correct atomic
