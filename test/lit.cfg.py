@@ -158,6 +158,8 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
+        if device["Features"].get("MeshShader", False):
+            config.available_features.add("MeshShader")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
