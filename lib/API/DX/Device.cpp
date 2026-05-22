@@ -47,6 +47,8 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/Signals.h"
 
+#include "../Util.h"
+
 #include <atomic>
 #include <codecvt>
 #include <locale>
@@ -55,15 +57,19 @@
 using namespace offloadtest;
 using Microsoft::WRL::ComPtr;
 
+using ID3D12DeviceX = ID3D12Device2;
+using ID3D12GraphicsCommandListX = ID3D12GraphicsCommandList6;
+
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
+template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
-static llvm::SmallVector<ID3D12Device *> SignalHandlerDevices;
+static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
 
 static void dumpD3DInfoQueues(void *) {
   const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
-  for (ID3D12Device *Device : SignalHandlerDevices) {
+  for (ID3D12DeviceX *Device : SignalHandlerDevices) {
     ComPtr<ID3D12InfoQueue> InfoQueue;
     HRESULT HR = Device->QueryInterface(InfoQueue.GetAddressOf());
     if (FAILED(HR)) {
@@ -361,6 +367,8 @@ public:
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource), Name(Name),
         Desc(Desc) {}
 
+  const TextureCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::DirectX;
   }
@@ -400,7 +408,7 @@ public:
   int Event;
 #endif
 
-  static llvm::Expected<std::unique_ptr<DXFence>> create(ID3D12Device *Device,
+  static llvm::Expected<std::unique_ptr<DXFence>> create(ID3D12DeviceX *Device,
                                                          llvm::StringRef Name) {
     ComPtr<ID3D12Fence> Fence;
     if (auto Err = HR::toError(
@@ -483,7 +491,7 @@ public:
   ~DXQueue() override {}
 
   static llvm::Expected<DXQueue>
-  createGraphicsQueue(ComPtr<ID3D12Device> Device) {
+  createGraphicsQueue(ComPtr<ID3D12DeviceX> Device) {
     const D3D12_COMMAND_QUEUE_DESC Desc = {D3D12_COMMAND_LIST_TYPE_DIRECT, 0,
                                            D3D12_COMMAND_QUEUE_FLAG_NONE, 0};
     ComPtr<ID3D12CommandQueue> CmdQueue;
@@ -505,12 +513,12 @@ public:
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
-  ComPtr<ID3D12GraphicsCommandList> CmdList;
+  ComPtr<ID3D12GraphicsCommandListX> CmdList;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
-  create(ComPtr<ID3D12Device> Device) {
+  create(ComPtr<ID3D12DeviceX> Device) {
     auto CB = std::unique_ptr<DXCommandBuffer>(new DXCommandBuffer());
     if (auto Err = HR::toError(
             Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -546,6 +554,9 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
   createComputeEncoder() override;
 
+  llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+  createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
+
 private:
   DXCommandBuffer() : CommandBuffer(GPUAPI::DirectX) {}
 };
@@ -557,7 +568,7 @@ struct DescriptorAllocator {
   uint32_t Capacity;
 
   static llvm::Expected<DescriptorAllocator>
-  create(ID3D12Device *Device, D3D12_DESCRIPTOR_HEAP_TYPE Type,
+  create(ID3D12DeviceX *Device, D3D12_DESCRIPTOR_HEAP_TYPE Type,
          uint32_t Capacity) {
     ComPtr<ID3D12DescriptorHeap> Heap;
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
@@ -652,10 +663,226 @@ DXCommandBuffer::createComputeEncoder() {
   return Enc;
 }
 
+class DXRenderPass final : public offloadtest::RenderPass {
+public:
+  offloadtest::RenderPassDesc Desc;
+
+  explicit DXRenderPass(offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::DirectX), Desc(std::move(Desc)) {}
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::DirectX;
+  }
+};
+
+class DXRenderEncoder : public offloadtest::RenderEncoder {
+  DXCommandBuffer &CB;
+
+  // Encoder contract: viewport and scissor must both be set before draw().
+  bool ViewportSet = false;
+  bool ScissorSet = false;
+
+  llvm::Error bindCommonDrawState(const offloadtest::PipelineState &PSO) {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &DXPSO = llvm::cast<DXPipelineState>(PSO);
+    CB.CmdList->SetGraphicsRootSignature(DXPSO.RootSig.Get());
+    CB.CmdList->SetPipelineState(DXPSO.PSO.Get());
+    CB.CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    return llvm::Error::success();
+  }
+
+public:
+  DXRenderEncoder(DXCommandBuffer &CB)
+      : RenderEncoder(GPUAPI::DirectX), CB(CB) {}
+  DXRenderEncoder(const DXRenderEncoder &CB) = delete;
+  DXRenderEncoder(DXRenderEncoder &&CB) = delete;
+  DXRenderEncoder &operator=(DXRenderEncoder &CB) = delete;
+  DXRenderEncoder &operator=(const DXRenderEncoder &&CB) = delete;
+
+  ~DXRenderEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::DirectX;
+  }
+
+  // See DXComputeEncoder for why these are no-ops.
+  void pushDebugGroup(llvm::StringRef Label) override {}
+  void popDebugGroup() override {}
+  void insertDebugSignpost(llvm::StringRef Label) override {}
+
+  void setViewport(const offloadtest::Viewport &VP) override {
+    D3D12_VIEWPORT DXVP = {};
+    DXVP.TopLeftX = VP.X;
+    DXVP.TopLeftY = VP.Y;
+    DXVP.Width = VP.Width;
+    DXVP.Height = VP.Height;
+    DXVP.MinDepth = VP.MinDepth;
+    DXVP.MaxDepth = VP.MaxDepth;
+    CB.CmdList->RSSetViewports(1, &DXVP);
+    ViewportSet = true;
+  }
+
+  void setScissor(const offloadtest::ScissorRect &Rect) override {
+    const D3D12_RECT DXRect = {Rect.X, Rect.Y,
+                               static_cast<LONG>(Rect.X + Rect.Width),
+                               static_cast<LONG>(Rect.Y + Rect.Height)};
+    CB.CmdList->RSSetScissorRects(1, &DXRect);
+    ScissorSet = true;
+  }
+
+  void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
+                       uint32_t Stride) override {
+    assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
+           "Vertex buffer slot exceeds D3D12 IA input resource slot count");
+    assert(Slot == 0 && "Pipeline input layout only describes slot 0");
+    if (VB) {
+      auto &DXVB = llvm::cast<DXBuffer>(*VB);
+      D3D12_VERTEX_BUFFER_VIEW VBView = {};
+      VBView.BufferLocation = DXVB.Buffer->GetGPUVirtualAddress() + Offset;
+      VBView.SizeInBytes = static_cast<UINT>(DXVB.getSizeInBytes() - Offset);
+      VBView.StrideInBytes = Stride;
+      CB.CmdList->IASetVertexBuffers(Slot, 1, &VBView);
+    } else {
+      CB.CmdList->IASetVertexBuffers(Slot, 1, nullptr);
+    }
+  }
+
+  llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
+                            uint32_t VertexCount, uint32_t InstanceCount,
+                            uint32_t FirstVertex,
+                            uint32_t FirstInstance) override {
+    if (auto Err = bindCommonDrawState(PSO))
+      return Err;
+    CB.CmdList->DrawInstanced(VertexCount, InstanceCount, FirstVertex,
+                              FirstInstance);
+    return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    if (auto Err = bindCommonDrawState(PSO))
+      return Err;
+    CB.CmdList->DispatchMesh(GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override { popDebugGroup(); }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+DXCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries format / load / store policy; the begin desc supplies
+  // the actual textures. Walk both in lockstep.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &DXPass = llvm::cast<DXRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = DXPass.Desc;
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, nullptr, nullptr))
+    return Err;
+
+  // Validate attachments and gather the RTV / DSV CPU handles. RT and DSV
+  // descriptors are owned by the textures themselves; this just collects
+  // them for OMSetRenderTargets.
+  llvm::SmallVector<DXTexture *, 8> RTTextures;
+  llvm::SmallVector<D3D12_CPU_DESCRIPTOR_HANDLE, 8> RTVHandles;
+  RTTextures.reserve(Desc.ColorAttachments.size());
+  RTVHandles.reserve(Desc.ColorAttachments.size());
+  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+    if (!Tex)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &DXTex = llvm::cast<DXTexture>(*Tex);
+    if (DXTex.RTVHandle.ptr == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture was not created with RenderTarget usage.");
+    RTTextures.push_back(&DXTex);
+    RTVHandles.push_back(DXTex.RTVHandle);
+  }
+
+  DXTexture *DSTexture = nullptr;
+  D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
+  if (Desc.DepthStencil) {
+    auto &DXDS = llvm::cast<DXTexture>(*Desc.DepthStencil);
+    if (DXDS.DSVHandle.ptr == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil texture was not created with DepthStencil usage.");
+    DSTexture = &DXDS;
+    DSVHandle = DXDS.DSVHandle;
+  }
+
+  CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
+                              RTVHandles.data(),
+                              /*RTsSingleHandleToDescriptorRange=*/false,
+                              Desc.DepthStencil ? &DSVHandle : nullptr);
+
+  for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
+    if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)
+      continue;
+    if (!RTTextures[I]->Desc.OptimizedClearValue)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "LoadAction::Clear requires the render target to have been "
+          "created with an OptimizedClearValue.");
+    const auto *CV =
+        std::get_if<ClearColor>(&*RTTextures[I]->Desc.OptimizedClearValue);
+    assert(CV && "RenderTarget OptimizedClearValue must be a ClearColor");
+    const float ClearArr[4] = {CV->R, CV->G, CV->B, CV->A};
+    CmdList->ClearRenderTargetView(RTVHandles[I], ClearArr, 0, nullptr);
+  }
+  if (PassDesc.DepthStencil) {
+    D3D12_CLEAR_FLAGS Flags = static_cast<D3D12_CLEAR_FLAGS>(0);
+    if (PassDesc.DepthStencil->DepthLoad == offloadtest::LoadAction::Clear)
+      Flags |= D3D12_CLEAR_FLAG_DEPTH;
+    if (PassDesc.DepthStencil->StencilLoad == offloadtest::LoadAction::Clear)
+      Flags |= D3D12_CLEAR_FLAG_STENCIL;
+    if (Flags != 0) {
+      if (!DSTexture->Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *CV =
+          std::get_if<ClearDepthStencil>(&*DSTexture->Desc.OptimizedClearValue);
+      assert(CV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CmdList->ClearDepthStencilView(DSVHandle, Flags, CV->Depth, CV->Stencil,
+                                     0, nullptr);
+    }
+  }
+
+  auto Enc = std::make_unique<DXRenderEncoder>(*this);
+  Enc->pushDebugGroup("RenderEncoder");
+  return Enc;
+}
+
 class DXDevice : public offloadtest::Device {
 private:
   ComPtr<IDXCoreAdapter> Adapter;
-  ComPtr<ID3D12Device> Device;
+  ComPtr<ID3D12DeviceX> Device;
   DXQueue GraphicsQueue;
   Capabilities Caps;
   DescriptorAllocator RTVAllocator;
@@ -687,9 +914,10 @@ private:
     std::unique_ptr<PipelineState> Pipeline;
 
     // Resources for graphics pipelines.
-    std::unique_ptr<offloadtest::Texture> RT;
+    std::unique_ptr<offloadtest::RenderPass> RenderPass;
+    std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
-    std::unique_ptr<offloadtest::Texture> DS;
+    std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -697,7 +925,7 @@ private:
   };
 
 public:
-  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12Device> D, DXQueue Q,
+  DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
            std::string Desc)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
@@ -930,6 +1158,85 @@ public:
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
   }
 
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       std::optional<ShaderContainer> AS, ShaderContainer MS,
+                       std::optional<ShaderContainer> PS) {
+    assert(RTFormats.size() <= 8);
+
+    ComPtr<ID3D12RootSignature> RootSig;
+    if (auto Err = createRootSignature(Name, BindingsDesc, MS,
+                                       /*IsGraphics=*/true, RootSig))
+      return Err;
+
+    const D3D12_SHADER_BYTECODE MSBytecode = {MS.Shader->getBuffer().data(),
+                                              MS.Shader->getBuffer().size()};
+    if (MSBytecode.BytecodeLength == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Mesh shader pipeline requires a mesh shader.");
+
+    // The amplification (task) shader is optional.
+    D3D12_SHADER_BYTECODE ASBytecode = {};
+    if (AS) {
+      assert((*AS).Shader->getBufferSize() > 0 &&
+             "The passed task/amplification shader was empty.");
+      ASBytecode = {(*AS).Shader->getBuffer().data(),
+                    (*AS).Shader->getBuffer().size()};
+    }
+
+    // The pixel shader is optional
+    D3D12_SHADER_BYTECODE PSBytecode = {};
+    if (PS) {
+      assert((*PS).Shader->getBufferSize() > 0 &&
+             "The passed pixel shader was empty.");
+      PSBytecode = {(*PS).Shader->getBuffer().data(),
+                    (*PS).Shader->getBuffer().size()};
+    }
+
+    D3D12_RT_FORMAT_ARRAY RTArray = {};
+    RTArray.NumRenderTargets = static_cast<UINT>(RTFormats.size());
+    for (size_t I = 0; I < RTFormats.size(); ++I)
+      RTArray.RTFormats[I] = getDXGIFormat(RTFormats[I]);
+
+    CD3DX12_DEPTH_STENCIL_DESC1 DepthStencil(D3D12_DEFAULT);
+    DepthStencil.DepthEnable = true;
+    DepthStencil.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
+    DepthStencil.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    DepthStencil.StencilEnable = false;
+
+    DXGI_SAMPLE_DESC SampleDesc = {};
+    SampleDesc.Count = 1;
+
+    CD3DX12_PIPELINE_MESH_STATE_STREAM Stream;
+    Stream.pRootSignature = RootSig.Get();
+    Stream.AS = ASBytecode;
+    Stream.MS = MSBytecode;
+    Stream.PS = PSBytecode;
+    Stream.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    Stream.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    Stream.DepthStencilState = DepthStencil;
+    Stream.SampleMask = UINT_MAX;
+    Stream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    Stream.RTVFormats = RTArray;
+    if (DSFormat)
+      Stream.DSVFormat = getDXGIFormat(*DSFormat);
+    Stream.SampleDesc = SampleDesc;
+
+    const D3D12_PIPELINE_STATE_STREAM_DESC StreamDesc = {sizeof(Stream),
+                                                         &Stream};
+
+    ComPtr<ID3D12PipelineState> PSO;
+    if (auto Err = HR::toError(
+            Device->CreatePipelineState(&StreamDesc, IID_PPV_ARGS(&PSO)),
+            "Failed to create mesh shader PSO."))
+      return Err;
+
+    return std::make_unique<DXPipelineState>(Name, RootSig, PSO);
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return DXFence::create(Device.Get(), Name);
@@ -1049,7 +1356,7 @@ public:
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
   create(ComPtr<IDXCoreAdapter> Adapter, const DeviceConfig &Config) {
-    ComPtr<ID3D12Device> Device;
+    ComPtr<ID3D12DeviceX> Device;
     if (auto Err =
             HR::toError(D3D12CreateDevice(Adapter.Get(), D3D_FEATURE_LEVEL_11_0,
                                           IID_PPV_ARGS(&Device)),
@@ -1123,7 +1430,7 @@ public:
 #include "DXFeatures.def"
   }
 
-  static llvm::Error configureInfoQueue(ID3D12Device *Device) {
+  static llvm::Error configureInfoQueue(ID3D12DeviceX *Device) {
 #ifdef _WIN32
     ComPtr<ID3D12InfoQueue> InfoQueue;
     if (auto Err = HR::toError(Device->QueryInterface(InfoQueue.GetAddressOf()),
@@ -1153,6 +1460,11 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
     return DXCommandBuffer::create(Device);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    return std::make_unique<DXRenderPass>(Desc);
   }
 
   void addResourceUploadCommands(Resource &R, InvocationState &IS,
@@ -1640,11 +1952,17 @@ public:
     }
 
     if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
-      auto VBOrErr = offloadtest::createVertexBufferFromCPUBuffer(
-          *this, *P.Bindings.VertexBufferPtr);
-      if (!VBOrErr)
-        return VBOrErr.takeError();
-      IS.VB = std::move(*VBOrErr);
+      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::CpuToGpu;
+      BufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
+                                           VBuffer->Data[0].get(),
+                                           VBuffer->size(), nullptr, nullptr);
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.VB = std::move(*BufOrErr);
       llvm::outs() << "Vertex buffer created.\n";
     }
 
@@ -1862,7 +2180,7 @@ public:
 
     // Query the copy footprint to get the actual padded row pitch used by
     // the copy operation (D3D12 requires 256-byte aligned rows).
-    auto &RT = llvm::cast<DXTexture>(*IS.RT);
+    auto &RT = llvm::cast<DXTexture>(*IS.RenderTarget);
     const D3D12_RESOURCE_DESC RTDesc = RT.Resource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
     uint32_t NumRows = 0;
@@ -1888,7 +2206,7 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RT = std::move(*TexOrErr);
+    IS.RenderTarget = std::move(*TexOrErr);
 
     // Create readback buffer sized for the pixel data with row pitch padded
     // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
@@ -1912,13 +2230,13 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DS = std::move(*TexOrErr);
+    IS.DepthStencil = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    auto &RT = llvm::cast<DXTexture>(*IS.RT);
-    auto &DS = llvm::cast<DXTexture>(*IS.DS);
+    auto &RT = llvm::cast<DXTexture>(*IS.RenderTarget);
+    auto &DS = llvm::cast<DXTexture>(*IS.DepthStencil);
     auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
 
     const DXPipelineState &DXPipeline =
@@ -1930,46 +2248,47 @@ public:
       IS.CB->CmdList->SetGraphicsRootDescriptorTable(
           0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
-    IS.CB->CmdList->SetPipelineState(DXPipeline.PSO.Get());
 
-    IS.CB->CmdList->OMSetRenderTargets(1, &RT.RTVHandle, false, &DS.DSVHandle);
+    RenderPassBeginDesc BeginDesc = {};
+    BeginDesc.Pass = IS.RenderPass.get();
+    BeginDesc.ColorAttachments.push_back(&RT);
+    BeginDesc.DepthStencil = &DS;
 
-    const auto *DepthCV =
-        std::get_if<ClearDepthStencil>(&*DS.Desc.OptimizedClearValue);
-    if (!DepthCV)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Depth/stencil clear value must be a ClearDepthStencil.");
-    IS.CB->CmdList->ClearDepthStencilView(
-        DS.DSVHandle, D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL,
-        DepthCV->Depth, DepthCV->Stencil, 0, nullptr);
+    auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
+    if (!EncOrErr)
+      return EncOrErr.takeError();
+    auto &Encoder = *EncOrErr.get();
 
-    D3D12_VIEWPORT VP = {};
+    Viewport VP;
     VP.Width =
         static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
     VP.Height =
         static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    VP.MinDepth = 0.0f;
-    VP.MaxDepth = 1.0f;
-    VP.TopLeftX = 0.0f;
-    VP.TopLeftY = 0.0f;
-    IS.CB->CmdList->RSSetViewports(1, &VP);
-    const D3D12_RECT Scissor = {0, 0, static_cast<LONG>(VP.Width),
-                                static_cast<LONG>(VP.Height)};
-    IS.CB->CmdList->RSSetScissorRects(1, &Scissor);
+    Encoder.setViewport(VP);
 
-    if (IS.VB) {
-      auto &VBBuf = llvm::cast<DXBuffer>(*IS.VB);
-      D3D12_VERTEX_BUFFER_VIEW VBView = {};
-      VBView.BufferLocation = VBBuf.Buffer->GetGPUVirtualAddress();
-      VBView.SizeInBytes = static_cast<UINT>(IS.VB->getSizeInBytes());
-      VBView.StrideInBytes = P.Bindings.getVertexStride();
-      IS.CB->CmdList->IASetVertexBuffers(0, 1, &VBView);
+    ScissorRect Scissor;
+    Scissor.Width = static_cast<uint32_t>(VP.Width);
+    Scissor.Height = static_cast<uint32_t>(VP.Height);
+    Encoder.setScissor(Scissor);
+
+    if (P.isTraditionalRaster()) {
+      if (IS.VB)
+        Encoder.setVertexBuffer(0, IS.VB.get(), 0,
+                                P.Bindings.getVertexStride());
+
+      if (auto Err =
+              Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                    /*InstanceCount=*/1))
+        return Err;
+    } else {
+      if (auto Err = Encoder.dispatchMesh(
+              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
+        return Err;
     }
 
-    IS.CB->CmdList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-    IS.CB->CmdList->DrawInstanced(P.getVertexCount(), 1, 0, 0);
+    Encoder.endEncoding();
 
     // Transition the render target to copy source and copy to the readback
     // buffer.
@@ -2064,6 +2383,18 @@ public:
       BindingsDesc.DescriptorSetDescs.push_back(Layout);
     }
 
+    if (P.isRaster()) {
+      // Create render target and depth/stencil
+      if (auto Err = createRenderTarget(P, State))
+        return Err;
+      llvm::outs() << "Render target created.\n";
+      // TODO: Always created for graphics pipelines. Consider making this
+      // conditional on the pipeline definition.
+      if (auto Err = createDepthStencil(P, State))
+        return Err;
+      llvm::outs() << "Depth stencil created.\n";
+    }
+
     if (P.isCompute()) {
       // This is an arbitrary distinction that we could alter in the future.
       if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
@@ -2085,65 +2416,118 @@ public:
         return Err;
       llvm::outs() << "Compute command list created.\n";
 
-    } else if (P.isTraditionalRaster()) {
-      // Create render target, depth/stencil, readback and vertex buffer and
-      // PSO.
-      if (auto Err = createRenderTarget(P, State))
-        return Err;
-      llvm::outs() << "Render target created.\n";
-      // TODO: Always created for graphics pipelines. Consider making this
-      // conditional on the pipeline definition.
-      if (auto Err = createDepthStencil(P, State))
-        return Err;
-      llvm::outs() << "Depth stencil created.\n";
+    } else if (P.isRaster()) {
+      // Begin a render pass: bind RT/DSV and clear depth-stencil. Color
+      // load action is Load — the existing inline code didn't clear color.
+      ColorAttachmentFormatDesc ColorAttachment = {};
+      ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
+      ColorAttachment.Load = LoadAction::Load;
+      ColorAttachment.Store = StoreAction::Store;
 
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
-      for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
+      DepthStencilAttachmentFormatDesc DSAttachment = {};
+      DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
+      DSAttachment.DepthLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::Store;
+      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilStore = StoreAction::DontCare;
+
+      RenderPassDesc PassDesc;
+      PassDesc.ColorAttachments.push_back(ColorAttachment);
+      PassDesc.DepthStencil = DSAttachment;
+
+      auto RenderPassOrErr = createRenderPass(PassDesc);
+      if (!RenderPassOrErr)
+        return RenderPassOrErr.takeError();
+      State.RenderPass = std::move(*RenderPassOrErr);
+      llvm::outs() << "Render pass created.\n";
+
+      if (P.isTraditionalRaster()) {
+        ShaderContainer VS = {};
+        ShaderContainer PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Vertex) {
+            VS.EntryPoint = Shader.Entry;
+            VS.Shader = Shader.Shader.get();
+          } else if (Shader.Stage == Stages::Pixel) {
+            PS.EntryPoint = Shader.Entry;
+            PS.Shader = Shader.Shader.get();
+          }
         }
-      }
 
-      // Create the input layout based on the vertex attributes.
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
-      for (auto &Attr : P.Bindings.VertexAttributes) {
-        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+        // Create the input layout based on the vertex attributes.
+        llvm::SmallVector<InputLayoutDesc> InputLayout;
+        for (auto &Attr : P.Bindings.VertexAttributes) {
+          auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+          if (!FormatOrErr)
+            return FormatOrErr.takeError();
+
+          InputLayoutDesc Desc = {};
+          Desc.Name = Attr.Name;
+          Desc.Fmt = *FormatOrErr;
+          Desc.OffsetInBytes = Attr.Offset;
+          InputLayout.push_back(Desc);
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr = createPipelineVsPs(
+            "Traditional Raster Pipeline State", BindingsDesc, InputLayout,
+            RTFormats, Format::D32FloatS8Uint, VS, PS);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Traditional Raster Pipeline created.\n";
+
+      } else if (P.isMeshShaderRaster()) {
+        std::optional<ShaderContainer> AS = {};
+        ShaderContainer MS = {};
+        std::optional<ShaderContainer> PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Amplification) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            AS = Container;
+          } else if (Shader.Stage == Stages::Mesh) {
+            MS.EntryPoint = Shader.Entry;
+            MS.Shader = Shader.Shader.get();
+          } else if (Shader.Stage == Stages::Pixel) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            PS = Container;
+          }
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr =
+            createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
+                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
 
-      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
-                                  P.Bindings.RTargetBufferPtr->Channels);
-      if (!FormatOrErr)
-        return FormatOrErr.takeError();
-
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
-      if (!PipelineStateOrErr)
-        return PipelineStateOrErr.takeError();
-      State.Pipeline = std::move(*PipelineStateOrErr);
-      llvm::outs() << "Graphics Pipeline created.\n";
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
     } else {
-      return llvm::createStringError(
-          "Pipeline was neither Compute nor Traditional Raster");
+      return llvm::createStringError("Pipeline was neither Compute nor Raster");
     }
 
     auto SubmitResult = GraphicsQueue.submit(std::move(State.CB));

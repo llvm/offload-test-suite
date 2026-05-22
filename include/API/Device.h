@@ -18,6 +18,7 @@
 #include "API/Buffer.h"
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
+#include "API/RenderPass.h"
 #include "API/Texture.h"
 
 #include "Support/Pipeline.h"
@@ -175,6 +176,9 @@ public:
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
 
+  virtual llvm::Expected<std::unique_ptr<RenderPass>>
+  createRenderPass(const RenderPassDesc &Desc) = 0;
+
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual llvm::Expected<std::unique_ptr<CommandBuffer>>
@@ -208,9 +212,11 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 llvm::Expected<std::unique_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
-// Creates a vertex buffer and uploads the given CPU-side vertex data into it.
-llvm::Expected<std::unique_ptr<Buffer>>
-createVertexBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createBufferWithData(Device &Dev, std::string Name,
+                     const BufferCreateDesc &Desc, const void *Data,
+                     size_t SizeInBytes, ComputeEncoder *Encoder,
+                     std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
 } // namespace offloadtest
 

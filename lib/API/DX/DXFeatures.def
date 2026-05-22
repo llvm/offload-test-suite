@@ -22,9 +22,16 @@ ROOT_SIGNATURE_ENUM(RootSig_v1_2, 1.2, 0x3)
 #undef ROOT_SIGNATURE_ENUM
 #endif
 
+#ifdef MESH_SHADER_TIER_ENUM
+MESH_SHADER_TIER_ENUM(MeshShaderNotSupported, NotSupported, 0)
+MESH_SHADER_TIER_ENUM(MeshShaderTier1, Tier1,10)
+#undef MESH_SHADER_TIER_ENUM
+#endif
+
 #ifdef D3D_FEATURE_ENUM
 D3D_FEATURE_ENUM(directx::ShaderModel, HighestShaderModel)
 D3D_FEATURE_ENUM(directx::RootSignature, HighestRootSignatureVersion)
+D3D_FEATURE_ENUM(directx::MeshShaderTier, MeshShaderTier)
 #undef D3D_FEATURE_ENUM
 #endif
 
