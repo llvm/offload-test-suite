@@ -21,10 +21,5 @@ jobs:
       OS: windows
       SKU: windows-nvidia
       BuildType: Debug
-      TestTarget: check-hlsl-d3d12
-      OffloadTest-branch: fix-test-job-regen
-      OffloadTest-fork: bob80905
-      LLVM-branch: hlsl-offload-distribution
-      LLVM-fork: bob80905
-      SplitBuild: true
+      TestTarget: check-hlsl-d3d12      
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
