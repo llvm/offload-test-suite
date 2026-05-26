@@ -67,6 +67,45 @@ template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
 
+// RAII guard that serializes D3D12 pipeline state object (PSO) creation across
+// all tests running in parallel. Each test invocation runs in its own
+// offloader.exe process, so an in-process std::mutex would not be enough; we
+// use a named Windows mutex so that all offloader processes in the same logon
+// session share a single lock.
+#ifdef _WIN32
+namespace {
+class GlobalPSOCreationLock {
+  HANDLE Mutex = nullptr;
+  bool Acquired = false;
+
+public:
+  GlobalPSOCreationLock() {
+    Mutex = ::CreateMutexW(nullptr, FALSE,
+                           L"OffloadTest.D3D12.PipelineStateCreation");
+    if (Mutex != nullptr) {
+      const DWORD WaitResult = ::WaitForSingleObject(Mutex, INFINITE);
+      Acquired = (WaitResult == WAIT_OBJECT_0 || WaitResult == WAIT_ABANDONED);
+    }
+  }
+
+  ~GlobalPSOCreationLock() {
+    if (Mutex != nullptr) {
+      if (Acquired)
+        ::ReleaseMutex(Mutex);
+      ::CloseHandle(Mutex);
+    }
+  }
+
+  GlobalPSOCreationLock(const GlobalPSOCreationLock &) = delete;
+  GlobalPSOCreationLock &operator=(const GlobalPSOCreationLock &) = delete;
+};
+} // namespace
+#else
+namespace {
+struct GlobalPSOCreationLock {};
+} // namespace
+#endif
+
 static void dumpD3DInfoQueues(void *) {
   const std::lock_guard<std::mutex> Lock(SignalHandlerMutex);
   for (ID3D12DeviceX *Device : SignalHandlerDevices) {
@@ -1113,10 +1152,13 @@ public:
         D3D12_PIPELINE_STATE_FLAG_NONE};
 
     ComPtr<ID3D12PipelineState> PSO;
-    if (auto Err = HR::toError(
-            Device->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&PSO)),
-            "Failed to create PSO."))
-      return Err;
+    {
+      const GlobalPSOCreationLock Lock;
+      if (auto Err = HR::toError(
+              Device->CreateComputePipelineState(&Desc, IID_PPV_ARGS(&PSO)),
+              "Failed to create PSO."))
+        return Err;
+    }
 
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
   }
@@ -1181,10 +1223,13 @@ public:
     PSODesc.SampleDesc.Count = 1;
 
     ComPtr<ID3D12PipelineState> PSO;
-    if (auto Err = HR::toError(
-            Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO)),
-            "Failed to create graphics PSO."))
-      return Err;
+    {
+      const GlobalPSOCreationLock Lock;
+      if (auto Err = HR::toError(
+              Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO)),
+              "Failed to create graphics PSO."))
+        return Err;
+    }
 
     return std::make_unique<DXPipelineState>(
         Name, RootSig, PSO, getDXPrimitiveTopology(Desc.Topology));
