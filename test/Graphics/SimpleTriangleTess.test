@@ -159,11 +159,12 @@ DescriptorSets: []
 ...
 #--- end
 
-# Metal has no native Hull/Domain shader stages; tessellation would require
-# routing through mesh shaders via the Metal IR converter. Skip this backend.
+# Metal has tessellation but no Hull/Domain stages: HS is a compute kernel
+# writing per-patch factors, DS is a post-tessellation vertex function tagged
+# [[patch(...)]]. Mapping HLSL HS/DS onto that isn't wired up, so skip this backend.
 # UNSUPPORTED: Metal
 
-# XFAIL: Clang && !Vulkan
+# XFAIL: Clang
 # REQUIRES: goldenimage
 
 # RUN: split-file %s %t

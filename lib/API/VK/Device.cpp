@@ -1684,11 +1684,10 @@ public:
     InputAssemblyCI.topology = getVkPrimitiveTopology(Desc.Topology);
 
     VkPipelineTessellationStateCreateInfo TessellationCI = {};
-    const bool HasTessellation = HS.has_value() && DS.has_value();
-    if (HasTessellation) {
+    if (Desc.PatchControlPoints) {
       TessellationCI.sType =
           VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
-      TessellationCI.patchControlPoints = Desc.PatchControlPoints;
+      TessellationCI.patchControlPoints = *Desc.PatchControlPoints;
     }
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
@@ -1741,7 +1740,8 @@ public:
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
     PipelineCI.pInputAssemblyState = &InputAssemblyCI;
-    PipelineCI.pTessellationState = HasTessellation ? &TessellationCI : nullptr;
+    PipelineCI.pTessellationState =
+        Desc.PatchControlPoints ? &TessellationCI : nullptr;
     PipelineCI.pViewportState = &ViewportCI;
     PipelineCI.pRasterizationState = &RastCI;
     PipelineCI.pMultisampleState = &MultisampleCI;

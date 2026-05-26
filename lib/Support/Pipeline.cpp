@@ -55,8 +55,6 @@ namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
-  if (auto Err = P.validatePipelineKind())
-    I.setError(llvm::toString(std::move(Err)));
 
   // Runtime-specific settings.
   I.mapOptional("RuntimeSettings", P.Settings);
@@ -67,6 +65,12 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
   I.mapOptional("PushConstants", P.PushConstants);
+
+  // Runs here (not right after Shaders) because the tessellation topology
+  // check reads Bindings.Topology and Bindings.PatchControlPoints. Must
+  // still run before validateDispatchParameters, which reads P.Kind.
+  if (auto Err = P.validatePipelineKind())
+    I.setError(llvm::toString(std::move(Err)));
 
   I.mapOptional("DispatchParameters", P.DispatchParameters);
   if (auto Err = P.validateDispatchParameters())
@@ -427,7 +431,7 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("RenderTarget", B.RenderTarget);
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
-  I.mapOptional("PatchControlPoints", B.PatchControlPoints, uint32_t{0});
+  I.mapOptional("PatchControlPoints", B.PatchControlPoints);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -614,17 +618,17 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
           "pipeline requires both stages, never just one.");
 
     const bool IsTessellated = HasHS && HasDS;
-    const bool IsPatchList =
-        Bindings.Topology == PrimitiveTopology::PatchList;
+    const bool IsPatchList = Bindings.Topology == PrimitiveTopology::PatchList;
     if (IsTessellated != IsPatchList)
       return llvm::createStringError(
           "Tessellation pipelines must use PatchList topology, and PatchList "
           "topology requires Hull and Domain shaders.");
-    if (IsPatchList && (Bindings.PatchControlPoints < 1 ||
-                        Bindings.PatchControlPoints > 32))
+    if (IsPatchList && (!Bindings.PatchControlPoints ||
+                        *Bindings.PatchControlPoints < 1 ||
+                        *Bindings.PatchControlPoints > 32))
       return llvm::createStringError(
           "PatchList topology requires PatchControlPoints in the range 1..32.");
-    if (!IsPatchList && Bindings.PatchControlPoints != 0)
+    if (!IsPatchList && Bindings.PatchControlPoints)
       return llvm::createStringError(
           "PatchControlPoints is only valid with PatchList topology.");
 

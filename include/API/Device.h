@@ -87,8 +87,10 @@ struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
   PrimitiveTopology Topology;
-  // Only meaningful when Topology == PatchList. Validated in Pipeline.cpp.
-  uint32_t PatchControlPoints = 0;
+  // Set if Topology == PatchList. Validated in
+  // Pipeline.cpp::validatePipelineKind.
+  std::optional<uint32_t> PatchControlPoints;
+
   ShaderContainer VS;
   // Hull and Domain are independent optionals here; Pipeline.cpp enforces that
   // they must be set as a pair (and only with PatchList topology).

@@ -21,6 +21,7 @@
 #include "llvm/Support/YAMLTraits.h"
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -42,9 +43,8 @@ enum class Stages {
   Mesh
 };
 inline constexpr std::array AllStages = {
-    Stages::Compute,       Stages::Vertex, Stages::Hull, Stages::Domain,
-    Stages::Geometry,      Stages::Pixel,  Stages::Amplification,
-    Stages::Mesh,
+    Stages::Compute,  Stages::Vertex, Stages::Hull,          Stages::Domain,
+    Stages::Geometry, Stages::Pixel,  Stages::Amplification, Stages::Mesh,
 };
 inline constexpr size_t NumStages = AllStages.size();
 
@@ -405,10 +405,11 @@ struct IOBindings {
   CPUBuffer *RTargetBufferPtr = nullptr;
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
-  // Number of control points per patch. Required when Topology == PatchList.
-  // Valid range is 1..32 (matches both D3D12's per-CP-patchlist topologies and
-  // Vulkan's VkPipelineTessellationStateCreateInfo::patchControlPoints).
-  uint32_t PatchControlPoints = 0;
+  // Set if Topology == PatchList. Validated in
+  // Pipeline.cpp::validatePipelineKind. Valid range is 1..32 (matches both
+  // D3D12's per-CP-patchlist topologies and Vulkan's
+  // VkPipelineTessellationStateCreateInfo::patchControlPoints).
+  std::optional<uint32_t> PatchControlPoints;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;

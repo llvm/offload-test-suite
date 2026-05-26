@@ -172,7 +172,7 @@ getDXPrimitiveTopologyType(PrimitiveTopology Topology) {
 
 static D3D_PRIMITIVE_TOPOLOGY
 getDXPrimitiveTopology(PrimitiveTopology Topology,
-                       uint32_t PatchControlPoints) {
+                       std::optional<uint32_t> PatchControlPoints) {
   switch (Topology) {
   case PrimitiveTopology::TriangleList:
     return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
@@ -180,10 +180,11 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
     return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
   case PrimitiveTopology::PatchList:
     // _N_CONTROL_POINT_PATCHLIST enums are contiguous from 1..32.
-    assert(PatchControlPoints >= 1 && PatchControlPoints <= 32);
+    assert(PatchControlPoints && *PatchControlPoints >= 1 &&
+           *PatchControlPoints <= 32);
     return static_cast<D3D_PRIMITIVE_TOPOLOGY>(
         D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST +
-        (PatchControlPoints - 1));
+        (*PatchControlPoints - 1));
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
