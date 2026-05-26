@@ -716,14 +716,12 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
                                      "Scissor must be set before drawing.");
 
     const auto &DXPSO = llvm::cast<DXPipelineState>(PSO);
-    if (!DXPSO.Topology)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Pipeline bound for drawing has no primitive topology (not a "
-          "graphics pipeline).");
     CB.CmdList->SetGraphicsRootSignature(DXPSO.RootSig.Get());
     CB.CmdList->SetPipelineState(DXPSO.PSO.Get());
-    CB.CmdList->IASetPrimitiveTopology(*DXPSO.Topology);
+    // Mesh-shader pipelines bypass the input assembler and carry no IA
+    // topology; only bind one when the pipeline actually has one.
+    if (DXPSO.Topology)
+      CB.CmdList->IASetPrimitiveTopology(*DXPSO.Topology);
     return llvm::Error::success();
   }
 
@@ -1126,7 +1124,7 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>>
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BndDesc,
-      const GraphicsPipelineCreateDesc &Desc) override {
+      const TraditionalRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
@@ -2489,7 +2487,7 @@ public:
           }
         }
 
-        GraphicsPipelineCreateDesc PipelineDesc = {};
+        TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         for (auto &Shader : P.Shaders) {

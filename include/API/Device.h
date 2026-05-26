@@ -82,7 +82,7 @@ struct ShaderContainer {
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
 
-struct GraphicsPipelineCreateDesc {
+struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<InputLayoutDesc> InputLayout;
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
@@ -190,9 +190,9 @@ public:
                    ShaderContainer CS) = 0;
 
   virtual llvm::Expected<std::unique_ptr<PipelineState>>
-  createTraditionalRasterPipeline(llvm::StringRef Name,
-                                  const BindingsDesc &BindingsDesc,
-                                  const GraphicsPipelineCreateDesc &Desc) = 0;
+  createTraditionalRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const TraditionalRasterPipelineCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;

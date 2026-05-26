@@ -1458,7 +1458,7 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>>
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-      const GraphicsPipelineCreateDesc &Desc) override {
+      const TraditionalRasterPipelineCreateDesc &Desc) override {
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = Desc.PS;
     const std::optional<ShaderContainer> &GS = Desc.GS;
@@ -3220,7 +3220,7 @@ public:
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
     } else if (P.isTraditionalRaster()) {
-      GraphicsPipelineCreateDesc PipelineDesc = {};
+      TraditionalRasterPipelineCreateDesc PipelineDesc = {};
       PipelineDesc.Topology = P.Bindings.Topology;
       PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {

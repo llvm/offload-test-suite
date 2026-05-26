@@ -1582,7 +1582,7 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>>
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-      const GraphicsPipelineCreateDesc &Desc) override {
+      const TraditionalRasterPipelineCreateDesc &Desc) override {
     if (Desc.GS)
       return llvm::createStringError(
           std::errc::not_supported,
@@ -1812,7 +1812,7 @@ public:
       if (auto Err = createComputeCommands(P, IS))
         return Err;
     } else {
-      GraphicsPipelineCreateDesc PipelineDesc = {};
+      TraditionalRasterPipelineCreateDesc PipelineDesc = {};
       PipelineDesc.Topology = P.Bindings.Topology;
       PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
