@@ -18,9 +18,6 @@ struct GSOutput {
   float4 position : SV_POSITION;
 };
 
-// Identity geometry shader: one triangle in, one triangle out, vertices
-// untouched. Exercises the GS pipeline path on the default TriangleList
-// topology without any expansion or topology change.
 [maxvertexcount(3)]
 void main(triangle GSInput input[3], inout TriangleStream<GSOutput> stream) {
   GSOutput v;
