@@ -614,18 +614,16 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
     const bool HasDS = HasShaderType[llvm::to_underlying(Stages::Domain)];
     if (HasHS != HasDS)
       return llvm::createStringError(
-          "Hull and Domain shaders must be used together: a tessellation "
-          "pipeline requires both stages, never just one.");
+          "Hull and Domain shaders must be used together");
 
     const bool IsTessellated = HasHS && HasDS;
     const bool IsPatchList = Bindings.Topology == PrimitiveTopology::PatchList;
     if (IsTessellated != IsPatchList)
       return llvm::createStringError(
-          "Tessellation pipelines must use PatchList topology, and PatchList "
-          "topology requires Hull and Domain shaders.");
-    if (IsPatchList && (!Bindings.PatchControlPoints ||
-                        *Bindings.PatchControlPoints < 1 ||
-                        *Bindings.PatchControlPoints > 32))
+          "Tessellation pipelines must use PatchList topology");
+    if (IsPatchList &&
+        (!Bindings.PatchControlPoints || *Bindings.PatchControlPoints < 1 ||
+         *Bindings.PatchControlPoints > 32))
       return llvm::createStringError(
           "PatchList topology requires PatchControlPoints in the range 1..32.");
     if (!IsPatchList && Bindings.PatchControlPoints)
