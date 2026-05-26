@@ -27,10 +27,10 @@ COMPLETED_WINDOW_HOURS = 3
 
 # ANSI color codes per vendor
 VENDOR_COLORS = {
-    "intel": "\033[34m",   # blue
-    "amd": "\033[31m",     # red
+    "intel": "\033[34m",  # blue
+    "amd": "\033[31m",  # red
     "nvidia": "\033[32m",  # green
-    "qc": "\033[90m",      # gray
+    "qc": "\033[90m",  # gray
 }
 RESET = "\033[0m"
 
