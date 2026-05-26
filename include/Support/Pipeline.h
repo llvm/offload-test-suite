@@ -26,15 +26,26 @@
 
 namespace offloadtest {
 
-enum class Stages { Compute, Vertex, Pixel };
+enum class Stages {
+  // Compute
+  Compute,
+
+  // Traditional Raster
+  Vertex,
+  Geometry,
+  Pixel,
+
+  // Mesh Shader Raster
+  Amplification,
+  Mesh
+};
 inline constexpr std::array AllStages = {
-    Stages::Compute,
-    Stages::Vertex,
-    Stages::Pixel,
+    Stages::Compute, Stages::Vertex,        Stages::Geometry,
+    Stages::Pixel,   Stages::Amplification, Stages::Mesh,
 };
 inline constexpr size_t NumStages = AllStages.size();
 
-enum class ShaderPipelineKind { Compute, TraditionalRaster };
+enum class ShaderPipelineKind { Compute, TraditionalRaster, MeshShaderRaster };
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -389,6 +400,7 @@ struct IOBindings {
 
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
+  PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
@@ -502,6 +514,12 @@ struct Pipeline {
   bool isCompute() const { return Kind == ShaderPipelineKind::Compute; }
   bool isTraditionalRaster() const {
     return Kind == ShaderPipelineKind::TraditionalRaster;
+  }
+  bool isMeshShaderRaster() const {
+    return Kind == ShaderPipelineKind::MeshShaderRaster;
+  }
+  bool isRaster() const {
+    return isTraditionalRaster() || isMeshShaderRaster();
   }
 };
 } // namespace offloadtest
@@ -712,7 +730,19 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
     ENUM_CASE(Compute);
     ENUM_CASE(Vertex);
+    ENUM_CASE(Geometry);
     ENUM_CASE(Pixel);
+    ENUM_CASE(Amplification);
+    ENUM_CASE(Mesh);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
+  static void enumeration(IO &I, offloadtest::PrimitiveTopology &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::PrimitiveTopology::Val)
+    ENUM_CASE(TriangleList);
+    ENUM_CASE(PointList);
 #undef ENUM_CASE
   }
 };

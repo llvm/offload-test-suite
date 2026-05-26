@@ -34,6 +34,13 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
 macro(add_offloadtest_tool name)
   add_llvm_executable(${name} ${ARGN})
   set_target_properties(${name} PROPERTIES FOLDER "HLSL Test/Tools")
+  # Install offload-test tools under a single umbrella component so the
+  # standalone test distribution can pull them all with one
+  # `install-offload-tools` target. LLVM_TOOLS_INSTALL_DIR defaults to
+  # `bin` when building inside an LLVM tree.
+  install(TARGETS ${name}
+    COMPONENT offload-tools
+    RUNTIME DESTINATION "${LLVM_TOOLS_INSTALL_DIR}")
 endmacro()
 
 macro(add_offloadtest_library name)
@@ -135,3 +142,13 @@ add_subdirectory(tools)
 
 add_subdirectory(unittests)
 add_subdirectory(test)
+
+# Aggregate install target for the offload-tools component. After the
+# `add_subdirectory(tools)` call above has registered every tool under the
+# `offload-tools` component via `add_offloadtest_tool`, this provides a
+# single `install-offload-tools` target that builds + installs all of them.
+if (NOT LLVM_ENABLE_IDE)
+  add_llvm_install_targets(install-offload-tools
+    COMPONENT offload-tools
+    DEPENDS api-query imgdiff offloader)
+endif()

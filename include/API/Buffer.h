@@ -28,6 +28,10 @@ enum class BufferUsage {
 struct BufferCreateDesc {
   MemoryLocation Location;
   BufferUsage Usage;
+
+  static BufferCreateDesc uploadBuffer() {
+    return BufferCreateDesc{MemoryLocation::CpuToGpu, BufferUsage::Storage};
+  }
 };
 
 class Buffer {

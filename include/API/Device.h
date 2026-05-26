@@ -18,6 +18,7 @@
 #include "API/Buffer.h"
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
+#include "API/RenderPass.h"
 #include "API/Texture.h"
 
 #include "Support/Pipeline.h"
@@ -26,6 +27,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 #include <cstdint>
@@ -78,6 +80,35 @@ struct ShaderContainer {
   std::string EntryPoint;
   const llvm::MemoryBuffer *Shader;
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
+};
+
+struct TraditionalRasterPipelineCreateDesc {
+  llvm::SmallVector<InputLayoutDesc> InputLayout;
+  llvm::SmallVector<Format> RTFormats;
+  std::optional<Format> DSFormat;
+  PrimitiveTopology Topology;
+  ShaderContainer VS;
+  // TODO: Optional Hull & Domain Shaders
+  std::optional<ShaderContainer> GS;
+  ShaderContainer PS;
+
+  void setShader(Stages Stage, ShaderContainer &&SC) {
+    switch (Stage) {
+    case Stages::Vertex:
+      VS = std::move(SC);
+      break;
+    case Stages::Geometry:
+      GS = std::move(SC);
+      break;
+    case Stages::Pixel:
+      PS = std::move(SC);
+      break;
+    case Stages::Compute:
+    case Stages::Amplification:
+    case Stages::Mesh:
+      llvm_unreachable("Not a traditional raster pipeline stage.");
+    }
+  }
 };
 
 class PipelineState {
@@ -145,6 +176,7 @@ class Device {
 protected:
   std::string Description;
   std::string DriverName;
+  std::string DriverVersion;
 
 public:
   virtual const Capabilities &getCapabilities() = 0;
@@ -159,11 +191,9 @@ public:
                    ShaderContainer CS) = 0;
 
   virtual llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) = 0;
+  createTraditionalRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const TraditionalRasterPipelineCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
@@ -175,6 +205,9 @@ public:
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
 
+  virtual llvm::Expected<std::unique_ptr<RenderPass>>
+  createRenderPass(const RenderPassDesc &Desc) = 0;
+
   virtual void printExtra(llvm::raw_ostream &OS) {}
 
   virtual llvm::Expected<std::unique_ptr<CommandBuffer>>
@@ -184,6 +217,7 @@ public:
 
   llvm::StringRef getDescription() const { return Description; }
   llvm::StringRef getDriverName() const { return DriverName; }
+  llvm::StringRef getDriverVersion() const { return DriverVersion; }
 };
 
 llvm::Error
@@ -208,9 +242,11 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 llvm::Expected<std::unique_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
-// Creates a vertex buffer and uploads the given CPU-side vertex data into it.
-llvm::Expected<std::unique_ptr<Buffer>>
-createVertexBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createBufferWithData(Device &Dev, std::string Name,
+                     const BufferCreateDesc &Desc, const void *Data,
+                     size_t SizeInBytes, ComputeEncoder *Encoder,
+                     std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
 } // namespace offloadtest
 
