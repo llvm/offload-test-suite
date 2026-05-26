@@ -39,6 +39,17 @@ int main(int ArgC, char **ArgV) {
     outs() << "- API: " << D->getAPIName() << "\n";
     outs() << "  Description: " << D->getDescription() << "\n";
     outs() << "  Driver: " << D->getDriverName() << "\n";
+    // Driver version strings can be vendor-specific freeform text that
+    // may contain ':' characters (e.g. Qualcomm's Vulkan driverInfo is
+    // "Driver Build: ..."). Emit as a double-quoted YAML scalar so
+    // lit.cfg.py's yaml.safe_load() can parse the output.
+    outs() << "  Driver Version: \"";
+    for (const char C : D->getDriverVersion()) {
+      if (C == '"' || C == '\\')
+        outs() << '\\';
+      outs() << C;
+    }
+    outs() << "\"\n";
     outs() << "  Features: \n";
     for (const auto &C : D->getCapabilities()) {
       outs() << "    ";

@@ -42,6 +42,7 @@
 #include "DXResources.h"
 
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Object/DXContainer.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -955,11 +956,12 @@ private:
 public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
-           std::string Desc)
+           std::string Desc, std::string DriverVer)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)) {
-    Description = Desc;
+    Description = std::move(Desc);
+    DriverVersion = std::move(DriverVer);
   }
   DXDevice(const DXDevice &) = delete;
   DXDevice &operator=(const DXDevice &) = delete;
@@ -1412,6 +1414,22 @@ public:
     std::vector<char> DescVec(BufferSize);
     Adapter->GetProperty(DXCoreAdapterProperty::DriverDescription, BufferSize,
                          (void *)DescVec.data());
+
+    std::string DriverVer;
+    if (Adapter->IsPropertySupported(DXCoreAdapterProperty::DriverVersion)) {
+      uint64_t Packed = 0;
+      if (SUCCEEDED(Adapter->GetProperty(DXCoreAdapterProperty::DriverVersion,
+                                         sizeof(Packed), &Packed))) {
+        const uint16_t Major = static_cast<uint16_t>((Packed >> 48) & 0xFFFF);
+        const uint16_t Minor = static_cast<uint16_t>((Packed >> 32) & 0xFFFF);
+        const uint16_t Build = static_cast<uint16_t>((Packed >> 16) & 0xFFFF);
+        const uint16_t Revision = static_cast<uint16_t>(Packed & 0xFFFF);
+        DriverVer = (llvm::Twine(Major) + "." + llvm::Twine(Minor) + "." +
+                     llvm::Twine(Build) + "." + llvm::Twine(Revision))
+                        .str();
+      }
+    }
+
     if (Config.EnableDebugLayer || Config.EnableValidationLayer)
       if (auto Err = configureInfoQueue(Device.Get()))
         return Err;
@@ -1433,7 +1451,7 @@ public:
     return std::make_unique<DXDevice>(
         Adapter, Device, std::move(*GraphicsQueueOrErr),
         std::move(*RTVHeapOrErr), std::move(*DSVHeapOrErr),
-        std::string(DescVec.data()));
+        std::string(DescVec.data()), std::move(DriverVer));
   }
 
   const Capabilities &getCapabilities() override {

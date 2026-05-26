@@ -176,6 +176,7 @@ class Device {
 protected:
   std::string Description;
   std::string DriverName;
+  std::string DriverVersion;
 
 public:
   virtual const Capabilities &getCapabilities() = 0;
@@ -216,6 +217,7 @@ public:
 
   llvm::StringRef getDescription() const { return Description; }
   llvm::StringRef getDriverName() const { return DriverName; }
+  llvm::StringRef getDriverVersion() const { return DriverVersion; }
 };
 
 llvm::Error
