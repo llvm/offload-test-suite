@@ -3,8 +3,6 @@ struct VSOutput {
   float4 position : SV_POSITION;
 };
 
-// Pass-through vertex shader. Real coverage decisions are made by the input
-// vertex data, not the shader.
 VSOutput main(float4 position : POSITION) {
   VSOutput o;
   o.position = position;
@@ -22,8 +20,7 @@ struct GSOutput {
 
 // Identity geometry shader: one triangle in, one triangle out, vertices
 // untouched. Exercises the GS pipeline path on the default TriangleList
-// topology without any expansion or topology change — if this test breaks
-// before gs_point_to_quad, the bug is in GS plumbing, not topology handling.
+// topology without any expansion or topology change.
 [maxvertexcount(3)]
 void main(triangle GSInput input[3], inout TriangleStream<GSOutput> stream) {
   GSOutput v;
@@ -81,13 +78,10 @@ DescriptorSets: []
 ...
 #--- end
 
-# Metal has no native geometry shader stage (equivalents would require mesh or
-# tessellation shaders). Skip this test on that backend entirely.
+# Metal has no native geometry shader stage.
 # UNSUPPORTED: Metal
 
 # Clang's HLSL frontend does not yet support geometry shader stream types
-# (e.g. TriangleStream<T>::Append), so compiling geometry.hlsl with clang-dxc
-# fails on both D3D12 and Vulkan code paths.
 # Tracked upstream: https://github.com/llvm/llvm-project/issues/136963
 # XFAIL: Clang
 
