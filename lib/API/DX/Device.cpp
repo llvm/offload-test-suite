@@ -919,12 +919,25 @@ private:
   struct ResourceSet {
     ComPtr<ID3D12Resource> Upload;
     ComPtr<ID3D12Resource> Buffer;
-    ComPtr<ID3D12Resource> Readback;
+    std::unique_ptr<offloadtest::Buffer> Readback;
     ComPtr<ID3D12Heap> Heap;
     ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
-                ComPtr<ID3D12Resource> Readback,
+                std::unique_ptr<offloadtest::Buffer> Readback,
                 ComPtr<ID3D12Heap> Heap = nullptr)
-        : Upload(Upload), Buffer(Buffer), Readback(Readback), Heap(Heap) {}
+        : Upload(Upload), Buffer(Buffer), Readback(std::move(Readback)),
+          Heap(Heap) {}
+    ResourceSet(const ResourceSet &) = delete;
+    ResourceSet(ResourceSet &&A)
+        : Upload(A.Upload), Buffer(A.Buffer), Readback(std::move(A.Readback)),
+          Heap(A.Heap) {}
+    ResourceSet &operator=(const ResourceSet &) = delete;
+    ResourceSet &operator=(ResourceSet &&A) {
+      Upload = A.Upload;
+      Buffer = A.Buffer;
+      Readback = std::move(A.Readback);
+      Heap = A.Heap;
+      return *this;
+    }
   };
 
   // ResourceBundle will contain one ResourceSet for a singular resource
@@ -1665,7 +1678,7 @@ public:
 
   // returns the next available HeapIdx
   uint32_t bindSRV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
-                   ResourceBundle ResBundle) {
+                   const ResourceBundle &ResBundle) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     const D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = getSRVDescription(R);
@@ -1693,20 +1706,6 @@ public:
     if (!ResDescOrErr)
       return ResDescOrErr.takeError();
     const D3D12_RESOURCE_DESC ResDesc = *ResDescOrErr;
-
-    const D3D12_HEAP_PROPERTIES ReadBackHeapProp =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
-    const D3D12_RESOURCE_DESC ReadBackResDesc = {
-        D3D12_RESOURCE_DIMENSION_BUFFER,
-        0,
-        BufferSize,
-        1,
-        1,
-        1,
-        DXGI_FORMAT_UNKNOWN,
-        {1, 0},
-        D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        D3D12_RESOURCE_FLAG_NONE};
 
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
@@ -1756,15 +1755,10 @@ public:
               "Failed to create committed resource (upload buffer)."))
         return Err;
 
-      // Committed readback buffer
-      ComPtr<ID3D12Resource> ReadBackBuffer;
-      if (auto Err = HR::toError(
-              Device->CreateCommittedResource(
-                  &ReadBackHeapProp, D3D12_HEAP_FLAG_NONE, &ReadBackResDesc,
-                  D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
-                  IID_PPV_ARGS(&ReadBackBuffer)),
-              "Failed to create committed resource (readback buffer)."))
-        return Err;
+      const BufferCreateDesc ReadbackDesc = BufferCreateDesc::readbackBuffer();
+      auto ReadbackOrErr = createBuffer("Readback", ReadbackDesc, BufferSize);
+      if (!ReadbackOrErr)
+        return ReadbackOrErr.takeError();
 
       ComPtr<ID3D12Heap> Heap; // optional, only created if NumTiles > 0
       if (R.IsReserved)
@@ -1783,7 +1777,8 @@ public:
 
       addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
 
-      Bundle.emplace_back(UploadBuffer, Buffer, ReadBackBuffer, Heap);
+      Bundle.emplace_back(UploadBuffer, Buffer, std::move(*ReadbackOrErr),
+                          Heap);
       RegOffset++;
     }
     return Bundle;
@@ -1791,7 +1786,7 @@ public:
 
   // returns the next available HeapIdx
   uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
-                   ResourceBundle ResBundle) {
+                   const ResourceBundle &ResBundle) {
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = getUAVDescription(R);
@@ -1885,7 +1880,7 @@ public:
 
   // returns the next available HeapIdx
   uint32_t bindCBV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
-                   ResourceBundle ResBundle) {
+                   const ResourceBundle &ResBundle) {
     const size_t CBVSize = getCBVSize(R.size());
     const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -1915,21 +1910,21 @@ public:
         auto ExRes = createSRV(R, IS);
         if (!ExRes)
           return ExRes.takeError();
-        Resources.push_back(std::make_pair(&R, *ExRes));
+        Resources.push_back(std::make_pair(&R, std::move(*ExRes)));
         break;
       }
       case DescriptorKind::UAV: {
         auto ExRes = createUAV(R, IS);
         if (!ExRes)
           return ExRes.takeError();
-        Resources.push_back(std::make_pair(&R, *ExRes));
+        Resources.push_back(std::make_pair(&R, std::move(*ExRes)));
         break;
       }
       case DescriptorKind::CBV: {
         auto ExRes = createCBV(R, IS);
         if (!ExRes)
           return ExRes.takeError();
-        Resources.push_back(std::make_pair(&R, *ExRes));
+        Resources.push_back(std::make_pair(&R, std::move(*ExRes)));
         break;
       }
       case DescriptorKind::SAMPLER:
@@ -2134,8 +2129,9 @@ public:
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
+          const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
           addReadbackBeginBarrier(IS, RS.Buffer);
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
+          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
                                                      Footprint);
           const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
           IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
@@ -2146,8 +2142,9 @@ public:
       for (const ResourceSet &RS : R.second) {
         if (RS.Readback == nullptr)
           continue;
+        const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
         addReadbackBeginBarrier(IS, RS.Buffer);
-        IS.CB->CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
+        IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(), RS.Buffer.Get());
         addReadbackEndBarrier(IS, RS.Buffer);
       }
     };
@@ -2171,10 +2168,12 @@ public:
       auto *DataIt = R.first->BufferPtr->Data.begin();
       for (; RSIt != R.second.end() && DataIt != R.first->BufferPtr->Data.end();
            ++RSIt, ++DataIt) {
-        void *DataPtr;
-        if (auto Err = HR::toError(RSIt->Readback->Map(0, nullptr, &DataPtr),
-                                   "Failed to map result."))
-          return Err;
+        DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RSIt->Readback);
+        auto DataPtrOrErr = ReadbackDX.map();
+        if (!DataPtrOrErr)
+          return DataPtrOrErr.takeError();
+        void *DataPtr = *DataPtrOrErr;
+
         memcpy(DataIt->get(), DataPtr, R.first->size());
 
         if (R.first->HasCounter) {
@@ -2185,7 +2184,7 @@ public:
                  sizeof(uint32_t));
           R.first->BufferPtr->Counters.push_back(Counter);
         }
-        RSIt->Readback->Unmap(0, nullptr);
+        ReadbackDX.unmap();
       }
 
       return llvm::Error::success();
@@ -2353,8 +2352,9 @@ public:
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
+          DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
           addReadbackBeginBarrier(IS, RS.Buffer);
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
+          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
                                                      Footprint);
           const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
           IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
@@ -2365,8 +2365,9 @@ public:
       for (const ResourceSet &RS : R.second) {
         if (RS.Readback == nullptr)
           continue;
+        DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
         addReadbackBeginBarrier(IS, RS.Buffer);
-        IS.CB->CmdList->CopyResource(RS.Readback.Get(), RS.Buffer.Get());
+        IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(), RS.Buffer.Get());
         addReadbackEndBarrier(IS, RS.Buffer);
       }
     };
