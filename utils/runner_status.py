@@ -17,6 +17,7 @@ import sys
 import os
 import json
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone, timedelta
 
 OWNER = "llvm"
@@ -24,9 +25,32 @@ REPO = "offload-test-suite"
 VALID_VENDORS = ("intel", "amd", "nvidia", "qc")
 COMPLETED_WINDOW_HOURS = 3
 
+# ANSI color codes per vendor
+VENDOR_COLORS = {
+    "intel": "\033[34m",   # blue
+    "amd": "\033[31m",     # red
+    "nvidia": "\033[32m",  # green
+    "qc": "\033[90m",      # gray
+}
+RESET = "\033[0m"
+
+# Workflow names that are exclusive to a specific vendor
+VENDOR_WORKFLOW_KEYWORDS = {
+    "intel": "intel",
+    "amd": "amd",
+    "nvidia": "nvidia",
+    "qc": "qc",
+}
+
 
 def runner_label(vendor):
     return f"hlsl-windows-{vendor}"
+
+
+def colorize(vendor, text):
+    """Wrap text in the vendor's ANSI color."""
+    c = VENDOR_COLORS.get(vendor, "")
+    return f"{c}{text}{RESET}" if c else text
 
 
 def api_get(path):
@@ -53,8 +77,30 @@ def get_runners(label):
         return None
 
 
-def get_runs():
-    """Fetch runs that are queued, in_progress, or recently completed."""
+def run_could_match_vendor(run, vendor):
+    """Quick heuristic: can this run possibly have jobs for the given vendor?
+
+    Scheduled/dispatch runs whose workflow name contains another vendor's
+    keyword are skipped. PR runs (Execution Testing) and ambiguous runs
+    are always kept.
+    """
+    name_lower = run["name"].lower()
+    # "Execution Testing" (PR matrix) always includes intel, sometimes others
+    if "execution testing" in name_lower or "hlsl test" in name_lower:
+        return True
+    # If the workflow name mentions a specific vendor, only match that one
+    for v, kw in VENDOR_WORKFLOW_KEYWORDS.items():
+        if kw in name_lower:
+            return v == vendor
+    return True
+
+
+def get_runs(vendors):
+    """Fetch runs that are queued, in_progress, or recently completed.
+
+    When a single vendor is requested, only fetches runs whose workflow
+    could plausibly contain jobs for that vendor.
+    """
     results = []
     for status in ("queued", "in_progress"):
         path = f"/repos/{OWNER}/{REPO}/actions/runs?status={status}&per_page=100"
@@ -75,7 +121,30 @@ def get_runs():
         if r["id"] not in seen:
             seen.add(r["id"])
             unique.append(r)
+
+    # Pre-filter: if only one vendor requested, skip runs that clearly
+    # belong to a different vendor (avoids fetching their jobs).
+    if len(vendors) == 1:
+        vendor = vendors[0]
+        unique = [r for r in unique if run_could_match_vendor(r, vendor)]
+
     return unique
+
+
+def prefetch_jobs(runs, jobs_cache):
+    """Fetch jobs for all runs in parallel to minimize wall-clock time."""
+    to_fetch = [r for r in runs if r["id"] not in jobs_cache]
+    if not to_fetch:
+        return
+
+    def fetch_one(run_id):
+        return run_id, get_jobs(run_id)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(fetch_one, r["id"]): r["id"] for r in to_fetch}
+        for future in as_completed(futures):
+            run_id, jobs = future.result()
+            jobs_cache[run_id] = jobs
 
 
 def get_jobs(run_id):
@@ -163,7 +232,9 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
             short = j["name"].split(",")[-1].strip().rstrip(") / build")
             active_details.append((title, short, j.get("runner_name", "?")))
 
-    print(f"=== {vendor.upper()} (runner: {label}{runner_info}) ===\n")
+    header_text = f"=== {vendor.upper()} (runner: {label}{runner_info}) ==="
+    print(colorize(vendor, header_text))
+    print()
 
     if not rows:
         print(f"No runs with {vendor} jobs found.\n")
@@ -182,18 +253,18 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
         f"{run_col_header:<{col1_w}}  {'Workflow':<{col2_w}}"
         f"  {'Done':>6}  {'Active':>6}  {'Queued':>6}"
     )
-    sep = "-" * len(header)
+    sep = "=" * len(header)
 
-    print(sep)
+    print(colorize(vendor, sep))
     print(header)
-    print(sep)
+    print(colorize(vendor, sep))
     for run_label, workflow, done, active, queued in rows:
         active_str = str(active) if active == 0 else f"*{active}*"
         print(
             f"{run_label:<{col1_w}}  {workflow:<{col2_w}}"
             f"  {done:>6}  {active_str:>6}  {queued:>6}"
         )
-    print(sep)
+    print(colorize(vendor, sep))
 
     total_done = sum(r[2] for r in rows)
     total_active = sum(r[3] for r in rows)
@@ -205,7 +276,7 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
     print()
 
     if active_details:
-        print(f"Currently running on {vendor}:")
+        print(colorize(vendor, f"Currently running on {vendor}:"))
         for title, job, runner_name in active_details:
             print(f"  -> {job}  (runner: {runner_name}, run: {title})")
     else:
@@ -225,15 +296,17 @@ def main():
     else:
         vendors = list(VALID_VENDORS)
 
-    runs = get_runs()
+    runs = get_runs(vendors)
     if not runs:
         print("No queued, in-progress, or recently completed runs found.")
         return
 
     runs.sort(key=lambda r: r["created_at"])
 
-    # Cache jobs per run so they're only fetched once across vendors
+    # Fetch all jobs in parallel upfront
     jobs_cache = {}
+    prefetch_jobs(runs, jobs_cache)
+
     runners_cache = {}
 
     for v in vendors:
