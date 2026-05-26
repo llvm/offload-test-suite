@@ -85,13 +85,10 @@ DescriptorSets: []
 ...
 #--- end
 
-# Metal has no native geometry shader stage (equivalents would require mesh or
-# tessellation shaders). Skip this test on that backend entirely.
+# Metal has no native geometry shader stage.
 # UNSUPPORTED: Metal
 
-# Clang's HLSL frontend does not yet support geometry shader stream types
-# (e.g. TriangleStream<T>::Append), so compiling geometry.hlsl with clang-dxc
-# fails on both D3D12 and Vulkan code paths.
+# Clang's HLSL frontend does not yet support geometry shader stream types.
 # Tracked upstream: https://github.com/llvm/llvm-project/issues/136963
 # XFAIL: Clang
 
