@@ -423,7 +423,12 @@ jobs:
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
             suite='${{ steps.suite.outputs.suite }}'
-            lit -v "run/test/$suite" \
+            # Invoke lit via `python -m` so it works even when pip-install
+            # falls back to a --user install (e.g. self-hosted runners
+            # running as NetworkService can't write to system site-packages,
+            # so lit.exe lands in %APPDATA%\Python\...\Scripts\ which isn't
+            # on PATH).
+            python -m lit -v "run/test/$suite" \
               --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
