@@ -32,6 +32,8 @@ enum class Stages {
 
   // Traditional Raster
   Vertex,
+  Hull,
+  Domain,
   Geometry,
   Pixel,
 
@@ -40,8 +42,9 @@ enum class Stages {
   Mesh
 };
 inline constexpr std::array AllStages = {
-    Stages::Compute, Stages::Vertex,        Stages::Geometry,
-    Stages::Pixel,   Stages::Amplification, Stages::Mesh,
+    Stages::Compute,       Stages::Vertex, Stages::Hull, Stages::Domain,
+    Stages::Geometry,      Stages::Pixel,  Stages::Amplification,
+    Stages::Mesh,
 };
 inline constexpr size_t NumStages = AllStages.size();
 
@@ -402,6 +405,11 @@ struct IOBindings {
   CPUBuffer *RTargetBufferPtr = nullptr;
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
+  // Number of control points per patch. Required when Topology == PatchList.
+  // Valid range is 1..32 (matches both D3D12's per-CP-patchlist topologies and
+  // Vulkan's VkPipelineTessellationStateCreateInfo::patchControlPoints).
+  uint32_t PatchControlPoints = 0;
+
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
     for (auto VA : VertexAttributes)
@@ -730,6 +738,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::Stages::Val)
     ENUM_CASE(Compute);
     ENUM_CASE(Vertex);
+    ENUM_CASE(Hull);
+    ENUM_CASE(Domain);
     ENUM_CASE(Geometry);
     ENUM_CASE(Pixel);
     ENUM_CASE(Amplification);
@@ -743,6 +753,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::PrimitiveTopology::Val)
     ENUM_CASE(TriangleList);
     ENUM_CASE(PointList);
+    ENUM_CASE(PatchList);
 #undef ENUM_CASE
   }
 };

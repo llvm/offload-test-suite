@@ -133,6 +133,10 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageCompute;
   case Stages::Vertex:
     return IRShaderStageVertex;
+  case Stages::Hull:
+    llvm_unreachable("Hull shaders are not supported on Metal.");
+  case Stages::Domain:
+    llvm_unreachable("Domain shaders are not supported on Metal.");
   case Stages::Geometry:
     llvm_unreachable("Geometry shaders are not supported on Metal.");
   case Stages::Pixel:
@@ -1587,6 +1591,11 @@ public:
       return llvm::createStringError(
           std::errc::not_supported,
           "Geometry shaders are not supported on this backend.");
+    if (Desc.HS || Desc.DS)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Hull/Domain (tessellation) shaders are not supported on this "
+          "backend.");
     if (Desc.Topology != PrimitiveTopology::TriangleList)
       return llvm::createStringError(
           std::errc::not_supported,

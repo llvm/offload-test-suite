@@ -427,6 +427,7 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("RenderTarget", B.RenderTarget);
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
+  I.mapOptional("PatchControlPoints", B.PatchControlPoints, uint32_t{0});
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -604,6 +605,28 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
         HasShaderType[llvm::to_underlying(Stages::Mesh)])
       return llvm::createStringError("Vertex and Mesh/Amplification Shaders "
                                      "cannot be used in the same pipeline.");
+
+    const bool HasHS = HasShaderType[llvm::to_underlying(Stages::Hull)];
+    const bool HasDS = HasShaderType[llvm::to_underlying(Stages::Domain)];
+    if (HasHS != HasDS)
+      return llvm::createStringError(
+          "Hull and Domain shaders must be used together: a tessellation "
+          "pipeline requires both stages, never just one.");
+
+    const bool IsTessellated = HasHS && HasDS;
+    const bool IsPatchList =
+        Bindings.Topology == PrimitiveTopology::PatchList;
+    if (IsTessellated != IsPatchList)
+      return llvm::createStringError(
+          "Tessellation pipelines must use PatchList topology, and PatchList "
+          "topology requires Hull and Domain shaders.");
+    if (IsPatchList && (Bindings.PatchControlPoints < 1 ||
+                        Bindings.PatchControlPoints > 32))
+      return llvm::createStringError(
+          "PatchList topology requires PatchControlPoints in the range 1..32.");
+    if (!IsPatchList && Bindings.PatchControlPoints != 0)
+      return llvm::createStringError(
+          "PatchControlPoints is only valid with PatchList topology.");
 
     Kind = ShaderPipelineKind::TraditionalRaster;
     return llvm::Error::success();

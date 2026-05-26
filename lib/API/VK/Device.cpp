@@ -206,6 +206,10 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_COMPUTE_BIT;
   case Stages::Vertex:
     return VK_SHADER_STAGE_VERTEX_BIT;
+  case Stages::Hull:
+    return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+  case Stages::Domain:
+    return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
   case Stages::Geometry:
     return VK_SHADER_STAGE_GEOMETRY_BIT;
   case Stages::Pixel:
@@ -224,6 +228,8 @@ static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
     return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   case PrimitiveTopology::PointList:
     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+  case PrimitiveTopology::PatchList:
+    return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
@@ -1461,6 +1467,8 @@ public:
       const TraditionalRasterPipelineCreateDesc &Desc) override {
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = Desc.PS;
+    const std::optional<ShaderContainer> &HS = Desc.HS;
+    const std::optional<ShaderContainer> &DS = Desc.DS;
     const std::optional<ShaderContainer> &GS = Desc.GS;
     const llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
     const llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
@@ -1494,6 +1502,56 @@ public:
       ShaderStage.pName = VS.EntryPoint.c_str();
       ShaderStage.pSpecializationInfo =
           VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> HSSpecEntries;
+    llvm::SmallVector<char> HSSpecData;
+    VkSpecializationInfo HSSpecInfo = {};
+    if (HS) {
+      if (auto Err = parseSpecializationConstants(HS->SpecializationConstants,
+                                                  HSSpecEntries, HSSpecData,
+                                                  HSSpecInfo))
+        return Err;
+
+      auto HSModOrErr = createShaderModule(HS->Shader, "hull");
+      if (!HSModOrErr)
+        return HSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+      ShaderStage.module = *HSModOrErr;
+      ShaderStage.pName = HS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          HS->SpecializationConstants.empty() ? nullptr : &HSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> DSSpecEntries;
+    llvm::SmallVector<char> DSSpecData;
+    VkSpecializationInfo DSSpecInfo = {};
+    if (DS) {
+      if (auto Err = parseSpecializationConstants(DS->SpecializationConstants,
+                                                  DSSpecEntries, DSSpecData,
+                                                  DSSpecInfo))
+        return Err;
+
+      auto DSModOrErr = createShaderModule(DS->Shader, "domain");
+      if (!DSModOrErr)
+        return DSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+      ShaderStage.module = *DSModOrErr;
+      ShaderStage.pName = DS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          DS->SpecializationConstants.empty() ? nullptr : &DSSpecInfo;
       ShaderStages.push_back(ShaderStage);
     }
 
@@ -1625,6 +1683,14 @@ public:
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     InputAssemblyCI.topology = getVkPrimitiveTopology(Desc.Topology);
 
+    VkPipelineTessellationStateCreateInfo TessellationCI = {};
+    const bool HasTessellation = HS.has_value() && DS.has_value();
+    if (HasTessellation) {
+      TessellationCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+      TessellationCI.patchControlPoints = Desc.PatchControlPoints;
+    }
+
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     ViewportCI.viewportCount = 1;
@@ -1675,6 +1741,7 @@ public:
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
     PipelineCI.pInputAssemblyState = &InputAssemblyCI;
+    PipelineCI.pTessellationState = HasTessellation ? &TessellationCI : nullptr;
     PipelineCI.pViewportState = &ViewportCI;
     PipelineCI.pRasterizationState = &RastCI;
     PipelineCI.pMultisampleState = &MultisampleCI;
@@ -3222,6 +3289,7 @@ public:
     } else if (P.isTraditionalRaster()) {
       TraditionalRasterPipelineCreateDesc PipelineDesc = {};
       PipelineDesc.Topology = P.Bindings.Topology;
+      PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
       PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
         ShaderContainer SC = {};

@@ -1,0 +1,175 @@
+#--- vertex.hlsl
+struct VSOutput
+{
+    float4 position : POSITION;
+    float4 color : COLOR;
+};
+
+// Pass-through: control points travel unchanged into the Hull stage.
+VSOutput main(float4 position : POSITION, float4 color : COLOR)
+{
+    VSOutput o;
+    o.position = position;
+    o.color = color;
+    return o;
+}
+
+#--- hull.hlsl
+struct HSInput
+{
+    float4 position : POSITION;
+    float4 color : COLOR;
+};
+
+struct HSOutput
+{
+    float4 position : POSITION;
+    float4 color : COLOR;
+};
+
+struct HSPatchConstants
+{
+    float Edges[3]  : SV_TessFactor;
+    float Inside    : SV_InsideTessFactor;
+};
+
+// Edges = 2, Inside = 2 with integer partitioning gives the Sierpinski-1
+// subdivision: three corner sub-triangles + one central inverted triangle, all
+// tiling the original triangle exactly.
+HSPatchConstants PatchConstants(InputPatch<HSInput, 3> patch,
+                                uint patchID : SV_PrimitiveID)
+{
+    HSPatchConstants c;
+    c.Edges[0] = 2.0;
+    c.Edges[1] = 2.0;
+    c.Edges[2] = 2.0;
+    c.Inside   = 2.0;
+    return c;
+}
+
+[domain("tri")]
+[partitioning("integer")]
+[outputtopology("triangle_cw")]
+[outputcontrolpoints(3)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 3> patch,
+              uint i : SV_OutputControlPointID)
+{
+    HSOutput o;
+    o.position = patch[i].position;
+    o.color    = patch[i].color;
+    return o;
+}
+
+#--- domain.hlsl
+struct DSInput
+{
+    float4 position : POSITION;
+    float4 color : COLOR;
+};
+
+struct DSPatchConstants
+{
+    float Edges[3]  : SV_TessFactor;
+    float Inside    : SV_InsideTessFactor;
+};
+
+struct DSOutput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+// Evaluate each generated vertex by barycentric interpolation of the patch's
+// control points. The output triangles tile the original triangle exactly, so
+// the rasterized image must match SimpleTriangle.test pixel-for-pixel.
+[domain("tri")]
+DSOutput main(DSPatchConstants constants,
+              float3 bary : SV_DomainLocation,
+              const OutputPatch<DSInput, 3> patch)
+{
+    DSOutput o;
+    o.position = bary.x * patch[0].position
+               + bary.y * patch[1].position
+               + bary.z * patch[2].position;
+    o.color    = bary.x * patch[0].color
+               + bary.y * patch[1].color
+               + bary.z * patch[2].color;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return input.color;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 28 # 32 bytes per vertex
+    Data: [ 0.0, 0.25, 0.0, 1.0, 0.0, 0.0, 1.0,
+            0.25, -0.25, 0.0, 0.0, 1.0, 0.0, 1.0,
+           -0.25, -0.25, 0.0, 0.0, 0.0, 1.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+    - Format: Float32
+      Channels: 4
+      Offset: 12
+      Name: COLOR
+  Topology: PatchList
+  PatchControlPoints: 3
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+# Metal has no native Hull/Domain shader stages; tessellation would require
+# routing through mesh shaders via the Metal IR converter. Skip this backend.
+# UNSUPPORTED: Metal
+
+# XFAIL: Clang && !Vulkan
+# REQUIRES: goldenimage
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o   %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o %t/domain.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/SimpleTriangle.png -rules %t/rules.yaml
