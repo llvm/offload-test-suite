@@ -376,11 +376,17 @@ jobs:
           arch: arm64
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          # The test runner needs only lit + pyyaml; no source checkout is
-          # available so we can't pip install -r requirements.txt. Keep
-          # this list in sync with OffloadTest/test/requirements.txt.
-          pip-install: lit pyyaml
+      - name: Install lit and pyyaml
+        # The test runner needs only lit + pyyaml; no source checkout is
+        # available so we can't pip install -r requirements.txt. Keep
+        # this list in sync with OffloadTest/test/requirements.txt.
+        # We invoke pip explicitly here instead of relying on
+        # setup-python's `pip-install:` input, which has been observed
+        # to silently no-op on our self-hosted Windows runners.
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install lit pyyaml
       - name: Dump GPU Info (test runner)
         shell: bash
         run: |
