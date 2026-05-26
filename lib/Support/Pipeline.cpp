@@ -425,6 +425,8 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("VertexBuffer", B.VertexBuffer);
   I.mapOptional("VertexAttributes", B.VertexAttributes);
   I.mapOptional("RenderTarget", B.RenderTarget);
+  I.mapOptional("Topology", B.Topology,
+                offloadtest::PrimitiveTopology::TriangleList);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(

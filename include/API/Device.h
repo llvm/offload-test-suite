@@ -27,6 +27,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MemoryBuffer.h"
 
 #include <cstdint>
@@ -79,6 +80,35 @@ struct ShaderContainer {
   std::string EntryPoint;
   const llvm::MemoryBuffer *Shader;
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
+};
+
+struct TraditionalRasterPipelineCreateDesc {
+  llvm::SmallVector<InputLayoutDesc> InputLayout;
+  llvm::SmallVector<Format> RTFormats;
+  std::optional<Format> DSFormat;
+  PrimitiveTopology Topology;
+  ShaderContainer VS;
+  // TODO: Optional Hull & Domain Shaders
+  std::optional<ShaderContainer> GS;
+  ShaderContainer PS;
+
+  void setShader(Stages Stage, ShaderContainer &&SC) {
+    switch (Stage) {
+    case Stages::Vertex:
+      VS = std::move(SC);
+      break;
+    case Stages::Geometry:
+      GS = std::move(SC);
+      break;
+    case Stages::Pixel:
+      PS = std::move(SC);
+      break;
+    case Stages::Compute:
+    case Stages::Amplification:
+    case Stages::Mesh:
+      llvm_unreachable("Not a traditional raster pipeline stage.");
+    }
+  }
 };
 
 class PipelineState {
@@ -160,11 +190,9 @@ public:
                    ShaderContainer CS) = 0;
 
   virtual llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) = 0;
+  createTraditionalRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const TraditionalRasterPipelineCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;

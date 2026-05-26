@@ -133,6 +133,8 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageCompute;
   case Stages::Vertex:
     return IRShaderStageVertex;
+  case Stages::Geometry:
+    llvm_unreachable("Geometry shaders are not supported on Metal.");
   case Stages::Pixel:
     return IRShaderStageFragment;
   case Stages::Amplification:
@@ -1578,11 +1580,23 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
+  createTraditionalRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const TraditionalRasterPipelineCreateDesc &Desc) override {
+    if (Desc.GS)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Geometry shaders are not supported on this backend.");
+    if (Desc.Topology != PrimitiveTopology::TriangleList)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Only TriangleList topology is currently supported.");
+    const ShaderContainer &VS = Desc.VS;
+    const ShaderContainer &PS = Desc.PS;
+    const llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
+    const llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
+    const std::optional<Format> DSFormat = Desc.DSFormat;
+
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
@@ -1633,11 +1647,11 @@ public:
           PS.EntryPoint.c_str());
     auto PSFnScope = llvm::scope_exit([&] { PSFn->release(); });
 
-    MTL::RenderPipelineDescriptor *Desc =
+    MTL::RenderPipelineDescriptor *RPDesc =
         MTL::RenderPipelineDescriptor::alloc()->init();
-    auto DescScope = llvm::scope_exit([&] { Desc->release(); });
-    Desc->setVertexFunction(VSFn);
-    Desc->setFragmentFunction(PSFn);
+    auto RPDescScope = llvm::scope_exit([&] { RPDesc->release(); });
+    RPDesc->setVertexFunction(VSFn);
+    RPDesc->setFragmentFunction(PSFn);
 
     // Build vertex descriptor from InputLayout.
     if (!InputLayout.empty()) {
@@ -1712,7 +1726,7 @@ public:
       VtxDesc->layouts()->setObject(LDesc, kIRVertexBufferBindPoint);
       LDesc->release();
 
-      Desc->setVertexDescriptor(VtxDesc);
+      RPDesc->setVertexDescriptor(VtxDesc);
     }
 
     // Configure render target color attachments.
@@ -1720,20 +1734,20 @@ public:
       MTL::RenderPipelineColorAttachmentDescriptor *RPCA =
           MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
       RPCA->setPixelFormat(getMetalPixelFormat(RTFormats[I]));
-      Desc->colorAttachments()->setObject(RPCA, I);
+      RPDesc->colorAttachments()->setObject(RPCA, I);
       RPCA->release();
     }
 
     // Configure depth/stencil attachment.
     if (DSFormat) {
       const MTL::PixelFormat DSPixelFormat = getMetalPixelFormat(*DSFormat);
-      Desc->setDepthAttachmentPixelFormat(DSPixelFormat);
+      RPDesc->setDepthAttachmentPixelFormat(DSPixelFormat);
       if (isStencilFormat(*DSFormat))
-        Desc->setStencilAttachmentPixelFormat(DSPixelFormat);
+        RPDesc->setStencilAttachmentPixelFormat(DSPixelFormat);
     }
 
     MTL::RenderPipelineState *PSO =
-        Device->newRenderPipelineState(Desc, &Error);
+        Device->newRenderPipelineState(RPDesc, &Error);
     if (Error)
       return toError(Error);
 
@@ -1798,42 +1812,36 @@ public:
       if (auto Err = createComputeCommands(P, IS))
         return Err;
     } else {
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
+      TraditionalRasterPipelineCreateDesc PipelineDesc = {};
+      PipelineDesc.Topology = P.Bindings.Topology;
+      PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-        }
+        ShaderContainer SC = {};
+        SC.EntryPoint = Shader.Entry;
+        SC.Shader = Shader.Shader.get();
+        PipelineDesc.setShader(Shader.Stage, std::move(SC));
       }
 
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
       for (auto &Attr : P.Bindings.VertexAttributes) {
         auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        InputLayoutDesc Layout = {};
+        Layout.Name = Attr.Name;
+        Layout.Fmt = *FormatOrErr;
+        Layout.OffsetInBytes = Attr.Offset;
+        PipelineDesc.InputLayout.push_back(Layout);
       }
 
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                   P.Bindings.RTargetBufferPtr->Channels);
       if (!FormatOrErr)
         return FormatOrErr.takeError();
+      PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr =
-          createPipelineVsPs("Graphics Pipeline State", Bindings, InputLayout,
-                             RTFormats, Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr = createTraditionalRasterPipeline(
+          "Graphics Pipeline State", Bindings, PipelineDesc);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       IS.Pipeline = std::move(*PipelineStateOrErr);

@@ -206,6 +206,8 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_COMPUTE_BIT;
   case Stages::Vertex:
     return VK_SHADER_STAGE_VERTEX_BIT;
+  case Stages::Geometry:
+    return VK_SHADER_STAGE_GEOMETRY_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
   case Stages::Amplification:
@@ -214,6 +216,16 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_MESH_BIT_EXT;
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
+  switch (Topology) {
+  case PrimitiveTopology::TriangleList:
+    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  case PrimitiveTopology::PointList:
+    return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
 static std::string getMessageSeverityString(
@@ -1444,11 +1456,15 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineVsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                     llvm::ArrayRef<InputLayoutDesc> InputLayout,
-                     llvm::ArrayRef<Format> RTFormats,
-                     std::optional<Format> DSFormat, ShaderContainer VS,
-                     ShaderContainer PS) override {
+  createTraditionalRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const TraditionalRasterPipelineCreateDesc &Desc) override {
+    const ShaderContainer &VS = Desc.VS;
+    const ShaderContainer &PS = Desc.PS;
+    const std::optional<ShaderContainer> &GS = Desc.GS;
+    const llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
+    const llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
+    const std::optional<Format> DSFormat = Desc.DSFormat;
 
     VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_VERTEX_BIT;
     llvm::SmallVector<VkPipelineShaderStageCreateInfo, 5> ShaderStages;
@@ -1467,7 +1483,7 @@ public:
                                                   VSSpecInfo))
         return Err;
 
-      auto VSModOrErr = createShaderModule(VS.Shader, "mesh");
+      auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
       if (!VSModOrErr)
         return VSModOrErr.takeError();
 
@@ -1478,6 +1494,31 @@ public:
       ShaderStage.pName = VS.EntryPoint.c_str();
       ShaderStage.pSpecializationInfo =
           VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> GSSpecEntries;
+    llvm::SmallVector<char> GSSpecData;
+    VkSpecializationInfo GSSpecInfo = {};
+    if (GS) {
+      if (auto Err = parseSpecializationConstants(GS->SpecializationConstants,
+                                                  GSSpecEntries, GSSpecData,
+                                                  GSSpecInfo))
+        return Err;
+
+      auto GSModOrErr = createShaderModule(GS->Shader, "geometry");
+      if (!GSModOrErr)
+        return GSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_GEOMETRY_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+      ShaderStage.module = *GSModOrErr;
+      ShaderStage.pName = GS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          GS->SpecializationConstants.empty() ? nullptr : &GSSpecInfo;
       ShaderStages.push_back(ShaderStage);
     }
 
@@ -1582,7 +1623,7 @@ public:
     VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
     InputAssemblyCI.sType =
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    InputAssemblyCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    InputAssemblyCI.topology = getVkPrimitiveTopology(Desc.Topology);
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
@@ -3179,45 +3220,38 @@ public:
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
     } else if (P.isTraditionalRaster()) {
-      ShaderContainer VS = {};
-      ShaderContainer PS = {};
+      TraditionalRasterPipelineCreateDesc PipelineDesc = {};
+      PipelineDesc.Topology = P.Bindings.Topology;
+      PipelineDesc.DSFormat = Format::D32FloatS8Uint;
       for (auto &Shader : P.Shaders) {
-        if (Shader.Stage == Stages::Vertex) {
-          VS.EntryPoint = Shader.Entry;
-          VS.Shader = Shader.Shader.get();
-          VS.SpecializationConstants = Shader.SpecializationConstants;
-        } else if (Shader.Stage == Stages::Pixel) {
-          PS.EntryPoint = Shader.Entry;
-          PS.Shader = Shader.Shader.get();
-          PS.SpecializationConstants = Shader.SpecializationConstants;
-        }
+        ShaderContainer SC = {};
+        SC.EntryPoint = Shader.Entry;
+        SC.Shader = Shader.Shader.get();
+        SC.SpecializationConstants = Shader.SpecializationConstants;
+        PipelineDesc.setShader(Shader.Stage, std::move(SC));
       }
 
       // Create the input layout based on the vertex attributes.
-      llvm::SmallVector<InputLayoutDesc> InputLayout;
       for (auto &Attr : P.Bindings.VertexAttributes) {
         auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
-        InputLayoutDesc Desc = {};
-        Desc.Name = Attr.Name;
-        Desc.Fmt = *FormatOrErr;
-        Desc.OffsetInBytes = Attr.Offset;
-        InputLayout.push_back(Desc);
+        InputLayoutDesc Layout = {};
+        Layout.Name = Attr.Name;
+        Layout.Fmt = *FormatOrErr;
+        Layout.OffsetInBytes = Attr.Offset;
+        PipelineDesc.InputLayout.push_back(Layout);
       }
 
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                   P.Bindings.RTargetBufferPtr->Channels);
       if (!FormatOrErr)
         return FormatOrErr.takeError();
+      PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-      llvm::SmallVector<Format> RTFormats;
-      RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr = createPipelineVsPs(
-          "Graphics Pipeline State", BindingsDesc, InputLayout, RTFormats,
-          Format::D32FloatS8Uint, VS, PS);
+      auto PipelineStateOrErr = createTraditionalRasterPipeline(
+          "Graphics Pipeline State", BindingsDesc, PipelineDesc);
       if (!PipelineStateOrErr)
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
