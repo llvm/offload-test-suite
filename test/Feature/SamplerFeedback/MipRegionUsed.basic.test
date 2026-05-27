@@ -1,0 +1,98 @@
+#--- source.hlsl
+// SamplerFeedback MipRegionUsed — basic test.
+//
+// Paired Texture2D is 8x8 with a single mip. The FeedbackTexture2D is 2x2
+// with a 4x4 MipRegion (so each feedback texel covers a 4x4 region of the
+// paired mip). Decoded values are a per-mip-0-texel bit-mask; for a
+// single-mip resource only bit 0 is meaningful. The DECODE resolve
+// reports 0xFF for a region whose paired mip 0 was sampled at least
+// once, and 0x00 for a region that was never sampled.
+//
+// Three of the four threads write at LOD 0 in their own quadrant. The
+// fourth thread does nothing. Expected decoded bytes for mip 0:
+//   (0,0): 0xFF  (sampled)
+//   (1,0): 0xFF  (sampled)
+//   (0,1): 0xFF  (sampled)
+//   (1,1): 0x00  (never sampled)
+[[vk::binding(0, 0)]] Texture2D<float4> PairedTex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp : register(s0);
+[[vk::binding(2, 0)]] FeedbackTexture2D<SAMPLER_FEEDBACK_MIP_REGION_USED> FBTex : register(u0);
+
+[numthreads(2, 2, 1)]
+void main(uint3 DTid : SV_DispatchThreadID) {
+  if (DTid.x == 1 && DTid.y == 1)
+    return;
+
+  float2 uv = (float2(DTid.xy) + 0.5) * 0.5;
+  FBTex.WriteSamplerFeedbackLevel(PairedTex, Samp, uv, 0.0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [1, 1, 1]
+
+Buffers:
+  - Name: PairedTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 8, Height: 8, Depth: 1, MipLevels: 1 }
+    FillSize: 1024 # 8 * 8 * 16 bytes
+
+  - Name: FBTex
+    Format: Hex8
+    Channels: 1
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+      MipLevels: 1
+      MipRegionWidth: 4
+      MipRegionHeight: 4
+    FillSize: 4
+
+  - Name: Expected
+    Format: Hex8
+    Channels: 1
+    Data: [ 0xFF, 0xFF, 0xFF, 0x00 ]
+
+Samplers:
+  - Name: Samp
+    Address: Clamp
+    MinFilter: Linear
+    MagFilter: Linear
+
+DescriptorSets:
+  - Resources:
+    - Name: PairedTex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: FBTex
+      Kind: FeedbackTexture2D
+      FeedbackKind: MipRegionUsed
+      PairedResource: PairedTex
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: MipRegionUsedTest
+    Rule: BufferExact
+    Actual: FBTex
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: SamplerFeedback
+# UNSUPPORTED: Vulkan, Metal, Clang, WARP
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -E main -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
