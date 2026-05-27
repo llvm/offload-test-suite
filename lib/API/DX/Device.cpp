@@ -978,6 +978,7 @@ public:
         DSVAllocator(std::move(DSVAllocator)) {
     Description = std::move(Desc);
     DriverName = "DirectX";
+    DriverVersion = DriverVer;
   }
   DXDevice(const DXDevice &) = delete;
   DXDevice &operator=(const DXDevice &) = delete;
@@ -2372,7 +2373,7 @@ public:
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
-          DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
+          const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
           addReadbackBeginBarrier(IS, RS.Buffer);
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
                                                      Footprint);
@@ -2385,7 +2386,7 @@ public:
       for (const ResourceSet &RS : R.second) {
         if (RS.Readback == nullptr)
           continue;
-        DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
+        const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
         addReadbackBeginBarrier(IS, RS.Buffer);
         IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(), RS.Buffer.Get());
         addReadbackEndBarrier(IS, RS.Buffer);
