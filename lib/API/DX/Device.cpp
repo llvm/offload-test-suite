@@ -797,6 +797,13 @@ public:
     CB.CmdList->RSSetShadingRate(DXRate, nullptr);
   }
 
+  void enablePrimitiveShadingRate() override {
+    const D3D12_SHADING_RATE_COMBINER Combiners[] = {
+        D3D12_SHADING_RATE_COMBINER_OVERRIDE,
+        D3D12_SHADING_RATE_COMBINER_PASSTHROUGH};
+    CB.CmdList->RSSetShadingRate(D3D12_SHADING_RATE_1X1, Combiners);
+  }
+
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t Stride) override {
     assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
@@ -1509,6 +1516,14 @@ public:
   void queryCapabilities() {
     CD3DX12FeatureSupport Features;
     Features.Init(Device.Get());
+
+    const bool SupportsVariableShadingRateTier2 =
+        Features.VariableShadingRateTier() >=
+        D3D12_VARIABLE_SHADING_RATE_TIER_2;
+    Caps.insert(
+        std::make_pair("VariableShadingRateTier2",
+                       makeCapability<bool>("VariableShadingRateTier2",
+                                            SupportsVariableShadingRateTier2)));
 
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
@@ -2354,6 +2369,8 @@ public:
 
     if (P.ShadingRateOverride)
       Encoder.setShadingRate(*P.ShadingRateOverride);
+    if (P.PrimitiveShadingRate)
+      Encoder.enablePrimitiveShadingRate();
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)

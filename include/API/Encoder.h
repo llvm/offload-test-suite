@@ -111,6 +111,10 @@ public:
   /// depend on it should mark themselves UNSUPPORTED on those backends.
   virtual void setShadingRate(ShadingRate Rate) {}
 
+  /// Enable the SV_ShadingRate per-primitive input. Backends that do not
+  /// implement Variable Rate Shading Tier 2 are free to ignore this.
+  virtual void enablePrimitiveShadingRate() {}
+
   virtual llvm::Error drawInstanced(const PipelineState &PSO,
                                     uint32_t VertexCount,
                                     uint32_t InstanceCount,

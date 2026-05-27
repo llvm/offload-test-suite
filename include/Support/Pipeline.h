@@ -469,6 +469,7 @@ struct Pipeline {
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
   std::optional<ShadingRate> ShadingRateOverride;
+  bool PrimitiveShadingRate = false;
 
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)

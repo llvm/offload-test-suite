@@ -73,6 +73,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
     I.setError(llvm::toString(std::move(Err)));
 
   I.mapOptional("ShadingRate", P.ShadingRateOverride);
+  I.mapOptional("PrimitiveShadingRate", P.PrimitiveShadingRate, false);
 
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
