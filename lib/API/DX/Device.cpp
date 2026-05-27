@@ -149,6 +149,32 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
   return DXGI_FORMAT_UNKNOWN;
 }
 
+// DXGI opaque format used to create a SamplerFeedback resource. The opaque
+// formats are GPU-only — the CPU must use ResolveSubresourceRegion with
+// D3D12_RESOLVE_MODE_DECODE_SAMPLER_FEEDBACK to read the decoded values
+// through getFeedbackDecodedFormat().
+static DXGI_FORMAT getFeedbackOpaqueFormat(FeedbackKind FK) {
+  switch (FK) {
+  case FeedbackKind::MinMip:
+    return DXGI_FORMAT_SAMPLER_FEEDBACK_MIN_MIP_OPAQUE;
+  case FeedbackKind::MipRegionUsed:
+    return DXGI_FORMAT_SAMPLER_FEEDBACK_MIP_REGION_USED_OPAQUE;
+  }
+  llvm_unreachable("All FeedbackKind cases handled");
+}
+
+// Format that ResolveSubresourceRegion(DECODE_SAMPLER_FEEDBACK) writes into a
+// staging texture for CPU readback. Both feedback kinds resolve to a single
+// 8-bit unsigned value per feedback texel.
+static DXGI_FORMAT getFeedbackDecodedFormat(FeedbackKind FK) {
+  switch (FK) {
+  case FeedbackKind::MinMip:
+  case FeedbackKind::MipRegionUsed:
+    return DXGI_FORMAT_R8_UINT;
+  }
+  llvm_unreachable("All FeedbackKind cases handled");
+}
+
 // D3D12 requires the RowPitch in a placed subresource footprint (used for
 // texture <-> buffer copies via CopyTextureRegion) to be a multiple of
 // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256 bytes). For textures whose natural
@@ -1024,10 +1050,16 @@ private:
     ComPtr<ID3D12Resource> Buffer;
     ComPtr<ID3D12Resource> Readback;
     ComPtr<ID3D12Heap> Heap;
+    // Only used by FeedbackTexture2D: typed staging texture (e.g. R8_UINT) that
+    // receives the decoded feedback values from ResolveSubresourceRegion
+    // before they are CopyTextureRegion'd into Readback.
+    ComPtr<ID3D12Resource> Staging;
     ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
                 ComPtr<ID3D12Resource> Readback,
-                ComPtr<ID3D12Heap> Heap = nullptr)
-        : Upload(Upload), Buffer(Buffer), Readback(Readback), Heap(Heap) {}
+                ComPtr<ID3D12Heap> Heap = nullptr,
+                ComPtr<ID3D12Resource> Staging = nullptr)
+        : Upload(Upload), Buffer(Buffer), Readback(Readback), Heap(Heap),
+          Staging(Staging) {}
   };
 
   // ResourceBundle will contain one ResourceSet for a singular resource
@@ -1904,7 +1936,156 @@ public:
     return HeapIdx;
   }
 
+  // Look up the D3D12 resource backing a previously-created scheduling
+  // resource by its schema name. Used by the SamplerFeedback path to find the
+  // paired sampled Texture2D when wiring CreateSamplerFeedbackUAV. The lookup
+  // scans both descriptor tables and root resources because either may host
+  // the paired texture. Returns nullptr if not found.
+  ID3D12Resource *findD3DResourceByName(llvm::StringRef Name,
+                                        InvocationState &IS) const {
+    for (const auto &T : IS.DescTables)
+      for (const auto &RP : T.Resources)
+        if (RP.first->Name == Name && !RP.second.empty())
+          return RP.second[0].Buffer.Get();
+    for (const auto &RP : IS.RootResources)
+      if (RP.first->Name == Name && !RP.second.empty())
+        return RP.second[0].Buffer.Get();
+    return nullptr;
+  }
+
+  // Create a SamplerFeedback Texture2D resource plus a paired typed staging
+  // texture and a readback buffer.
+  //
+  // Layout:
+  //   * Buffer  : opaque feedback resource (DXGI_FORMAT_SAMPLER_FEEDBACK_*).
+  //     Created via ID3D12Device8::CreateCommittedResource2 because the
+  //     opaque formats require D3D12_RESOURCE_DESC1 (specifically the
+  //     MipRegion field — without it the feedback resource collapses to a
+  //     single texel).
+  //   * Staging : typed Texture2D (R8_UINT) sized to the feedback texel
+  //     dimensions. Receives decoded values from ResolveSubresourceRegion
+  //     with D3D12_RESOLVE_MODE_DECODE_SAMPLER_FEEDBACK.
+  //   * Readback: row-major readback buffer the staging texture is then
+  //     CopyTextureRegion'd into, so CPU readback uses the same loop as
+  //     normal textures.
+  //
+  // No upload buffer is needed: SamplerFeedback resources are GPU-written
+  // only and start in the all-unmapped state when first cleared by the
+  // shader (the runtime initialises them to 0xFF "never sampled" once any
+  // CreateSamplerFeedbackUnorderedAccessView lands).
+  llvm::Expected<ResourceBundle> createFeedbackUAV(Resource &R,
+                                                   InvocationState &IS) {
+    ResourceBundle Bundle;
+    const offloadtest::CPUBuffer &B = *R.BufferPtr;
+
+    llvm::outs()
+        << "Creating FeedbackTexture2D: { Width = " << B.OutputProps.Width
+        << ", Height = " << B.OutputProps.Height << ", FeedbackKind = "
+        << (R.FBKind == FeedbackKind::MinMip ? "MinMip" : "MipRegionUsed")
+        << ", PairedResource = " << R.PairedResource.value_or("<unset>")
+        << ", Register = u" << R.DXBinding.Register
+        << ", Space = " << R.DXBinding.Space << " }\n";
+
+    if (!R.PairedResource)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "FeedbackTexture2D '%s' requires a PairedResource (the sampled "
+          "Texture2D being tracked).",
+          R.Name.c_str());
+
+    ComPtr<ID3D12Device8> Device8;
+    if (auto Err = HR::toError(
+            Device.As(&Device8),
+            "ID3D12Device8 (SamplerFeedback) not available on this device."))
+      return Err;
+
+    // Feedback texel dimensions come from the YAML OutputProps. The opaque
+    // feedback resource itself is sized to the *paired* texture's dimensions
+    // (Width * MipRegion.Width); the MipRegion controls how many paired-
+    // texture pixels collapse into one feedback texel. Until we plumb an
+    // explicit MipRegion field through OutputProperties, use a fixed 4×4
+    // region — small enough to exercise multi-texel feedback resolution and
+    // common enough that test authors can simply size their paired texture
+    // to (4 * feedbackWidth, 4 * feedbackHeight). A follow-up commit will
+    // expose MipRegion in the YAML schema.
+    constexpr UINT MipRegionTexels = 4;
+    const UINT FeedbackTexelsW = static_cast<UINT>(B.OutputProps.Width);
+    const UINT FeedbackTexelsH = static_cast<UINT>(B.OutputProps.Height);
+
+    D3D12_RESOURCE_DESC1 ResDesc = {};
+    ResDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    ResDesc.Alignment = 0;
+    ResDesc.Width = static_cast<UINT64>(FeedbackTexelsW) * MipRegionTexels;
+    ResDesc.Height = FeedbackTexelsH * MipRegionTexels;
+    ResDesc.DepthOrArraySize = 1;
+    ResDesc.MipLevels = 1;
+    ResDesc.Format = getFeedbackOpaqueFormat(R.FBKind);
+    ResDesc.SampleDesc = {1, 0};
+    ResDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    ResDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    ResDesc.SamplerFeedbackMipRegion = {MipRegionTexels, MipRegionTexels, 1};
+
+    const D3D12_HEAP_PROPERTIES DefaultHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    ComPtr<ID3D12Resource> FeedbackResource;
+    if (auto Err =
+            HR::toError(Device8->CreateCommittedResource2(
+                            &DefaultHeapProp, D3D12_HEAP_FLAG_NONE, &ResDesc,
+                            D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                            nullptr, IID_PPV_ARGS(&FeedbackResource)),
+                        "Failed to create FeedbackTexture2D resource."))
+      return Err;
+
+    // Typed staging texture for decoded values. Same dimensions as the
+    // feedback texel count (one decoded byte per feedback texel).
+    const DXGI_FORMAT DecodedFormat = getFeedbackDecodedFormat(R.FBKind);
+    const D3D12_RESOURCE_DESC StagingDesc = {D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+                                             0,
+                                             FeedbackTexelsW,
+                                             FeedbackTexelsH,
+                                             1,
+                                             1,
+                                             DecodedFormat,
+                                             {1, 0},
+                                             D3D12_TEXTURE_LAYOUT_UNKNOWN,
+                                             D3D12_RESOURCE_FLAG_NONE};
+    ComPtr<ID3D12Resource> StagingResource;
+    if (auto Err =
+            HR::toError(Device->CreateCommittedResource(
+                            &DefaultHeapProp, D3D12_HEAP_FLAG_NONE,
+                            &StagingDesc, D3D12_RESOURCE_STATE_RESOLVE_DEST,
+                            nullptr, IID_PPV_ARGS(&StagingResource)),
+                        "Failed to create SamplerFeedback staging texture."))
+      return Err;
+
+    // Row-major readback buffer matches the staging texture's row pitch
+    // requirements (256-byte alignment is enforced by CopyTextureRegion).
+    const uint32_t AlignedPitch =
+        getAlignedTexturePitch(FeedbackTexelsW, /*ElementSize=*/1u);
+    const uint64_t ReadbackSize =
+        static_cast<uint64_t>(AlignedPitch) * FeedbackTexelsH;
+    const D3D12_HEAP_PROPERTIES ReadbackHeapProp =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+    const D3D12_RESOURCE_DESC ReadbackDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(ReadbackSize);
+    ComPtr<ID3D12Resource> ReadbackBuffer;
+    if (auto Err =
+            HR::toError(Device->CreateCommittedResource(
+                            &ReadbackHeapProp, D3D12_HEAP_FLAG_NONE,
+                            &ReadbackDesc, D3D12_RESOURCE_STATE_COPY_DEST,
+                            nullptr, IID_PPV_ARGS(&ReadbackBuffer)),
+                        "Failed to create SamplerFeedback readback buffer."))
+      return Err;
+
+    Bundle.emplace_back(/*Upload=*/nullptr, FeedbackResource, ReadbackBuffer,
+                        /*Heap=*/nullptr, StagingResource);
+    return Bundle;
+  }
+
   llvm::Expected<ResourceBundle> createUAV(Resource &R, InvocationState &IS) {
+    if (R.isFeedbackTexture())
+      return createFeedbackUAV(R, IS);
+
     ResourceBundle Bundle;
     const uint32_t BufferSize = getUAVBufferSize(R);
 
@@ -2008,9 +2189,51 @@ public:
     return Bundle;
   }
 
+  // returns the next available HeapIdx after binding the SamplerFeedback UAV
+  // for `R` at `HeapIdx`. Each Bundle entry contributes a single descriptor.
+  uint32_t bindFeedbackUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
+                           ResourceBundle ResBundle) {
+    assert(R.isFeedbackTexture() &&
+           "bindFeedbackUAV called on a non-feedback resource");
+    assert(R.PairedResource &&
+           "FeedbackTexture2D missing PairedResource at bind time");
+
+    ComPtr<ID3D12Device8> Device8;
+    if (FAILED(Device.As(&Device8))) {
+      llvm::errs() << "ID3D12Device8 not available; cannot bind "
+                      "SamplerFeedback UAV for "
+                   << R.Name << "\n";
+      return HeapIdx;
+    }
+    ID3D12Resource *PairedRes = findD3DResourceByName(*R.PairedResource, IS);
+    if (!PairedRes) {
+      llvm::errs() << "PairedResource '" << *R.PairedResource
+                   << "' not found for FeedbackTexture2D " << R.Name << "\n";
+      return HeapIdx;
+    }
+
+    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
+        IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
+
+    for (const ResourceSet &RS : ResBundle) {
+      llvm::outs() << "FeedbackUAV: HeapIdx = " << HeapIdx << " PairedResource "
+                   << *R.PairedResource << "\n";
+      D3D12_CPU_DESCRIPTOR_HANDLE Handle = HeapStart;
+      Handle.ptr += HeapIdx * DescHandleIncSize;
+      Device8->CreateSamplerFeedbackUnorderedAccessView(
+          PairedRes, RS.Buffer.Get(), Handle);
+      HeapIdx++;
+    }
+    return HeapIdx;
+  }
+
   // returns the next available HeapIdx
   uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
                    ResourceBundle ResBundle) {
+    if (R.isFeedbackTexture())
+      return bindFeedbackUAV(R, IS, HeapIdx, ResBundle);
     const uint32_t EltSize = R.getElementSize();
     const uint32_t NumElts = R.size() / EltSize;
     const D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = getUAVDescription(R);
@@ -2268,6 +2491,47 @@ public:
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
   }
 
+  // SamplerFeedback readback: opaque feedback resource → typed staging
+  // texture (via ResolveSubresourceRegion DECODE) → row-major readback
+  // buffer. Used by both compute and graphics CopyBackResource lambdas.
+  void copyBackFeedbackResource(ResourcePair &R, InvocationState &IS) {
+    const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
+    const UINT FeedbackW = static_cast<UINT>(B.OutputProps.Width);
+    const UINT FeedbackH = static_cast<UINT>(B.OutputProps.Height);
+    const uint32_t AlignedPitch =
+        getAlignedTexturePitch(FeedbackW, /*ElementSize=*/1u);
+    const DXGI_FORMAT DecodedFormat = getFeedbackDecodedFormat(R.first->FBKind);
+    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT ReadbackFootprint{
+        0, CD3DX12_SUBRESOURCE_FOOTPRINT(DecodedFormat, FeedbackW, FeedbackH, 1,
+                                         AlignedPitch)};
+    for (const ResourceSet &RS : R.second) {
+      if (RS.Readback == nullptr || RS.Staging == nullptr)
+        continue;
+      // Feedback resource: UAV -> RESOLVE_SOURCE for the decode resolve.
+      const D3D12_RESOURCE_BARRIER FeedbackToResolve =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              RS.Buffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+              D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+      IS.CB->CmdList->ResourceBarrier(1, &FeedbackToResolve);
+      // Decode the opaque feedback values into the typed staging texture.
+      D3D12_RECT SrcRect = {0, 0, static_cast<LONG>(FeedbackW),
+                            static_cast<LONG>(FeedbackH)};
+      IS.CB->CmdList->ResolveSubresourceRegion(
+          RS.Staging.Get(), 0, 0, 0, RS.Buffer.Get(), 0, &SrcRect,
+          DecodedFormat, D3D12_RESOLVE_MODE_DECODE_SAMPLER_FEEDBACK);
+      // Staging: RESOLVE_DEST -> COPY_SOURCE so we can CopyTextureRegion.
+      const D3D12_RESOURCE_BARRIER StagingToCopy =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              RS.Staging.Get(), D3D12_RESOURCE_STATE_RESOLVE_DEST,
+              D3D12_RESOURCE_STATE_COPY_SOURCE);
+      IS.CB->CmdList->ResourceBarrier(1, &StagingToCopy);
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RS.Readback.Get(),
+                                                 ReadbackFootprint);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Staging.Get(), 0);
+      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
+  }
+
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
     if (IS.DescHeap || IS.SamplerHeap) {
@@ -2401,6 +2665,10 @@ public:
     }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
+      if (R.first->isFeedbackTexture()) {
+        copyBackFeedbackResource(R, IS);
+        return;
+      }
       if (R.first->isTexture()) {
         const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
@@ -2443,6 +2711,26 @@ public:
     auto MemCpyBack = [](ResourcePair &R) -> llvm::Error {
       if (!R.first->isReadWrite())
         return llvm::Error::success();
+
+      // SamplerFeedback: readback buffer is a row-padded 2D image of decoded
+      // bytes (R8_UINT). Use CPUBuffer::copyFromTexture to strip the 256-byte
+      // row padding into the tightly-packed Data block. createFeedbackUAV
+      // emits a single ResourceSet, and copyFromTexture writes Data[0].
+      if (R.first->isFeedbackTexture()) {
+        for (const ResourceSet &RS : R.second) {
+          if (RS.Readback == nullptr)
+            continue;
+          void *DataPtr;
+          if (auto Err = HR::toError(RS.Readback->Map(0, nullptr, &DataPtr),
+                                     "Failed to map SamplerFeedback readback."))
+            return Err;
+          const uint32_t AlignedPitch = getAlignedTexturePitch(
+              R.first->BufferPtr->OutputProps.Width, /*ElementSize=*/1u);
+          R.first->BufferPtr->copyFromTexture(DataPtr, AlignedPitch);
+          RS.Readback->Unmap(0, nullptr);
+        }
+        return llvm::Error::success();
+      }
 
       auto *RSIt = R.second.begin();
       auto *DataIt = R.first->BufferPtr->Data.begin();
@@ -2655,6 +2943,10 @@ public:
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
+      if (R.first->isFeedbackTexture()) {
+        copyBackFeedbackResource(R, IS);
+        return;
+      }
       if (R.first->isTexture()) {
         const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
