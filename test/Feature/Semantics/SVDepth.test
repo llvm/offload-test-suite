@@ -117,6 +117,8 @@ Results:
 #--- end
 
 # XFAIL: Clang
+# Metal backend doesn't yet support Bindings.DepthBuffer.
+# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
