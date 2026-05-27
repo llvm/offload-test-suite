@@ -953,6 +953,10 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
+    // Set only when the pipeline has a Bindings.DepthBuffer; the depth target
+    // contents are copied here after the draw so the test can verify
+    // SV_Depth* writes.
+    std::unique_ptr<offloadtest::Buffer> DSReadback;
     std::unique_ptr<offloadtest::Buffer> VB;
 
     llvm::SmallVector<DescriptorTable> DescTables;
@@ -2248,6 +2252,28 @@ public:
     P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped,
                                                  Placed.Footprint.RowPitch);
     Readback.Buffer->Unmap(0, nullptr);
+
+    if (IS.DSReadback) {
+      void *DSMapped = nullptr;
+      auto &DSReadback = llvm::cast<DXBuffer>(*IS.DSReadback);
+      if (auto Err = HR::toError(DSReadback.Buffer->Map(0, nullptr, &DSMapped),
+                                 "Failed to map depth buffer readback"))
+        return Err;
+
+      auto &DS = llvm::cast<DXTexture>(*IS.DepthStencil);
+      const D3D12_RESOURCE_DESC DSDesc = DS.Resource->GetDesc();
+      D3D12_PLACED_SUBRESOURCE_FOOTPRINT DSPlaced = {};
+      uint32_t DSNumRows = 0;
+      uint64_t DSRowSizeInBytes = 0;
+      uint64_t DSTotalBytes = 0;
+      Device->GetCopyableFootprints(&DSDesc, 0u, 1u, 0u, &DSPlaced, &DSNumRows,
+                                    &DSRowSizeInBytes, &DSTotalBytes);
+
+      P.Bindings.DepthBufferPtr->copyFromTexture(DSMapped,
+                                                 DSPlaced.Footprint.RowPitch);
+      DSReadback.Buffer->Unmap(0, nullptr);
+    }
+
     return llvm::Error::success();
   }
 
@@ -2281,6 +2307,28 @@ public:
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    // If the test bound a CPU-readable depth buffer, create the depth target
+    // from it and allocate a readback buffer. Otherwise fall back to the
+    // default depth target (which is not read back).
+    if (P.Bindings.DepthBufferPtr) {
+      const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
+      auto TexOrErr =
+          offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
+      if (!TexOrErr)
+        return TexOrErr.takeError();
+      IS.DepthStencil = std::move(*TexOrErr);
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::GpuToCpu;
+      BufDesc.Usage = BufferUsage::Storage;
+      auto BufOrErr = createBuffer("DSReadback", BufDesc,
+                                   getAlignedTextureBufferSize(DSBuf));
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.DSReadback = std::move(*BufOrErr);
+      return llvm::Error::success();
+    }
+
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
@@ -2365,6 +2413,35 @@ public:
     const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
 
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+
+    // If a depth buffer is bound for readback, transition the depth target
+    // from DEPTH_WRITE to COPY_SOURCE and copy its contents to the readback
+    // buffer using the depth-aspect placed footprint.
+    if (IS.DSReadback) {
+      auto &DSReadback = llvm::cast<DXBuffer>(*IS.DSReadback);
+      const D3D12_RESOURCE_BARRIER DSBarrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              DS.Resource.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE,
+              D3D12_RESOURCE_STATE_COPY_SOURCE);
+      IS.CB->CmdList->ResourceBarrier(1, &DSBarrier);
+
+      const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
+      // CopyTextureRegion requires the placed-footprint format to match the
+      // source resource format (D32_FLOAT for a depth target), not the
+      // shader-visible (R32_FLOAT) cast used for SRV reads.
+      const DXGI_FORMAT DSResFormat = DS.Resource->GetDesc().Format;
+      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT DSFootprint{
+          0,
+          CD3DX12_SUBRESOURCE_FOOTPRINT(DSResFormat, DSBuf.OutputProps.Width,
+                                        DSBuf.OutputProps.Height, 1,
+                                        getAlignedTexturePitch(
+                                            DSBuf.OutputProps.Width,
+                                            DSBuf.getElementSize()))};
+      const CD3DX12_TEXTURE_COPY_LOCATION DSDstLoc(DSReadback.Buffer.Get(),
+                                                   DSFootprint);
+      const CD3DX12_TEXTURE_COPY_LOCATION DSSrcLoc(DS.Resource.Get(), 0);
+      IS.CB->CmdList->CopyTextureRegion(&DSDstLoc, 0, 0, 0, &DSSrcLoc, nullptr);
+    }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
@@ -2513,7 +2590,10 @@ public:
 
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
-        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        // Match the PSO depth-stencil format to the actual depth target the
+        // backend created (default: D32_FLOAT_S8X24_UINT; user-bound depth
+        // buffers may be a simpler depth-only format like D32_FLOAT).
+        PipelineDesc.DSFormat = State.DepthStencil->getDesc().Fmt;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;

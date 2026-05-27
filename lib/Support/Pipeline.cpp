@@ -16,7 +16,7 @@ using namespace offloadtest;
 
 static bool isFloatingPointFormat(DataFormat Format) {
   return Format == DataFormat::Float16 || Format == DataFormat::Float32 ||
-         Format == DataFormat::Float64;
+         Format == DataFormat::Float64 || Format == DataFormat::Depth32;
 }
 
 void PushConstantBlock::getContent(
@@ -154,6 +154,13 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       if (!P.Bindings.RTargetBufferPtr)
         I.setError(Twine("Referenced render target buffer ") +
                    P.Bindings.RenderTarget + " not found!");
+    }
+
+    if (!P.Bindings.DepthBuffer.empty()) {
+      P.Bindings.DepthBufferPtr = P.getBuffer(P.Bindings.DepthBuffer);
+      if (!P.Bindings.DepthBufferPtr)
+        I.setError(Twine("Referenced depth buffer ") + P.Bindings.DepthBuffer +
+                   " not found!");
     }
   }
 }
@@ -425,6 +432,7 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("VertexBuffer", B.VertexBuffer);
   I.mapOptional("VertexAttributes", B.VertexAttributes);
   I.mapOptional("RenderTarget", B.RenderTarget);
+  I.mapOptional("DepthBuffer", B.DepthBuffer);
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
 }

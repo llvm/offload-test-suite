@@ -22,7 +22,9 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
+
+DispatchParameters:
+  DispatchGroupCount: [1, 1, 1]
 
 Buffers:
   - Name: Tex

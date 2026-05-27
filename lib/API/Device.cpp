@@ -107,6 +107,32 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   return Dev.createTexture("DepthStencil", Desc);
 }
 
+llvm::Expected<std::unique_ptr<Texture>>
+offloadtest::createDepthBufferFromCPUBuffer(Device &Dev,
+                                            const CPUBuffer &Buf) {
+  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
+  if (!TexFmtOrErr)
+    return TexFmtOrErr.takeError();
+  if (*TexFmtOrErr != Format::D32Float)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Depth buffer binding requires DataFormat::Depth32 with 1 channel.");
+
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::DepthStencil;
+  Desc.Fmt = *TexFmtOrErr;
+  Desc.Width = Buf.OutputProps.Width;
+  Desc.Height = Buf.OutputProps.Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
+
+  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
+    return Err;
+
+  return Dev.createTexture("DepthBuffer", Desc);
+}
+
 // This is a separate function because recursion is not allowed in this code
 // base.
 static llvm::Expected<std::unique_ptr<offloadtest::Buffer>>

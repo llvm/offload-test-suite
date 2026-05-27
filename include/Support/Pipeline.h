@@ -400,6 +400,15 @@ struct IOBindings {
 
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
+
+  // Optional: a CPU-readable depth buffer attachment. When set, the graphics
+  // pipeline binds this buffer's storage as the depth target and copies the
+  // contents back after the draw. Required for testing SV_Depth* / SV_StencilRef
+  // pixel shader outputs. When unset, backends create an internal depth target
+  // that is not read back.
+  std::string DepthBuffer;
+  CPUBuffer *DepthBufferPtr = nullptr;
+
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
   uint32_t getVertexStride() const {
