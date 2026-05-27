@@ -239,9 +239,13 @@ public:
   std::string Name;
   IRRootSignaturePtr RootSig;
   std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
-  IRShaderReflectionPtr Reflection;
   MTL::ComputePipelineState *ComputePipeline = nullptr;
   MTL::RenderPipelineState *RenderPipeline = nullptr;
+
+  // Compute pipeline only state. Threadgroup size comes from numthreads() in
+  // the HLSL source and is captured from shader reflection at pipeline
+  // creation, so dispatch() doesn't need to re-query reflection each time.
+  MTL::Size ThreadsPerGroup = MTL::Size(1, 1, 1);
 
   // Rasterization pipeline only state.
   // These are part of the pipeline in DX and VK, but dynamic state in Metal.
@@ -252,11 +256,11 @@ public:
 
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
-                   IRShaderReflectionPtr Reflection,
-                   MTL::ComputePipelineState *ComputePipeline)
+                   MTL::ComputePipelineState *ComputePipeline,
+                   MTL::Size ThreadsPerGroup)
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
         RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
-        Reflection(std::move(Reflection)), ComputePipeline(ComputePipeline) {}
+        ComputePipeline(ComputePipeline), ThreadsPerGroup(ThreadsPerGroup) {}
 
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
@@ -422,11 +426,6 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
   MTL::ComputeCommandEncoder *ComputeEnc = nullptr;
   MTL::BlitCommandEncoder *BlitEnc = nullptr;
 
-  /// Threadgroup size from shader reflection (the numthreads() attribute
-  /// persisted in the transpiled Metallib). Must be set via
-  /// setThreadGroupSize() before dispatching.
-  MTL::Size ThreadsPerGroup = {1, 1, 1};
-
   /// Accumulated barrier scope from commands recorded since the last barrier.
   MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
 
@@ -483,13 +482,6 @@ public:
 
   MTL::ComputeCommandEncoder *getNative() const { return ComputeEnc; }
 
-  /// Set the threadgroup size for subsequent dispatch calls. The values must
-  /// come from shader reflection (the numthreads() attribute in the HLSL
-  /// source, persisted in the transpiled Metallib).
-  void setThreadGroupSize(NS::UInteger X, NS::UInteger Y, NS::UInteger Z) {
-    ThreadsPerGroup = MTL::Size(X, Y, Z);
-  }
-
   MTL::CommandEncoder *getActiveEncoder() const {
     if (ComputeEnc)
       return ComputeEnc;
@@ -513,18 +505,26 @@ public:
           NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
-  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+  llvm::Error dispatch(const offloadtest::PipelineState &PSO,
+                       uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ) override {
+    const auto &MTLPSO = llvm::cast<MTLPipelineState>(PSO);
+    if (!MTLPSO.ComputePipeline)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "PipelineState bound to dispatch() is not a compute pipeline.");
     if (auto Err = ensureComputeEncoder())
       return Err;
     flushBarrier();
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
                                       GroupCountY, GroupCountZ)
                             .str());
-    const MTL::Size GridSize(ThreadsPerGroup.width * GroupCountX,
-                             ThreadsPerGroup.height * GroupCountY,
-                             ThreadsPerGroup.depth * GroupCountZ);
-    ComputeEnc->dispatchThreads(GridSize, ThreadsPerGroup);
+    ComputeEnc->setComputePipelineState(MTLPSO.ComputePipeline);
+
+    const MTL::Size GridSize(MTLPSO.ThreadsPerGroup.width * GroupCountX,
+                             MTLPSO.ThreadsPerGroup.height * GroupCountY,
+                             MTLPSO.ThreadsPerGroup.depth * GroupCountZ);
+    ComputeEnc->dispatchThreads(GridSize, MTLPSO.ThreadsPerGroup);
     addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
     return llvm::Error::success();
   }
@@ -1287,7 +1287,6 @@ class MTLDevice : public offloadtest::Device {
     MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
 
     const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
-    NativeEncoder->setComputePipelineState(PS->ComputePipeline);
     MTLGPUDescriptorHandle Handle = {};
     if (IS.DescHeap) {
       IS.DescHeap->bind(NativeEncoder);
@@ -1307,21 +1306,8 @@ class MTLDevice : public offloadtest::Device {
                                      MTL::ResourceUsageRead |
                                          MTL::ResourceUsageWrite);
 
-    NS::UInteger TGS[3] = {PS->ComputePipeline->maxTotalThreadsPerThreadgroup(),
-                           1, 1};
-    if (PS->Reflection) {
-      IRVersionedCSInfo Info;
-      if (IRShaderReflectionCopyComputeInfo(PS->Reflection.get(),
-                                            IRReflectionVersion_1_0, &Info)) {
-        TGS[0] = Info.info_1_0.tg_size[0];
-        TGS[1] = Info.info_1_0.tg_size[1];
-        TGS[2] = Info.info_1_0.tg_size[2];
-      }
-      IRShaderReflectionReleaseComputeInfo(&Info);
-    }
-    Encoder.setThreadGroupSize(TGS[0], TGS[1], TGS[2]);
-
-    if (auto Err = Encoder.dispatch(P.DispatchParameters.DispatchGroupCount[0],
+    if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
+                                    P.DispatchParameters.DispatchGroupCount[0],
                                     P.DispatchParameters.DispatchGroupCount[1],
                                     P.DispatchParameters.DispatchGroupCount[2]))
       return Err;
@@ -1574,9 +1560,20 @@ public:
     if (Error)
       return toError(Error);
 
+    IRVersionedCSInfo Info;
+    if (!IRShaderReflectionCopyComputeInfo(MetalIR->Reflection.get(),
+                                           IRReflectionVersion_1_0, &Info))
+      return llvm::createStringError(
+          "Failed to read compute reflection for entry point '%s'; cannot "
+          "determine threadgroup size from numthreads().",
+          CS.EntryPoint.c_str());
+    const MTL::Size ThreadsPerGroup(Info.info_1_0.tg_size[0],
+                                    Info.info_1_0.tg_size[1],
+                                    Info.info_1_0.tg_size[2]);
+    IRShaderReflectionReleaseComputeInfo(&Info);
+
     return std::make_unique<MTLPipelineState>(
-        Name, std::move(RootSig), std::move(ArgBuffer),
-        std::move(MetalIR->Reflection), PSO);
+        Name, std::move(RootSig), std::move(ArgBuffer), PSO, ThreadsPerGroup);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
