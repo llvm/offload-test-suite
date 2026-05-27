@@ -1,0 +1,139 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+// Graphics-stage SamplerFeedback MipRegionUsed smoke test.
+//
+// A 2x2 render target produces exactly four PS invocations, one per
+// feedback texel (the feedback resource is 2x2 with a 4x4 MipRegion
+// covering an 8x8 paired Texture2D). Three of the four pixels write LOD 0
+// via WriteSamplerFeedbackLevel; the fourth returns without writing.
+// After DECODE the touched texels report 0xFF (single-mip MipRegionUsed
+// encoding for "sampled") and the untouched bottom-right texel reports
+// 0x00.
+//
+// This pairs MipRegionUsed with the graphics CopyBackResource path; the
+// compute variant is MipRegionUsed.basic.test.
+[[vk::binding(0, 0)]] Texture2D<float4> PairedTex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp : register(s0);
+[[vk::binding(2, 0)]] FeedbackTexture2D<SAMPLER_FEEDBACK_MIP_REGION_USED> FBTex : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  uint2 Px = (uint2)Pos.xy;
+  if (Px.x == 1 && Px.y == 1)
+    return float4(0, 0, 0, 0);
+
+  // Map the 2x2 RT pixel to the centre of the matching 4x4 MipRegion in
+  // the 8x8 paired texture; each pixel writes its own feedback texel.
+  float2 uv = (float2(Px) + 0.5) * 0.5;
+  FBTex.WriteSamplerFeedbackLevel(PairedTex, Samp, uv, 0.0);
+  return float4(0, 0, 0, 0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: PairedTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 8, Height: 8, Depth: 1, MipLevels: 1 }
+    FillSize: 1024 # 8 * 8 * 16 bytes
+
+  - Name: FBTex
+    Format: Hex8
+    Channels: 1
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+      MipLevels: 1
+      MipRegionWidth: 4
+      MipRegionHeight: 4
+    FillSize: 4
+
+  - Name: Expected
+    Format: Hex8
+    Channels: 1
+    # PS pixel (0,0), (1,0), (0,1) sampled at LOD 0 -> 0xFF (single-mip
+    # MipRegionUsed decode reports 0xFF for any-mip-sampled regions).
+    # Pixel (1,1) never sampled -> 0x00.
+    Data: [ 0xFF, 0xFF, 0xFF, 0x00 ]
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Samplers:
+  - Name: Samp
+    Address: Clamp
+    MinFilter: Linear
+    MagFilter: Linear
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+DescriptorSets:
+  - Resources:
+    - Name: PairedTex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: FBTex
+      Kind: FeedbackTexture2D
+      FeedbackKind: MipRegionUsed
+      PairedResource: PairedTex
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: MipRegionUsedGraphicsTest
+    Rule: BufferExact
+    Actual: FBTex
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: SamplerFeedback
+# UNSUPPORTED: Vulkan, Metal, Clang, WARP
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_5 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_5 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
