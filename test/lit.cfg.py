@@ -152,6 +152,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
+        if device["Features"].get("SamplerFeedbackTier", "NotSupported") != "NotSupported":
+            config.available_features.add("SamplerFeedback")
         setWaveSizeFeaturesDirectX(config, device)
 
     if device["API"] == "Metal":

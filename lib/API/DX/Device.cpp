@@ -64,6 +64,7 @@ using ID3D12GraphicsCommandListX = ID3D12GraphicsCommandList6;
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
+template <> char CapabilityValueEnum<directx::SamplerFeedbackTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
@@ -2001,29 +2002,29 @@ public:
 
     // Feedback texel dimensions come from the YAML OutputProps. The opaque
     // feedback resource itself is sized to the *paired* texture's dimensions
-    // (Width * MipRegion.Width); the MipRegion controls how many paired-
-    // texture pixels collapse into one feedback texel. Until we plumb an
-    // explicit MipRegion field through OutputProperties, use a fixed 4×4
-    // region — small enough to exercise multi-texel feedback resolution and
-    // common enough that test authors can simply size their paired texture
-    // to (4 * feedbackWidth, 4 * feedbackHeight). A follow-up commit will
-    // expose MipRegion in the YAML schema.
-    constexpr UINT MipRegionTexels = 4;
+    // (FeedbackWidth * MipRegionWidth, FeedbackHeight * MipRegionHeight);
+    // the MipRegion controls how many paired-texture pixels collapse into
+    // one feedback texel. MipRegion is configurable via OutputProperties
+    // and defaults to 4x4 (the smallest region all SamplerFeedback hardware
+    // supports).
+    const UINT MipRegionW = static_cast<UINT>(B.OutputProps.MipRegionWidth);
+    const UINT MipRegionH = static_cast<UINT>(B.OutputProps.MipRegionHeight);
     const UINT FeedbackTexelsW = static_cast<UINT>(B.OutputProps.Width);
     const UINT FeedbackTexelsH = static_cast<UINT>(B.OutputProps.Height);
 
     D3D12_RESOURCE_DESC1 ResDesc = {};
     ResDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     ResDesc.Alignment = 0;
-    ResDesc.Width = static_cast<UINT64>(FeedbackTexelsW) * MipRegionTexels;
-    ResDesc.Height = FeedbackTexelsH * MipRegionTexels;
+    ResDesc.Width = static_cast<UINT64>(FeedbackTexelsW) * MipRegionW;
+    ResDesc.Height = FeedbackTexelsH * MipRegionH;
     ResDesc.DepthOrArraySize = 1;
-    ResDesc.MipLevels = 1;
+    ResDesc.MipLevels =
+        static_cast<UINT16>(std::max(1, B.OutputProps.MipLevels));
     ResDesc.Format = getFeedbackOpaqueFormat(R.FBKind);
     ResDesc.SampleDesc = {1, 0};
     ResDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     ResDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-    ResDesc.SamplerFeedbackMipRegion = {MipRegionTexels, MipRegionTexels, 1};
+    ResDesc.SamplerFeedbackMipRegion = {MipRegionW, MipRegionH, 1};
 
     const D3D12_HEAP_PROPERTIES DefaultHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);

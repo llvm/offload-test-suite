@@ -28,10 +28,18 @@ MESH_SHADER_TIER_ENUM(MeshShaderTier1, Tier1,10)
 #undef MESH_SHADER_TIER_ENUM
 #endif
 
+#ifdef SAMPLER_FEEDBACK_TIER_ENUM
+SAMPLER_FEEDBACK_TIER_ENUM(SamplerFeedbackNotSupported, NotSupported, 0)
+SAMPLER_FEEDBACK_TIER_ENUM(SamplerFeedbackTier_0_9, Tier_0_9, 90)
+SAMPLER_FEEDBACK_TIER_ENUM(SamplerFeedbackTier_1_0, Tier_1_0, 100)
+#undef SAMPLER_FEEDBACK_TIER_ENUM
+#endif
+
 #ifdef D3D_FEATURE_ENUM
 D3D_FEATURE_ENUM(directx::ShaderModel, HighestShaderModel)
 D3D_FEATURE_ENUM(directx::RootSignature, HighestRootSignatureVersion)
 D3D_FEATURE_ENUM(directx::MeshShaderTier, MeshShaderTier)
+D3D_FEATURE_ENUM(directx::SamplerFeedbackTier, SamplerFeedbackTier)
 #undef D3D_FEATURE_ENUM
 #endif
 

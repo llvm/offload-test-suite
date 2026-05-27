@@ -1,0 +1,109 @@
+#--- source.hlsl
+// SamplerFeedback MinMip — basic test.
+//
+// Paired Texture2D is 8x8 with 4 mip levels.
+// FeedbackTexture2D<SAMPLER_FEEDBACK_MIN_MIP> is 2x2 with a 4x4 MipRegion,
+// so each feedback texel records the min mip used across one 4x4 quadrant
+// of the paired texture. Three of the four compute threads write feedback
+// at LOD 0 in their own quadrant; the fourth (DTid (1,1)) skips writing.
+// After DECODE the three written texels report 0x00 (mip 0 touched) and
+// the untouched texel reports 0xFF (the spec's "never sampled" sentinel).
+[[vk::binding(0, 0)]] Texture2D<float4> PairedTex : register(t0);
+[[vk::binding(1, 0)]] SamplerState Samp : register(s0);
+[[vk::binding(2, 0)]] FeedbackTexture2D<SAMPLER_FEEDBACK_MIN_MIP> FBTex : register(u0);
+
+[numthreads(2, 2, 1)]
+void main(uint3 DTid : SV_DispatchThreadID) {
+  // Skip writing for thread (1,1) so its feedback texel stays "never sampled".
+  if (DTid.x == 1 && DTid.y == 1)
+    return;
+
+  // Place each writing thread at the centre of its 4x4 quadrant in UV space.
+  // Quadrant centres map to UVs (0.25, 0.25), (0.75, 0.25), (0.25, 0.75).
+  float2 uv = (float2(DTid.xy) + 0.5) * 0.5;
+
+  // Write at LOD 0 so each thread only marks its own feedback texel in
+  // mip 0 (higher LODs would smear across multiple mip-0 texels via the
+  // smaller feedback mip levels).
+  FBTex.WriteSamplerFeedbackLevel(PairedTex, Samp, uv, 0.0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [1, 1, 1]
+
+Buffers:
+  - Name: PairedTex
+    Format: Float32
+    Channels: 4
+    # 8x8 with 4 mips (8,4,2,1). Total texels: 64+16+4+1 = 85, each RGBA.
+    # Contents don't matter for feedback recording — only that the resource
+    # can be sampled.
+    OutputProps: { Width: 8, Height: 8, Depth: 1, MipLevels: 4 }
+    FillSize: 1360 # 85 texels * 16 bytes
+
+  - Name: FBTex
+    Format: Hex8
+    Channels: 1
+    # 2x2 feedback texels covering an 8x8 paired texture (MipRegion 4x4).
+    # MipLevels must match the paired texture (D3D12 spec). Total bytes =
+    # sum over mips: 2*2 + 1 + 1 + 1 = 7 bytes.
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+      MipLevels: 4
+      MipRegionWidth: 4
+      MipRegionHeight: 4
+    FillSize: 7
+
+  - Name: Expected
+    Format: Hex8
+    Channels: 1
+    # Decoded MIN_MIP values per feedback texel in row-major order for mip 0:
+    # (0,0)->0, (1,0)->0, (0,1)->0, (1,1)->0xFF (untouched).
+    # Higher feedback mips are not resolved back — those bytes remain at
+    # the zero fill from CPU-side initialization.
+    Data: [ 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00 ]
+
+Samplers:
+  - Name: Samp
+    Address: Clamp
+    MinFilter: Linear
+    MagFilter: Linear
+
+DescriptorSets:
+  - Resources:
+    - Name: PairedTex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: FBTex
+      Kind: FeedbackTexture2D
+      FeedbackKind: MinMip
+      PairedResource: PairedTex
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: MinMipTest
+    Rule: BufferExact
+    Actual: FBTex
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: SamplerFeedback
+# UNSUPPORTED: Vulkan, Metal, Clang, WARP
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -E main -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

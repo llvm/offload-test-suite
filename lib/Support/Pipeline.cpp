@@ -499,6 +499,8 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
   I.mapOptional("MipLevels", P.MipLevels, 1);
+  I.mapOptional("MipRegionWidth", P.MipRegionWidth, 4);
+  I.mapOptional("MipRegionHeight", P.MipRegionHeight, 4);
 }
 
 void MappingTraits<offloadtest::dx::RootResource>::mapping(
