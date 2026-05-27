@@ -885,8 +885,8 @@ public:
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
-    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
-    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
     VkBufferCopy Region = {};
     Region.srcOffset = SrcOffset;
     Region.dstOffset = DstOffset;
@@ -899,8 +899,8 @@ public:
 
   llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
                                   offloadtest::Buffer &Dst) override {
-    auto &VKSrc = static_cast<VulkanTexture &>(Src);
-    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    auto &VKSrc = llvm::cast<VulkanTexture>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
 
     assert((VKSrc.Desc.Usage & TextureUsage::Storage) !=
                TextureUsage::Storage &&

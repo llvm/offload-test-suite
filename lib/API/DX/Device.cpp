@@ -781,9 +781,8 @@ public:
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
-    auto &DXSrc = static_cast<DXBuffer &>(Src);
-    auto &DXDst = static_cast<DXBuffer &>(Dst);
-    // addUAVBarrier();
+    auto &DXSrc = llvm::cast<DXBuffer>(Src);
+    auto &DXDst = llvm::cast<DXBuffer>(Dst);
 
     {
       const D3D12_RESOURCE_BARRIER Barrier =
@@ -809,8 +808,8 @@ public:
   }
 
   llvm::Error copyTextureToBuffer(Texture &Src, Buffer &Dst) override {
-    auto &DXSrc = static_cast<DXTexture &>(Src);
-    auto &DXDst = static_cast<DXBuffer &>(Dst);
+    auto &DXSrc = llvm::cast<DXTexture>(Src);
+    auto &DXDst = llvm::cast<DXBuffer>(Dst);
 
     {
       const D3D12_RESOURCE_BARRIER Barrier =
