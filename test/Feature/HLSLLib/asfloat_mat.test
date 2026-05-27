@@ -1,0 +1,350 @@
+#--- source.hlsl
+StructuredBuffer<float4> In0 : register(t0);
+StructuredBuffer<uint4> In1 : register(t1);
+StructuredBuffer<int4> In2 : register(t2);
+
+RWStructuredBuffer<float4> Out0 : register(u3);
+RWStructuredBuffer<float4> Out1 : register(u4);
+RWStructuredBuffer<float4> Out2 : register(u5);
+
+[numthreads(1,1,1)]
+void main() {
+  // float -> float matrices (identity bit-cast)
+  float2x2 f22 = asfloat(float2x2(In0[0].xy, In0[0].zw));
+  float3x2 f32 = asfloat(float3x2(In0[1].xyz, In0[2].xyz));
+  float2x4 f24 = asfloat(float2x4(In0[3], In0[4]));
+  float4x4 f44 = asfloat(float4x4(In0[5], In0[6], In0[7], In0[8]));
+  float3x3 f33 = asfloat(float3x3(In0[9].xyz, In0[10].xyz, In0[11].xyz));
+  float4x3 f43 = asfloat(float4x3(In0[12].xyz, In0[13].xyz,
+                                  In0[14].xyz, In0[15].xyz));
+
+  Out0[0] = float4(f22[0], f22[1]);
+  Out0[1] = float4(f32[0], f32[1]);
+  Out0[2] = float4(f32[2], 0.0, 0.0);
+  Out0[3] = f24[0];
+  Out0[4] = f24[1];
+  Out0[5] = f44[0];
+  Out0[6] = f44[1];
+  Out0[7] = f44[2];
+  Out0[8] = f44[3];
+  Out0[9]  = float4(f33[0], 0.0);
+  Out0[10] = float4(f33[1], 0.0);
+  Out0[11] = float4(f33[2], 0.0);
+  Out0[12] = float4(f43[0], 0.0);
+  Out0[13] = float4(f43[1], 0.0);
+  Out0[14] = float4(f43[2], 0.0);
+  Out0[15] = float4(f43[3], 0.0);
+
+  float2x2 f22_const = asfloat(float2x2(0.0, 1.0, -1.0, 0.5));
+  Out0[16] = float4(f22_const[0], f22_const[1]);
+
+  float1x1 f11 = asfloat(float1x1(In0[0].x));
+  Out0[17] = float4(f11[0], 0.0, 0.0, 0.0);
+
+  float4x4 f44_const = asfloat(float4x4(0.0, 1.0, -1.0, 0.5,
+                                        10.5, -10.5, 100.0, 0.0,
+                                        1.0, 2.0, 3.0, 4.0,
+                                        -1.0, -2.0, -3.0, -4.0));
+  Out0[18] = f44_const[0];
+  Out0[19] = f44_const[1];
+  Out0[20] = f44_const[2];
+  Out0[21] = f44_const[3];
+
+  // uint -> float matrices
+  float2x2 u22 = asfloat(uint2x2(In1[0].xy, In1[0].zw));
+  float3x2 u32 = asfloat(uint3x2(In1[1].xyz, In1[2].xyz));
+  float2x4 u24 = asfloat(uint2x4(In1[3], In1[4]));
+  float4x4 u44 = asfloat(uint4x4(In1[5], In1[6], In1[7], In1[8]));
+  float3x3 u33 = asfloat(uint3x3(In1[9].xyz, In1[10].xyz, In1[11].xyz));
+  float4x3 u43 = asfloat(uint4x3(In1[12].xyz, In1[13].xyz,
+                                 In1[14].xyz, In1[15].xyz));
+
+  Out1[0] = float4(u22[0], u22[1]);
+  Out1[1] = float4(u32[0], u32[1]);
+  Out1[2] = float4(u32[2], 0.0, 0.0);
+  Out1[3] = u24[0];
+  Out1[4] = u24[1];
+  Out1[5] = u44[0];
+  Out1[6] = u44[1];
+  Out1[7] = u44[2];
+  Out1[8] = u44[3];
+  Out1[9]  = float4(u33[0], 0.0);
+  Out1[10] = float4(u33[1], 0.0);
+  Out1[11] = float4(u33[2], 0.0);
+  Out1[12] = float4(u43[0], 0.0);
+  Out1[13] = float4(u43[1], 0.0);
+  Out1[14] = float4(u43[2], 0.0);
+  Out1[15] = float4(u43[3], 0.0);
+
+  float2x2 u22_const = asfloat(uint2x2(0u, 1u, 10u, 100u));
+  Out1[16] = float4(u22_const[0], u22_const[1]);
+
+  float1x1 u11 = asfloat(uint1x1(In1[0].x));
+  Out1[17] = float4(u11[0], 0.0, 0.0, 0.0);
+
+  float4x4 u44_const = asfloat(uint4x4(0u, 1u, 10u, 100u,
+                                       50u, 100u, 1000u, 0u,
+                                       0u, 1u, 2u, 3u,
+                                       10u, 20u, 30u, 40u));
+  Out1[18] = u44_const[0];
+  Out1[19] = u44_const[1];
+  Out1[20] = u44_const[2];
+  Out1[21] = u44_const[3];
+
+  // int -> float matrices
+  float2x2 i22 = asfloat(int2x2(In2[0].xy, In2[0].zw));
+  float3x2 i32 = asfloat(int3x2(In2[1].xyz, In2[2].xyz));
+  float2x4 i24 = asfloat(int2x4(In2[3], In2[4]));
+  float4x4 i44 = asfloat(int4x4(In2[5], In2[6], In2[7], In2[8]));
+  float3x3 i33 = asfloat(int3x3(In2[9].xyz, In2[10].xyz, In2[11].xyz));
+  float4x3 i43 = asfloat(int4x3(In2[12].xyz, In2[13].xyz,
+                                In2[14].xyz, In2[15].xyz));
+
+  Out2[0] = float4(i22[0], i22[1]);
+  Out2[1] = float4(i32[0], i32[1]);
+  Out2[2] = float4(i32[2], 0.0, 0.0);
+  Out2[3] = i24[0];
+  Out2[4] = i24[1];
+  Out2[5] = i44[0];
+  Out2[6] = i44[1];
+  Out2[7] = i44[2];
+  Out2[8] = i44[3];
+  Out2[9]  = float4(i33[0], 0.0);
+  Out2[10] = float4(i33[1], 0.0);
+  Out2[11] = float4(i33[2], 0.0);
+  Out2[12] = float4(i43[0], 0.0);
+  Out2[13] = float4(i43[1], 0.0);
+  Out2[14] = float4(i43[2], 0.0);
+  Out2[15] = float4(i43[3], 0.0);
+
+  float2x2 i22_const = asfloat(int2x2(-1, 0, 50, 100));
+  Out2[16] = float4(i22_const[0], i22_const[1]);
+
+  float1x1 i11 = asfloat(int1x1(In2[0].x));
+  Out2[17] = float4(i11[0], 0.0, 0.0, 0.0);
+
+  float4x4 i44_const = asfloat(int4x4(-1, 0, 50, 100,
+                                      1, 10, 100, 0,
+                                      -1, 0, 1, 2,
+                                      3, 10, 50, 100));
+  Out2[18] = i44_const[0];
+  Out2[19] = i44_const[1];
+  Out2[20] = i44_const[2];
+  Out2[21] = i44_const[3];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In0
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 1.0, -1.0, 0.5,
+            10.5, -10.5, 100.0, 0.0,
+            -100.0, 0.001, -0.001, 0.0,
+            1.0, 2.0, 3.0, 4.0,
+            -1.0, -2.0, -3.0, -4.0,
+            0.0, 1.0, -1.0, 0.5,
+            -0.5, 10.0, -10.0, 100.0,
+            -100.0, 0.001, -0.001, 1000.0,
+            -1000.0, 99.99, -99.99, 50.5,
+            0.0, 1.0, 2.0, 0.0,
+            -1.0, -2.0, 0.25, 0.0,
+            0.5, 0.75, 1.5, 0.0,
+            1.0, 2.0, 3.0, 0.0,
+            -1.0, -2.0, -3.0, 0.0,
+            0.5, 1.5, 2.5, 0.0,
+            10.0, 20.0, 30.0, 0.0 ]
+  - Name: In1
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 1, 10, 100,
+            50, 100, 1000, 0,
+            10000, 202, 303, 0,
+            0, 1, 50, 100,
+            10, 1000, 10000, 100000,
+            0, 1, 2, 3,
+            10, 20, 30, 40,
+            100, 200, 300, 400,
+            1000, 2000, 3000, 4000,
+            50, 100, 150, 0,
+            200, 250, 300, 0,
+            350, 400, 450, 0,
+            10, 20, 30, 0,
+            40, 50, 60, 0,
+            100, 200, 300, 0,
+            1000, 2000, 3000, 0 ]
+  - Name: In2
+    Format: Int32
+    Stride: 16
+    Data: [ -1, 0, 50, 100,
+            1, 10, 100, 0,
+            1000, 10000, 2147483647, 0,
+            0, 50, 100, 1000,
+            -1, 10, 2147483647, 100,
+            -1, 0, 1, 2,
+            3, 10, 50, 100,
+            -1, -1, -1, -1,
+            1000, 10000, -1, 2147483647,
+            0, 50, 100, 0,
+            -1, -1, 150, 0,
+            200, -1, 2147483647, 0,
+            -1, 0, 50, 0,
+            -1, 100, -1, 0,
+            10, 100, 1000, 0,
+            10000, -1, 2147483647, 0 ]
+  - Name: Out0
+    Format: Float32
+    Stride: 16
+    FillSize: 352
+  - Name: ExpectedOut0
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 1.0, -1.0, 0.5,
+            10.5, -10.5, 100.0, -100.0,
+            0.001, -0.001, 0.0, 0.0,
+            1.0, 2.0, 3.0, 4.0,
+            -1.0, -2.0, -3.0, -4.0,
+            0.0, 1.0, -1.0, 0.5,
+            -0.5, 10.0, -10.0, 100.0,
+            -100.0, 0.001, -0.001, 1000.0,
+            -1000.0, 99.99, -99.99, 50.5,
+            0.0, 1.0, 2.0, 0.0,
+            -1.0, -2.0, 0.25, 0.0,
+            0.5, 0.75, 1.5, 0.0,
+            1.0, 2.0, 3.0, 0.0,
+            -1.0, -2.0, -3.0, 0.0,
+            0.5, 1.5, 2.5, 0.0,
+            10.0, 20.0, 30.0, 0.0,
+            0.0, 1.0, -1.0, 0.5,
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, -1.0, 0.5,
+            10.5, -10.5, 100.0, 0.0,
+            1.0, 2.0, 3.0, 4.0,
+            -1.0, -2.0, -3.0, -4.0 ]
+  - Name: Out1
+    Format: Float32
+    Stride: 16
+    FillSize: 352
+  - Name: ExpectedOut1
+    Format: Float32
+    Stride: 16
+    Data: [ 0, 1.4013e-45, 1.4013e-44, 1.4013e-43,
+            7.0065e-44, 1.4013e-43, 1.4013e-42, 1.4013e-41,
+            2.8306e-43, 4.2459e-43, 0, 0,
+            0, 1.4013e-45, 7.0065e-44, 1.4013e-43,
+            1.4013e-44, 1.4013e-42, 1.4013e-41, 1.4013e-40,
+            0, 1.4013e-45, 2.8026e-45, 4.2039e-45,
+            1.4013e-44, 2.8026e-44, 4.2039e-44, 5.6052e-44,
+            1.4013e-43, 2.8026e-43, 4.2039e-43, 5.6052e-43,
+            1.4013e-42, 2.8026e-42, 4.2039e-42, 5.6052e-42,
+            7.0065e-44, 1.4013e-43, 2.1019e-43, 0,
+            2.8026e-43, 3.5032e-43, 4.2039e-43, 0,
+            4.9045e-43, 5.6052e-43, 6.3058e-43, 0,
+            1.4013e-44, 2.8026e-44, 4.2039e-44, 0,
+            5.6052e-44, 7.0065e-44, 8.4078e-44, 0,
+            1.4013e-43, 2.8026e-43, 4.2039e-43, 0,
+            1.4013e-42, 2.8026e-42, 4.2039e-42, 0,
+            0, 1.4013e-45, 1.4013e-44, 1.4013e-43,
+            0, 0, 0, 0,
+            0, 1.4013e-45, 1.4013e-44, 1.4013e-43,
+            7.0065e-44, 1.4013e-43, 1.4013e-42, 0,
+            0, 1.4013e-45, 2.8026e-45, 4.2039e-45,
+            1.4013e-44, 2.8026e-44, 4.2039e-44, 5.6052e-44 ]
+  - Name: Out2
+    Format: Float32
+    Stride: 16
+    FillSize: 352
+  - Name: ExpectedOut2
+    Format: Float32
+    Stride: 16
+    Data: [ -nan, 0, 7.0065e-44, 1.4013e-43,
+            1.4013e-45, 1.4013e-44, 1.4013e-43, 1.4013e-42,
+            1.4013e-41, nan, 0, 0,
+            0, 7.0065e-44, 1.4013e-43, 1.4013e-42,
+            -nan, 1.4013e-44, nan, 1.4013e-43,
+            -nan, 0, 1.4013e-45, 2.8026e-45,
+            4.2039e-45, 1.4013e-44, 7.0065e-44, 1.4013e-43,
+            -nan, -nan, -nan, -nan,
+            1.4013e-42, 1.4013e-41, -nan, nan,
+            0, 7.0065e-44, 1.4013e-43, 0,
+            -nan, -nan, 2.1019e-43, 0,
+            2.8026e-43, -nan, nan, 0,
+            -nan, 0, 7.0065e-44, 0,
+            -nan, 1.4013e-43, -nan, 0,
+            1.4013e-44, 1.4013e-43, 1.4013e-42, 0,
+            1.4013e-41, -nan, nan, 0,
+            -nan, 0, 7.0065e-44, 1.4013e-43,
+            -nan, 0, 0, 0,
+            -nan, 0, 7.0065e-44, 1.4013e-43,
+            1.4013e-45, 1.4013e-44, 1.4013e-43, 0,
+            -nan, 0, 1.4013e-45, 2.8026e-45,
+            4.2039e-45, 1.4013e-44, 7.0065e-44, 1.4013e-43 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

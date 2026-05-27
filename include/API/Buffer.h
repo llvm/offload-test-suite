@@ -32,6 +32,10 @@ struct BufferCreateDesc {
   static BufferCreateDesc uploadBuffer() {
     return BufferCreateDesc{MemoryLocation::CpuToGpu, BufferUsage::Storage};
   }
+
+  static BufferCreateDesc readbackBuffer() {
+    return BufferCreateDesc{MemoryLocation::GpuToCpu, BufferUsage::Storage};
+  }
 };
 
 class Buffer {
