@@ -227,6 +227,9 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
   const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
+  if (B.OutputProps.MipLevels < 1)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "MipLevels must be >= 1.");
   if (B.OutputProps.MipLevels > 1 && getDescriptorKind(R.Kind) != DescriptorKind::SRV)
     return llvm::createStringError(std::errc::not_supported,
                                    "Multiple mip levels are only supported "
