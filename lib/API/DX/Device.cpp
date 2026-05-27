@@ -1481,6 +1481,13 @@ public:
     CD3DX12FeatureSupport Features;
     Features.Init(Device.Get());
 
+    const bool SupportsVariableShadingRateTier2 =
+        Features.VariableShadingRateTier() >= D3D12_VARIABLE_SHADING_RATE_TIER_2;
+    Caps.insert(std::make_pair(
+        "VariableShadingRateTier2",
+        makeCapability<bool>("VariableShadingRateTier2",
+                             SupportsVariableShadingRateTier2)));
+
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features.Name())));
@@ -2397,7 +2404,7 @@ public:
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
-          DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
+          const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
           addReadbackBeginBarrier(IS, RS.Buffer);
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
                                                      Footprint);
@@ -2410,7 +2417,7 @@ public:
       for (const ResourceSet &RS : R.second) {
         if (RS.Readback == nullptr)
           continue;
-        DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
+        const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
         addReadbackBeginBarrier(IS, RS.Buffer);
         IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(), RS.Buffer.Get());
         addReadbackEndBarrier(IS, RS.Buffer);
