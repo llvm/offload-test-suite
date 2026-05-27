@@ -68,3 +68,8 @@ Results:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
+
+# Metal's offload backend cannot bind a depth-format texture as an SRV
+# through this code path (hits "Metal does not support buffer robustness"
+# in the MTL backend). Mark unsupported until #1046 has a Metal story.
+# UNSUPPORTED: Metal
