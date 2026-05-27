@@ -1481,13 +1481,6 @@ public:
     CD3DX12FeatureSupport Features;
     Features.Init(Device.Get());
 
-    const bool SupportsVariableShadingRateTier2 =
-        Features.VariableShadingRateTier() >= D3D12_VARIABLE_SHADING_RATE_TIER_2;
-    Caps.insert(std::make_pair(
-        "VariableShadingRateTier2",
-        makeCapability<bool>("VariableShadingRateTier2",
-                             SupportsVariableShadingRateTier2)));
-
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features.Name())));
