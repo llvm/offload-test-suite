@@ -77,6 +77,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
     return DescriptorKind::SRV;
 
   case ResourceKind::RWStructuredBuffer:
@@ -140,6 +141,7 @@ struct OutputProperties {
   int Width;
   int Depth;
   int MipLevels = 1;
+  int ArraySize = 1;
 };
 
 static inline uint32_t getFormatSize(DataFormat Format) {
@@ -234,6 +236,7 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -260,6 +263,7 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
       return false;
@@ -279,6 +283,7 @@ struct Resource {
     case ResourceKind::Sampler:
       return false;
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
       return true;
@@ -337,6 +342,7 @@ struct Resource {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -714,6 +720,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
     ENUM_CASE(Texture2D);
+    ENUM_CASE(Texture2DArray);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
     ENUM_CASE(RWByteAddressBuffer);

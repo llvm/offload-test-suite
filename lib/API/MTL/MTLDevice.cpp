@@ -1064,6 +1064,8 @@ class MTLDevice : public offloadtest::Device {
         Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width,
                                                            Height, false);
         break;
+      case ResourceKind::Texture2DArray:
+        llvm_unreachable("Texture2DArray is not yet supported in Metal.");
       case ResourceKind::Sampler:
         llvm_unreachable("Not implemented yet.");
       case ResourceKind::SampledTexture2D:
