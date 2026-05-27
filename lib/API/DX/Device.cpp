@@ -2250,11 +2250,20 @@ public:
           ConstantOffset += NumValues;
           break;
         }
-        case dx::RootParamKind::DescriptorTable:
+        case dx::RootParamKind::DescriptorTable: {
           IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
                                                         Handle);
-          Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
+          // Samplers live in a separate heap (SamplerHandle) and must not
+          // count toward the CBV/SRV/UAV handle offset. Explicit RootParams
+          // does not yet support binding sampler tables — see the
+          // llvm_unreachable in the SAMPLER case below.
+          uint32_t ResourceCount = 0;
+          for (const auto &R : P.Sets[DescriptorTableIndex++].Resources)
+            if (getDescriptorKind(R.Kind) != DescriptorKind::SAMPLER)
+              ResourceCount += R.getArraySize();
+          Handle.Offset(ResourceCount, Inc);
           break;
+        }
         case dx::RootParamKind::RootDescriptor:
           assert(RootDescIt != IS.RootResources.end());
           if (RootDescIt->first->getArraySize() != 1)
