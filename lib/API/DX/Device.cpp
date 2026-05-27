@@ -117,8 +117,14 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
       return DXGI_FORMAT_R32G32B32A32_UINT;
     llvm_unreachable("Unsupported channel count for 64-bit format");
   case DataFormat::Depth32:
-    llvm_unreachable(
-        "Depth32 format is not yet supported in the DirectX backend.");
+    if (Channels != 1)
+      llvm_unreachable("Depth32 format only supports a single channel.");
+    // For user-bound resources (SRV/UAV), expose the depth-compatible
+    // typeless component as R32_FLOAT so shaders can Load()/Sample() the
+    // depth values directly. Depth-stencil view paths use getDXGIFormat()
+    // (see lib/API/DX/Device.cpp createTexture()) which uses the DSV-format
+    // mapping (D32_FLOAT) instead.
+    return DXGI_FORMAT_R32_FLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
