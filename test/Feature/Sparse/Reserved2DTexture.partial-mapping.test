@@ -1,0 +1,92 @@
+#--- source.hlsl
+// Verifies that a sparse Texture2D respects per-tile mapping: only the tiles
+// requested via TilesMapped in the YAML are backed by the heap, and reads
+// from unmapped tiles return zero per the D3D12 tiled-resources spec.
+//
+// The texture is 128x64 RGBA32 = 2 standard tiles arranged 2x1 (a single
+// 64x64 tile covers exactly 64KB of 128-bpp data). TilesMapped: 1 maps only
+// the first tile (X=0..63); the second tile (X=64..127) is left unmapped.
+// The kernel samples the centre texel of each tile and writes the result to
+// an output buffer for BufferExact comparison.
+//
+// (CheckAccessFullyMapped on Texture2D was deliberately not tested here:
+// the residency status returned by current NVIDIA and warp drivers is
+// unreliable for tiled textures even though it works for buffers; see the
+// XFAIL list on Feature/HLSLLib/PartiallyMappedResources.test.)
+
+Texture2D<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  uint status;
+  // Tile (0, 0): mapped. Centre texel at (32, 32) should return uploaded data.
+  Out[0] = In.Load(int3(32, 32, 0), status);
+  // Tile (1, 0): unmapped. Centre texel at (96, 32) should return zero.
+  Out[1] = In.Load(int3(96, 32, 0), status);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Channels: 4
+    # 128x64 RGBA32 = 2 standard 64KB tiles.
+    FillSize: 131072
+    FillValue: 0.5
+    OutputProps:
+      Height: 64
+      Width: 128
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 32
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    # Tile 0 returns the uploaded FillValue 0.5; unmapped tile 1 returns 0.
+    Data: [0.5, 0.5, 0.5, 0.5,  0.0, 0.0, 0.0, 0.0]
+Results:
+  - Result: PartialMapping
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: Texture2D
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      IsReserved: True
+      TilesMapped: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Sparse Texture2D support is DirectX-only today; VK lacks the
+# vkQueueBindSparse + sparseResidencyImage2D wiring (tracked in #1050).
+# UNSUPPORTED: Vulkan, Metal
+
+# Clang's HLSL -> DXIL lowering does not yet implement the Texture2D.Load
+# overload that exposes the residency status output.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
