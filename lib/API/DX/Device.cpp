@@ -1174,7 +1174,7 @@ public:
       // per root parameter (CBV/SRV/UAV first, then SAMPLER).
       uint32_t ResourceCount = 0;
       uint32_t SamplerCount = 0;
-      uint32_t ResourceStart = RangeIdx;
+      const uint32_t ResourceStart = RangeIdx;
       for (const auto &Binding : Set.ResourceBindings) {
         if (getDescriptorKind(Binding.Kind) == DescriptorKind::SAMPLER)
           continue;
@@ -1209,7 +1209,7 @@ public:
             D3D12_SHADER_VISIBILITY_ALL});
       }
 
-      uint32_t SamplerStart = RangeIdx;
+      const uint32_t SamplerStart = RangeIdx;
       for (const auto &Binding : Set.ResourceBindings) {
         if (getDescriptorKind(Binding.Kind) != DescriptorKind::SAMPLER)
           continue;
@@ -1992,7 +1992,7 @@ public:
   // shader (the runtime initialises them to 0xFF "never sampled" once any
   // CreateSamplerFeedbackUnorderedAccessView lands).
   llvm::Expected<ResourceBundle> createFeedbackUAV(Resource &R,
-                                                   InvocationState &IS) {
+                                                   InvocationState & /*IS*/) {
     ResourceBundle Bundle;
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
