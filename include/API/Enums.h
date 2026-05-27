@@ -21,6 +21,7 @@ enum class ResourceKind {
   RWStructuredBuffer,
   RWByteAddressBuffer,
   RWTexture2D,
+  RWTexture2DArray,
   ConstantBuffer,
   Sampler,
   SampledTexture2D,

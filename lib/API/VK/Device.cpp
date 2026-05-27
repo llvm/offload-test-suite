@@ -81,6 +81,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
   case ResourceKind::ByteAddressBuffer:
@@ -164,6 +165,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
@@ -179,6 +181,8 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Texture2DArray:
     return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  case ResourceKind::RWTexture2DArray:
+    llvm_unreachable("RWTexture2DArray is not yet supported in Vulkan.");
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
@@ -197,6 +201,7 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_TYPE_2D;
   default:
