@@ -1137,8 +1137,8 @@ public:
       if (ResourceCount > 0) {
         RootParams.push_back(D3D12_ROOT_PARAMETER{
             D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-            {D3D12_ROOT_DESCRIPTOR_TABLE{
-                RangeIdx - ResourceStart, &Ranges.get()[ResourceStart]}},
+            {D3D12_ROOT_DESCRIPTOR_TABLE{RangeIdx - ResourceStart,
+                                         &Ranges.get()[ResourceStart]}},
             D3D12_SHADER_VISIBILITY_ALL});
       }
 
@@ -1146,8 +1146,7 @@ public:
       for (const auto &Binding : Set.ResourceBindings) {
         if (getDescriptorKind(Binding.Kind) != DescriptorKind::SAMPLER)
           continue;
-        Ranges.get()[RangeIdx].RangeType =
-            D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
         Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
         Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
         Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
@@ -1638,10 +1637,10 @@ public:
       const D3D12_DESCRIPTOR_HEAP_DESC SamplerHeapDesc = {
           D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, SamplerCount,
           D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
-      if (auto Err =
-              HR::toError(Device->CreateDescriptorHeap(
-                              &SamplerHeapDesc, IID_PPV_ARGS(&State.SamplerHeap)),
-                          "Failed to create sampler descriptor heap."))
+      if (auto Err = HR::toError(
+              Device->CreateDescriptorHeap(&SamplerHeapDesc,
+                                           IID_PPV_ARGS(&State.SamplerHeap)),
+              "Failed to create sampler descriptor heap."))
         return Err;
     }
     return llvm::Error::success();
@@ -2135,7 +2134,8 @@ public:
           D3D12_CPU_DESCRIPTOR_HANDLE Handle =
               IS.SamplerHeap->GetCPUDescriptorHandleForHeapStart();
           Handle.ptr += SamplerHeapIndex * SamplerInc;
-          const D3D12_SAMPLER_DESC Desc = getDXSamplerDesc(*R.first->SamplerPtr);
+          const D3D12_SAMPLER_DESC Desc =
+              getDXSamplerDesc(*R.first->SamplerPtr);
           Device->CreateSampler(&Desc, Handle);
           ++SamplerHeapIndex;
           break;
