@@ -230,7 +230,8 @@ getResourceDescription(const Resource &R) {
   if (B.OutputProps.MipLevels < 1)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "MipLevels must be >= 1.");
-  if (B.OutputProps.MipLevels > 1 && getDescriptorKind(R.Kind) != DescriptorKind::SRV)
+  if (B.OutputProps.MipLevels > 1 &&
+      getDescriptorKind(R.Kind) != DescriptorKind::SRV)
     return llvm::createStringError(std::errc::not_supported,
                                    "Multiple mip levels are only supported "
                                    "for read-only SRV textures.");
@@ -256,9 +257,8 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_FLAGS Flags =
       R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                       : D3D12_RESOURCE_FLAG_NONE;
-  const D3D12_RESOURCE_DESC ResDesc = {Dimension, 0,         Width, Height, 1,
-                                       MipLevels, Format,    {1, 0},
-                                       Layout,    Flags};
+  const D3D12_RESOURCE_DESC ResDesc = {
+      Dimension, 0, Width, Height, 1, MipLevels, Format, {1, 0}, Layout, Flags};
   return ResDesc;
 }
 
