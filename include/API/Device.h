@@ -91,6 +91,10 @@ struct TraditionalRasterPipelineCreateDesc {
   // TODO: Optional Hull & Domain Shaders
   std::optional<ShaderContainer> GS;
   ShaderContainer PS;
+  // View-instancing fan-out (1 == no view instancing). When > 1, backends
+  // that implement view instancing should route view N to render-target
+  // array slice N.
+  uint32_t ViewInstanceCount = 1;
 
   void setShader(Stages Stage, ShaderContainer &&SC) {
     switch (Stage) {

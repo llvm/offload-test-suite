@@ -1204,10 +1204,33 @@ public:
     PSODesc.SampleDesc.Count = 1;
 
     ComPtr<ID3D12PipelineState> PSO;
-    if (auto Err = HR::toError(
-            Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO)),
-            "Failed to create graphics PSO."))
+    if (Desc.ViewInstanceCount > 1) {
+      // View-instanced pipelines can't be created from the legacy
+      // D3D12_GRAPHICS_PIPELINE_STATE_DESC; switch to the stream-desc API
+      // and attach a view-instancing subobject that routes view N to the
+      // matching render/depth target array slice.
+      llvm::SmallVector<D3D12_VIEW_INSTANCE_LOCATION, 4> ViewLocations;
+      ViewLocations.reserve(Desc.ViewInstanceCount);
+      for (uint32_t I = 0; I < Desc.ViewInstanceCount; ++I)
+        ViewLocations.push_back({/*ViewportArrayIndex=*/0,
+                                 /*RenderTargetArrayIndex=*/I});
+
+      CD3DX12_PIPELINE_STATE_STREAM2 Stream(PSODesc);
+      Stream.ViewInstancingDesc = CD3DX12_VIEW_INSTANCING_DESC(
+          static_cast<UINT>(Desc.ViewInstanceCount), ViewLocations.data(),
+          D3D12_VIEW_INSTANCING_FLAG_NONE);
+
+      const D3D12_PIPELINE_STATE_STREAM_DESC StreamDesc = {sizeof(Stream),
+                                                           &Stream};
+      if (auto Err = HR::toError(
+              Device->CreatePipelineState(&StreamDesc, IID_PPV_ARGS(&PSO)),
+              "Failed to create view-instanced graphics PSO."))
+        return Err;
+    } else if (auto Err = HR::toError(Device->CreateGraphicsPipelineState(
+                                          &PSODesc, IID_PPV_ARGS(&PSO)),
+                                      "Failed to create graphics PSO.")) {
       return Err;
+    }
 
     return std::make_unique<DXPipelineState>(
         Name, RootSig, PSO, getDXPrimitiveTopology(Desc.Topology));
@@ -1343,7 +1366,8 @@ public:
     TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     TexDesc.Width = Desc.Width;
     TexDesc.Height = Desc.Height;
-    TexDesc.DepthOrArraySize = 1;
+    TexDesc.DepthOrArraySize =
+        static_cast<UINT16>(std::max(1u, Desc.ArraySize));
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
     TexDesc.Format = getDXGIFormat(Desc.Fmt);
     TexDesc.SampleDesc.Count = 1;
@@ -2534,6 +2558,7 @@ public:
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewInstanceCount = P.ViewInstanceCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;

@@ -71,6 +71,10 @@ struct TextureCreateDesc {
   uint32_t Width;
   uint32_t Height;
   uint32_t MipLevels;
+  // Texture array slice count (1 == plain Texture2D). Render targets used
+  // with view instancing require this to match the pipeline's
+  // ViewInstanceCount.
+  uint32_t ArraySize = 1;
   // Clear value for render target or depth/stencil textures.
   // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time

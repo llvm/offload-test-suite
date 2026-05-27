@@ -475,6 +475,12 @@ struct Pipeline {
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
 
+  // Number of view instances to render in a single draw (D3D12 view
+  // instancing). Default 1 = no view instancing. When > 1 the render target
+  // must be a Texture2DArray whose ArraySize is at least this value, and the
+  // backend routes view N to array slice N of the render/depth target.
+  uint32_t ViewInstanceCount = 1;
+
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)
       return *DispatchParameters.VertexCount;

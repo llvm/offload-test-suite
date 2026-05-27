@@ -72,6 +72,8 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   if (auto Err = P.validateDispatchParameters())
     I.setError(llvm::toString(std::move(Err)));
 
+  I.mapOptional("ViewInstanceCount", P.ViewInstanceCount, 1u);
+
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {

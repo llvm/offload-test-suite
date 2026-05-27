@@ -84,6 +84,7 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
   Desc.Width = Buf.OutputProps.Width;
   Desc.Height = Buf.OutputProps.Height;
   Desc.MipLevels = 1;
+  Desc.ArraySize = std::max(1, Buf.OutputProps.ArraySize);
   Desc.OptimizedClearValue = ClearColor{};
 
   if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
