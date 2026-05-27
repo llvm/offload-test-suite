@@ -95,7 +95,8 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
 
 llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
-                                             uint32_t Height) {
+                                             uint32_t Height,
+                                             uint32_t ArraySize) {
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
   Desc.Usage = TextureUsage::DepthStencil;
@@ -103,6 +104,7 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   Desc.Width = Width;
   Desc.Height = Height;
   Desc.MipLevels = 1;
+  Desc.ArraySize = std::max(1u, ArraySize);
   Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
 
   return Dev.createTexture("DepthStencil", Desc);

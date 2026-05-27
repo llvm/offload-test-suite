@@ -244,7 +244,8 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 
 // Creates a depth/stencil texture matching the dimensions of a render target.
 llvm::Expected<std::unique_ptr<Texture>>
-createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
+createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height,
+                                uint32_t ArraySize = 1);
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 createBufferWithData(Device &Dev, std::string Name,

@@ -1,0 +1,109 @@
+# Verifies D3D12 view instancing routes SV_ViewID-driven outputs into distinct
+# render target array slices.
+#
+# Wires:
+#   * Pipeline.ViewInstanceCount = 2 (PSODesc.ViewInstancingDesc with view
+#     locations {0,0} and {0,1} -- one viewport, one RT array slice per view).
+#   * RenderTarget OutputProps.ArraySize = 2 (Texture2DArray RT created with
+#     DepthOrArraySize = 2).
+#   * Pixel shader emits a per-view color, so slice s contents are determined
+#     by SV_ViewID == s.
+#
+# Pixel shader reads SV_ViewID directly. The PS is built with ps_6_1, the
+# minimum shader model that supports SV_ViewID as a stage input.
+
+#--- vertex.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+PSInput main(float4 position : POSITION) {
+    PSInput o;
+    o.position = position;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+// Per-view color is independent of fragment position so a single pixel-center
+// comparison is enough to confirm SV_ViewID routed the right invocation to
+// the right slice.
+float4 main(PSInput input, uint vid : SV_ViewID) : SV_TARGET {
+    if (vid == 0)
+        return float4(0.25, 0.5, 0.75, 1.0);
+    return float4(0.75, 0.5, 0.25, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+ViewInstanceCount: 2
+Buffers:
+  # Two CCW triangles covering the full 2x2 RT.
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 128 # 2x2 RT, ArraySize=2, 16 B/pixel = 128 B total
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+      ArraySize: 2
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [
+      # Slice 0 (SV_ViewID == 0)
+      0.25, 0.5, 0.75, 1.0,  0.25, 0.5, 0.75, 1.0,
+      0.25, 0.5, 0.75, 1.0,  0.25, 0.5, 0.75, 1.0,
+      # Slice 1 (SV_ViewID == 1)
+      0.75, 0.5, 0.25, 1.0,  0.75, 0.5, 0.25, 1.0,
+      0.75, 0.5, 0.25, 1.0,  0.75, 0.5, 0.25, 1.0,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: ViewInstancedRT
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# View instancing is a D3D12-only execution-suite feature today; Vulkan and
+# Metal silently ignore Pipeline.ViewInstanceCount (RenderEncoder default
+# no-op) so we don't try to validate them here.
+# UNSUPPORTED: Vulkan, Metal
+
+# Clang's HLSL -> DXIL lowering does not yet implement the graphics-stage
+# signature intrinsics (llvm.dx.load.input / llvm.dx.store.output) needed for
+# SV_POSITION / SV_TARGET / SV_ViewID plumbing.
+# XFAIL: Clang && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o

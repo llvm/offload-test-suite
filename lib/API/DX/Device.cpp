@@ -180,12 +180,25 @@ getDXPrimitiveTopology(PrimitiveTopology Topology) {
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
-static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
+static uint64_t getAlignedSliceSize(const CPUBuffer &B) {
   const uint64_t AlignedPitch =
       getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
   const uint64_t LastRowSize =
       uint64_t(B.OutputProps.Width) * B.getElementSize();
   return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
+}
+
+static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
+  const uint32_t ArraySize = std::max(1, B.OutputProps.ArraySize);
+  const uint64_t SliceSize = getAlignedSliceSize(B);
+  if (ArraySize == 1)
+    return SliceSize;
+  // Each slice has to start at D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
+  // (512-byte) boundary in the destination readback buffer for
+  // CopyTextureRegion's placed footprint to be legal.
+  const uint64_t SlicePitch =
+      llvm::alignTo(SliceSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+  return SlicePitch * (ArraySize - 1) + SliceSize;
 }
 
 static uint32_t getUAVBufferSize(const Resource &R) {
@@ -2289,8 +2302,32 @@ public:
     Device->GetCopyableFootprints(&RTDesc, 0u, 1u, 0u, &Placed, &NumRows,
                                   &RowSizeInBytes, &TotalBytes);
 
-    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped,
-                                                 Placed.Footprint.RowPitch);
+    CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+    const uint32_t ArraySize = std::max(1, OutBuf.OutputProps.ArraySize);
+    if (ArraySize == 1) {
+      OutBuf.copyFromTexture(Mapped, Placed.Footprint.RowPitch);
+    } else {
+      // Slices were placed in the readback buffer at 512-byte-aligned
+      // offsets by createGraphicsCommands(); pull them back out into the
+      // CPUBuffer's tight slice-major layout.
+      const uint64_t SliceSize = getAlignedSliceSize(OutBuf);
+      const uint64_t SlicePitch =
+          llvm::alignTo(SliceSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+      const uint64_t TightSliceBytes = uint64_t(OutBuf.OutputProps.Width) *
+                                       OutBuf.OutputProps.Height *
+                                       OutBuf.getElementSize();
+      const uint32_t RowBytes = OutBuf.getImageRowBytes();
+      uint8_t *Dst = reinterpret_cast<uint8_t *>(OutBuf.Data[0].get());
+      const uint8_t *SrcBase = reinterpret_cast<const uint8_t *>(Mapped);
+      const uint32_t Height = static_cast<uint32_t>(OutBuf.OutputProps.Height);
+      for (uint32_t Slice = 0; Slice < ArraySize; ++Slice) {
+        const uint8_t *SliceSrc = SrcBase + Slice * SlicePitch;
+        uint8_t *SliceDst = Dst + Slice * TightSliceBytes;
+        for (uint32_t Y = 0; Y < Height; ++Y)
+          memcpy(SliceDst + size_t(Y) * RowBytes,
+                 SliceSrc + size_t(Y) * Placed.Footprint.RowPitch, RowBytes);
+      }
+    }
     Readback.Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }
@@ -2327,7 +2364,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height,
+        std::max(1, P.Bindings.RTargetBufferPtr->OutputProps.ArraySize));
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -2391,24 +2429,33 @@ public:
     Encoder.endEncoding();
 
     // Transition the render target to copy source and copy to the readback
-    // buffer.
+    // buffer. For view-instanced (Texture2DArray) render targets, copy each
+    // slice at its 512-byte-aligned offset; readBack() reads them out
+    // slice-major.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
 
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-            B.OutputProps.Height, 1,
-            getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
-                                               Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
-
-    IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    const uint32_t ArraySize = std::max(1, B.OutputProps.ArraySize);
+    const uint64_t SliceSize = getAlignedSliceSize(B);
+    const uint64_t SlicePitch =
+        ArraySize == 1
+            ? SliceSize
+            : llvm::alignTo(SliceSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+    const CD3DX12_SUBRESOURCE_FOOTPRINT FootprintDesc(
+        getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+        B.OutputProps.Height, 1,
+        getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()));
+    for (uint32_t Slice = 0; Slice < ArraySize; ++Slice) {
+      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+          /*Offset=*/Slice * SlicePitch, FootprintDesc};
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
+                                                 Footprint);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), Slice);
+      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {

@@ -21,6 +21,8 @@
 
 #include "llvm/Support/Error.h"
 
+#include <algorithm>
+
 namespace offloadtest {
 
 // Bridge for code that still describes textures as DataFormat + Channels (e.g.
@@ -139,20 +141,28 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
         "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
         "levels %d.",
         Desc.MipLevels, Buf.OutputProps.MipLevels);
+  if (Desc.ArraySize !=
+      static_cast<uint32_t>(std::max(1, Buf.OutputProps.ArraySize)))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc array size %u does not match CPUBuffer array "
+        "size %d.",
+        Desc.ArraySize, Buf.OutputProps.ArraySize);
   const uint32_t TexelSize = getFormatSizeInBytes(Desc.Fmt);
   if (Buf.Stride > 0 && static_cast<uint32_t>(Buf.Stride) != TexelSize)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "CPUBuffer stride %d does not match texture format element size %u.",
         Buf.Stride, TexelSize);
-  const uint64_t ExpectedSize =
-      static_cast<uint64_t>(Desc.Width) * Desc.Height * TexelSize;
+  const uint64_t ExpectedSize = static_cast<uint64_t>(Desc.Width) *
+                                Desc.Height * Desc.ArraySize * TexelSize;
   if (static_cast<uint64_t>(Buf.size()) != ExpectedSize)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "CPUBuffer size %u does not match expected size %llu "
-        "(width %u * height %u * element size %u).",
-        Buf.size(), ExpectedSize, Desc.Width, Desc.Height, TexelSize);
+        "(width %u * height %u * array size %u * element size %u).",
+        Buf.size(), ExpectedSize, Desc.Width, Desc.Height, Desc.ArraySize,
+        TexelSize);
   return llvm::Error::success();
 }
 
