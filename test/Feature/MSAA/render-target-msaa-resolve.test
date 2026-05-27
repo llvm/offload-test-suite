@@ -59,6 +59,7 @@ DescriptorSets: []
 
 # MSAA pipelines and Resolve are currently DirectX-only.
 # UNSUPPORTED: Vulkan || Metal
+# REQUIRES: MSAA_4xSamples
 # XFAIL: Clang
 
 # RUN: split-file %s %t

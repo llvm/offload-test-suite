@@ -1485,6 +1485,17 @@ public:
     CD3DX12FeatureSupport Features;
     Features.Init(Device.Get());
 
+    D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS MSAA4xLevels = {
+        DXGI_FORMAT_R32G32B32A32_FLOAT, 4,
+        D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE, 0};
+    const bool SupportsMSAA4x = SUCCEEDED(Device->CheckFeatureSupport(
+                                    D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
+                                    &MSAA4xLevels, sizeof(MSAA4xLevels))) &&
+                                MSAA4xLevels.NumQualityLevels > 0;
+    Caps.insert(
+        std::make_pair("MSAA_4xSamples",
+                       makeCapability<bool>("MSAA_4xSamples", SupportsMSAA4x)));
+
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features.Name())));
