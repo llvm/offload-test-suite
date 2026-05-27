@@ -206,9 +206,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/llvm-project/issues/186864
 # XFAIL: Clang && Vulkan
 
-# Bug: DXC's DXIL lowering of asuint(double_mat, out low_mat, out high_mat)
-# transposes the output matrices relative to HLSL row-major semantics.
-# The SPIR-V backend produces the correct result.
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8477
 # XFAIL: DXC && DirectX
 
 # RUN: split-file %s %t
