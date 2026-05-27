@@ -127,7 +127,7 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   }
   return DXGI_FORMAT_UNKNOWN;
 }
-
+#if 0
 static DXGI_FORMAT getRawDXFormat(const Resource &R) {
   if (!R.isByteAddressBuffer())
     return DXGI_FORMAT_UNKNOWN;
@@ -151,7 +151,7 @@ static DXGI_FORMAT getRawDXFormat(const Resource &R) {
   }
   return DXGI_FORMAT_UNKNOWN;
 }
-
+#endif
 // D3D12 requires the RowPitch in a placed subresource footprint (used for
 // texture <-> buffer copies via CopyTextureRegion) to be a multiple of
 // D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256 bytes). For textures whose natural
@@ -201,19 +201,21 @@ static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
   return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
 }
 
+#if 0
 static uint32_t getUAVBufferSize(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT) +
                    sizeof(uint32_t)
              : R.size();
 }
-
+#endif
 static uint32_t getUAVBufferCounterOffset(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT)
              : 0;
 }
 
+#if 0
 static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
@@ -235,6 +237,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   }
   llvm_unreachable("All cases handled");
 }
+#endif
 
 static BufferUsage BufferUsageFromResourceKind(ResourceKind Kind) {
   // Determine Buffer Usage
@@ -281,7 +284,7 @@ static BufferShaderAccessType BufferShaderAccessTypeFromResourceKind(
         "Invalid case, non-buffers should have been filtered out.");
   }
 }
-
+#if 0
 static llvm::Expected<D3D12_RESOURCE_DESC>
 getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
@@ -397,6 +400,7 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   }
   return Desc;
 }
+#endif
 
 namespace {
 
@@ -463,6 +467,29 @@ public:
             D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle)
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource),
         SRVHandle(SRVHandle), UAVHandle(UAVHandle), Name(Name), Desc(Desc) {}
+
+  size_t calculateLinearSizeInBytes() const override {
+    // TODO(manon): Some parts are missing:
+    // - Depth
+    // - Mip Levels
+    // - Texture Array
+    // - Block Compression
+    assert(Desc.MipLevels == 1 && "Mip Levels not supported");
+    return Desc.Width * Desc.Height * getFormatSizeInBytes(Desc.Fmt);
+  }
+
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly texture.");
+    void *Ptr = nullptr;
+    if (auto Err = HR::toError(Resource->Map(0, nullptr, &Ptr),
+                               "Failed to map texture."))
+      return std::move(Err);
+    return Ptr;
+  }
+
+  void unmap() override { Resource->Unmap(0, nullptr); }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
@@ -766,10 +793,28 @@ public:
                                  size_t Size) override {
     auto &DXSrc = static_cast<DXBuffer &>(Src);
     auto &DXDst = static_cast<DXBuffer &>(Dst);
-    addUAVBarrier();
+    // addUAVBarrier();
+
+    {
+      const D3D12_RESOURCE_BARRIER Barrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+              D3D12_RESOURCE_STATE_COPY_SOURCE);
+      CB.CmdList->ResourceBarrier(1, &Barrier);
+    }
+
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
+
+    {
+      const D3D12_RESOURCE_BARRIER Barrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+      CB.CmdList->ResourceBarrier(1, &Barrier);
+    }
+
     return llvm::Error::success();
   }
 
@@ -1023,16 +1068,27 @@ private:
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Buffer> Buffer,
                 std::unique_ptr<offloadtest::Buffer> Readback)
-        : NewUpload(std::move(UploadBuffer)), Buffer(std::move(Buffer)),
+        : UploadBuffer(std::move(UploadBuffer)), Buffer(std::move(Buffer)),
           Readback(std::move(Readback)) {}
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Texture> Texture,
                 std::unique_ptr<offloadtest::Buffer> Readback)
-        : NewUpload(std::move(UploadBuffer)), Texture(std::move(Texture)),
+        : UploadBuffer(std::move(UploadBuffer)), Texture(std::move(Texture)),
           Readback(std::move(Readback)) {}
 
     ResourceSet(const ResourceSet &) = delete;
     ResourceSet &operator=(const ResourceSet &) = delete;
+
+    ResourceSet(ResourceSet &&A)
+        : UploadBuffer(std::move(A.UploadBuffer)), Buffer(std::move(A.Buffer)),
+          Texture(std::move(A.Texture)), Readback(std::move(A.Readback)) {}
+    ResourceSet &operator=(ResourceSet &&A) {
+      UploadBuffer = std::move(A.UploadBuffer);
+      Buffer = std::move(A.Buffer);
+      Texture = std::move(A.Texture);
+      Readback = std::move(A.Readback);
+      return *this;
+    }
   };
 
   // ResourceBundle will contain one ResourceSet for a singular resource
@@ -1063,7 +1119,8 @@ private:
 public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
-           DescriptorAllocator CSUAllocator, std::string Desc, std::string DriverVer)
+           DescriptorAllocator CSUAllocator, std::string Desc,
+           std::string DriverVer)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)),
@@ -1676,7 +1733,7 @@ public:
                                      Tex->DSVHandle);
     }
 
-    return Tex;
+    return std::move(Tex);
   }
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
@@ -1747,7 +1804,8 @@ public:
     return std::make_unique<DXDevice>(
         Adapter, Device, std::move(*GraphicsQueueOrErr),
         std::move(*RTVHeapOrErr), std::move(*DSVHeapOrErr),
-        std::move(*CSUHeapOrErr), std::string(DescVec.data()), std::move(DriverVer));
+        std::move(*CSUHeapOrErr), std::string(DescVec.data()),
+        std::move(DriverVer));
   }
 
   const Capabilities &getCapabilities() override {
@@ -2386,12 +2444,12 @@ public:
             return BufferOrErr.takeError();
           auto Buffer = std::move(*BufferOrErr);
 
-          std::unique_ptr<Buffer> ReadbackBuffer;
+          std::unique_ptr<offloadtest::Buffer> ReadbackBuffer;
           if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
             const BufferCreateDesc ReadbackDesc =
                 BufferCreateDesc::readbackBuffer();
-            auto ReadbackOrErr =
-                createBuffer("Readback", ReadbackDesc, BufferSize);
+            auto ReadbackOrErr = createBuffer("Readback", ReadbackDesc,
+                                              Buffer->getSizeInBytes());
             if (!ReadbackOrErr)
               return ReadbackOrErr.takeError();
             ReadbackBuffer = std::move(*ReadbackOrErr);
@@ -2437,7 +2495,8 @@ public:
             const BufferCreateDesc ReadbackDesc =
                 BufferCreateDesc::readbackBuffer();
             auto ReadbackOrErr =
-                createBuffer("Readback", ReadbackDesc, BufferSize);
+                createBuffer("Readback", ReadbackDesc,
+                             Texture->calculateLinearSizeInBytes());
             if (!ReadbackOrErr)
               return ReadbackOrErr.takeError();
             ReadbackBuffer = std::move(*ReadbackOrErr);
@@ -2626,21 +2685,33 @@ public:
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root descriptor cannot refer to resource arrays.");
+
+          D3D12_GPU_VIRTUAL_ADDRESS VirtualAddress = {};
+          if (RootDescIt->second.back().Buffer) {
+            const auto &BufferDX =
+                llvm::cast<DXBuffer>(*RootDescIt->second.back().Buffer);
+            VirtualAddress = BufferDX.Buffer->GetGPUVirtualAddress();
+          } else if (RootDescIt->second.back().Texture) {
+            const auto &TextureDX =
+                llvm::cast<DXTexture>(*RootDescIt->second.back().Texture);
+            VirtualAddress = TextureDX.Resource->GetGPUVirtualAddress();
+          } else {
+            assert(false &&
+                   "Resource is a buffer nor texture. Must be one of the two.");
+          }
+
           switch (getDescriptorKind(RootDescIt->first->Kind)) {
           case DescriptorKind::SRV:
-            IS.CB->CmdList->SetComputeRootShaderResourceView(
-                RootParamIndex++,
-                RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
+            IS.CB->CmdList->SetComputeRootShaderResourceView(RootParamIndex++,
+                                                             VirtualAddress);
             break;
           case DescriptorKind::UAV:
-            IS.CB->CmdList->SetComputeRootUnorderedAccessView(
-                RootParamIndex++,
-                RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
+            IS.CB->CmdList->SetComputeRootUnorderedAccessView(RootParamIndex++,
+                                                              VirtualAddress);
             break;
           case DescriptorKind::CBV:
-            IS.CB->CmdList->SetComputeRootConstantBufferView(
-                RootParamIndex++,
-                RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
+            IS.CB->CmdList->SetComputeRootConstantBufferView(RootParamIndex++,
+                                                             VirtualAddress);
             break;
           case DescriptorKind::SAMPLER:
             llvm_unreachable("Not implemented yet.");
@@ -2672,7 +2743,13 @@ public:
       Encoder.endEncoding();
     }
 
-    auto CopyBackResource = [&IS, this](ResourcePair &R) {
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto ReadbackEncoder = std::move(*EncoderOrErr);
+
+    auto CopyBackResource = [&IS, &ReadbackEncoder,
+                             this](ResourcePair &R) -> llvm::Error {
       if (R.first->isTexture()) {
         const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
@@ -2684,31 +2761,43 @@ public:
           if (RS.Readback == nullptr)
             continue;
           const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-          addReadbackBeginBarrier(IS, RS.Buffer);
+          const DXTexture &TextureDX = llvm::cast<DXTexture>(*RS.Texture);
+          addReadbackBeginBarrier(IS, TextureDX.Resource);
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
                                                      Footprint);
-          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
+          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(TextureDX.Resource.Get(),
+                                                     0);
           IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-          addReadbackEndBarrier(IS, RS.Buffer);
+          addReadbackEndBarrier(IS, TextureDX.Resource);
         }
-        return;
+      } else {
+        for (const ResourceSet &RS : R.second) {
+          if (RS.Readback == nullptr)
+            continue;
+
+          if (auto Err = ReadbackEncoder->copyBufferToBuffer(
+                  *RS.Buffer, 0, *RS.Readback, 0,
+                  RS.Readback->getSizeInBytes()))
+            return Err;
+          // const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
+          // addReadbackBeginBarrier(IS, RS.Buffer);
+          // IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(),
+          // RS.Buffer.Get()); addReadbackEndBarrier(IS, RS.Buffer);
+        }
       }
-      for (const ResourceSet &RS : R.second) {
-        if (RS.Readback == nullptr)
-          continue;
-        const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-        addReadbackBeginBarrier(IS, RS.Buffer);
-        IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(), RS.Buffer.Get());
-        addReadbackEndBarrier(IS, RS.Buffer);
-      }
+      return llvm::Error::success();
     };
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        CopyBackResource(R);
+        if (auto Err = CopyBackResource(R))
+          return Err;
 
     for (auto &R : IS.RootResources)
-      CopyBackResource(R);
+      if (auto Err = CopyBackResource(R))
+        return Err;
+
+    ReadbackEncoder->endEncoding();
 
     return llvm::Error::success();
   }
@@ -2895,7 +2984,13 @@ public:
 
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
-    auto CopyBackResource = [&IS, this](ResourcePair &R) {
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto ReadbackEncoder = std::move(*EncoderOrErr);
+
+    auto CopyBackResource = [&IS, &ReadbackEncoder,
+                             this](ResourcePair &R) -> llvm::Error {
       if (R.first->isTexture()) {
         const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
@@ -2907,31 +3002,35 @@ public:
           if (RS.Readback == nullptr)
             continue;
           const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-          addReadbackBeginBarrier(IS, RS.Buffer);
+          const DXTexture &TextureDX = llvm::cast<DXTexture>(*RS.Texture);
+          addReadbackBeginBarrier(IS, TextureDX.Resource);
           const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
                                                      Footprint);
-          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
+          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(TextureDX.Resource.Get(),
+                                                     0);
           IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-          addReadbackEndBarrier(IS, RS.Buffer);
+          addReadbackEndBarrier(IS, TextureDX.Resource);
         }
-        return;
+      } else {
+        for (const ResourceSet &RS : R.second) {
+          if (RS.Readback != nullptr)
+            if (auto Err = ReadbackEncoder->copyBufferToBuffer(
+                    *RS.Buffer, 0, *RS.Readback, 0,
+                    RS.Buffer->getSizeInBytes()))
+              return Err;
+        }
       }
-      for (const ResourceSet &RS : R.second) {
-        if (RS.Readback == nullptr)
-          continue;
-        const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-        addReadbackBeginBarrier(IS, RS.Buffer);
-        IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(), RS.Buffer.Get());
-        addReadbackEndBarrier(IS, RS.Buffer);
-      }
+      return llvm::Error::success();
     };
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        CopyBackResource(R);
+        if (auto Err = CopyBackResource(R))
+          return Err;
 
     for (auto &R : IS.RootResources)
-      CopyBackResource(R);
+      if (auto Err = CopyBackResource(R))
+        return Err;
 
     return llvm::Error::success();
   }

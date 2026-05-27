@@ -150,6 +150,16 @@ public:
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;
 
+  // Calculate the size in bytes of the texture data given a linear layout
+  // Useful for calculating the size for an upload or readback buffer.
+  virtual size_t calculateLinearSizeInBytes() const = 0;
+
+  // Maps the texture's memory for host access. Only valid for CpuToGpu and
+  // GpuToCpu textures; returns an error for GpuOnly. Each successful map() must
+  // be paired with a call to unmap() before the texture is used on the GPU.
+  virtual llvm::Expected<void *> map() = 0;
+  virtual void unmap() = 0;
+
   GPUAPI getAPI() const { return API; }
   virtual const TextureCreateDesc &getDesc() const = 0;
 

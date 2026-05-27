@@ -176,7 +176,7 @@ offloadtest::createBufferWithData(
   return Buffer;
 }
 
-llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
 createTextureWithData(Device &Dev, std::string Name,
                       const TextureCreateDesc &Desc, const void *Data,
                       size_t SizeInBytes, ComputeEncoder *Encoder,
@@ -184,10 +184,10 @@ createTextureWithData(Device &Dev, std::string Name,
 
   // TODO(manon): Validate texture size with data to upload
 
-  auto BufferOrErr = Dev.createTexture(Name, Desc);
-  if (!BufferOrErr)
-    return BufferOrErr.takeError();
-  auto Buffer = std::move(*BufferOrErr);
+  auto TextureOrErr = Dev.createTexture(Name, Desc);
+  if (!TextureOrErr)
+    return TextureOrErr.takeError();
+  auto Texture = std::move(*TextureOrErr);
 
   if (Desc.Location == MemoryLocation::GpuOnly) {
     if (OutUploadBuffer == nullptr)
@@ -204,7 +204,7 @@ createTextureWithData(Device &Dev, std::string Name,
     *OutUploadBuffer = std::move(*UploadBufferOrErr);
 
     // Copy Buffer to Buffer
-    Encoder->copyBufferToTexture(*UploadBuffer, 0, *Texture, 0, SizeInBytes);
+    Encoder->copyBufferToTexture(*OutUploadBuffer, 0, *Texture, 0, SizeInBytes);
 
   } else {
     // Copy data over

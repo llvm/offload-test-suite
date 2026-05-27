@@ -322,7 +322,7 @@ createBufferWithData(Device &Dev, std::string Name,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
-llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
 createTextureWithData(Device &Dev, std::string Name,
                       const TextureCreateDesc &Desc, const void *Data,
                       size_t SizeInBytes, ComputeEncoder *Encoder,
