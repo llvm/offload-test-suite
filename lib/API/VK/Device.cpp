@@ -2272,8 +2272,7 @@ public:
     // default depth target (which is not read back).
     if (P.Bindings.DepthBufferPtr) {
       const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
-      auto TexOrErr =
-          offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
+      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
       if (!TexOrErr)
         return TexOrErr.takeError();
       IS.DepthStencil = std::move(*TexOrErr);
@@ -3062,12 +3061,12 @@ public:
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
 
       if (IS.DSReadback) {
-        copyTextureToReadback(
-            IS.CB->CmdBuffer, llvm::cast<VulkanTexture>(*IS.DepthStencil),
-            llvm::cast<VulkanBuffer>(*IS.DSReadback),
-            VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-            VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
+        copyTextureToReadback(IS.CB->CmdBuffer,
+                              llvm::cast<VulkanTexture>(*IS.DepthStencil),
+                              llvm::cast<VulkanBuffer>(*IS.DSReadback),
+                              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                              VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
       }
     }
 

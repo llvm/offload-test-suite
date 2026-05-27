@@ -2312,8 +2312,7 @@ public:
     // default depth target (which is not read back).
     if (P.Bindings.DepthBufferPtr) {
       const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
-      auto TexOrErr =
-          offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
+      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
       if (!TexOrErr)
         return TexOrErr.takeError();
       IS.DepthStencil = std::move(*TexOrErr);
@@ -2432,11 +2431,10 @@ public:
       const DXGI_FORMAT DSResFormat = DS.Resource->GetDesc().Format;
       const D3D12_PLACED_SUBRESOURCE_FOOTPRINT DSFootprint{
           0,
-          CD3DX12_SUBRESOURCE_FOOTPRINT(DSResFormat, DSBuf.OutputProps.Width,
-                                        DSBuf.OutputProps.Height, 1,
-                                        getAlignedTexturePitch(
-                                            DSBuf.OutputProps.Width,
-                                            DSBuf.getElementSize()))};
+          CD3DX12_SUBRESOURCE_FOOTPRINT(
+              DSResFormat, DSBuf.OutputProps.Width, DSBuf.OutputProps.Height, 1,
+              getAlignedTexturePitch(DSBuf.OutputProps.Width,
+                                     DSBuf.getElementSize()))};
       const CD3DX12_TEXTURE_COPY_LOCATION DSDstLoc(DSReadback.Buffer.Get(),
                                                    DSFootprint);
       const CD3DX12_TEXTURE_COPY_LOCATION DSSrcLoc(DS.Resource.Get(), 0);

@@ -108,8 +108,7 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
 }
 
 llvm::Expected<std::unique_ptr<Texture>>
-offloadtest::createDepthBufferFromCPUBuffer(Device &Dev,
-                                            const CPUBuffer &Buf) {
+offloadtest::createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf) {
   auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
   if (!TexFmtOrErr)
     return TexFmtOrErr.takeError();
