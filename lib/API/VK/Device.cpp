@@ -703,6 +703,32 @@ private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
 };
 
+class VulkanPipelineState : public offloadtest::PipelineState {
+public:
+  std::string Name;
+  VkDevice Dev;
+  VkPipeline Pipeline;
+  VkPipelineLayout Layout;
+  llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+
+  VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
+                      VkPipelineLayout Layout,
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+      : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
+
+  ~VulkanPipelineState() override {
+    vkDestroyPipeline(Dev, Pipeline, nullptr);
+    vkDestroyPipelineLayout(Dev, Layout, nullptr);
+    for (VkDescriptorSetLayout L : SetLayouts)
+      vkDestroyDescriptorSetLayout(Dev, L, nullptr);
+  }
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    return B->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
 class VKComputeEncoder : public offloadtest::ComputeEncoder {
   VulkanCommandBuffer &CB;
 
@@ -729,13 +755,17 @@ public:
     CB.insertDebugSignpost(Label);
   }
 
-  llvm::Error dispatch(uint32_t GroupCountX, uint32_t GroupCountY,
+  llvm::Error dispatch(const offloadtest::PipelineState &PSO,
+                       uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ) override {
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
     addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                   VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
                                       GroupCountY, GroupCountZ)
                             .str());
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      VKPSO.Pipeline);
     vkCmdDispatch(CB.CmdBuffer, GroupCountX, GroupCountY, GroupCountZ);
     return llvm::Error::success();
   }
@@ -764,32 +794,6 @@ VulkanCommandBuffer::createComputeEncoder() {
   Enc->pushDebugGroup("ComputeEncoder");
   return Enc;
 }
-
-class VulkanPipelineState : public offloadtest::PipelineState {
-public:
-  std::string Name;
-  VkDevice Dev;
-  VkPipeline Pipeline;
-  VkPipelineLayout Layout;
-  llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
-
-  VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
-                      VkPipelineLayout Layout,
-                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
-      : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
-        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
-
-  ~VulkanPipelineState() override {
-    vkDestroyPipeline(Dev, Pipeline, nullptr);
-    vkDestroyPipelineLayout(Dev, Layout, nullptr);
-    for (VkDescriptorSetLayout L : SetLayouts)
-      vkDestroyDescriptorSetLayout(Dev, L, nullptr);
-  }
-
-  static bool classof(const offloadtest::PipelineState *B) {
-    return B->getAPI() == GPUAPI::Vulkan;
-  }
-};
 
 static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
   switch (Action) {
@@ -2966,7 +2970,6 @@ public:
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
     const VulkanPipelineState &VulkanPipeline =
         llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
-    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, VulkanPipeline.Pipeline);
     if (IS.DescriptorSets.size() > 0)
       vkCmdBindDescriptorSets(
           IS.CB->CmdBuffer, BindPoint, VulkanPipeline.Layout, 0,
@@ -2985,10 +2988,10 @@ public:
       if (!EncoderOrErr)
         return EncoderOrErr.takeError();
       auto &Encoder = *EncoderOrErr.get();
-      if (auto Err =
-              Encoder.dispatch(P.DispatchParameters.DispatchGroupCount[0],
-                               P.DispatchParameters.DispatchGroupCount[1],
-                               P.DispatchParameters.DispatchGroupCount[2]))
+      if (auto Err = Encoder.dispatch(
+              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
         return Err;
       Encoder.endEncoding();
       llvm::outs() << "Dispatched compute shader: { "
