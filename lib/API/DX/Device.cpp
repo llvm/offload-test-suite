@@ -1574,11 +1574,10 @@ public:
       const DXGI_FORMAT DXFormat = getDXFormat(B.Format, B.Channels);
       const uint32_t RowPitch = B.OutputProps.Width * B.getElementSize();
       const uint32_t SliceBytes = RowPitch * B.OutputProps.Height;
-      const uint32_t NumSlices =
-          (R.Kind == ResourceKind::Texture2DArray ||
-           R.Kind == ResourceKind::RWTexture2DArray)
-              ? B.OutputProps.ArraySize
-              : 1;
+      const uint32_t NumSlices = (R.Kind == ResourceKind::Texture2DArray ||
+                                  R.Kind == ResourceKind::RWTexture2DArray)
+                                     ? B.OutputProps.ArraySize
+                                     : 1;
       for (uint32_t Slice = 0; Slice < NumSlices; ++Slice) {
         const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
             Slice * SliceBytes,
