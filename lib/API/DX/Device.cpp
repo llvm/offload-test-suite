@@ -961,6 +961,7 @@ public:
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)) {
     Description = std::move(Desc);
+    DriverVersion = std::move(DriverVer);
     DriverName = "DirectX";
   }
   DXDevice(const DXDevice &) = delete;
