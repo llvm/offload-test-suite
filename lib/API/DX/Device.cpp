@@ -945,6 +945,9 @@ private:
     // Resources for graphics pipelines.
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
+    // When the render target is multi-sampled, the contents are resolved into
+    // this single-sample texture before being copied into RTReadback.
+    std::unique_ptr<offloadtest::Texture> ResolvedRenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
@@ -1180,7 +1183,8 @@ public:
       PSODesc.DSVFormat = getDXGIFormat(*Desc.DSFormat);
     for (size_t I = 0; I < Desc.RTFormats.size(); ++I)
       PSODesc.RTVFormats[I] = getDXGIFormat(Desc.RTFormats[I]);
-    PSODesc.SampleDesc.Count = 1;
+    PSODesc.SampleDesc.Count = std::max(1u, Desc.SampleCount);
+    PSODesc.RasterizerState.MultisampleEnable = Desc.SampleCount > 1;
 
     ComPtr<ID3D12PipelineState> PSO;
     if (auto Err = HR::toError(
@@ -1325,7 +1329,7 @@ public:
     TexDesc.DepthOrArraySize = 1;
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
     TexDesc.Format = getDXGIFormat(Desc.Fmt);
-    TexDesc.SampleDesc.Count = 1;
+    TexDesc.SampleDesc.Count = std::max(1u, Desc.SampleCount);
     TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
     TexDesc.Flags = getDXResourceFlags(Desc.Usage);
 
@@ -2258,6 +2262,28 @@ public:
 
     IS.RenderTarget = std::move(*TexOrErr);
 
+    // For MSAA render targets, allocate a single-sample texture that
+    // ResolveSubresource writes into; CopyTextureRegion then copies the
+    // resolved texture into the readback buffer.
+    if (OutBuf.OutputProps.SampleCount > 1) {
+      auto FmtOrErr = toFormat(OutBuf.Format, OutBuf.Channels);
+      if (!FmtOrErr)
+        return FmtOrErr.takeError();
+      TextureCreateDesc ResolvedDesc = {};
+      ResolvedDesc.Location = MemoryLocation::GpuOnly;
+      ResolvedDesc.Usage = TextureUsage::RenderTarget;
+      ResolvedDesc.Fmt = *FmtOrErr;
+      ResolvedDesc.Width = OutBuf.OutputProps.Width;
+      ResolvedDesc.Height = OutBuf.OutputProps.Height;
+      ResolvedDesc.MipLevels = 1;
+      ResolvedDesc.SampleCount = 1;
+      ResolvedDesc.OptimizedClearValue = ClearColor{};
+      auto ResolvedOrErr = createTexture("ResolvedRenderTarget", ResolvedDesc);
+      if (!ResolvedOrErr)
+        return ResolvedOrErr.takeError();
+      IS.ResolvedRenderTarget = std::move(*ResolvedOrErr);
+    }
+
     // Create readback buffer sized for the pixel data with row pitch padded
     // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
     // for the placed footprint used by CopyTextureRegion. The compaction
@@ -2275,9 +2301,11 @@ public:
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    const uint32_t SampleCount =
+        std::max(1, P.Bindings.RTargetBufferPtr->OutputProps.SampleCount);
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height, SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -2340,14 +2368,43 @@ public:
 
     Encoder.endEncoding();
 
-    // Transition the render target to copy source and copy to the readback
-    // buffer.
-    const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
-
+    // Transition the render target and (for MSAA) resolve target into the
+    // states needed to copy pixels back into RTReadback. For non-MSAA we
+    // just transition RT to COPY_SOURCE; for MSAA we resolve the multi-
+    // sampled RT into the single-sample resolved RT, then read that.
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
+    const bool IsMSAA = B.OutputProps.SampleCount > 1;
+
+    ID3D12Resource *CopySource = RT.Resource.Get();
+    if (IsMSAA) {
+      auto &Resolved = llvm::cast<DXTexture>(*IS.ResolvedRenderTarget);
+      const D3D12_RESOURCE_BARRIER PreBarriers[] = {
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+              D3D12_RESOURCE_STATE_RESOLVE_SOURCE),
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              Resolved.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+              D3D12_RESOURCE_STATE_RESOLVE_DEST)};
+      IS.CB->CmdList->ResourceBarrier(2, PreBarriers);
+
+      IS.CB->CmdList->ResolveSubresource(Resolved.Resource.Get(), 0,
+                                         RT.Resource.Get(), 0,
+                                         getDXFormat(B.Format, B.Channels));
+
+      const D3D12_RESOURCE_BARRIER PostBarrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              Resolved.Resource.Get(), D3D12_RESOURCE_STATE_RESOLVE_DEST,
+              D3D12_RESOURCE_STATE_COPY_SOURCE);
+      IS.CB->CmdList->ResourceBarrier(1, &PostBarrier);
+      CopySource = Resolved.Resource.Get();
+    } else {
+      const D3D12_RESOURCE_BARRIER Barrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+              D3D12_RESOURCE_STATE_COPY_SOURCE);
+      IS.CB->CmdList->ResourceBarrier(1, &Barrier);
+    }
+
     const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
         0,
         CD3DX12_SUBRESOURCE_FOOTPRINT(
@@ -2356,7 +2413,7 @@ public:
             getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()))};
     const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
                                                Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(CopySource, 0);
 
     IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
@@ -2533,6 +2590,8 @@ public:
         if (!FormatOrErr)
           return FormatOrErr.takeError();
         PipelineDesc.RTFormats.push_back(*FormatOrErr);
+        PipelineDesc.SampleCount =
+            std::max(1, P.Bindings.RTargetBufferPtr->OutputProps.SampleCount);
 
         auto PipelineStateOrErr = createTraditionalRasterPipeline(
             "Graphics Pipeline State", BndDesc, PipelineDesc);

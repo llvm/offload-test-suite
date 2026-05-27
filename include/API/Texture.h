@@ -71,6 +71,7 @@ struct TextureCreateDesc {
   uint32_t Width;
   uint32_t Height;
   uint32_t MipLevels;
+  uint32_t SampleCount = 1;
   // Clear value for render target or depth/stencil textures.
   // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time
