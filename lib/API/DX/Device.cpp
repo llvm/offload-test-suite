@@ -468,16 +468,6 @@ public:
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource),
         SRVHandle(SRVHandle), UAVHandle(UAVHandle), Name(Name), Desc(Desc) {}
 
-  size_t calculateLinearSizeInBytes() const override {
-    // TODO(manon): Some parts are missing:
-    // - Depth
-    // - Mip Levels
-    // - Texture Array
-    // - Block Compression
-    assert(Desc.MipLevels == 1 && "Mip Levels not supported");
-    return Desc.Width * Desc.Height * getFormatSizeInBytes(Desc.Fmt);
-  }
-
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
       return llvm::createStringError(std::errc::invalid_argument,

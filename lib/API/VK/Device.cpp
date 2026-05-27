@@ -509,6 +509,30 @@ public:
     vkFreeMemory(Dev, Memory, nullptr);
   }
 
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly texture.");
+    size_t SizeInBytes = calculateLinearSizeInBytes();
+    void *Ptr = nullptr;
+    if (vkMapMemory(Dev, Memory, 0, SizeInBytes, 0, &Ptr) != VK_SUCCESS)
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to map texture.");
+    // HOST_CACHED memory that is *not* HOST_COHERENT (GpuToCpu) needs explicit
+    // invalidation so the CPU sees the GPU-side writes.
+    if (Desc.Location == MemoryLocation::GpuToCpu) {
+      VkMappedMemoryRange Range = {};
+      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      Range.memory = Memory;
+      Range.offset = 0;
+      Range.size = VK_WHOLE_SIZE;
+      vkInvalidateMappedMemoryRanges(Dev, 1, &Range);
+    }
+    return Ptr;
+  }
+
+  void unmap() override { vkUnmapMemory(Dev, Memory); }
+
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Texture *T) {
