@@ -765,6 +765,35 @@ public:
     ScissorSet = true;
   }
 
+  void setShadingRate(offloadtest::ShadingRate Rate) override {
+    D3D12_SHADING_RATE DXRate = D3D12_SHADING_RATE_1X1;
+    switch (Rate) {
+    case offloadtest::ShadingRate::Rate_1x1:
+      DXRate = D3D12_SHADING_RATE_1X1;
+      break;
+    case offloadtest::ShadingRate::Rate_1x2:
+      DXRate = D3D12_SHADING_RATE_1X2;
+      break;
+    case offloadtest::ShadingRate::Rate_2x1:
+      DXRate = D3D12_SHADING_RATE_2X1;
+      break;
+    case offloadtest::ShadingRate::Rate_2x2:
+      DXRate = D3D12_SHADING_RATE_2X2;
+      break;
+    case offloadtest::ShadingRate::Rate_2x4:
+      DXRate = D3D12_SHADING_RATE_2X4;
+      break;
+    case offloadtest::ShadingRate::Rate_4x2:
+      DXRate = D3D12_SHADING_RATE_4X2;
+      break;
+    case offloadtest::ShadingRate::Rate_4x4:
+      DXRate = D3D12_SHADING_RATE_4X4;
+      break;
+    }
+    // Tier 1: no combiners (per-primitive / per-tile rates require Tier 2).
+    CB.CmdList->RSSetShadingRate(DXRate, nullptr);
+  }
+
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t Stride) override {
     assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
@@ -2320,6 +2349,9 @@ public:
     Scissor.Width = static_cast<uint32_t>(VP.Width);
     Scissor.Height = static_cast<uint32_t>(VP.Height);
     Encoder.setScissor(Scissor);
+
+    if (P.ShadingRateOverride)
+      Encoder.setShadingRate(*P.ShadingRateOverride);
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)

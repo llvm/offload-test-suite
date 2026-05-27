@@ -46,6 +46,19 @@ enum class StoreAction {
 
 enum class PrimitiveTopology { TriangleList, PointList };
 
+/// Per-draw rasterizer shading rate (D3D12 VRS Tier 1). Tier 1 hardware
+/// supports the four base rates (1x1, 1x2, 2x1, 2x2); the additional rates
+/// (2x4, 4x2, 4x4) require AdditionalShadingRatesSupported.
+enum class ShadingRate {
+  Rate_1x1,
+  Rate_1x2,
+  Rate_2x1,
+  Rate_2x2,
+  Rate_2x4,
+  Rate_4x2,
+  Rate_4x4,
+};
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_ENUMS_H

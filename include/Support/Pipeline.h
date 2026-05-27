@@ -468,6 +468,7 @@ struct Pipeline {
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
+  std::optional<ShadingRate> ShadingRateOverride;
 
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)
@@ -743,6 +744,20 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::PrimitiveTopology::Val)
     ENUM_CASE(TriangleList);
     ENUM_CASE(PointList);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::ShadingRate> {
+  static void enumeration(IO &I, offloadtest::ShadingRate &V) {
+#define ENUM_CASE(Val, Yaml) I.enumCase(V, Yaml, offloadtest::ShadingRate::Val)
+    ENUM_CASE(Rate_1x1, "1x1");
+    ENUM_CASE(Rate_1x2, "1x2");
+    ENUM_CASE(Rate_2x1, "2x1");
+    ENUM_CASE(Rate_2x2, "2x2");
+    ENUM_CASE(Rate_2x4, "2x4");
+    ENUM_CASE(Rate_4x2, "4x2");
+    ENUM_CASE(Rate_4x4, "4x4");
 #undef ENUM_CASE
   }
 };
