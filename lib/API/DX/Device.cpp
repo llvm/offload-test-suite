@@ -213,6 +213,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
     return D3D12_RESOURCE_DIMENSION_BUFFER;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::FeedbackTexture2D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   case ResourceKind::Sampler:
     return D3D12_RESOURCE_DIMENSION_UNKNOWN;
@@ -380,6 +381,7 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
+  case ResourceKind::FeedbackTexture2D:
     llvm_unreachable("Not an SRV type!");
   case ResourceKind::SampledTexture2D:
     llvm_unreachable("Sampled textures aren't supported in DirectX!");
@@ -413,6 +415,14 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
     Desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     Desc.Texture2D = D3D12_TEX2D_UAV{0, 0};
     break;
+  case ResourceKind::FeedbackTexture2D:
+    // SamplerFeedback UAVs are created by a separate device entry point
+    // (CreateSamplerFeedbackUnorderedAccessView) that takes the paired
+    // sampled texture rather than a generic D3D12_UNORDERED_ACCESS_VIEW_DESC.
+    // Backends that need a UAV descriptor for a FeedbackTexture2D must use
+    // that path directly; this helper has nothing meaningful to return.
+    llvm_unreachable(
+        "FeedbackTexture2D UAVs go through CreateSamplerFeedbackUAV");
   case ResourceKind::StructuredBuffer:
   case ResourceKind::Buffer:
   case ResourceKind::ByteAddressBuffer:

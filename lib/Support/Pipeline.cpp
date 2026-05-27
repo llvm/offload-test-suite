@@ -396,6 +396,8 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
   I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapOptional("TilesMapped", R.TilesMapped);
   I.mapOptional("IsReserved", R.IsReserved);
+  I.mapOptional("PairedResource", R.PairedResource);
+  I.mapOptional("FeedbackKind", R.FBKind, offloadtest::FeedbackKind::MinMip);
   I.mapRequired("DirectXBinding", R.DXBinding);
   I.mapOptional("VulkanBinding", R.VKBinding);
 }

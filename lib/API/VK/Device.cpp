@@ -95,6 +95,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_SAMPLER;
   case ResourceKind::SampledTexture2D:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  case ResourceKind::FeedbackTexture2D:
+    llvm_unreachable("SamplerFeedback textures aren't supported in Vulkan!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -164,6 +166,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
+  case ResourceKind::FeedbackTexture2D:
     llvm_unreachable("Textures and samplers don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
@@ -183,6 +186,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
+  case ResourceKind::FeedbackTexture2D:
     llvm_unreachable("Not an image view!");
   }
   llvm_unreachable("All cases handled");

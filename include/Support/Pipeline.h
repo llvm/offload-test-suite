@@ -83,6 +83,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::FeedbackTexture2D:
     return DescriptorKind::UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -112,6 +113,11 @@ enum class CompareFunction {
 };
 
 enum class SamplerKind { Sampler, SamplerComparison };
+
+// Sub-kind for FeedbackTexture2D resources. Maps to
+// DXGI_FORMAT_SAMPLER_FEEDBACK_{MIN_MIP,MIP_REGION_USED}_OPAQUE and the
+// matching D3D12_SAMPLER_FEEDBACK_*_DECODE resolve modes on DirectX.
+enum class FeedbackKind { MinMip, MipRegionUsed };
 
 struct Sampler {
   std::string Name;
@@ -228,6 +234,12 @@ struct Resource {
   bool HasCounter;
   std::optional<uint32_t> TilesMapped;
   bool IsReserved = false;
+  // For FeedbackTexture2D: the name of the paired sampled Texture2D resource
+  // whose Sample* calls write into this feedback texture. Looked up by the
+  // backend at descriptor-creation time.
+  std::optional<std::string> PairedResource;
+  // For FeedbackTexture2D: which feedback flavour. Defaults to MinMip.
+  FeedbackKind FBKind = FeedbackKind::MinMip;
 
   bool isRaw() const {
     switch (Kind) {
@@ -237,6 +249,7 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
+    case ResourceKind::FeedbackTexture2D:
       return false;
     case ResourceKind::StructuredBuffer:
     case ResourceKind::RWStructuredBuffer:
@@ -262,6 +275,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
+    case ResourceKind::FeedbackTexture2D:
       return false;
     }
     llvm_unreachable("All cases handled");
@@ -281,6 +295,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
+    case ResourceKind::FeedbackTexture2D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -345,9 +360,14 @@ struct Resource {
     case ResourceKind::RWStructuredBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::FeedbackTexture2D:
       return true;
     }
     llvm_unreachable("All cases handled");
+  }
+
+  bool isFeedbackTexture() const {
+    return Kind == ResourceKind::FeedbackTexture2D;
   }
 
   bool isReadOnly() const { return !isReadWrite(); }
@@ -685,6 +705,15 @@ template <> struct ScalarEnumerationTraits<offloadtest::SamplerKind> {
   }
 };
 
+template <> struct ScalarEnumerationTraits<offloadtest::FeedbackKind> {
+  static void enumeration(IO &I, offloadtest::FeedbackKind &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::FeedbackKind::Val)
+    ENUM_CASE(MinMip);
+    ENUM_CASE(MipRegionUsed);
+#undef ENUM_CASE
+  }
+};
+
 template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
   static void enumeration(IO &I, offloadtest::DataFormat &V) {
 #define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::DataFormat::Val)
@@ -721,6 +750,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(ConstantBuffer);
     ENUM_CASE(Sampler);
     ENUM_CASE(SampledTexture2D);
+    ENUM_CASE(FeedbackTexture2D);
 #undef ENUM_CASE
   }
 };
