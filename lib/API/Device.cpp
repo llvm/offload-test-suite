@@ -204,7 +204,7 @@ createTextureWithData(Device &Dev, std::string Name,
     *OutUploadBuffer = std::move(*UploadBufferOrErr);
 
     // Copy Buffer to Buffer
-    Encoder->copyBufferToTexture(*OutUploadBuffer, 0, *Texture, 0, SizeInBytes);
+    Encoder->copyBufferToTexture(*OutUploadBuffer, *Texture, SizeInBytes);
 
   } else {
     // Copy data over

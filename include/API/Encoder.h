@@ -21,6 +21,7 @@ namespace offloadtest {
 
 class Buffer;
 class PipelineState;
+class Texture;
 
 /// Base class for all command encoders. An encoder records commands into a
 /// command buffer. Call endEncoding() when done recording. Barriers are
@@ -82,6 +83,8 @@ public:
   virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
                                          Buffer &Dst, size_t DstOffset,
                                          size_t Size) = 0;
+
+  virtual llvm::Error copyTextureToBuffer(Texture &Src, Buffer &Dst) = 0;
 };
 
 struct Viewport {

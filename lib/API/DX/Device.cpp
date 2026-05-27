@@ -808,6 +808,31 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyTextureToBuffer(Texture &Src, Buffer &Dst) override {
+    auto &DXSrc = static_cast<DXTexture &>(Src);
+    auto &DXDst = static_cast<DXBuffer &>(Dst);
+
+    {
+      const D3D12_RESOURCE_BARRIER Barrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              DXSrc.Resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+              D3D12_RESOURCE_STATE_COPY_SOURCE);
+      CB.CmdList->ResourceBarrier(1, &Barrier);
+    }
+
+    CB.CmdList->CopyResource(DXDst.Buffer.Get(), DXSrc.Resource.Get());
+
+    {
+      const D3D12_RESOURCE_BARRIER Barrier =
+          CD3DX12_RESOURCE_BARRIER::Transition(
+              DXSrc.Resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+      CB.CmdList->ResourceBarrier(1, &Barrier);
+    }
+
+    return llvm::Error::success();
+  }
+
   void endEncodingImpl() override { popDebugGroup(); }
 };
 
@@ -2738,27 +2763,14 @@ public:
       return EncoderOrErr.takeError();
     auto ReadbackEncoder = std::move(*EncoderOrErr);
 
-    auto CopyBackResource = [&IS, &ReadbackEncoder,
-                             this](ResourcePair &R) -> llvm::Error {
+    auto CopyBackResource = [&ReadbackEncoder](ResourcePair &R) -> llvm::Error {
       if (R.first->isTexture()) {
-        const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
-        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-            0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                   B.OutputProps.Height, 1,
-                   B.OutputProps.Width * B.getElementSize())};
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
-          const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-          const DXTexture &TextureDX = llvm::cast<DXTexture>(*RS.Texture);
-          addReadbackBeginBarrier(IS, TextureDX.Resource);
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
-                                                     Footprint);
-          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(TextureDX.Resource.Get(),
-                                                     0);
-          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-          addReadbackEndBarrier(IS, TextureDX.Resource);
+          if (auto Err = ReadbackEncoder->copyTextureToBuffer(*RS.Texture,
+                                                              *RS.Readback))
+            return Err;
         }
       } else {
         for (const ResourceSet &RS : R.second) {
@@ -2769,10 +2781,6 @@ public:
                   *RS.Buffer, 0, *RS.Readback, 0,
                   RS.Readback->getSizeInBytes()))
             return Err;
-          // const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-          // addReadbackBeginBarrier(IS, RS.Buffer);
-          // IS.CB->CmdList->CopyResource(ReadbackDX.Buffer.Get(),
-          // RS.Buffer.Get()); addReadbackEndBarrier(IS, RS.Buffer);
         }
       }
       return llvm::Error::success();

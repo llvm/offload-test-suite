@@ -494,13 +494,15 @@ public:
   // currently created during descriptor set setup, which determines their
   // binding layout.
   VkImageView View = VK_NULL_HANDLE;
+  VkImageSubresourceRange FullRange;
   std::string Name;
   TextureCreateDesc Desc;
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
-                llvm::StringRef Name, TextureCreateDesc Desc)
+                llvm::StringRef Name, TextureCreateDesc Desc,
+                VkImageSubresourceRange FullRange)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), Name(Name), Desc(Desc) {}
+        Memory(Memory), FullRange(FullRange), Name(Name), Desc(Desc) {}
 
   ~VulkanTexture() override {
     if (View)
@@ -725,6 +727,25 @@ public:
   VkAccessFlags PendingSrcAccess = VK_ACCESS_HOST_WRITE_BIT;
   VkPipelineStageFlags PendingDstStage = 0;
   VkAccessFlags PendingDstAccess = 0;
+  llvm::SmallVector<VkImageMemoryBarrier> PendingImageTransitions;
+
+  void addImageTransition(VkAccessFlags SrcAccessMask,
+                          VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
+                          VkImageLayout NewLayout, VkImage Image,
+                          VkImageSubresourceRange SubresourceRange) {
+    PendingImageTransitions.push_back(VkImageMemoryBarrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
+        nullptr,                                /*pNext*/
+        SrcAccessMask,
+        DstAccessMask,
+        OldLayout,
+        NewLayout,
+        0, /*srcQueueFamilyIndex*/
+        0, /*dstQueueFamilyIndex*/
+        Image,
+        SubresourceRange,
+    });
+  }
 
   void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
     PendingDstStage |= Stage;
@@ -732,22 +753,18 @@ public:
   }
 
   void flushBarrier() {
-    if (PendingSrcStage == 0) {
-      // Nothing produced yet — no barrier needed, but carry dst forward as
-      // the next src (the command we're about to run will produce at these
-      // stages).
-      PendingSrcStage = PendingDstStage;
-      PendingSrcAccess = PendingDstAccess;
-      PendingDstStage = 0;
-      PendingDstAccess = 0;
-      return;
+    if (PendingSrcStage != 0 || !PendingImageTransitions.empty()) {
+      VkMemoryBarrier Barrier = {};
+      Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      Barrier.srcAccessMask = PendingSrcAccess;
+      Barrier.dstAccessMask = PendingDstAccess;
+      vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
+                           &Barrier, 0, nullptr, PendingImageTransitions.size(),
+                           PendingImageTransitions.data());
+
+      PendingImageTransitions.clear();
     }
-    VkMemoryBarrier Barrier = {};
-    Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    Barrier.srcAccessMask = PendingSrcAccess;
-    Barrier.dstAccessMask = PendingDstAccess;
-    vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
-                         &Barrier, 0, nullptr, 0, nullptr);
+
     PendingSrcStage = PendingDstStage;
     PendingSrcAccess = PendingDstAccess;
     PendingDstStage = 0;
@@ -877,6 +894,43 @@ public:
     addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = static_cast<VulkanTexture &>(Src);
+    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+
+    assert((VKSrc.Desc.Usage & TextureUsage::Storage) !=
+               TextureUsage::Storage &&
+           "copyTextureToBuffer currently assumes the texture is an unordered "
+           "access texture. We need to implement a DefaultStateOrUndefined "
+           "field on the Texture object to support other types of texture.");
+
+    CB.addImageTransition(CB.PendingSrcAccess,         /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT, /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_GENERAL,     /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
+                          VKSrc.Image, VKSrc.FullRange);
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
+                           0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,              /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
+                          VK_IMAGE_LAYOUT_GENERAL,              /*NewLayout*/
+                          VKSrc.Image, VKSrc.FullRange);
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_NONE);
+
     return llvm::Error::success();
   }
 
@@ -2422,8 +2476,22 @@ public:
       return Err;
     }
 
+    VkImageAspectFlags FullAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (isDepthFormat(Desc.Fmt)) {
+      FullAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+      if (isStencilFormat(Desc.Fmt))
+        FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    const VkImageSubresourceRange FullRange{
+        FullAspectMask,
+        0, /*baseMipLevel*/
+        Desc.MipLevels,
+        0, /*baseArrayLayer*/
+        1, /*layerCount*/
+    };
+
     auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc);
+                                               Name, Desc, FullRange);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
