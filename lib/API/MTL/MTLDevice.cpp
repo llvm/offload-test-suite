@@ -1976,17 +1976,17 @@ public:
     } else if (P.isRaster()) {
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                   P.Bindings.RTargetBufferPtr->Channels);
-      if (!FormatOrErr)
-        return FormatOrErr.takeError();
-      PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
       llvm::SmallVector<Format> RTFormats;
+      if (!FormatOrErr)
+        return FormatOrErr.takeError();
       RTFormats.push_back(*FormatOrErr);
 
       if (P.isTraditionalRaster()) {
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
