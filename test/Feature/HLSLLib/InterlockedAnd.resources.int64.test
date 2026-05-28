@@ -172,7 +172,13 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99125
 # XFAIL: Clang
 
-# REQUIRES: Int64
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -1322,12 +1322,12 @@ public:
     DeviceInfo.pNext = Features.pNext;
 
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
-    llvm::SmallVector<const char *, 1> EnabledDeviceExtensions;
     if (HasShaderImageAtomicInt64Ext &&
         FeaturesImageAtomicInt64.shaderImageInt64Atomics)
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
-    DeviceInfo.enabledExtensionCount = EnabledDeviceExtensions.size();
+    DeviceInfo.enabledExtensionCount =
+        static_cast<uint32_t>(EnabledDeviceExtensions.size());
     DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
 #endif
 

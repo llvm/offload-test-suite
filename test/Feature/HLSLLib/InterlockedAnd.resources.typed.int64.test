@@ -1,26 +1,32 @@
 #--- source.hlsl
 
 // This test exercises InterlockedAnd on 64-bit typed RWBuffer resources.
-// 64-bit atomics on typed UAVs are an optional Shader Model 6.6 capability
-// (D3D12 cap AtomicInt64OnTypedResourceSupported, Vulkan feature
-// shaderBufferInt64Atomics), surfaced to lit as `Int64TypedResourceAtomics`.
+// 64-bit atomics on typed UAVs are an optional Shader Model 6.6 capability:
+//
+//   * DirectX:  cap AtomicInt64OnTypedResourceSupported
+//   * Vulkan:   shaderImageInt64Atomics, from the (non-core) extension
+//               VK_EXT_shader_image_atomic_int64. RWBuffer<T> in HLSL maps
+//               to a SPIR-V image (not an SSBO), so RWBuffer atomics on
+//               Vulkan require this image-atomics extension, not
+//               shaderBufferInt64Atomics. The same Vulkan feature also
+//               covers RWTexture<int64_t> typed-image atomics; this test
+//               only exercises RWBuffer.
+//
+// Both are surfaced to lit as `Int64TypedResourceAtomics`.
 //
 //   * RWBuffer<uint64_t>[i]  (free function, 2-arg)
 //   * RWBuffer<int64_t>[i]   (free function, 3-arg, signed)
 //
-// 64-bit typed-image atomics (RWTexture<int64_t>) live behind an additional
-// Vulkan extension (VK_EXT_shader_image_atomic_int64) and are not covered
-// here.
-//
-// 64 threads of a single threadgroup atomically AND `~(1ull << tid)` into
-// a single accumulator slot whose initial value is 0xFFFFFFFFFFFFFFFF.
-// With correct atomic semantics every thread's bit-clear must take
-// effect, so each accumulator must end at exactly 0. If any
-// read-modify-write were lost, the corresponding bit would remain set.
+// 64 threads of a single threadgroup atomically AND their own unique bit
+// mask ~(1ull << tid) into a single accumulator slot that starts with 
+// all bits set. With correct atomic semantics, every bit must be set 
+// back to 0, so each accumulator must end at
+// exactly 0x0000000000000000. If any read-modify-write were lost, the
+// corresponding bit would remain clear.
 //
 // Per-thread sanity for the 3-argument form: the returned "original"
-// value must have *this* thread's bit set, since no other thread ever
-// clears that bit.
+// value must have *this* thread's bit clear, since no other thread ever
+// sets that bit.
 
 RWBuffer<uint64_t> TBufU : register(u0);
 RWBuffer<int64_t>  TBufI : register(u1);
@@ -59,6 +65,7 @@ Buffers:
     Format: UInt64
     Channels: 1
     FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedTBufU
     Format: UInt64
     Channels: 1
@@ -67,6 +74,7 @@ Buffers:
     Format: Int64
     Channels: 1
     FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedTBufI
     Format: Int64
     Channels: 1
@@ -124,7 +132,7 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99125
 # XFAIL: Clang
 
-# REQUIRES: Int64TypedResourceAtomics
+# REQUIRES: Int64TypedResourceAtomics && SM_6_6
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
