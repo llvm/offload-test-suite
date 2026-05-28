@@ -1279,11 +1279,9 @@ public:
       MeshFeatures.multiviewMeshShader = 0;
       MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
       MeshFeatures.meshShaderQueries = 0;
-#ifdef VK_VERSION_1_4
-      Features14.pNext = &MeshFeatures;
-#else
-      Features13.pNext = &MeshFeatures;
-#endif
+
+      MeshFeatures.pNext = Features.pNext;
+      Features.pNext = &MeshFeatures;
     }
 
     DeviceInfo.enabledExtensionCount =
