@@ -1501,6 +1501,15 @@ public:
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 
+    // MSAA support is not yet wired up on the Metal backend. Tests that
+    // require it should mark themselves `UNSUPPORTED: Metal` so this guard
+    // never fires in CI; it exists to keep the shared TextureCreateDesc
+    // contract honest across backends (see #1043).
+    if (Desc.SampleCount > 1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "MSAA textures (SampleCount > 1) are not yet implemented on Metal");
+
     MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
         getMetalPixelFormat(Desc.Fmt), Desc.Width, Desc.Height,
         Desc.MipLevels > 1);
