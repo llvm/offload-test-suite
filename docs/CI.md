@@ -68,8 +68,8 @@ Configurations:
 
 ### Windows Intel GPU
 
-* CPU: Intel Core i9-10900
-* GPU: Intel UHD Graphics 630
+* CPU: AMD Ryzen Threadripper 3970X
+* GPU: Intel Arc Pro B50 Graphics
 * RAM: 64 GiB
 * Configurations:
   * Windows Intel GPU DirectX
