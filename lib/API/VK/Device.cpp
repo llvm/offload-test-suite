@@ -1252,6 +1252,19 @@ public:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Opt-in extension features: query and enable
+    // VK_EXT_shader_image_atomic_int64 when the device advertises it so that
+    // tests using 64-bit atomics on RWBuffer / RWTexture (SPIR-V image storage
+    // class) can run.
+    const auto AvailableExts = queryDeviceExtensions(PhysicalDevice);
+    const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
+        AvailableExts, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    FeaturesImageAtomicInt64.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+#endif
 
     Features.pNext = &Features11;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
@@ -1261,6 +1274,24 @@ public:
 #ifdef VK_VERSION_1_4
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
       Features13.pNext = &Features14;
+#endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Attach the extension features struct to the tail of the version-gated
+    // chain so vkGetPhysicalDeviceFeatures2 populates it and vkCreateDevice
+    // sees it enabled.
+    if (HasShaderImageAtomicInt64Ext) {
+#ifdef VK_VERSION_1_4
+      if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+        Features14.pNext = &FeaturesImageAtomicInt64;
+      else
+#endif
+          if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+        Features13.pNext = &FeaturesImageAtomicInt64;
+      else if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+        Features12.pNext = &FeaturesImageAtomicInt64;
+      else
+        Features11.pNext = &FeaturesImageAtomicInt64;
+    }
 #endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
@@ -1289,6 +1320,16 @@ public:
     DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
+
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    llvm::SmallVector<const char *, 1> EnabledDeviceExtensions;
+    if (HasShaderImageAtomicInt64Ext &&
+        FeaturesImageAtomicInt64.shaderImageInt64Atomics)
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    DeviceInfo.enabledExtensionCount = EnabledDeviceExtensions.size();
+    DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
+#endif
 
     VkDevice Device = VK_NULL_HANDLE;
     if (auto Err = VK::toError(
@@ -2197,6 +2238,14 @@ private:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    FeaturesImageAtomicInt64.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+    const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
+        DeviceExtensions, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+#endif
 
     Features.pNext = &Features11;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
@@ -2206,6 +2255,27 @@ private:
 #ifdef VK_VERSION_1_4
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
       Features13.pNext = &Features14;
+#endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Append the VK_EXT_shader_image_atomic_int64 features struct to the
+    // pNext chain, but only if the device advertises the extension --
+    // otherwise drivers may reject the unknown sType. The chain above is
+    // built version-by-version (11 -> 12 -> 13 -> 14), so the correct
+    // attachment point is whichever Features1X struct is currently the
+    // tail for this device's apiVersion.
+    if (HasShaderImageAtomicInt64Ext) {
+#ifdef VK_VERSION_1_4
+      if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+        Features14.pNext = &FeaturesImageAtomicInt64;
+      else
+#endif
+          if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+        Features13.pNext = &FeaturesImageAtomicInt64;
+      else if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+        Features12.pNext = &FeaturesImageAtomicInt64;
+      else
+        Features11.pNext = &FeaturesImageAtomicInt64;
+    }
 #endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
@@ -2238,6 +2308,12 @@ private:
 #define VULKAN14_FEATURE_BOOL(Name)                                            \
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features14.Name)));
+#endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+#define VULKAN_EXT_SHADER_IMAGE_ATOMIC_INT64_FEATURE_BOOL(Name)                \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, HasShaderImageAtomicInt64Ext &&       \
+                                             FeaturesImageAtomicInt64.Name)));
 #endif
 #include "VKFeatures.def"
   }

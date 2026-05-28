@@ -107,6 +107,8 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   switch (Format) {
   case DataFormat::Int32:
     DXFormats(SINT) break;
+  case DataFormat::UInt32:
+    DXFormats(UINT) break;
   case DataFormat::Float32:
     DXFormats(FLOAT) break;
   case DataFormat::UInt64:
