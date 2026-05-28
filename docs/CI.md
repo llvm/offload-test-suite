@@ -49,11 +49,11 @@ Configurations:
 
 ## Build Hardware
 
-### Apple M1
+### Apple M4 Pro
 
-* CPU: Apple M1
-* GPU: Apple M1
-* RAM: 16 GiB
+* CPU: Apple M4 Pro
+* GPU: Apple M4 Pro
+* RAM: 24 GiB
 * Configurations:
   * macOS Metal
 
