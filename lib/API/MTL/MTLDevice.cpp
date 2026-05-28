@@ -1804,12 +1804,9 @@ public:
                                               DSState, MTL::CullModeNone);
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                       llvm::ArrayRef<Format> RTFormats,
-                       std::optional<Format> DSFormat,
-                       std::optional<ShaderContainer> AS, ShaderContainer MS,
-                       std::optional<ShaderContainer> PS) {
+  llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const MeshShaderRasterPipelineCreateDesc &Desc) override {
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
@@ -1846,24 +1843,25 @@ public:
     MetalIR MSIR;
     MTLPtr<MTL::Library> MSLib;
     MTLPtr<MTL::Function> MSFn;
-    if (auto Err = compileStage(Stages::Mesh, MS, "mesh", MSIR, MSLib, MSFn))
+    if (auto Err =
+            compileStage(Stages::Mesh, Desc.MS, "mesh", MSIR, MSLib, MSFn))
       return Err;
 
     MetalIR ASIR;
     MTLPtr<MTL::Library> ASLib;
     MTLPtr<MTL::Function> ASFn;
-    if (AS) {
-      if (auto Err = compileStage(Stages::Amplification, *AS, "amplification",
-                                  ASIR, ASLib, ASFn))
+    if (Desc.AS) {
+      if (auto Err = compileStage(Stages::Amplification, *Desc.AS,
+                                  "amplification", ASIR, ASLib, ASFn))
         return Err;
     }
 
     MetalIR PSIR;
     MTLPtr<MTL::Library> PSLib;
     MTLPtr<MTL::Function> PSFn;
-    if (PS) {
-      if (auto Err =
-              compileStage(Stages::Pixel, *PS, "fragment", PSIR, PSLib, PSFn))
+    if (Desc.PS) {
+      if (auto Err = compileStage(Stages::Pixel, *Desc.PS, "fragment", PSIR,
+                                  PSLib, PSFn))
         return Err;
     }
 
@@ -1877,18 +1875,19 @@ public:
     if (PSFn)
       Desc->setFragmentFunction(PSFn.get());
 
-    for (size_t I = 0; I < RTFormats.size(); ++I) {
+    for (size_t I = 0; I < Desc.RTFormats.size(); ++I) {
       MTL::RenderPipelineColorAttachmentDescriptor *RPCA =
           MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
-      RPCA->setPixelFormat(getMetalPixelFormat(RTFormats[I]));
+      RPCA->setPixelFormat(getMetalPixelFormat(Desc.RTFormats[I]));
       Desc->colorAttachments()->setObject(RPCA, I);
       RPCA->release();
     }
 
-    if (DSFormat) {
-      const MTL::PixelFormat DSPixelFormat = getMetalPixelFormat(*DSFormat);
+    if (Desc.DSFormat) {
+      const MTL::PixelFormat DSPixelFormat =
+          getMetalPixelFormat(*Desc.DSFormat);
       Desc->setDepthAttachmentPixelFormat(DSPixelFormat);
-      if (isStencilFormat(*DSFormat))
+      if (isStencilFormat(*Desc.DSFormat))
         Desc->setStencilAttachmentPixelFormat(DSPixelFormat);
     }
 
@@ -1918,7 +1917,7 @@ public:
     }
 
     MTL::Size ObjectTGSize(1, 1, 1);
-    if (AS) {
+    if (Desc.AS) {
       IRVersionedASInfo ASInfo;
       if (IRShaderReflectionCopyAmplificationInfo(
               ASIR.Reflection.get(), IRReflectionVersion_1_0, &ASInfo)) {
@@ -2021,19 +2020,15 @@ public:
           return PipelineStateOrErr.takeError();
         IS.Pipeline = std::move(*PipelineStateOrErr);
       } else if (P.isMeshShaderRaster()) {
-        std::optional<ShaderContainer> AS;
-        ShaderContainer MS = {};
-        std::optional<ShaderContainer> PS;
+        MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
+        PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
           SC.Shader = Shader.Shader.get();
-          if (Shader.Stage == Stages::Amplification)
-            AS = std::move(SC);
-          else if (Shader.Stage == Stages::Mesh)
-            MS = std::move(SC);
-          else if (Shader.Stage == Stages::Pixel)
-            PS = std::move(SC);
+          PipelineDesc.setShader(Shader.Stage, std::move(SC));
         }
 
         auto PipelineStateOrErr =

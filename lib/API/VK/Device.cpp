@@ -1821,13 +1821,10 @@ public:
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
-                       llvm::ArrayRef<Format> RTFormats,
-                       std::optional<Format> DSFormat,
-                       std::optional<ShaderContainer> AS, ShaderContainer MS,
-                       std::optional<ShaderContainer> PS) /*override*/ {
-    assert(RTFormats.size() <= 8);
+  llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    assert(Desc.RTFormats.size() <= 8);
 
     VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
     llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> ShaderStages;
@@ -1841,12 +1838,12 @@ public:
     llvm::SmallVector<char> MSSpecData;
     VkSpecializationInfo MSSpecInfo = {};
     {
-      if (auto Err = parseSpecializationConstants(MS.SpecializationConstants,
-                                                  MSSpecEntries, MSSpecData,
-                                                  MSSpecInfo))
+      if (auto Err = parseSpecializationConstants(
+              Desc.MS.SpecializationConstants, MSSpecEntries, MSSpecData,
+              MSSpecInfo))
         return Err;
 
-      auto MSModOrErr = createShaderModule(MS.Shader, "mesh");
+      auto MSModOrErr = createShaderModule(Desc.MS.Shader, "mesh");
       if (!MSModOrErr)
         return MSModOrErr.takeError();
 
@@ -1854,22 +1851,22 @@ public:
       ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       ShaderStage.stage = VK_SHADER_STAGE_MESH_BIT_EXT;
       ShaderStage.module = *MSModOrErr;
-      ShaderStage.pName = MS.EntryPoint.c_str();
+      ShaderStage.pName = Desc.MS.EntryPoint.c_str();
       ShaderStage.pSpecializationInfo =
-          MS.SpecializationConstants.empty() ? nullptr : &MSSpecInfo;
+          Desc.MS.SpecializationConstants.empty() ? nullptr : &MSSpecInfo;
       ShaderStages.push_back(ShaderStage);
     }
 
     llvm::SmallVector<VkSpecializationMapEntry> ASSpecEntries;
     llvm::SmallVector<char> ASSpecData;
     VkSpecializationInfo ASSpecInfo = {};
-    if (AS) {
-      if (auto Err = parseSpecializationConstants((*AS).SpecializationConstants,
-                                                  ASSpecEntries, ASSpecData,
-                                                  ASSpecInfo))
+    if (Desc.AS) {
+      if (auto Err = parseSpecializationConstants(
+              (*Desc.AS).SpecializationConstants, ASSpecEntries, ASSpecData,
+              ASSpecInfo))
         return Err;
 
-      auto ASModOrErr = createShaderModule((*AS).Shader, "task");
+      auto ASModOrErr = createShaderModule((*Desc.AS).Shader, "task");
       if (!ASModOrErr)
         return ASModOrErr.takeError();
 
@@ -1879,22 +1876,22 @@ public:
       ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       ShaderStage.stage = VK_SHADER_STAGE_TASK_BIT_EXT;
       ShaderStage.module = *ASModOrErr;
-      ShaderStage.pName = (*AS).EntryPoint.c_str();
+      ShaderStage.pName = (*Desc.AS).EntryPoint.c_str();
       ShaderStage.pSpecializationInfo =
-          (*AS).SpecializationConstants.empty() ? nullptr : &ASSpecInfo;
+          (*Desc.AS).SpecializationConstants.empty() ? nullptr : &ASSpecInfo;
       ShaderStages.push_back(ShaderStage);
     }
 
     llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
     llvm::SmallVector<char> PSSpecData;
     VkSpecializationInfo PSSpecInfo = {};
-    if (PS) {
-      if (auto Err = parseSpecializationConstants((*PS).SpecializationConstants,
-                                                  PSSpecEntries, PSSpecData,
-                                                  PSSpecInfo))
+    if (Desc.PS) {
+      if (auto Err = parseSpecializationConstants(
+              (*Desc.PS).SpecializationConstants, PSSpecEntries, PSSpecData,
+              PSSpecInfo))
         return Err;
 
-      auto PSModOrErr = createShaderModule((*PS).Shader, "pixel");
+      auto PSModOrErr = createShaderModule((*Desc.PS).Shader, "pixel");
       if (!PSModOrErr)
         return PSModOrErr.takeError();
 
@@ -1904,23 +1901,23 @@ public:
       ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
       ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
       ShaderStage.module = *PSModOrErr;
-      ShaderStage.pName = (*PS).EntryPoint.c_str();
+      ShaderStage.pName = (*Desc.PS).EntryPoint.c_str();
       ShaderStage.pSpecializationInfo =
-          (*PS).SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+          (*Desc.PS).SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
       ShaderStages.push_back(ShaderStage);
     }
 
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
-    PassDesc.ColorAttachments.reserve(RTFormats.size());
-    for (const Format F : RTFormats) {
+    PassDesc.ColorAttachments.reserve(Desc.RTFormats.size());
+    for (const Format F : Desc.RTFormats) {
       ColorAttachmentFormatDesc CA = {};
       CA.Fmt = F;
       PassDesc.ColorAttachments.push_back(CA);
     }
-    if (DSFormat) {
+    if (Desc.DSFormat) {
       DepthStencilAttachmentFormatDesc DS = {};
-      DS.Fmt = *DSFormat;
+      DS.Fmt = *Desc.DSFormat;
       PassDesc.DepthStencil = DS;
     }
 
@@ -1978,7 +1975,7 @@ public:
     DepthStencilCI.front = DepthStencilCI.back;
 
     llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
-        RTFormats.size());
+        Desc.RTFormats.size());
     for (auto &BA : BlendAttachments)
       BA.colorWriteMask = 0xf;
     VkPipelineColorBlendStateCreateInfo BlendCI = {};
@@ -3603,37 +3600,24 @@ public:
         State.Pipeline = std::move(*PipelineStateOrErr);
         llvm::outs() << "Graphics Pipeline created.\n";
       } else if (P.isMeshShaderRaster()) {
-        std::optional<ShaderContainer> AS = {};
-        ShaderContainer MS = {};
-        std::optional<ShaderContainer> PS = {};
+        MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
+        PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         for (auto &Shader : P.Shaders) {
-          if (Shader.Stage == Stages::Amplification) {
-            ShaderContainer Container;
-            Container.EntryPoint = Shader.Entry;
-            Container.Shader = Shader.Shader.get();
-            AS = Container;
-          } else if (Shader.Stage == Stages::Mesh) {
-            MS.EntryPoint = Shader.Entry;
-            MS.Shader = Shader.Shader.get();
-          } else if (Shader.Stage == Stages::Pixel) {
-            ShaderContainer Container;
-            Container.EntryPoint = Shader.Entry;
-            Container.Shader = Shader.Shader.get();
-            PS = Container;
-          }
+          ShaderContainer SC = {};
+          SC.EntryPoint = Shader.Entry;
+          SC.Shader = Shader.Shader.get();
+          PipelineDesc.setShader(Shader.Stage, std::move(SC));
         }
 
         auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                     P.Bindings.RTargetBufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
+        PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-        llvm::SmallVector<Format> RTFormats;
-        RTFormats.push_back(*FormatOrErr);
-
-        auto PipelineStateOrErr =
-            createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
-                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+        auto PipelineStateOrErr = createMeshShaderRasterPipeline(
+            "Mesh Shader Pipeline State", BindingsDesc, PipelineDesc);
         if (!PipelineStateOrErr)
           return PipelineStateOrErr.takeError();
         State.Pipeline = std::move(*PipelineStateOrErr);
