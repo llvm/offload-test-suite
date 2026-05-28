@@ -176,6 +176,8 @@ def setDeviceFeatures(config, device, compiler):
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
+            if Extension["ExtensionName"] == "VK_EXT_mesh_shader":
+                config.available_features.add("MeshShader")
 
 
 offloader_args = []
