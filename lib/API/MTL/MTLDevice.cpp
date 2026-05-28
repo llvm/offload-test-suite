@@ -1761,6 +1761,15 @@ public:
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
+    // Variable Rate Shading is not yet implemented on Metal. Tests that set
+    // a per-draw or per-primitive shading rate should mark themselves
+    // `UNSUPPORTED: Metal` so this guard never fires in CI; it exists to
+    // keep the shared Pipeline contract honest (see #1044).
+    if (P.ShadingRateOverride || P.PrimitiveShadingRate)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Variable Rate Shading is not yet implemented on Metal");
+
     InvocationState IS;
 
     auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);
