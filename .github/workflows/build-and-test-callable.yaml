@@ -381,12 +381,21 @@ jobs:
         # available so we can't pip install -r requirements.txt. Keep
         # this list in sync with OffloadTest/test/requirements.txt.
         # We invoke pip explicitly here instead of relying on
-        # setup-python's `pip-install:` input, which has been observed
-        # to silently no-op on our self-hosted Windows runners.
+        # setup-python's `pip-install:` input, which was observed to
+        # silently no-op on our self-hosted Windows runners.
+        # The runner service account (NetworkService) can't write to
+        # the system site-packages under C:\Program Files\Python313, so
+        # pip falls back to a --user install. That puts lit.exe in
+        # %APPDATA%\Python\Python313\Scripts\ which is NOT on PATH.
+        # We compute that dir from sysconfig and prepend it to PATH for
+        # all subsequent steps so `lit` resolves correctly.
         shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install lit pyyaml
+          user_scripts=$(python -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
+          echo "User scripts dir: $user_scripts"
+          echo "$user_scripts" >> "$GITHUB_PATH"
       - name: Dump GPU Info (test runner)
         shell: bash
         run: |
@@ -429,12 +438,7 @@ jobs:
             set -euxo pipefail
             cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
             suite='${{ steps.suite.outputs.suite }}'
-            # Invoke lit via `python -m` so it works even when pip-install
-            # falls back to a --user install (e.g. self-hosted runners
-            # running as NetworkService can't write to system site-packages,
-            # so lit.exe lands in %APPDATA%\Python\...\Scripts\ which isn't
-            # on PATH).
-            python -m lit -v "run/test/$suite" \
+            lit -v "run/test/$suite" \
               --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
