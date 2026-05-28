@@ -1916,17 +1916,11 @@ public:
     for (const Format F : RTFormats) {
       ColorAttachmentFormatDesc CA = {};
       CA.Fmt = F;
-      CA.Load = LoadAction::DontCare;
-      CA.Store = StoreAction::DontCare;
       PassDesc.ColorAttachments.push_back(CA);
     }
     if (DSFormat) {
       DepthStencilAttachmentFormatDesc DS = {};
       DS.Fmt = *DSFormat;
-      DS.DepthLoad = LoadAction::DontCare;
-      DS.DepthStore = StoreAction::DontCare;
-      DS.StencilLoad = LoadAction::DontCare;
-      DS.StencilStore = StoreAction::DontCare;
       PassDesc.DepthStencil = DS;
     }
 
