@@ -523,8 +523,8 @@ struct TLASDesc {
 };
 
 struct AccelerationStructureDescs {
-  llvm::SmallVector<BLASDesc> BLAS;
-  llvm::SmallVector<TLASDesc> TLAS;
+  llvm::SmallVector<BLASDesc, 1> BLAS;
+  llvm::SmallVector<TLASDesc, 1> TLAS;
 };
 
 struct Pipeline {
