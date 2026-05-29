@@ -84,6 +84,8 @@ public:
                                          Buffer &Dst, size_t DstOffset,
                                          size_t Size) = 0;
 
+  virtual llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) = 0;
+
   virtual llvm::Error copyTextureToBuffer(Texture &Src, Buffer &Dst) = 0;
 };
 

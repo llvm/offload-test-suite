@@ -172,6 +172,9 @@ public:
   GPUAPI getAPI() const { return API; }
   virtual const TextureCreateDesc &getDesc() const = 0;
 
+  // The row stride required for uploading and reading back from this texture.
+  virtual uint32_t getRowStrideInBytes() const = 0;
+
 protected:
   explicit Texture(GPUAPI API) : API(API) {}
 };

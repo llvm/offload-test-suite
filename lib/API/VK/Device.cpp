@@ -497,12 +497,23 @@ public:
   VkImageSubresourceRange FullRange;
   std::string Name;
   TextureCreateDesc Desc;
+  uint64_t RowPitchAlignment = 1;
+
+  VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+  bool IsInUndefinedLayout = true;
+
+  VkImageLayout preferredLayoutOrUndefined() {
+    return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
+  }
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
                 llvm::StringRef Name, TextureCreateDesc Desc,
-                VkImageSubresourceRange FullRange)
+                VkImageLayout PreferredLayout,
+                VkImageSubresourceRange FullRange, uint64_t RowPitchAlignment)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), FullRange(FullRange), Name(Name), Desc(Desc) {}
+        Memory(Memory), FullRange(FullRange), Name(Name), Desc(Desc),
+        RowPitchAlignment(RowPitchAlignment), PreferredLayout(PreferredLayout) {
+  }
 
   ~VulkanTexture() override {
     if (View)
@@ -536,6 +547,12 @@ public:
   void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
+
+  uint32_t getRowStrideInBytes() const override {
+    const uint64_t TightRow =
+        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
+    return static_cast<uint32_t>(llvm::alignTo(TightRow, RowPitchAlignment));
+  }
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Vulkan;
@@ -897,24 +914,53 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToTexture(offloadtest::Buffer &Src,
+                                  offloadtest::Texture &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst.Image, VKDst.FullRange);
+    VKDst.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst.Image, VKDst.FullRange);
+
+    return llvm::Error::success();
+  }
+
   llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
                                   offloadtest::Buffer &Dst) override {
     auto &VKSrc = llvm::cast<VulkanTexture>(Src);
     auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
 
-    assert((VKSrc.Desc.Usage & TextureUsage::Storage) !=
-               TextureUsage::Storage &&
-           "copyTextureToBuffer currently assumes the texture is an unordered "
-           "access texture. We need to implement a DefaultStateOrUndefined "
-           "field on the Texture object to support other types of texture.");
-
-    CB.addImageTransition(CB.PendingSrcAccess,         /*SrcAccessMask*/
-                          VK_ACCESS_TRANSFER_READ_BIT, /*DstAccessMask*/
-                          VK_IMAGE_LAYOUT_GENERAL,     /*OldLayout*/
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT,        /*DstAccessMask*/
+                          VKSrc.preferredLayoutOrUndefined(), /*OldLayout*/
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
                           VKSrc.Image, VKSrc.FullRange);
+    VKSrc.IsInUndefinedLayout = false;
+
     CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_ACCESS_TRANSFER_READ_BIT);
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
     insertDebugSignpost(
@@ -927,9 +973,8 @@ public:
     CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,              /*DstAccessMask*/
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
-                          VK_IMAGE_LAYOUT_GENERAL,              /*NewLayout*/
+                          VKSrc.preferredLayoutOrUndefined(),   /*NewLayout*/
                           VKSrc.Image, VKSrc.FullRange);
-    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_NONE);
 
     return llvm::Error::success();
   }
@@ -2490,8 +2535,13 @@ public:
         1, /*layerCount*/
     };
 
-    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc, FullRange);
+    VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if ((Desc.Usage & TextureUsage::Storage))
+      PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    auto Tex = std::make_unique<VulkanTexture>(
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
+        Props.limits.optimalBufferCopyRowPitchAlignment);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;

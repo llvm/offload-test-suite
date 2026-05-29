@@ -177,42 +177,77 @@ offloadtest::createBufferWithData(
 }
 
 llvm::Expected<std::unique_ptr<offloadtest::Texture>>
-createTextureWithData(Device &Dev, std::string Name,
-                      const TextureCreateDesc &Desc, const void *Data,
-                      size_t SizeInBytes, ComputeEncoder *Encoder,
-                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
+offloadtest::createTextureWithData(
+    Device &Dev, std::string Name, const TextureCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
+    std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
 
   // TODO(manon): Validate texture size with data to upload
+
+  const uint64_t PackedRowStrideInBytes =
+      Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
+    return llvm::createStringError(
+        "Data upload is not enough for texture size.");
 
   auto TextureOrErr = Dev.createTexture(Name, Desc);
   if (!TextureOrErr)
     return TextureOrErr.takeError();
   auto Texture = std::move(*TextureOrErr);
 
+  const uint64_t TexRowStrideInBytes = Texture->getRowStrideInBytes();
   if (Desc.Location == MemoryLocation::GpuOnly) {
     if (OutUploadBuffer == nullptr)
       return llvm::createStringError("An upload buffer is required to create a "
                                      "GpuOnly texture with data.");
 
+    const uint64_t UploadBufferSizeInBytes =
+        (Desc.Height - 1) * TexRowStrideInBytes + PackedRowStrideInBytes;
+
     // Create Upload buffer
     const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
     std::string UploadBufferName = Name + " (Upload Buffer)";
-    auto UploadBufferOrErr = createBufferWithData(
-        Dev, UploadBufferName, UploadDesc, Data, SizeInBytes, Encoder, nullptr);
+    auto UploadBufferOrErr =
+        Dev.createBuffer(UploadBufferName, UploadDesc, UploadBufferSizeInBytes);
     if (!UploadBufferOrErr)
       return UploadBufferOrErr.takeError();
     *OutUploadBuffer = std::move(*UploadBufferOrErr);
 
+    auto MappedPtrOrErr = (*OutUploadBuffer)->map();
+    if (!MappedPtrOrErr)
+      return MappedPtrOrErr.takeError();
+
+    uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
+    const uint8_t *SrcPtr = (const uint8_t *)Data;
+
+    for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
+      memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
+      DstPtr += TexRowStrideInBytes;
+      SrcPtr += PackedRowStrideInBytes;
+    }
+    (*OutUploadBuffer)->unmap();
+
     // Copy Buffer to Buffer
-    Encoder->copyBufferToTexture(*OutUploadBuffer, *Texture, SizeInBytes);
+    if (auto Err = Encoder->copyBufferToTexture(**OutUploadBuffer, *Texture))
+      return Err;
 
   } else {
     // Copy data over
     auto MappedPtrOrErr = Texture->map();
     if (!MappedPtrOrErr)
       return MappedPtrOrErr.takeError();
-    void *MappedPtr = *MappedPtrOrErr;
-    memcpy(MappedPtr, Data, SizeInBytes);
+
+    uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
+    const uint8_t *SrcPtr = (const uint8_t *)Data;
+
+    for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
+      memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
+      DstPtr += TexRowStrideInBytes;
+      SrcPtr +=
+          PackedRowStrideInBytes; // TODO(manon): INCORRECT Must query the
+                                  // actual row stride from the API instead.
+    }
+
     Texture->unmap();
   }
 

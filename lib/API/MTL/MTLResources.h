@@ -85,6 +85,12 @@ inline MTL::PixelFormat getMetalPixelFormat(Format Format) {
     return MTL::PixelFormatRGBA32Uint;
   case Format::RGBA32Float:
     return MTL::PixelFormatRGBA32Float;
+  // Metal has no 64-bit-per-channel pixel formats.
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
+    llvm_unreachable("64-bit formats have no Metal pixel format equivalent");
   case Format::D32Float:
     return MTL::PixelFormatDepth32Float;
   case Format::D32FloatS8Uint:
@@ -140,6 +146,12 @@ inline MTL::VertexFormat getMetalVertexFormat(Format Fmt) {
     return MTL::VertexFormatUInt4;
   case Format::RGBA32Float:
     return MTL::VertexFormatFloat4;
+  // Metal has no 64-bit-per-channel vertex formats.
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
+    llvm_unreachable("64-bit formats have no Metal vertex format equivalent");
   // Depth formats cannot be used as vertex attributes.
   case Format::D32Float:
   case Format::D32FloatS8Uint:

@@ -356,6 +356,10 @@ public:
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
+  uint32_t getRowStrideInBytes() const override {
+    return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  }
+
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Metal;
   }

@@ -266,14 +266,17 @@ static BufferShaderAccessType BufferShaderAccessTypeFromResourceKind(
   case ResourceKind::RWBuffer: {
     auto FmtOrErr =
         toFormat(Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
-    if (!FmtOrErr)
+    if (!FmtOrErr) {
+      printf("Invalid format! FMT: %d, CHANNELS: %d\n",
+             Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
       assert(false && "Invalid format.");
+    }
     OutParams.Fmt = *FmtOrErr;
     return BufferShaderAccessType::Typed;
   }
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
-    OutParams.StructureStride = Resource.BufferPtr->Stride;
+    OutParams.StructureStride = Resource.BufferPtr->getElementSize();
     return BufferShaderAccessType::Structured;
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::RWByteAddressBuffer:
@@ -410,6 +413,7 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+  D3D12_RESOURCE_STATES PreferredState;
 
   D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle;
   D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle;
@@ -417,12 +421,13 @@ public:
 
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes,
+           D3D12_RESOURCE_STATES PreferredState,
            D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle,
            D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle,
            D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
-        Desc(Desc), SizeInBytes(SizeInBytes), SRVHandle(SRVHandle),
-        UAVHandle(UAVHandle), CBVHandle(CBVHandle) {}
+        Desc(Desc), SizeInBytes(SizeInBytes), PreferredState(PreferredState),
+        SRVHandle(SRVHandle), UAVHandle(UAVHandle), CBVHandle(CBVHandle) {}
   DXBuffer(const DXBuffer &) = delete;
   DXBuffer(DXBuffer &&) = delete;
   DXBuffer &operator=(const DXBuffer &) = delete;
@@ -451,6 +456,7 @@ public:
 class DXTexture : public offloadtest::Texture {
 public:
   ComPtr<ID3D12Resource> Resource;
+  D3D12_RESOURCE_STATES PreferredState;
 
   // Optional descriptors, depending on Desc.Usage.
   // A zero ptr means no descriptor was created for that view type.
@@ -463,10 +469,12 @@ public:
   TextureCreateDesc Desc;
 
   DXTexture(ComPtr<ID3D12Resource> Resource, llvm::StringRef Name,
-            TextureCreateDesc Desc, D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle,
+            TextureCreateDesc Desc, D3D12_RESOURCE_STATES PreferredState,
+            D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle,
             D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle)
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource),
-        SRVHandle(SRVHandle), UAVHandle(UAVHandle), Name(Name), Desc(Desc) {}
+        PreferredState(PreferredState), SRVHandle(SRVHandle),
+        UAVHandle(UAVHandle), Name(Name), Desc(Desc) {}
 
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
@@ -482,6 +490,10 @@ public:
   void unmap() override { Resource->Unmap(0, nullptr); }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
+
+  uint32_t getRowStrideInBytes() const override {
+    return getAlignedTexturePitch(Desc.Width, getFormatSizeInBytes(Desc.Fmt));
+  }
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::DirectX;
@@ -650,6 +662,7 @@ public:
   ComPtr<ID3D12GraphicsCommandListX> CmdList;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
+  llvm::SmallVector<D3D12_RESOURCE_BARRIER> PendingTransitions;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12DeviceX> Device) {
@@ -675,14 +688,27 @@ public:
   }
 
   void addPendingUAVBarrier() { PendingUAVBarrier = true; }
+  void addResourceTransition(D3D12_RESOURCE_BARRIER Transition) {
+    PendingTransitions.push_back(Transition);
+  }
 
   void flushBarrier() {
-    if (!PendingUAVBarrier)
-      return;
-    const D3D12_RESOURCE_BARRIER Barrier =
-        CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
-    CmdList->ResourceBarrier(1, &Barrier);
-    PendingUAVBarrier = false;
+
+    if (PendingUAVBarrier) {
+      PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::UAV(nullptr));
+      PendingUAVBarrier = false;
+    }
+
+    // if (!PendingUAVBarrier)
+    //   return;
+    // const D3D12_RESOURCE_BARRIER Barrier =
+    //     CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
+
+    if (!PendingTransitions.empty()) {
+      CmdList->ResourceBarrier(PendingTransitions.size(),
+                               PendingTransitions.data());
+      PendingTransitions.clear();
+    }
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
@@ -784,25 +810,67 @@ public:
     auto &DXSrc = llvm::cast<DXBuffer>(Src);
     auto &DXDst = llvm::cast<DXBuffer>(Dst);
 
-    {
-      const D3D12_RESOURCE_BARRIER Barrier =
-          CD3DX12_RESOURCE_BARRIER::Transition(
-              DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-              D3D12_RESOURCE_STATE_COPY_SOURCE);
-      CB.CmdList->ResourceBarrier(1, &Barrier);
-    }
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Buffer.Get(), DXSrc.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_SOURCE));
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Buffer.Get(), DXDst.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_DEST));
+    CB.flushBarrier();
 
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
 
-    {
-      const D3D12_RESOURCE_BARRIER Barrier =
-          CD3DX12_RESOURCE_BARRIER::Transition(
-              DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-      CB.CmdList->ResourceBarrier(1, &Barrier);
-    }
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+          DXSrc.PreferredState));
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+          DXDst.PreferredState));
+    CB.flushBarrier();
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) override {
+    auto &DXSrc = llvm::cast<DXBuffer>(Src);
+    auto &DXDst = llvm::cast<DXTexture>(Dst);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Buffer.Get(), DXSrc.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_SOURCE));
+
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Resource.Get(), DXDst.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_DEST));
+    CB.flushBarrier();
+
+    const uint32_t ElementSize = getFormatSizeInBytes(DXDst.Desc.Fmt);
+    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+        0,
+        CD3DX12_SUBRESOURCE_FOOTPRINT(
+            getDXGIFormat(DXDst.Desc.Fmt), DXDst.Desc.Width, DXDst.Desc.Height,
+            1, getAlignedTexturePitch(DXDst.Desc.Width, ElementSize))};
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(), Footprint);
+    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+          DXSrc.PreferredState));
+
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+          DXDst.PreferredState));
 
     return llvm::Error::success();
   }
@@ -811,23 +879,39 @@ public:
     auto &DXSrc = llvm::cast<DXTexture>(Src);
     auto &DXDst = llvm::cast<DXBuffer>(Dst);
 
-    {
-      const D3D12_RESOURCE_BARRIER Barrier =
-          CD3DX12_RESOURCE_BARRIER::Transition(
-              DXSrc.Resource.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-              D3D12_RESOURCE_STATE_COPY_SOURCE);
-      CB.CmdList->ResourceBarrier(1, &Barrier);
-    }
+    CB.flushBarrier(); // workaround
 
-    CB.CmdList->CopyResource(DXDst.Buffer.Get(), DXSrc.Resource.Get());
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Resource.Get(), DXSrc.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_SOURCE));
 
-    {
-      const D3D12_RESOURCE_BARRIER Barrier =
-          CD3DX12_RESOURCE_BARRIER::Transition(
-              DXSrc.Resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-              D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-      CB.CmdList->ResourceBarrier(1, &Barrier);
-    }
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Buffer.Get(), DXDst.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_DEST));
+
+    CB.flushBarrier();
+
+    const uint32_t ElementSize = getFormatSizeInBytes(DXSrc.Desc.Fmt);
+    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+        0,
+        CD3DX12_SUBRESOURCE_FOOTPRINT(
+            getDXGIFormat(DXSrc.Desc.Fmt), DXSrc.Desc.Width, DXSrc.Desc.Height,
+            1, getAlignedTexturePitch(DXSrc.Desc.Width, ElementSize))};
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Buffer.Get(), Footprint);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Resource.Get(), 0);
+    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+          DXSrc.PreferredState));
+
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+          DXDst.PreferredState));
 
     return llvm::Error::success();
   }
@@ -856,6 +940,7 @@ public:
 
 class DXRenderEncoder : public offloadtest::RenderEncoder {
   DXCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
 
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
@@ -880,8 +965,9 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
   }
 
 public:
-  DXRenderEncoder(DXCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::DirectX), CB(CB) {}
+  DXRenderEncoder(DXCommandBuffer &CB,
+                  const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::DirectX), CB(CB), Desc(Desc) {}
   DXRenderEncoder(const DXRenderEncoder &CB) = delete;
   DXRenderEncoder(DXRenderEncoder &&CB) = delete;
   DXRenderEncoder &operator=(DXRenderEncoder &CB) = delete;
@@ -955,7 +1041,25 @@ public:
     return llvm::Error::success();
   }
 
-  void endEncodingImpl() override { popDebugGroup(); }
+  void endEncodingImpl() override {
+    // State transitions
+    for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+      auto &DXTex = llvm::cast<DXTexture>(*Tex);
+      if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+            DXTex.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
+            DXTex.PreferredState));
+    }
+    if (Desc.DepthStencil) {
+      auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
+      if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+        CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+            DXTex.Resource.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE,
+            DXTex.PreferredState));
+    }
+
+    popDebugGroup();
+  }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
@@ -1016,6 +1120,24 @@ DXCommandBuffer::createRenderEncoder(
     DSVHandle = DXDS.DSVHandle;
   }
 
+  // State transitions
+  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+    auto &DXTex = llvm::cast<DXTexture>(*Tex);
+    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
+      this->addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXTex.Resource.Get(), DXTex.PreferredState,
+          D3D12_RESOURCE_STATE_RENDER_TARGET));
+  }
+  if (Desc.DepthStencil) {
+    auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
+    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+      this->addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXTex.Resource.Get(), DXTex.PreferredState,
+          D3D12_RESOURCE_STATE_DEPTH_WRITE));
+  }
+
+  this->flushBarrier();
+
   CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
                               RTVHandles.data(),
                               /*RTsSingleHandleToDescriptorRange=*/false,
@@ -1056,7 +1178,7 @@ DXCommandBuffer::createRenderEncoder(
     }
   }
 
-  auto Enc = std::make_unique<DXRenderEncoder>(*this);
+  auto Enc = std::make_unique<DXRenderEncoder>(*this, Desc);
   Enc->pushDebugGroup("RenderEncoder");
   return Enc;
 }
@@ -1513,6 +1635,7 @@ public:
     const D3D12_RESOURCE_DESC BufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(BufferSizeInBytes, Flags);
 
+    D3D12_RESOURCE_STATES PreferredState = D3D12_RESOURCE_STATE_COMMON;
     ComPtr<ID3D12Resource> BufferObject;
     if (Desc.Backing == MemoryBacking::Sparse) {
       if (auto Err = HR::toError(Device->CreateReservedResource(
@@ -1530,7 +1653,7 @@ public:
         // > D3D12_RESOURCE_STATE_COPY_DEST, and cannot be changed away from
         // this.
         InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
-
+      PreferredState = InitialState;
       if (auto Err = HR::toError(Device->CreateCommittedResource(
                                      &HeapProps, D3D12_HEAP_FLAG_NONE,
                                      &BufferDesc, InitialState, nullptr,
@@ -1565,6 +1688,8 @@ public:
             SizeInBytes / getFormatSizeInBytes(Desc.AccessTypeParams.Fmt));
         break;
       case BufferShaderAccessType::Structured:
+        assert(Desc.AccessTypeParams.StructureStride > 0 &&
+               "Structured buffers must have a Structure Stride.");
         SRVDesc.Format = DXGI_FORMAT_UNKNOWN;
         SRVDesc.Buffer.NumElements = static_cast<uint32_t>(
             SizeInBytes / Desc.AccessTypeParams.StructureStride);
@@ -1597,6 +1722,8 @@ public:
             SizeInBytes / getFormatSizeInBytes(Desc.AccessTypeParams.Fmt));
         break;
       case BufferShaderAccessType::Structured:
+        assert(Desc.AccessTypeParams.StructureStride > 0 &&
+               "Structured buffers must have a Structure Stride.");
         UAVDesc.Format = DXGI_FORMAT_UNKNOWN;
         UAVDesc.Buffer.NumElements = static_cast<uint32_t>(
             SizeInBytes / Desc.AccessTypeParams.StructureStride);
@@ -1630,7 +1757,8 @@ public:
     }
 
     return std::make_unique<DXBuffer>(BufferObject, Name, Desc, SizeInBytes,
-                                      SRVHandle, UAVHandle, CBVHandle);
+                                      PreferredState, SRVHandle, UAVHandle,
+                                      CBVHandle);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -1649,7 +1777,9 @@ public:
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
     TexDesc.Format = getDXGIFormat(Desc.Fmt);
     TexDesc.SampleDesc.Count = 1;
-    TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    TexDesc.Layout = Desc.Location == MemoryLocation::GpuOnly
+                         ? D3D12_TEXTURE_LAYOUT_UNKNOWN
+                         : D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     TexDesc.Flags = getDXResourceFlags(Desc.Usage);
 
     const D3D12_CLEAR_VALUE *ClearValuePtr = nullptr;
@@ -1673,11 +1803,10 @@ public:
       ClearValuePtr = &ClearValue;
     }
 
-    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
-    if ((Desc.Usage & TextureUsage::RenderTarget) != 0)
-      InitialState = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    else if ((Desc.Usage & TextureUsage::DepthStencil) != 0)
-      InitialState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    D3D12_RESOURCE_STATES InitialState =
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    if ((Desc.Usage & TextureUsage::Storage))
+      InitialState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
     ComPtr<ID3D12Resource> TextureObject;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
@@ -1699,7 +1828,7 @@ public:
           D3D12_SRV_DIMENSION_TEXTURE2D; // assume this is correct for now.
       SRVDesc.Shader4ComponentMapping =
           D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-      SRVDesc.Format = getDXGIFormat(Desc.Fmt);
+      SRVDesc.Format = getDXGIFormatSRV(Desc.Fmt);
       SRVDesc.Texture2D.MostDetailedMip = 0;
       SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
       SRVDesc.Texture2D.PlaneSlice = 0;
@@ -1725,8 +1854,8 @@ public:
                                         UAVHandle);
     }
 
-    auto Tex = std::make_unique<DXTexture>(TextureObject, Name, Desc, SRVHandle,
-                                           UAVHandle);
+    auto Tex = std::make_unique<DXTexture>(TextureObject, Name, Desc,
+                                           InitialState, SRVHandle, UAVHandle);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -1862,8 +1991,10 @@ public:
   }
 
   llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
-    if (P.getDescriptorCount() == 0)
+    if (P.getDescriptorCount() == 0) {
+      printf("P.getDescriptorCount() == 0\n");
       return llvm::Error::success();
+    }
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         P.getDescriptorCountWithFlattenedArrays(),
@@ -2541,52 +2672,76 @@ public:
     Enc->endEncoding();
 
     // Bind descriptors in descriptor tables.
-    uint32_t HeapIndex = 0;
-    const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
-        IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
-    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-    for (auto &T : IS.DescTables) {
-      for (auto &R : T.Resources) {
-        for (const auto &Set : R.second) {
-          D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
-          if (Set.Buffer != nullptr) {
-            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buffer.get());
-            switch (getDescriptorKind(R.first->Kind)) {
-            case DescriptorKind::SRV:
-              DescriptorHandle = BufferDX.SRVHandle;
-              break;
-            case DescriptorKind::UAV:
-              DescriptorHandle = BufferDX.UAVHandle;
-              break;
-            case DescriptorKind::CBV:
-              DescriptorHandle = BufferDX.CBVHandle;
-              break;
-            default:
-              llvm_unreachable("Invalid DescriptorKind for a Buffer.");
-              break;
-            }
-          } else if (Set.Texture != nullptr) {
-            const DXTexture &TextureDX =
-                llvm::cast<DXTexture>(*Set.Texture.get());
+    if (IS.DescHeap) {
+      uint32_t HeapIndex = 0;
+      printf("IS.DescHeap: 0x%p\n", IS.DescHeap.Get());
+      const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
+          IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
+      const uint32_t DescHandleIncSize =
+          Device->GetDescriptorHandleIncrementSize(
+              D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      for (auto &T : IS.DescTables) {
+        for (auto &R : T.Resources) {
+          for (const auto &Set : R.second) {
             D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
-            switch (getDescriptorKind(R.first->Kind)) {
-            case DescriptorKind::SRV:
-              DescriptorHandle = TextureDX.SRVHandle;
-              break;
-            case DescriptorKind::UAV:
-              DescriptorHandle = TextureDX.UAVHandle;
-              break;
-            default:
-              llvm_unreachable("Invalid DescriptorKind for a Texture.");
-              break;
+            if (Set.Buffer != nullptr) {
+              const DXBuffer &BufferDX =
+                  llvm::cast<DXBuffer>(*Set.Buffer.get());
+              switch (getDescriptorKind(R.first->Kind)) {
+              case DescriptorKind::SRV:
+                assert(BufferDX.SRVHandle.ptr != 0 &&
+                       "Missing SRV Descriptor. Is BufferUsage correct?");
+                DescriptorHandle = BufferDX.SRVHandle;
+                break;
+              case DescriptorKind::UAV:
+                assert(BufferDX.UAVHandle.ptr != 0 &&
+                       "Missing UAV Descriptor. Is BufferUsage correct?");
+                DescriptorHandle = BufferDX.UAVHandle;
+                break;
+              case DescriptorKind::CBV:
+                assert(BufferDX.CBVHandle.ptr != 0 &&
+                       "Missing CBV Descriptor. Is BufferUsage correct?");
+                DescriptorHandle = BufferDX.CBVHandle;
+                break;
+              default:
+                assert(false && "Invalid DescriptorKind for a Buffer.");
+                llvm_unreachable("Invalid DescriptorKind for a Buffer.");
+                break;
+              }
+            } else if (Set.Texture != nullptr) {
+              const DXTexture &TextureDX =
+                  llvm::cast<DXTexture>(*Set.Texture.get());
+              D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
+              switch (getDescriptorKind(R.first->Kind)) {
+              case DescriptorKind::SRV:
+                assert(TextureDX.SRVHandle.ptr != 0 &&
+                       "Missing SRV Descriptor. Is TextureUsage correct?");
+                DescriptorHandle = TextureDX.SRVHandle;
+                break;
+              case DescriptorKind::UAV:
+                assert(TextureDX.UAVHandle.ptr != 0 &&
+                       "Missing UAV Descriptor. Is TextureUsage correct?");
+                DescriptorHandle = TextureDX.UAVHandle;
+                break;
+              default:
+                assert(false && "Invalid DescriptorKind for a Texture.");
+                llvm_unreachable("Invalid DescriptorKind for a Texture.");
+                break;
+              }
+            } else {
+              assert(false && "Resource was a texture nor buffer. Samplers are "
+                              "unsupported");
+              llvm_unreachable("Resource was a texture nor buffer. Samplers "
+                               "are unsupported");
             }
-          }
 
-          Device->CopyDescriptorsSimple(
-              1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
-              DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-          HeapIndex += 1;
+            assert(DescriptorHandle.ptr != 0 &&
+                   "Somehow got a null descriptor :(");
+            Device->CopyDescriptorsSimple(
+                1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
+                DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            HeapIndex += 1;
+          }
         }
       }
     }
@@ -2906,10 +3061,6 @@ public:
   }
 
   llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    auto &RT = llvm::cast<DXTexture>(*IS.RenderTarget);
-    auto &DS = llvm::cast<DXTexture>(*IS.DepthStencil);
-    auto &RTReadback = llvm::cast<DXBuffer>(*IS.RTReadback);
-
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
     IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
@@ -2922,8 +3073,8 @@ public:
 
     RenderPassBeginDesc BeginDesc = {};
     BeginDesc.Pass = IS.RenderPass.get();
-    BeginDesc.ColorAttachments.push_back(&RT);
-    BeginDesc.DepthStencil = &DS;
+    BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
+    BeginDesc.DepthStencil = IS.DepthStencil.get();
 
     auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
     if (!EncOrErr)
@@ -2961,52 +3112,24 @@ public:
 
     Encoder.endEncoding();
 
-    // Transition the render target to copy source and copy to the readback
-    // buffer.
-    const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-        RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-    IS.CB->CmdList->ResourceBarrier(1, &Barrier);
-
-    const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-            B.OutputProps.Height, 1,
-            getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
-                                               Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
-
-    IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
     auto ReadbackEncoder = std::move(*EncoderOrErr);
 
-    auto CopyBackResource = [&IS, &ReadbackEncoder,
-                             this](ResourcePair &R) -> llvm::Error {
+    if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
+                                                        *IS.RTReadback))
+      return Err;
+
+    auto CopyBackResource = [&ReadbackEncoder](ResourcePair &R) -> llvm::Error {
       if (R.first->isTexture()) {
-        const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
-        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-            0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                   B.OutputProps.Height, 1,
-                   B.OutputProps.Width * B.getElementSize())};
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
-          const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
-          const DXTexture &TextureDX = llvm::cast<DXTexture>(*RS.Texture);
-          addReadbackBeginBarrier(IS, TextureDX.Resource);
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
-                                                     Footprint);
-          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(TextureDX.Resource.Get(),
-                                                     0);
-          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-          addReadbackEndBarrier(IS, TextureDX.Resource);
+
+          if (auto Err = ReadbackEncoder->copyTextureToBuffer(*RS.Texture,
+                                                              *RS.Readback))
+            return Err;
         }
       } else {
         for (const ResourceSet &RS : R.second) {
