@@ -2711,7 +2711,6 @@ public:
             } else if (Set.Texture != nullptr) {
               const DXTexture &TextureDX =
                   llvm::cast<DXTexture>(*Set.Texture.get());
-              D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
               switch (getDescriptorKind(R.first->Kind)) {
               case DescriptorKind::SRV:
                 assert(TextureDX.SRVHandle.ptr != 0 &&
