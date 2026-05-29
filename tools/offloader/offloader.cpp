@@ -96,7 +96,7 @@ static bool matchesRegexIgnoreCase(StringRef GPUDescription,
   return R.isValid() && R.match(GPUDescription);
 }
 
-int run() {
+static int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   const DeviceConfig Config = {Debug, Validation};
   auto DevicesOrErr = initializeDevices(Config);

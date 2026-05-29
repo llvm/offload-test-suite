@@ -95,6 +95,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_SAMPLER;
   case ResourceKind::SampledTexture2D:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  case ResourceKind::AccelerationStructure:
+    return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   }
   llvm_unreachable("All cases handled");
 }
@@ -164,7 +166,9 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
-    llvm_unreachable("Textures and samplers don't have buffer usage bits!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable(
+        "Textures, samplers, and AS don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -183,6 +187,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
+  case ResourceKind::AccelerationStructure:
     llvm_unreachable("Not an image view!");
   }
   llvm_unreachable("All cases handled");
@@ -1315,21 +1320,18 @@ public:
       Features.pNext = &MeshFeatures;
     }
 
-    DeviceInfo.enabledExtensionCount =
-        static_cast<uint32_t>(EnabledDeviceExtensions.size());
-    DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
-    DeviceInfo.pEnabledFeatures = &Features.features;
-    DeviceInfo.pNext = Features.pNext;
-
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
     if (HasShaderImageAtomicInt64Ext &&
         FeaturesImageAtomicInt64.shaderImageInt64Atomics)
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+#endif
+
     DeviceInfo.enabledExtensionCount =
         static_cast<uint32_t>(EnabledDeviceExtensions.size());
     DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
-#endif
+    DeviceInfo.pEnabledFeatures = &Features.features;
+    DeviceInfo.pNext = Features.pNext;
 
     VkDevice Device = VK_NULL_HANDLE;
     if (auto Err = VK::toError(

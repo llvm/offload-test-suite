@@ -64,6 +64,7 @@ using ID3D12GraphicsCommandListX = ID3D12GraphicsCommandList6;
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
+template <> char CapabilityValueEnum<directx::RaytracingTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
@@ -222,6 +223,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::AccelerationStructure:
     return D3D12_RESOURCE_DIMENSION_BUFFER;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
@@ -303,6 +305,8 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
     llvm_unreachable("Not an SRV type!");
   case ResourceKind::SampledTexture2D:
     llvm_unreachable("Sampled textures aren't supported in DirectX!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable("Acceleration structures use a separate descriptor path!");
   }
   return Desc;
 }
@@ -342,6 +346,8 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
     llvm_unreachable("Not a UAV type!");
   case ResourceKind::SampledTexture2D:
     llvm_unreachable("Sampled textures aren't supported in DirectX!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable("Acceleration structures use a separate descriptor path!");
   }
   return Desc;
 }
