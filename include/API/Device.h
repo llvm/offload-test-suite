@@ -87,8 +87,15 @@ struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
   PrimitiveTopology Topology;
+  // Set if Topology == PatchList. Validated in
+  // Pipeline.cpp::validatePipelineKind.
+  std::optional<uint32_t> PatchControlPoints;
+
   ShaderContainer VS;
-  // TODO: Optional Hull & Domain Shaders
+  // Hull and Domain are independent optionals here; Pipeline.cpp enforces that
+  // they must be set as a pair (and only with PatchList topology).
+  std::optional<ShaderContainer> HS;
+  std::optional<ShaderContainer> DS;
   std::optional<ShaderContainer> GS;
   ShaderContainer PS;
   // View-instancing fan-out (1 == no view instancing). When > 1, backends
@@ -100,6 +107,12 @@ struct TraditionalRasterPipelineCreateDesc {
     switch (Stage) {
     case Stages::Vertex:
       VS = std::move(SC);
+      break;
+    case Stages::Hull:
+      HS = std::move(SC);
+      break;
+    case Stages::Domain:
+      DS = std::move(SC);
       break;
     case Stages::Geometry:
       GS = std::move(SC);

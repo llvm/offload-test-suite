@@ -55,8 +55,6 @@ namespace yaml {
 void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                                                    offloadtest::Pipeline &P) {
   I.mapRequired("Shaders", P.Shaders);
-  if (auto Err = P.validatePipelineKind())
-    I.setError(llvm::toString(std::move(Err)));
 
   // Runtime-specific settings.
   I.mapOptional("RuntimeSettings", P.Settings);
@@ -67,6 +65,13 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapRequired("DescriptorSets", P.Sets);
   I.mapOptional("Bindings", P.Bindings);
   I.mapOptional("PushConstants", P.PushConstants);
+  I.mapOptional("AccelerationStructures", P.AccelStructs);
+
+  // Runs here (not right after Shaders) because the tessellation topology
+  // check reads Bindings.Topology and Bindings.PatchControlPoints. Must
+  // still run before validateDispatchParameters, which reads P.Kind.
+  if (auto Err = P.validatePipelineKind())
+    I.setError(llvm::toString(std::move(Err)));
 
   I.mapOptional("DispatchParameters", P.DispatchParameters);
   if (auto Err = P.validateDispatchParameters())
@@ -77,7 +82,11 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (R.isSampledTexture()) {
+        if (R.isAccelerationStructure()) {
+          R.TLASPtr = P.getTLAS(R.Name);
+          if (!R.TLASPtr)
+            I.setError(Twine("Referenced TLAS ") + R.Name + " not found!");
+        } else if (R.isSampledTexture()) {
           R.SamplerPtr = P.getSampler(R.Name);
           if (!R.SamplerPtr)
             I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
@@ -156,6 +165,45 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       if (!P.Bindings.RTargetBufferPtr)
         I.setError(Twine("Referenced render target buffer ") +
                    P.Bindings.RenderTarget + " not found!");
+    }
+
+    // Resolve buffer name references in acceleration structure descriptions.
+    for (auto &B : P.AccelStructs.BLAS) {
+      for (auto &T : B.Triangles) {
+        T.VertexBufferPtr = P.getBuffer(T.VertexBuffer);
+        if (!T.VertexBufferPtr)
+          I.setError(Twine("BLAS '") + B.Name +
+                     "': referenced vertex buffer '" + T.VertexBuffer +
+                     "' not found!");
+        if (!T.IndexBuffer.empty()) {
+          T.IndexBufferPtr = P.getBuffer(T.IndexBuffer);
+          if (!T.IndexBufferPtr)
+            I.setError(Twine("BLAS '") + B.Name +
+                       "': referenced index buffer '" + T.IndexBuffer +
+                       "' not found!");
+        }
+      }
+      for (auto &A : B.AABBs) {
+        A.AABBBufferPtr = P.getBuffer(A.AABBBuffer);
+        if (!A.AABBBufferPtr)
+          I.setError(Twine("BLAS '") + B.Name + "': referenced AABB buffer '" +
+                     A.AABBBuffer + "' not found!");
+      }
+    }
+
+    // Resolve BLAS name references in TLAS instance descriptions.
+    for (auto &T : P.AccelStructs.TLAS) {
+      for (auto &Inst : T.Instances) {
+        for (int Idx = 0, E = P.AccelStructs.BLAS.size(); Idx < E; ++Idx) {
+          if (P.AccelStructs.BLAS[Idx].Name == Inst.BLAS) {
+            Inst.BLASIdx = Idx;
+            break;
+          }
+        }
+        if (Inst.BLASIdx < 0)
+          I.setError(Twine("TLAS '") + T.Name + "': referenced BLAS '" +
+                     Inst.BLAS + "' not found!");
+      }
     }
   }
 }
@@ -430,6 +478,7 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("RenderTarget", B.RenderTarget);
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
+  I.mapOptional("PatchControlPoints", B.PatchControlPoints);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -579,6 +628,64 @@ void MappingTraits<offloadtest::SpecializationConstant>::mapping(
   I.mapRequired("Value", C.Value);
 }
 
+void MappingTraits<offloadtest::TriangleGeometry>::mapping(
+    IO &I, offloadtest::TriangleGeometry &G) {
+  I.mapRequired("VertexBuffer", G.VertexBuffer);
+  I.mapOptional("VertexFormat", G.VertexFormat, Format::RGB32Float);
+  I.mapOptional("VertexStride", G.VertexStride, 12u);
+  I.mapRequired("VertexCount", G.VertexCount);
+  I.mapOptional("IndexBuffer", G.IndexBuffer, std::string());
+  I.mapOptional("IndexFormat", G.IdxFormat, IndexFormat::Uint32);
+  I.mapOptional("IndexCount", G.IndexCount, 0u);
+  I.mapOptional("Opaque", G.Opaque, true);
+}
+
+void MappingTraits<offloadtest::AABBGeometry>::mapping(
+    IO &I, offloadtest::AABBGeometry &G) {
+  I.mapRequired("AABBBuffer", G.AABBBuffer);
+  I.mapRequired("AABBCount", G.AABBCount);
+  I.mapOptional("AABBStride", G.AABBStride, 24u);
+  I.mapOptional("Opaque", G.Opaque, true);
+}
+
+void MappingTraits<offloadtest::BLASDesc>::mapping(IO &I,
+                                                   offloadtest::BLASDesc &D) {
+  I.mapRequired("Name", D.Name);
+  I.mapOptional("Triangles", D.Triangles);
+  I.mapOptional("AABBs", D.AABBs);
+}
+
+void MappingTraits<offloadtest::InstanceDesc>::mapping(
+    IO &I, offloadtest::InstanceDesc &D) {
+  I.mapRequired("BLAS", D.BLAS);
+  llvm::SmallVector<float> Transform(std::begin(D.Transform),
+                                     std::end(D.Transform));
+  I.mapOptional("Transform", Transform);
+  if (Transform.size() != std::size(D.Transform)) {
+    I.setError(llvm::Twine("InstanceDesc.Transform must have exactly ") +
+               llvm::Twine(std::size(D.Transform)) +
+               " floats (3x4 row-major), got " + llvm::Twine(Transform.size()));
+    return;
+  }
+  std::copy(Transform.begin(), Transform.end(), std::begin(D.Transform));
+  I.mapOptional("InstanceID", D.InstanceID, 0u);
+  uint32_t Mask = D.InstanceMask;
+  I.mapOptional("InstanceMask", Mask, 255u);
+  D.InstanceMask = static_cast<uint8_t>(Mask);
+}
+
+void MappingTraits<offloadtest::TLASDesc>::mapping(IO &I,
+                                                   offloadtest::TLASDesc &D) {
+  I.mapRequired("Name", D.Name);
+  I.mapRequired("Instances", D.Instances);
+}
+
+void MappingTraits<offloadtest::AccelerationStructureDescs>::mapping(
+    IO &I, offloadtest::AccelerationStructureDescs &D) {
+  I.mapOptional("BLAS", D.BLAS);
+  I.mapOptional("TLAS", D.TLAS);
+}
+
 } // namespace yaml
 } // namespace llvm
 
@@ -608,6 +715,26 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
         HasShaderType[llvm::to_underlying(Stages::Mesh)])
       return llvm::createStringError("Vertex and Mesh/Amplification Shaders "
                                      "cannot be used in the same pipeline.");
+
+    const bool HasHS = HasShaderType[llvm::to_underlying(Stages::Hull)];
+    const bool HasDS = HasShaderType[llvm::to_underlying(Stages::Domain)];
+    if (HasHS != HasDS)
+      return llvm::createStringError(
+          "Hull and Domain shaders must be used together");
+
+    const bool IsTessellated = HasHS && HasDS;
+    const bool IsPatchList = Bindings.Topology == PrimitiveTopology::PatchList;
+    if (IsTessellated != IsPatchList)
+      return llvm::createStringError(
+          "Tessellation pipelines must use PatchList topology");
+    if (IsPatchList &&
+        (!Bindings.PatchControlPoints || *Bindings.PatchControlPoints < 1 ||
+         *Bindings.PatchControlPoints > 32))
+      return llvm::createStringError(
+          "PatchList topology requires PatchControlPoints in the range 1..32.");
+    if (!IsPatchList && Bindings.PatchControlPoints)
+      return llvm::createStringError(
+          "PatchControlPoints is only valid with PatchList topology.");
 
     Kind = ShaderPipelineKind::TraditionalRaster;
     return llvm::Error::success();
