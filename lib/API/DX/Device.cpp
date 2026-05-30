@@ -274,9 +274,7 @@ static D3D12_COMPARISON_FUNC getDXComparisonFunc(CompareFunction Func) {
   llvm_unreachable("All CompareFunction cases handled");
 }
 
-// Compose a D3D12_FILTER from the sampler kind and the requested min/mag
-// filter modes. Mip filtering is hardcoded to Nearest (matches VK backend) and
-// anisotropic filtering is not currently exposed in the YAML schema.
+// Compose a D3D12_FILTER from kind + min/mag (mip is Nearest to match VK).
 static D3D12_FILTER getDXFilter(SamplerKind Kind, FilterMode MinFilter,
                                 FilterMode MagFilter) {
   const bool IsComparison = (Kind == SamplerKind::SamplerComparison);
@@ -292,7 +290,6 @@ static D3D12_FILTER getDXFilter(SamplerKind Kind, FilterMode MinFilter,
   else
     F = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
   if (IsComparison) {
-    // Set the comparison reduction bit (high bit of the D3D12_FILTER encoding).
     F = static_cast<D3D12_FILTER>(static_cast<unsigned>(F) |
                                   D3D12_FILTER_REDUCTION_TYPE_COMPARISON
                                       << D3D12_FILTER_REDUCTION_TYPE_SHIFT);
@@ -311,7 +308,6 @@ static D3D12_SAMPLER_DESC getDXSamplerDesc(const Sampler &S) {
   Desc.ComparisonFunc = (S.Kind == SamplerKind::SamplerComparison)
                             ? getDXComparisonFunc(S.ComparisonOp)
                             : D3D12_COMPARISON_FUNC_NEVER;
-  // Transparent black to match VK backend.
   Desc.BorderColor[0] = 0.0f;
   Desc.BorderColor[1] = 0.0f;
   Desc.BorderColor[2] = 0.0f;
@@ -1136,10 +1132,9 @@ public:
         new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
     uint32_t RangeIdx = 0;
     for (const auto &Set : BndDesc.DescriptorSetDescs) {
-      // D3D12 requires SAMPLER ranges in their own descriptor table because
-      // samplers live in a different descriptor heap type from CBV/SRV/UAV.
-      // Walk the bindings twice so the resulting Ranges array is contiguous
-      // per root parameter (CBV/SRV/UAV first, then SAMPLER).
+      // Split CBV/SRV/UAV and SAMPLER into separate D3D12 descriptor tables
+      // (different heap types). Walk twice so Ranges stays contiguous per
+      // root parameter.
       uint32_t ResourceCount = 0;
       uint32_t SamplerCount = 0;
       const uint32_t ResourceStart = RangeIdx;
@@ -2114,9 +2109,8 @@ public:
         break;
       }
       case DescriptorKind::SAMPLER:
-        // Samplers don't have a backing GPU resource; the descriptor is
-        // written directly into the sampler heap during binding. Push an empty
-        // bundle so DescTables stays parallel with P.Sets[i].Resources.
+        // Samplers have no backing GPU buffer; placeholder bundle keeps
+        // DescTables aligned with P.Sets[i].Resources.
         Resources.push_back(std::make_pair(&R, ResourceBundle{}));
         break;
       }
@@ -2131,9 +2125,7 @@ public:
           return Err;
     }
 
-    // Bind descriptors in descriptor tables. CBV/SRV/UAV descriptors go into
-    // IS.DescHeap, samplers into IS.SamplerHeap; each heap tracks its own
-    // sequential index.
+    // CBV/SRV/UAV descriptors live in IS.DescHeap; samplers in IS.SamplerHeap.
     uint32_t HeapIndex = 0;
     uint32_t SamplerHeapIndex = 0;
     const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
@@ -2151,10 +2143,8 @@ public:
           HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
           break;
         case DescriptorKind::SAMPLER: {
-          assert(IS.SamplerHeap && "Sampler heap must exist when binding a "
-                                   "sampler descriptor.");
-          assert(R.first->SamplerPtr && "Sampler resource is missing its "
-                                        "schema-side Sampler description.");
+          assert(IS.SamplerHeap && "missing sampler heap");
+          assert(R.first->SamplerPtr && "missing Sampler description");
           D3D12_CPU_DESCRIPTOR_HANDLE Handle =
               IS.SamplerHeap->GetCPUDescriptorHandleForHeapStart();
           Handle.ptr += SamplerHeapIndex * SamplerInc;
@@ -2276,10 +2266,8 @@ public:
         case dx::RootParamKind::DescriptorTable: {
           IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
                                                         Handle);
-          // Samplers live in a separate heap (SamplerHandle) and must not
-          // count toward the CBV/SRV/UAV handle offset. Explicit RootParams
-          // does not yet support binding sampler tables — see the
-          // llvm_unreachable in the SAMPLER case below.
+          // Samplers live in a separate heap and don't contribute to the
+          // CBV/SRV/UAV handle offset.
           uint32_t ResourceCount = 0;
           for (const auto &R : P.Sets[DescriptorTableIndex++].Resources)
             if (getDescriptorKind(R.Kind) != DescriptorKind::SAMPLER)
@@ -2310,7 +2298,7 @@ public:
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case DescriptorKind::SAMPLER:
-            llvm_unreachable("Not implemented yet.");
+            llvm_unreachable("Samplers cannot be bound as root descriptors.");
           }
           ++RootDescIt;
           break;
