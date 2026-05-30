@@ -23,6 +23,7 @@ enum class ResourceKind {
   ConstantBuffer,
   Sampler,
   SampledTexture2D,
+  AccelerationStructure,
 };
 
 enum ShaderContainerType {
@@ -44,7 +45,7 @@ enum class StoreAction {
   DontCare, ///< Contents may be discarded after the pass.
 };
 
-enum class PrimitiveTopology { TriangleList, PointList };
+enum class PrimitiveTopology { TriangleList, PointList, PatchList };
 
 /// Per-draw rasterizer shading rate (D3D12 VRS Tier 1). Tier 1 hardware
 /// supports the four base rates (1x1, 1x2, 2x1, 2x2); the additional rates

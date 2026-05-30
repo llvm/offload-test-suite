@@ -136,6 +136,27 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("AVX512")
 
     HighestShaderModel = getHighestShaderModel(device["Features"])
+    sm_major, sm_minor = HighestShaderModel
+
+    # Highest SM 6.x version DXC recognizes; used as the upper bound for
+    # back-ends that don't report a D3D HighestShaderModel cap.
+    HIGHEST_KNOWN_SM6_MINOR = 9
+
+    # Expose SM_6_X features so tests can gate on a minimum SM
+    # (e.g. `# REQUIRES: SM_6_6`).
+    if device["API"] == "DirectX":
+        # D3D12's HighestShaderModel cap is the top of a contiguous range
+        # starting at SM 6.0 for any DXIL-capable device.
+        if sm_major == 6:
+            for minor in range(sm_minor + 1):
+                config.available_features.add(f"SM_6_{minor}")
+    else:
+        # Vulkan/Metal device caps don't expose a D3D shader model; tests
+        # that hit unimplemented intrinsics on those back-ends should XFAIL
+        # the specific configuration.
+        for minor in range(HIGHEST_KNOWN_SM6_MINOR + 1):
+            config.available_features.add(f"SM_6_{minor}")
+
     if (6, 6) <= HighestShaderModel:
         # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
         config.available_features.add("DerivativesInCompute")
@@ -150,16 +171,24 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64")
         if device["Features"].get("AtomicInt64OnGroupSharedSupported", False):
             config.available_features.add("Int64GroupSharedAtomics")
+        if device["Features"].get("AtomicInt64OnTypedResourceSupported", False):
+            config.available_features.add("Int64TypedResourceAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
         if device["Features"].get("VariableShadingRateTier2", False):
             config.available_features.add("VariableShadingRateTier2")
         setWaveSizeFeaturesDirectX(config, device)
+        if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
+            config.available_features.add("acceleration-structure")
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
+        if device["Features"].get("MeshShader", False):
+            config.available_features.add("MeshShader")
+        if device["Features"].get("supportsRaytracing", False):
+            config.available_features.add("acceleration-structure")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
@@ -172,10 +201,19 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64")
         if device["Features"].get("shaderSharedInt64Atomics", False):
             config.available_features.add("Int64GroupSharedAtomics")
+        if device["Features"].get("shaderBufferInt64Atomics", False):
+            config.available_features.add("VulkanInt64BufferAtomics")
+        if device["Features"].get("shaderImageInt64Atomics", False):
+            config.available_features.add("Int64TypedResourceAtomics")
 
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
+            if Extension["ExtensionName"] == "VK_EXT_mesh_shader":
+                config.available_features.add("MeshShader")
+
+        if "VK_KHR_acceleration_structure" in config.available_features:
+            config.available_features.add("acceleration-structure")
 
 
 offloader_args = []
