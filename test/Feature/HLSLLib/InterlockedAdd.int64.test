@@ -152,7 +152,7 @@ DescriptorSets:
 ...
 #--- end
 
-# REQUIRES: Int64 && Int64GroupSharedAtomics
+# REQUIRES: Int64 && Int64GroupSharedAtomics && SM_6_6
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99122
 # XFAIL: Clang

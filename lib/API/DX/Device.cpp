@@ -64,6 +64,7 @@ using ID3D12GraphicsCommandListX = ID3D12GraphicsCommandList6;
 template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
+template <> char CapabilityValueEnum<directx::RaytracingTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
@@ -107,6 +108,8 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   switch (Format) {
   case DataFormat::Int32:
     DXFormats(SINT) break;
+  case DataFormat::UInt32:
+    DXFormats(UINT) break;
   case DataFormat::Float32:
     DXFormats(FLOAT) break;
   case DataFormat::UInt64:
@@ -165,17 +168,27 @@ getDXPrimitiveTopologyType(PrimitiveTopology Topology) {
     return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
   case PrimitiveTopology::PointList:
     return D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
+  case PrimitiveTopology::PatchList:
+    return D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
 static D3D_PRIMITIVE_TOPOLOGY
-getDXPrimitiveTopology(PrimitiveTopology Topology) {
+getDXPrimitiveTopology(PrimitiveTopology Topology,
+                       std::optional<uint32_t> PatchControlPoints) {
   switch (Topology) {
   case PrimitiveTopology::TriangleList:
     return D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
   case PrimitiveTopology::PointList:
     return D3D_PRIMITIVE_TOPOLOGY_POINTLIST;
+  case PrimitiveTopology::PatchList:
+    // _N_CONTROL_POINT_PATCHLIST enums are contiguous from 1..32.
+    assert(PatchControlPoints && *PatchControlPoints >= 1 &&
+           *PatchControlPoints <= 32);
+    return static_cast<D3D_PRIMITIVE_TOPOLOGY>(
+        D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST +
+        (*PatchControlPoints - 1));
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
@@ -210,6 +223,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::ConstantBuffer:
+  case ResourceKind::AccelerationStructure:
     return D3D12_RESOURCE_DIMENSION_BUFFER;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
@@ -291,6 +305,8 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
     llvm_unreachable("Not an SRV type!");
   case ResourceKind::SampledTexture2D:
     llvm_unreachable("Sampled textures aren't supported in DirectX!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable("Acceleration structures use a separate descriptor path!");
   }
   return Desc;
 }
@@ -330,6 +346,8 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
     llvm_unreachable("Not a UAV type!");
   case ResourceKind::SampledTexture2D:
     llvm_unreachable("Sampled textures aren't supported in DirectX!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable("Acceleration structures use a separate descriptor path!");
   }
   return Desc;
 }
@@ -1181,6 +1199,12 @@ public:
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Graphics pipeline requires both a vertex "
                                      "shader and a pixel shader.");
+    if (Desc.HS)
+      PSODesc.HS = {Desc.HS->Shader->getBuffer().data(),
+                    Desc.HS->Shader->getBuffer().size()};
+    if (Desc.DS)
+      PSODesc.DS = {Desc.DS->Shader->getBuffer().data(),
+                    Desc.DS->Shader->getBuffer().size()};
     if (Desc.GS)
       PSODesc.GS = {Desc.GS->Shader->getBuffer().data(),
                     Desc.GS->Shader->getBuffer().size()};
@@ -1210,7 +1234,8 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(
-        Name, RootSig, PSO, getDXPrimitiveTopology(Desc.Topology));
+        Name, RootSig, PSO,
+        getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints));
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -2579,6 +2604,7 @@ public:
 
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
