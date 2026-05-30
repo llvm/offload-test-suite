@@ -66,9 +66,6 @@ DescriptorSets:
 # waiting on https://github.com/llvm/llvm-project/pull/187440 to be merged, so I can open a PR for it
 # XFAIL: Clang
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/986
-# XFAIL: Intel && Vulkan && DXC
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
