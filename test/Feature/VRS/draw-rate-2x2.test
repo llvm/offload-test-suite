@@ -63,6 +63,7 @@ ShadingRate: 2x2
 # Variable Rate Shading Tier 1 (per-draw RSSetShadingRate) is DirectX-only
 # today. WARP supports the API on Windows 10 1903+.
 # UNSUPPORTED: Vulkan || Metal
+# REQUIRES: VariableShadingRateTier1
 # XFAIL: Clang
 
 # RUN: split-file %s %t
