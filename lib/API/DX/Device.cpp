@@ -1996,26 +1996,13 @@ public:
     return nullptr;
   }
 
-  // Create a SamplerFeedback Texture2D resource plus a paired typed staging
-  // texture and a readback buffer.
-  //
+  // Create a SamplerFeedback Texture2D plus staging + readback.
   // Layout:
   //   * Buffer  : opaque feedback resource (DXGI_FORMAT_SAMPLER_FEEDBACK_*).
-  //     Created via ID3D12Device8::CreateCommittedResource2 because the
-  //     opaque formats require D3D12_RESOURCE_DESC1 (specifically the
-  //     MipRegion field — without it the feedback resource collapses to a
-  //     single texel).
-  //   * Staging : typed Texture2D (R8_UINT) sized to the feedback texel
-  //     dimensions. Receives decoded values from ResolveSubresourceRegion
-  //     with D3D12_RESOLVE_MODE_DECODE_SAMPLER_FEEDBACK.
-  //   * Readback: row-major readback buffer the staging texture is then
-  //     CopyTextureRegion'd into, so CPU readback uses the same loop as
-  //     normal textures.
-  //
-  // No upload buffer is needed: SamplerFeedback resources are GPU-written
-  // only and start in the all-unmapped state when first cleared by the
-  // shader (the runtime initialises them to 0xFF "never sampled" once any
-  // CreateSamplerFeedbackUnorderedAccessView lands).
+  //               Requires ID3D12Device8::CreateCommittedResource2 for MipRegion.
+  //   * Staging : R8_UINT texture for ResolveSubresourceRegion(DECODE_SAMPLER_FEEDBACK).
+  //   * Readback: row-major buffer for CPU access.
+  // No Upload buffer (feedback is GPU-write-only; runtime initialises to 0xFF).
   llvm::Expected<ResourceBundle> createFeedbackUAV(Resource &R,
                                                    InvocationState & /*IS*/) {
     ResourceBundle Bundle;
@@ -2042,13 +2029,8 @@ public:
             "ID3D12Device8 (SamplerFeedback) not available on this device."))
       return Err;
 
-    // Feedback texel dimensions come from the YAML OutputProps. The opaque
-    // feedback resource itself is sized to the *paired* texture's dimensions
-    // (FeedbackWidth * MipRegionWidth, FeedbackHeight * MipRegionHeight);
-    // the MipRegion controls how many paired-texture pixels collapse into
-    // one feedback texel. MipRegion is configurable via OutputProperties
-    // and defaults to 4x4 (the smallest region all SamplerFeedback hardware
-    // supports).
+    // Feedback resource dimensions = feedback texels × MipRegion.
+    // MipRegion defaults to 4×4 (minimum for SamplerFeedback Tier 0.9+).
     const UINT MipRegionW = static_cast<UINT>(B.OutputProps.MipRegionWidth);
     const UINT MipRegionH = static_cast<UINT>(B.OutputProps.MipRegionHeight);
     const UINT FeedbackTexelsW = static_cast<UINT>(B.OutputProps.Width);

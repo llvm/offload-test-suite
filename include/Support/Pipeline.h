@@ -151,10 +151,8 @@ struct OutputProperties {
   int Width;
   int Depth;
   int MipLevels = 1;
-  // SamplerFeedback only: each feedback texel covers
-  // MipRegionWidth x MipRegionHeight pixels of the paired Texture2D. Both
-  // must be powers of two per D3D12 spec. Defaults match the smallest
-  // 4x4 region that all SamplerFeedback Tier 0.9+ hardware supports.
+  // SamplerFeedback: feedback texel size in paired-texture pixels.
+  // Must be powers of two. Defaults to 4×4 (minimum for Tier 0.9+).
   int MipRegionWidth = 4;
   int MipRegionHeight = 4;
 };
