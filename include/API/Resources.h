@@ -25,6 +25,8 @@ enum class MemoryLocation {
   GpuToCpu,
 };
 
+enum class IndexFormat { Uint16, Uint32 };
+
 // TODO: Add Unorm types (e.g. R8Unorm, RGBA8Unorm) which can be sampled as
 // floats.
 // TODO: Add SRGB types (e.g. RGBA8Srgb) once needed.
