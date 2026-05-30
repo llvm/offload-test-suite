@@ -184,9 +184,8 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
   case ResourceKind::Texture2DArray:
-    return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   case ResourceKind::RWTexture2DArray:
-    llvm_unreachable("RWTexture2DArray is not yet supported in Vulkan.");
+    return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
