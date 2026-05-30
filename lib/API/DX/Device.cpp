@@ -122,11 +122,6 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
   case DataFormat::Depth32:
     if (Channels != 1)
       llvm_unreachable("Depth32 format only supports a single channel.");
-    // For user-bound resources (SRV/UAV), expose the depth-compatible
-    // typeless component as R32_FLOAT so shaders can Load()/Sample() the
-    // depth values directly. Depth-stencil view paths use getDXGIFormat()
-    // (see lib/API/DX/Device.cpp createTexture()) which uses the DSV-format
-    // mapping (D32_FLOAT) instead.
     return DXGI_FORMAT_R32_FLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
@@ -987,9 +982,7 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
-    // Set only when the pipeline has a Bindings.DepthBuffer; the depth target
-    // contents are copied here after the draw so the test can verify
-    // SV_Depth* writes.
+    // Populated when Bindings.DepthBuffer is set, for SV_Depth verification.
     std::unique_ptr<offloadtest::Buffer> DSReadback;
     std::unique_ptr<offloadtest::Buffer> VB;
 
@@ -2452,9 +2445,8 @@ public:
       IS.CB->CmdList->ResourceBarrier(1, &DSBarrier);
 
       const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
-      // CopyTextureRegion requires the placed-footprint format to match the
-      // source resource format (D32_FLOAT for a depth target), not the
-      // shader-visible (R32_FLOAT) cast used for SRV reads.
+      // CopyTextureRegion footprint format must match the source resource
+      // (D32_FLOAT), not the shader-visible R32_FLOAT SRV cast.
       const DXGI_FORMAT DSResFormat = DS.Resource->GetDesc().Format;
       const D3D12_PLACED_SUBRESOURCE_FOOTPRINT DSFootprint{
           0,
