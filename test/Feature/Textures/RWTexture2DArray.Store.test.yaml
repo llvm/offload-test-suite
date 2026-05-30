@@ -88,6 +88,9 @@ Results:
 # RWTexture2DArray support is currently DirectX-only.
 # UNSUPPORTED: Vulkan || Metal
 
+# Clang HLSL has no RWTexture2DArray template yet.
+# XFAIL: Clang
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
