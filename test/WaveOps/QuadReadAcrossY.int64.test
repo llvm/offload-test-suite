@@ -232,9 +232,6 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/986
-# XFAIL: Intel && Vulkan && DXC
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/989
 # XFAIL: Metal
 

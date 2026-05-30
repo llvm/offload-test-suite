@@ -97,6 +97,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_SAMPLER;
   case ResourceKind::SampledTexture2D:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  case ResourceKind::AccelerationStructure:
+    return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   }
   llvm_unreachable("All cases handled");
 }
@@ -168,7 +170,9 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2DArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
-    llvm_unreachable("Textures and samplers don't have buffer usage bits!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable(
+        "Textures, samplers, and AS don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -191,6 +195,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
+  case ResourceKind::AccelerationStructure:
     llvm_unreachable("Not an image view!");
   }
   llvm_unreachable("All cases handled");
@@ -216,6 +221,10 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_COMPUTE_BIT;
   case Stages::Vertex:
     return VK_SHADER_STAGE_VERTEX_BIT;
+  case Stages::Hull:
+    return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+  case Stages::Domain:
+    return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
   case Stages::Geometry:
     return VK_SHADER_STAGE_GEOMETRY_BIT;
   case Stages::Pixel:
@@ -234,6 +243,8 @@ static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
     return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
   case PrimitiveTopology::PointList:
     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+  case PrimitiveTopology::PatchList:
+    return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
@@ -410,6 +421,18 @@ struct VulkanInstance {
 
 namespace {
 
+struct MeshShaderFunctions {
+  PFN_vkCmdDrawMeshTasksEXT VkCmdDrawMeshTasksEXT = nullptr;
+
+  static MeshShaderFunctions create(VkDevice Device) {
+    MeshShaderFunctions Result;
+    Result.VkCmdDrawMeshTasksEXT =
+        (PFN_vkCmdDrawMeshTasksEXT)vkGetDeviceProcAddr(Device,
+                                                       "vkCmdDrawMeshTasksEXT");
+    return Result;
+  }
+};
+
 class VulkanBuffer : public offloadtest::Buffer {
 public:
   VkDevice Dev; // Needed for clean-up
@@ -579,6 +602,7 @@ public:
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
 public:
   VkDevice Device = VK_NULL_HANDLE;
+  MeshShaderFunctions MeshShaderFns;
   // Owned per command buffer so that recording, submission, and lifetime
   // management of each command buffer are independently safe without external
   // synchronization.
@@ -596,7 +620,8 @@ public:
   create(VkDevice Device, uint32_t QueueFamilyIdx,
          PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
          PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel,
-         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel) {
+         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel,
+         MeshShaderFunctions MeshShaderFns) {
     auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
     CB->Device = Device;
 
@@ -628,6 +653,7 @@ public:
     CB->CmdBeginDebugUtilsLabel = CmdBeginDebugUtilsLabel;
     CB->CmdEndDebugUtilsLabel = CmdEndDebugUtilsLabel;
     CB->CmdInsertDebugUtilsLabel = CmdInsertDebugUtilsLabel;
+    CB->MeshShaderFns = MeshShaderFns;
 
     return CB;
   }
@@ -941,13 +967,19 @@ public:
   llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
                            uint32_t GroupCountX, uint32_t GroupCountY,
                            uint32_t GroupCountZ) override {
-    (void)PSO;
-    (void)GroupCountX;
-    (void)GroupCountY;
-    (void)GroupCountZ;
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
 
-    return llvm::createStringError(
-        "dispatchMesh is unimplemented in the Vulkan backend.");
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VKPSO.Pipeline);
+    CB.MeshShaderFns.VkCmdDrawMeshTasksEXT(CB.CmdBuffer, GroupCountX,
+                                           GroupCountY, GroupCountZ);
+    return llvm::Error::success();
   }
 
   void endEncodingImpl() override {
@@ -1092,6 +1124,7 @@ private:
   PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
   PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
   PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+  MeshShaderFunctions MeshShaderFns;
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -1234,6 +1267,19 @@ public:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Opt-in extension features: query and enable
+    // VK_EXT_shader_image_atomic_int64 when the device advertises it so that
+    // tests using 64-bit atomics on RWBuffer / RWTexture (SPIR-V image storage
+    // class) can run.
+    const auto AvailableExts = queryDeviceExtensions(PhysicalDevice);
+    const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
+        AvailableExts, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    FeaturesImageAtomicInt64.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+#endif
 
     Features.pNext = &Features11;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
@@ -1244,8 +1290,56 @@ public:
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
       Features13.pNext = &Features14;
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Attach the extension features struct to the tail of the version-gated
+    // chain so vkGetPhysicalDeviceFeatures2 populates it and vkCreateDevice
+    // sees it enabled.
+    if (HasShaderImageAtomicInt64Ext) {
+#ifdef VK_VERSION_1_4
+      if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+        Features14.pNext = &FeaturesImageAtomicInt64;
+      else
+#endif
+          if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+        Features13.pNext = &FeaturesImageAtomicInt64;
+      else if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+        Features12.pNext = &FeaturesImageAtomicInt64;
+      else
+        Features11.pNext = &FeaturesImageAtomicInt64;
+    }
+#endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
+    const VulkanDevice::ExtensionVector AvailableDeviceExtensions =
+        queryDeviceExtensions(PhysicalDevice);
+
+    llvm::SmallVector<const char *> EnabledDeviceExtensions;
+    const llvm::StringRef ExtensionName = "VK_EXT_mesh_shader";
+    VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
+    if (isExtensionSupported(AvailableDeviceExtensions, ExtensionName)) {
+      EnabledDeviceExtensions.push_back(ExtensionName.data());
+      MeshFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+      MeshFeatures.taskShader = 1;
+      MeshFeatures.meshShader = 1;
+      MeshFeatures.multiviewMeshShader = 0;
+      MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
+      MeshFeatures.meshShaderQueries = 0;
+
+      MeshFeatures.pNext = Features.pNext;
+      Features.pNext = &MeshFeatures;
+    }
+
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    if (HasShaderImageAtomicInt64Ext &&
+        FeaturesImageAtomicInt64.shaderImageInt64Atomics)
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+#endif
+
+    DeviceInfo.enabledExtensionCount =
+        static_cast<uint32_t>(EnabledDeviceExtensions.size());
+    DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
 
@@ -1263,16 +1357,18 @@ public:
     VulkanQueue GraphicsQueue(DeviceQueue, QueueFamilyIdx, Device,
                               std::move(*SubmitFenceOrErr));
 
-    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
-                                          Device, std::move(GraphicsQueue),
-                                          std::move(InstanceLayers));
+    return std::make_unique<VulkanDevice>(
+        Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
+        std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
   }
 
   VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
                VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
-               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
+               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers,
+               ExtensionVector DeviceExtensions)
       : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
-        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
+        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)),
+        DeviceExtensions(std::move(DeviceExtensions)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -1302,8 +1398,6 @@ public:
     Description += " (" + DriverName + ")";
 #endif
 
-    DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
-
     CmdBeginDebugUtilsLabel =
         (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
             Device, "vkCmdBeginDebugUtilsLabelEXT");
@@ -1312,6 +1406,8 @@ public:
     CmdInsertDebugUtilsLabel =
         (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetDeviceProcAddr(
             Device, "vkCmdInsertDebugUtilsLabelEXT");
+
+    MeshShaderFns = MeshShaderFunctions::create(Device);
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
@@ -1479,6 +1575,8 @@ public:
       const TraditionalRasterPipelineCreateDesc &Desc) override {
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = Desc.PS;
+    const std::optional<ShaderContainer> &HS = Desc.HS;
+    const std::optional<ShaderContainer> &DS = Desc.DS;
     const std::optional<ShaderContainer> &GS = Desc.GS;
     const llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
     const llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
@@ -1512,6 +1610,56 @@ public:
       ShaderStage.pName = VS.EntryPoint.c_str();
       ShaderStage.pSpecializationInfo =
           VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> HSSpecEntries;
+    llvm::SmallVector<char> HSSpecData;
+    VkSpecializationInfo HSSpecInfo = {};
+    if (HS) {
+      if (auto Err = parseSpecializationConstants(HS->SpecializationConstants,
+                                                  HSSpecEntries, HSSpecData,
+                                                  HSSpecInfo))
+        return Err;
+
+      auto HSModOrErr = createShaderModule(HS->Shader, "hull");
+      if (!HSModOrErr)
+        return HSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+      ShaderStage.module = *HSModOrErr;
+      ShaderStage.pName = HS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          HS->SpecializationConstants.empty() ? nullptr : &HSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> DSSpecEntries;
+    llvm::SmallVector<char> DSSpecData;
+    VkSpecializationInfo DSSpecInfo = {};
+    if (DS) {
+      if (auto Err = parseSpecializationConstants(DS->SpecializationConstants,
+                                                  DSSpecEntries, DSSpecData,
+                                                  DSSpecInfo))
+        return Err;
+
+      auto DSModOrErr = createShaderModule(DS->Shader, "domain");
+      if (!DSModOrErr)
+        return DSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+      ShaderStage.module = *DSModOrErr;
+      ShaderStage.pName = DS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          DS->SpecializationConstants.empty() ? nullptr : &DSSpecInfo;
       ShaderStages.push_back(ShaderStage);
     }
 
@@ -1643,6 +1791,13 @@ public:
         VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     InputAssemblyCI.topology = getVkPrimitiveTopology(Desc.Topology);
 
+    VkPipelineTessellationStateCreateInfo TessellationCI = {};
+    if (Desc.PatchControlPoints) {
+      TessellationCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+      TessellationCI.patchControlPoints = *Desc.PatchControlPoints;
+    }
+
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
     ViewportCI.viewportCount = 1;
@@ -1693,6 +1848,8 @@ public:
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
     PipelineCI.pInputAssemblyState = &InputAssemblyCI;
+    PipelineCI.pTessellationState =
+        Desc.PatchControlPoints ? &TessellationCI : nullptr;
     PipelineCI.pViewportState = &ViewportCI;
     PipelineCI.pRasterizationState = &RastCI;
     PipelineCI.pMultisampleState = &MultisampleCI;
@@ -1707,6 +1864,199 @@ public:
                                                          1, &PipelineCI,
                                                          nullptr, &Pipeline),
                                "Failed to create graphics pipeline.")) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    return std::make_unique<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                       llvm::ArrayRef<Format> RTFormats,
+                       std::optional<Format> DSFormat,
+                       std::optional<ShaderContainer> AS, ShaderContainer MS,
+                       std::optional<ShaderContainer> PS) /*override*/ {
+    assert(RTFormats.size() <= 8);
+
+    VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> ShaderStages;
+    // No longer need shader modules after pipeline compilation.
+    auto ShaderModuleCleanUp = llvm::scope_exit([&] {
+      for (auto &Stage : ShaderStages)
+        vkDestroyShaderModule(Device, Stage.module, nullptr);
+    });
+
+    llvm::SmallVector<VkSpecializationMapEntry> MSSpecEntries;
+    llvm::SmallVector<char> MSSpecData;
+    VkSpecializationInfo MSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(MS.SpecializationConstants,
+                                                  MSSpecEntries, MSSpecData,
+                                                  MSSpecInfo))
+        return Err;
+
+      auto MSModOrErr = createShaderModule(MS.Shader, "mesh");
+      if (!MSModOrErr)
+        return MSModOrErr.takeError();
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+      ShaderStage.module = *MSModOrErr;
+      ShaderStage.pName = MS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          MS.SpecializationConstants.empty() ? nullptr : &MSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> ASSpecEntries;
+    llvm::SmallVector<char> ASSpecData;
+    VkSpecializationInfo ASSpecInfo = {};
+    if (AS) {
+      if (auto Err = parseSpecializationConstants((*AS).SpecializationConstants,
+                                                  ASSpecEntries, ASSpecData,
+                                                  ASSpecInfo))
+        return Err;
+
+      auto ASModOrErr = createShaderModule((*AS).Shader, "task");
+      if (!ASModOrErr)
+        return ASModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TASK_BIT_EXT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TASK_BIT_EXT;
+      ShaderStage.module = *ASModOrErr;
+      ShaderStage.pName = (*AS).EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          (*AS).SpecializationConstants.empty() ? nullptr : &ASSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    if (PS) {
+      if (auto Err = parseSpecializationConstants((*PS).SpecializationConstants,
+                                                  PSSpecEntries, PSSpecData,
+                                                  PSSpecInfo))
+        return Err;
+
+      auto PSModOrErr = createShaderModule((*PS).Shader, "pixel");
+      if (!PSModOrErr)
+        return PSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      ShaderStage.module = *PSModOrErr;
+      ShaderStage.pName = (*PS).EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          (*PS).SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    // Build a RenderPassDesc from the PSO's RT/DS formats.
+    RenderPassDesc PassDesc;
+    PassDesc.ColorAttachments.reserve(RTFormats.size());
+    for (const Format F : RTFormats) {
+      ColorAttachmentFormatDesc CA = {};
+      CA.Fmt = F;
+      PassDesc.ColorAttachments.push_back(CA);
+    }
+    if (DSFormat) {
+      DepthStencilAttachmentFormatDesc DS = {};
+      DS.Fmt = *DSFormat;
+      PassDesc.DepthStencil = DS;
+    }
+
+    // NOTE: After pipeline creation this render pass can be dropped. Later
+    // render passes just need to be compatible with this render pass, or in
+    // other words: the format, sample count and number of targets (rt and ds),
+    // need to match.
+    auto RenderPassOrErr = createRenderPass(PassDesc);
+    if (!RenderPassOrErr)
+      return RenderPassOrErr.takeError();
+    const std::unique_ptr<offloadtest::RenderPass> RenderPass =
+        std::move(*RenderPassOrErr);
+    VkRenderPass RenderPassHandle =
+        llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
+
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
+                                        PipelineLayout))
+      return Err;
+
+    VkPipelineViewportStateCreateInfo ViewportCI = {};
+    ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewportCI.viewportCount = 1;
+    ViewportCI.scissorCount = 1;
+
+    const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                        VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo DynamicCI = {};
+    DynamicCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicCI.dynamicStateCount = 2;
+    DynamicCI.pDynamicStates = DynStates;
+
+    VkPipelineRasterizationStateCreateInfo RastCI = {};
+    RastCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RastCI.polygonMode = VK_POLYGON_MODE_FILL;
+    RastCI.cullMode = VK_CULL_MODE_NONE;
+    RastCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RastCI.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
+    MultisampleCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
+    DepthStencilCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    DepthStencilCI.depthTestEnable = VK_TRUE;
+    DepthStencilCI.depthWriteEnable = VK_TRUE;
+    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    DepthStencilCI.front = DepthStencilCI.back;
+
+    llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
+        RTFormats.size());
+    for (auto &BA : BlendAttachments)
+      BA.colorWriteMask = 0xf;
+    VkPipelineColorBlendStateCreateInfo BlendCI = {};
+    BlendCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    BlendCI.attachmentCount = static_cast<uint32_t>(BlendAttachments.size());
+    BlendCI.pAttachments = BlendAttachments.data();
+
+    VkGraphicsPipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
+    PipelineCI.pStages = ShaderStages.data();
+    PipelineCI.pViewportState = &ViewportCI;
+    PipelineCI.pRasterizationState = &RastCI;
+    PipelineCI.pMultisampleState = &MultisampleCI;
+    PipelineCI.pDepthStencilState = &DepthStencilCI;
+    PipelineCI.pColorBlendState = &BlendCI;
+    PipelineCI.pDynamicState = &DynamicCI;
+    PipelineCI.layout = PipelineLayout;
+    PipelineCI.renderPass = RenderPassHandle;
+
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
+                                                         1, &PipelineCI,
+                                                         nullptr, &Pipeline),
+                               "Failed to create mesh shader pipeline.")) {
       vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
       for (auto *L : SetLayouts)
         vkDestroyDescriptorSetLayout(Device, L, nullptr);
@@ -1900,6 +2250,14 @@ private:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    FeaturesImageAtomicInt64.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+    const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
+        DeviceExtensions, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+#endif
 
     Features.pNext = &Features11;
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
@@ -1909,6 +2267,27 @@ private:
 #ifdef VK_VERSION_1_4
     if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
       Features13.pNext = &Features14;
+#endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Append the VK_EXT_shader_image_atomic_int64 features struct to the
+    // pNext chain, but only if the device advertises the extension --
+    // otherwise drivers may reject the unknown sType. The chain above is
+    // built version-by-version (11 -> 12 -> 13 -> 14), so the correct
+    // attachment point is whichever Features1X struct is currently the
+    // tail for this device's apiVersion.
+    if (HasShaderImageAtomicInt64Ext) {
+#ifdef VK_VERSION_1_4
+      if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+        Features14.pNext = &FeaturesImageAtomicInt64;
+      else
+#endif
+          if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+        Features13.pNext = &FeaturesImageAtomicInt64;
+      else if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+        Features12.pNext = &FeaturesImageAtomicInt64;
+      else
+        Features11.pNext = &FeaturesImageAtomicInt64;
+    }
 #endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
@@ -1942,6 +2321,12 @@ private:
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features14.Name)));
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+#define VULKAN_EXT_SHADER_IMAGE_ATOMIC_INT64_FEATURE_BOOL(Name)                \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, HasShaderImageAtomicInt64Ext &&       \
+                                             FeaturesImageAtomicInt64.Name)));
+#endif
 #include "VKFeatures.def"
   }
 
@@ -1950,7 +2335,7 @@ public:
   createCommandBuffer() override {
     return VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
@@ -3008,7 +3393,7 @@ public:
                    << P.DispatchParameters.DispatchGroupCount[0] << ", "
                    << P.DispatchParameters.DispatchGroupCount[1] << ", "
                    << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
-    } else if (P.isTraditionalRaster()) {
+    } else if (P.isRaster()) {
       RenderPassBeginDesc BeginDesc = {};
       BeginDesc.Pass = IS.RenderPass.get();
       BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
@@ -3031,14 +3416,22 @@ public:
       Scissor.Height = static_cast<uint32_t>(VP.Height);
       Encoder.setScissor(Scissor);
 
-      if (IS.VB)
-        Encoder.setVertexBuffer(0, IS.VB.get(), 0,
-                                P.Bindings.getVertexStride());
+      if (P.isTraditionalRaster()) {
+        if (IS.VB)
+          Encoder.setVertexBuffer(0, IS.VB.get(), 0,
+                                  P.Bindings.getVertexStride());
 
-      if (auto Err =
-              Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
-                                    /*InstanceCount=*/1))
-        return Err;
+        if (auto Err =
+                Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                      /*InstanceCount=*/1))
+          return Err;
+      } else if (P.isMeshShaderRaster()) {
+        if (auto Err = Encoder.dispatchMesh(
+                *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+                P.DispatchParameters.DispatchGroupCount[1],
+                P.DispatchParameters.DispatchGroupCount[2]))
+          return Err;
+      }
       Encoder.endEncoding();
 
       copyTextureToReadback(IS.CB->CmdBuffer,
@@ -3172,7 +3565,7 @@ public:
 
     auto CBOrErr = VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
@@ -3236,44 +3629,7 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
-    } else if (P.isTraditionalRaster()) {
-      TraditionalRasterPipelineCreateDesc PipelineDesc = {};
-      PipelineDesc.Topology = P.Bindings.Topology;
-      PipelineDesc.DSFormat = Format::D32FloatS8Uint;
-      for (auto &Shader : P.Shaders) {
-        ShaderContainer SC = {};
-        SC.EntryPoint = Shader.Entry;
-        SC.Shader = Shader.Shader.get();
-        SC.SpecializationConstants = Shader.SpecializationConstants;
-        PipelineDesc.setShader(Shader.Stage, std::move(SC));
-      }
-
-      // Create the input layout based on the vertex attributes.
-      for (auto &Attr : P.Bindings.VertexAttributes) {
-        auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
-        if (!FormatOrErr)
-          return FormatOrErr.takeError();
-
-        InputLayoutDesc Layout = {};
-        Layout.Name = Attr.Name;
-        Layout.Fmt = *FormatOrErr;
-        Layout.OffsetInBytes = Attr.Offset;
-        PipelineDesc.InputLayout.push_back(Layout);
-      }
-
-      auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
-                                  P.Bindings.RTargetBufferPtr->Channels);
-      if (!FormatOrErr)
-        return FormatOrErr.takeError();
-      PipelineDesc.RTFormats.push_back(*FormatOrErr);
-
-      auto PipelineStateOrErr = createTraditionalRasterPipeline(
-          "Graphics Pipeline State", BindingsDesc, PipelineDesc);
-      if (!PipelineStateOrErr)
-        return PipelineStateOrErr.takeError();
-      State.Pipeline = std::move(*PipelineStateOrErr);
-      llvm::outs() << "Graphics Pipeline created.\n";
-
+    } else if (P.isRaster()) {
       ColorAttachmentFormatDesc ColorAttachment = {};
       ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
       ColorAttachment.Load = LoadAction::Clear;
@@ -3296,6 +3652,82 @@ public:
       State.RenderPass = std::move(*RenderPassOrErr);
       llvm::outs() << "Render pass created.\n";
 
+      if (P.isTraditionalRaster()) {
+        TraditionalRasterPipelineCreateDesc PipelineDesc = {};
+        PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
+        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        for (auto &Shader : P.Shaders) {
+          ShaderContainer SC = {};
+          SC.EntryPoint = Shader.Entry;
+          SC.Shader = Shader.Shader.get();
+          SC.SpecializationConstants = Shader.SpecializationConstants;
+          PipelineDesc.setShader(Shader.Stage, std::move(SC));
+        }
+
+        // Create the input layout based on the vertex attributes.
+        for (auto &Attr : P.Bindings.VertexAttributes) {
+          auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+          if (!FormatOrErr)
+            return FormatOrErr.takeError();
+
+          InputLayoutDesc Layout = {};
+          Layout.Name = Attr.Name;
+          Layout.Fmt = *FormatOrErr;
+          Layout.OffsetInBytes = Attr.Offset;
+          PipelineDesc.InputLayout.push_back(Layout);
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+        PipelineDesc.RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr = createTraditionalRasterPipeline(
+            "Graphics Pipeline State", BindingsDesc, PipelineDesc);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Graphics Pipeline created.\n";
+      } else if (P.isMeshShaderRaster()) {
+        std::optional<ShaderContainer> AS = {};
+        ShaderContainer MS = {};
+        std::optional<ShaderContainer> PS = {};
+        for (auto &Shader : P.Shaders) {
+          if (Shader.Stage == Stages::Amplification) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            AS = Container;
+          } else if (Shader.Stage == Stages::Mesh) {
+            MS.EntryPoint = Shader.Entry;
+            MS.Shader = Shader.Shader.get();
+          } else if (Shader.Stage == Stages::Pixel) {
+            ShaderContainer Container;
+            Container.EntryPoint = Shader.Entry;
+            Container.Shader = Shader.Shader.get();
+            PS = Container;
+          }
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+
+        llvm::SmallVector<Format> RTFormats;
+        RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr =
+            createPipelineAsMsPs("Mesh Shader Pipeline State", BindingsDesc,
+                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Mesh Shader Pipeline created.\n";
+      }
+
       if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
@@ -3313,7 +3745,7 @@ public:
     llvm::outs() << "Executed copy command buffer.\n";
     auto DispatchCBOrErr = VulkanCommandBuffer::create(
         Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel);
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
     if (!DispatchCBOrErr)
       return DispatchCBOrErr.takeError();
     State.CB = std::move(*DispatchCBOrErr);
