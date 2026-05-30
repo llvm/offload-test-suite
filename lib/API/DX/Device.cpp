@@ -1603,14 +1603,14 @@ public:
   // this overload uses the runtime's tiling info instead.
   UINT getNumTilesForTexture(std::optional<uint32_t> NumTiles,
                              ID3D12Resource *Resource) {
+    if (NumTiles.has_value())
+      return static_cast<UINT>(*NumTiles);
     UINT TotalTiles = 0;
     D3D12_PACKED_MIP_INFO PackedMipInfo = {};
     D3D12_TILE_SHAPE TileShape = {};
     UINT NumSubresourceTilings = 0;
     Device->GetResourceTiling(Resource, &TotalTiles, &PackedMipInfo, &TileShape,
                               &NumSubresourceTilings, 0, nullptr);
-    if (NumTiles.has_value())
-      return static_cast<UINT>(*NumTiles);
     return TotalTiles;
   }
 
