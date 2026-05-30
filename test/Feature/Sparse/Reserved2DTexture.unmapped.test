@@ -72,9 +72,10 @@ DescriptorSets:
 ...
 #--- end
 
-# Same backend gating as the basic sparse-texture test.
+# Same backend gating as the basic sparse-texture test (VK/MTL: unimplemented;
+# #1050 tracks porting). Clang is fine here because the shader does not Load
+# the texture — only the create/bind/dispatch plumbing is exercised.
 # UNSUPPORTED: Vulkan, Metal
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
