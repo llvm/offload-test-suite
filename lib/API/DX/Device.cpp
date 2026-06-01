@@ -2667,7 +2667,7 @@ public:
                 BufferCreateDesc::readbackBuffer();
             auto ReadbackOrErr =
                 createBuffer("Readback", ReadbackDesc,
-                             Texture->calculateLinearSizeInBytes());
+                             Texture->calculateLinearSizeInBytes(*this));
             if (!ReadbackOrErr)
               return ReadbackOrErr.takeError();
             ReadbackBuffer = std::move(*ReadbackOrErr);

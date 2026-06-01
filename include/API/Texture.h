@@ -28,6 +28,8 @@
 namespace offloadtest {
 LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
+class Device;
+
 enum TextureUsage : uint32_t {
   Sampled = 1 << 0,
   Storage = 1 << 1,
@@ -152,16 +154,7 @@ public:
 
   // Calculate the size in bytes of the texture data given a linear layout
   // Useful for calculating the size for an upload or readback buffer.
-  size_t calculateLinearSizeInBytes() const {
-    const auto &Desc = getDesc();
-    // TODO(manon): Some parts are missing:
-    // - Depth
-    // - Mip Levels
-    // - Texture Array
-    // - Block Compression
-    assert(Desc.MipLevels == 1 && "Mip Levels not supported");
-    return Desc.Width * Desc.Height * getFormatSizeInBytes(Desc.Fmt);
-  }
+  size_t calculateLinearSizeInBytes(Device &Dev) const;
 
   // Maps the texture's memory for host access. Only valid for CpuToGpu and
   // GpuToCpu textures; returns an error for GpuOnly. Each successful map() must
