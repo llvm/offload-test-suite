@@ -356,7 +356,13 @@ public:
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
-  uint32_t getRowStrideInBytes() const override {
+  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Cannot query mapped row pitch of a GpuOnly texture.");
+    // Metal host-visible textures are accessed via getBytes/replaceRegion with
+    // a caller-supplied bytesPerRow, so a tightly packed stride is valid.
     return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   }
 
@@ -1583,6 +1589,11 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
     return std::make_unique<MTLTexture>(Tex, Name, Desc);
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>

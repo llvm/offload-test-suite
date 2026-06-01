@@ -497,7 +497,7 @@ public:
   VkImageSubresourceRange FullRange;
   std::string Name;
   TextureCreateDesc Desc;
-  uint64_t RowPitchAlignment = 1;
+  VkImageTiling Tiling = VK_IMAGE_TILING_OPTIMAL;
 
   VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
   bool IsInUndefinedLayout = true;
@@ -509,11 +509,10 @@ public:
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
                 llvm::StringRef Name, TextureCreateDesc Desc,
                 VkImageLayout PreferredLayout,
-                VkImageSubresourceRange FullRange, uint64_t RowPitchAlignment)
+                VkImageSubresourceRange FullRange, VkImageTiling Tiling)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
         Memory(Memory), FullRange(FullRange), Name(Name), Desc(Desc),
-        RowPitchAlignment(RowPitchAlignment), PreferredLayout(PreferredLayout) {
-  }
+        Tiling(Tiling), PreferredLayout(PreferredLayout) {}
 
   ~VulkanTexture() override {
     if (View)
@@ -548,10 +547,23 @@ public:
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
-  uint32_t getRowStrideInBytes() const override {
-    const uint64_t TightRow =
-        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
-    return static_cast<uint32_t>(llvm::alignTo(TightRow, RowPitchAlignment));
+  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Cannot query mapped row pitch of a GpuOnly texture.");
+    if (Tiling != VK_IMAGE_TILING_LINEAR)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Mapped row pitch is only defined for linear-tiled textures.");
+
+    VkImageSubresource Sub = {};
+    Sub.aspectMask = FullRange.aspectMask;
+    Sub.mipLevel = 0;
+    Sub.arrayLayer = 0;
+    VkSubresourceLayout Layout = {};
+    vkGetImageSubresourceLayout(Dev, Image, &Sub, &Layout);
+    return static_cast<uint32_t>(Layout.rowPitch);
   }
 
   static bool classof(const offloadtest::Texture *T) {
@@ -2481,7 +2493,9 @@ public:
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = 1;
     ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
+                           ? VK_IMAGE_TILING_OPTIMAL
+                           : VK_IMAGE_TILING_LINEAR;
     ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
     ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -2539,9 +2553,9 @@ public:
     if ((Desc.Usage & TextureUsage::Storage))
       PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    auto Tex = std::make_unique<VulkanTexture>(
-        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
-        Props.limits.optimalBufferCopyRowPitchAlignment);
+    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
+                                               Name, Desc, PreferredLayout,
+                                               FullRange, ImageInfo.tiling);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -2571,6 +2585,14 @@ public:
     }
 
     return Tex;
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    const uint64_t TightRow =
+        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
+    return static_cast<uint32_t>(llvm::alignTo(
+        TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
   }
 
   const Capabilities &getCapabilities() override {

@@ -256,6 +256,11 @@ public:
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
 
+  // The row stride required when uploading data to (or reading back from) a
+  // texture created with the given description, via an upload buffer.
+  virtual uint32_t
+  getTextureUploadRowStrideInBytes(const TextureCreateDesc &Desc) const = 0;
+
   virtual llvm::Expected<std::unique_ptr<RenderPass>>
   createRenderPass(const RenderPassDesc &Desc) = 0;
 

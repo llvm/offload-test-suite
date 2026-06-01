@@ -182,8 +182,6 @@ offloadtest::createTextureWithData(
     const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
     std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
 
-  // TODO(manon): Validate texture size with data to upload
-
   const uint64_t PackedRowStrideInBytes =
       Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
@@ -195,12 +193,13 @@ offloadtest::createTextureWithData(
     return TextureOrErr.takeError();
   auto Texture = std::move(*TextureOrErr);
 
-  const uint64_t TexRowStrideInBytes = Texture->getRowStrideInBytes();
   if (Desc.Location == MemoryLocation::GpuOnly) {
     if (OutUploadBuffer == nullptr)
       return llvm::createStringError("An upload buffer is required to create a "
                                      "GpuOnly texture with data.");
 
+    const uint64_t TexRowStrideInBytes =
+        Dev.getTextureUploadRowStrideInBytes(Desc);
     const uint64_t UploadBufferSizeInBytes =
         (Desc.Height - 1) * TexRowStrideInBytes + PackedRowStrideInBytes;
 
@@ -232,6 +231,11 @@ offloadtest::createTextureWithData(
       return Err;
 
   } else {
+    auto MappedStrideInBytesOrErr = Texture->getMappedRowPitchInBytes();
+    if (!MappedStrideInBytesOrErr)
+      return MappedStrideInBytesOrErr.takeError();
+    const uint32_t MappedStrideInBytes = *MappedStrideInBytesOrErr;
+
     // Copy data over
     auto MappedPtrOrErr = Texture->map();
     if (!MappedPtrOrErr)
@@ -242,10 +246,8 @@ offloadtest::createTextureWithData(
 
     for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
       memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
-      DstPtr += TexRowStrideInBytes;
-      SrcPtr +=
-          PackedRowStrideInBytes; // TODO(manon): INCORRECT Must query the
-                                  // actual row stride from the API instead.
+      DstPtr += MappedStrideInBytes;
+      SrcPtr += PackedRowStrideInBytes;
     }
 
     Texture->unmap();
