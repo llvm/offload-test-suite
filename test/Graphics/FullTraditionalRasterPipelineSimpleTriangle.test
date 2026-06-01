@@ -1,0 +1,249 @@
+# Exercises the full traditional raster pipeline in one pass:
+#   Vertex -> Hull -> Domain -> Geometry -> Pixel
+# starting from a single point. The tessellator amplifies that point into four
+# points (one per sub-triangle of the midpoint subdivision) and the geometry
+# shader expands each into a triangle -- two primitive-topology transitions
+# (patch -> points, points -> triangles). The four sub-triangles tile the
+# original triangle, so the result is validated against the same golden image.
+
+#--- vertex.hlsl
+struct VSOutput
+{
+    float4 position : POSITION;
+};
+
+VSOutput main(float4 position : POSITION)
+{
+    VSOutput o;
+    o.position = position;
+    return o;
+}
+
+#--- hull.hlsl
+struct HSInput
+{
+    float4 position : POSITION;
+};
+
+struct HSOutput
+{
+    float4 position : POSITION;
+};
+
+struct HSPatchConstants
+{
+    float Edges[4]  : SV_TessFactor;
+    float Inside[2] : SV_InsideTessFactor;
+};
+
+// A quad domain with every factor at 1 produces exactly four domain vertices
+// (the quad corners) and no interior points. With the "point" output topology
+// below, the tessellator hands the Geometry stage four point primitives -- one
+// slot per sub-triangle of the midpoint subdivision.
+HSPatchConstants PatchConstants(InputPatch<HSInput, 1> patch,
+                                uint patchID : SV_PrimitiveID)
+{
+    HSPatchConstants c;
+    c.Edges[0]  = 1.0;
+    c.Edges[1]  = 1.0;
+    c.Edges[2]  = 1.0;
+    c.Edges[3]  = 1.0;
+    c.Inside[0] = 1.0;
+    c.Inside[1] = 1.0;
+    return c;
+}
+
+[domain("quad")]
+[partitioning("integer")]
+[outputtopology("point")]
+[outputcontrolpoints(1)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 1> patch,
+              uint i : SV_OutputControlPointID)
+{
+    HSOutput o;
+    o.position = patch[i].position;
+    return o;
+}
+
+#--- domain.hlsl
+struct DSInput
+{
+    float4 position : POSITION;
+};
+
+struct DSPatchConstants
+{
+    float Edges[4]  : SV_TessFactor;
+    float Inside[2] : SV_InsideTessFactor;
+};
+
+struct DSOutput
+{
+    float4 position              : SV_POSITION; // the sub-triangle centroid
+    float2 bigCenter             : BIGCENTER;   // big triangle centroid, forwarded
+    nointerpolation uint subTri  : SUBTRI;      // which sub-triangle (0..3)
+};
+
+// Classify each of the four tessellated points (at quad-domain corners
+// (0,0),(1,0),(0,1),(1,1)) into one of the four sub-triangles, and place it at
+// that sub-triangle's centroid. Corner sub-triangles sit at G + 0.5*d_k; the
+// central (inverted) one sits at G. The Geometry stage expands each centroid
+// back into a full sub-triangle.
+[domain("quad")]
+DSOutput main(DSPatchConstants constants,
+              float2 uv : SV_DomainLocation,
+              const OutputPatch<DSInput, 1> patch)
+{
+    float2 g = patch[0].position.xy;
+
+    // Big triangle corner offsets from its centroid (SimpleTriangle layout).
+    const float2 d0 = float2( 0.0,  0.33333333);
+    const float2 d1 = float2( 0.25, -0.16666667);
+    const float2 d2 = float2(-0.25, -0.16666667);
+
+    uint id = (uv.x > 0.5 ? 1u : 0u) + (uv.y > 0.5 ? 2u : 0u);
+
+    float2 sc = g; // central sub-triangle centroid == big centroid
+    if (id == 0)      sc = g + 0.5 * d0;
+    else if (id == 1) sc = g + 0.5 * d1;
+    else if (id == 2) sc = g + 0.5 * d2;
+
+    DSOutput o;
+    o.position  = float4(sc, 0.0, 1.0);
+    o.bigCenter = g;
+    o.subTri    = id;
+    return o;
+}
+
+#--- geometry.hlsl
+struct GSInput
+{
+    float4 position              : SV_POSITION;
+    float2 bigCenter             : BIGCENTER;
+    nointerpolation uint subTri  : SUBTRI;
+};
+
+struct GSOutput
+{
+    float4 position : SV_POSITION;
+    float4 color    : COLOR;
+};
+
+// Expand one sub-triangle centroid into its three corners. The midpoint
+// subdivision splits the big triangle (corners V0/V1/V2) into three corner
+// sub-triangles plus a central inverted one; together they tile it exactly.
+// Each emitted vertex carries the colour it has in the original gradient
+// (corners = R/G/B, edge midpoints = their averages), so the reassembled image
+// reproduces SimpleTriangle's gradient pixel-for-pixel.
+[maxvertexcount(3)]
+void main(point GSInput input[1], inout TriangleStream<GSOutput> stream)
+{
+    float2 g  = input[0].bigCenter;
+    uint   id = input[0].subTri;
+
+    const float2 d0 = float2( 0.0,  0.33333333);
+    const float2 d1 = float2( 0.25, -0.16666667);
+    const float2 d2 = float2(-0.25, -0.16666667);
+
+    float2 V0 = g + d0, V1 = g + d1, V2 = g + d2;
+    float2 M01 = 0.5 * (V0 + V1);
+    float2 M12 = 0.5 * (V1 + V2);
+    float2 M02 = 0.5 * (V0 + V2);
+
+    const float3 cR   = float3(1.0, 0.0, 0.0);
+    const float3 cG   = float3(0.0, 1.0, 0.0);
+    const float3 cB   = float3(0.0, 0.0, 1.0);
+    const float3 cM01 = float3(0.5, 0.5, 0.0);
+    const float3 cM12 = float3(0.0, 0.5, 0.5);
+    const float3 cM02 = float3(0.5, 0.0, 0.5);
+
+    float2 p0, p1, p2;
+    float3 q0, q1, q2;
+    if (id == 0)      { p0 = V0;  q0 = cR;   p1 = M01; q1 = cM01; p2 = M02; q2 = cM02; }
+    else if (id == 1) { p0 = M01; q0 = cM01; p1 = V1;  q1 = cG;   p2 = M12; q2 = cM12; }
+    else if (id == 2) { p0 = M02; q0 = cM02; p1 = M12; q1 = cM12; p2 = V2;  q2 = cB;   }
+    else              { p0 = M01; q0 = cM01; p1 = M12; q1 = cM12; p2 = M02; q2 = cM02; }
+
+    GSOutput o;
+    o.position = float4(p0, 0.0, 1.0); o.color = float4(q0, 1.0); stream.Append(o);
+    o.position = float4(p1, 0.0, 1.0); o.color = float4(q1, 1.0); stream.Append(o);
+    o.position = float4(p2, 0.0, 1.0); o.color = float4(q2, 1.0); stream.Append(o);
+}
+
+#--- pixel.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return input.color;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Geometry
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # A single control point at the big triangle centroid: ((0 + 0.25 - 0.25)/3,
+  # (0.25 - 0.25 - 0.25)/3) = (0, -1/12). Everything downstream is rebuilt from
+  # it, so a dropped position visibly moves the whole triangle.
+  - Name: VertexData
+    Format: Float32
+    Stride: 12 # 1 vertex, float3 position
+    Data: [ 0.0, -0.08333333, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  Topology: PatchList
+  PatchControlPoints: 1
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+# Metal has no native geometry shader stage, and its tessellation maps HS/DS
+# onto a compute kernel + post-tessellation vertex function that isn't wired up
+# here. Skip this backend entirely.
+# UNSUPPORTED: Metal
+
+# XFAIL: Clang
+# REQUIRES: goldenimage
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o   %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o     %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o   %t/domain.hlsl
+# RUN: %dxc_target -T gs_6_0 -Fo %t-geometry.o %t/geometry.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o    %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-geometry.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/SimpleTriangle.png -rules %t/rules.yaml
