@@ -89,8 +89,6 @@ static const float3 Palette[6] =
     float3(1.0, 0.0, 1.0), float3(0.0, 1.0, 1.0),
 };
 
-// Both varyings drive the output: faceID (int) selects the base colour, the
-// interpolated normal (float) shades it with a fixed directional light.
 float4 main(PSInput input) : SV_Target
 {
     float3 N    = normalize(input.normal);
