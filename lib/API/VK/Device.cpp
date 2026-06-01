@@ -501,6 +501,7 @@ public:
 
   VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
   bool IsInUndefinedLayout = true;
+  uint64_t SizeInBytes;
 
   VkImageLayout preferredLayoutOrUndefined() {
     return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
@@ -509,10 +510,12 @@ public:
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
                 llvm::StringRef Name, TextureCreateDesc Desc,
                 VkImageLayout PreferredLayout,
-                VkImageSubresourceRange FullRange, VkImageTiling Tiling)
+                VkImageSubresourceRange FullRange, VkImageTiling Tiling,
+                uint64_t SizeInBytes)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
         Memory(Memory), FullRange(FullRange), Name(Name), Desc(Desc),
-        Tiling(Tiling), PreferredLayout(PreferredLayout) {}
+        Tiling(Tiling), PreferredLayout(PreferredLayout), uint64_t SizeInBytes {
+  }
 
   ~VulkanTexture() override {
     if (View)
@@ -525,7 +528,6 @@ public:
     if (Desc.Location == MemoryLocation::GpuOnly)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Cannot map a GpuOnly texture.");
-    size_t SizeInBytes = calculateLinearSizeInBytes();
     void *Ptr = nullptr;
     if (vkMapMemory(Dev, Memory, 0, SizeInBytes, 0, &Ptr) != VK_SUCCESS)
       return llvm::createStringError(std::errc::io_error,
@@ -2553,9 +2555,9 @@ public:
     if ((Desc.Usage & TextureUsage::Storage))
       PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
 
-    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc, PreferredLayout,
-                                               FullRange, ImageInfo.tiling);
+    auto Tex = std::make_unique<VulkanTexture>(
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
+        ImageInfo.tiling, MemReqs.size);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
