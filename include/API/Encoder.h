@@ -83,6 +83,7 @@ public:
   virtual llvm::Error copyBufferToBuffer(Buffer &Src, size_t SrcOffset,
                                          Buffer &Dst, size_t DstOffset,
                                          size_t Size) = 0;
+  virtual llvm::Error copyCounterToBuffer(Buffer &Src, Buffer &Dst) = 0;
 
   virtual llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) = 0;
 

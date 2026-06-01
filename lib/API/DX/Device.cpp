@@ -208,14 +208,13 @@ static uint32_t getUAVBufferSize(const Resource &R) {
                    sizeof(uint32_t)
              : R.size();
 }
-#endif
+
 static uint32_t getUAVBufferCounterOffset(const Resource &R) {
   return R.HasCounter
              ? llvm::alignTo(R.size(), D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT)
              : 0;
 }
 
-#if 0
 static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
@@ -413,6 +412,7 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+  uint64_t CounterOffsetInBytes;
   D3D12_RESOURCE_STATES PreferredState;
 
   D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle;
@@ -421,7 +421,7 @@ public:
 
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes,
-           D3D12_RESOURCE_STATES PreferredState,
+           uint64_t CounterOffsetInBytes, D3D12_RESOURCE_STATES PreferredState,
            D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle,
            D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle,
            D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle)
@@ -447,6 +447,26 @@ public:
   }
 
   void unmap() override { Buffer->Unmap(0, nullptr); }
+
+  llvm::Expected<uint32_t *> mapCounter() override {
+    if (!Desc.HasCounter)
+      return llvm::createStringError("Buffer does not have a counter to map");
+
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    void *Ptr = nullptr;
+    const D3D12_RANGE Range = {CounterOffsetInBytes, 4};
+    if (auto Err =
+            HR::toError(Buffer->Map(0, &Range, &Ptr), "Failed to map buffer."))
+      return std::move(Err);
+
+    return (uint32_t *)Ptr;
+  }
+  void unmapCounter() override {
+    const D3D12_RANGE Range = {CounterOffsetInBytes, 4};
+    Buffer->Unmap(0, &Range);
+  }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::DirectX;
@@ -857,6 +877,41 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyCounterToBuffer(offloadtest::Buffer &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &DXSrc = llvm::cast<DXBuffer>(Src);
+    auto &DXDst = llvm::cast<DXBuffer>(Dst);
+
+    if (!DXSrc.Desc.HasCounter)
+      return llvm::createStringError(
+          "Counter resource passed does not hvae a counter.");
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Buffer.Get(), DXSrc.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_SOURCE));
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Buffer.Get(), DXDst.PreferredState,
+          D3D12_RESOURCE_STATE_COPY_DEST));
+    CB.flushBarrier();
+
+    insertDebugSignpost(llvm::formatv("copyCounterToBuffer {0}B", Size).str());
+    CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), 0, DXSrc.Buffer.Get(),
+                                 DXSrc.CounterOffsetInBytes, sizeof(uint32_t));
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
+          DXSrc.PreferredState));
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
+          DXDst.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
+          DXDst.PreferredState));
+    CB.flushBarrier();
+    return llvm::Error::success();
+  }
+
   llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) override {
     auto &DXSrc = llvm::cast<DXBuffer>(Src);
     auto &DXDst = llvm::cast<DXTexture>(Dst);
@@ -1220,12 +1275,15 @@ private:
     std::unique_ptr<Buffer> Buffer;
     std::unique_ptr<Texture> Texture;
     std::unique_ptr<offloadtest::Buffer> Readback;
+    std::unique_ptr<offloadtest::Buffer> CounterReadback;
 
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Buffer> Buffer,
-                std::unique_ptr<offloadtest::Buffer> Readback)
+                std::unique_ptr<offloadtest::Buffer> Readback,
+                std::unique_ptr<offloadtest::Buffer> CounterReadback)
         : UploadBuffer(std::move(UploadBuffer)), Buffer(std::move(Buffer)),
-          Readback(std::move(Readback)) {}
+          Readback(std::move(Readback)),
+          CounterReadback(std::move(CounterReadback)) {}
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Texture> Texture,
                 std::unique_ptr<offloadtest::Buffer> Readback)
@@ -1237,12 +1295,14 @@ private:
 
     ResourceSet(ResourceSet &&A)
         : UploadBuffer(std::move(A.UploadBuffer)), Buffer(std::move(A.Buffer)),
-          Texture(std::move(A.Texture)), Readback(std::move(A.Readback)) {}
+          Texture(std::move(A.Texture)), Readback(std::move(A.Readback)),
+          CounterReadback(std::move(A.CounterReadback)) {}
     ResourceSet &operator=(ResourceSet &&A) {
       UploadBuffer = std::move(A.UploadBuffer);
       Buffer = std::move(A.Buffer);
       Texture = std::move(A.Texture);
       Readback = std::move(A.Readback);
+      CounterReadback = std::move(A.CounterReadback);
       return *this;
     }
   };
@@ -1777,8 +1837,8 @@ public:
     }
 
     return std::make_unique<DXBuffer>(BufferObject, Name, Desc, SizeInBytes,
-                                      PreferredState, SRVHandle, UAVHandle,
-                                      CBVHandle);
+                                      CounterOffsetInBytes, PreferredState,
+                                      SRVHandle, UAVHandle, CBVHandle);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -2616,6 +2676,7 @@ public:
           auto Buffer = std::move(*BufferOrErr);
 
           std::unique_ptr<offloadtest::Buffer> ReadbackBuffer;
+          std::unique_ptr<offloadtest::Buffer> CounterReadbackBuffer;
           if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
             const BufferCreateDesc ReadbackDesc =
                 BufferCreateDesc::readbackBuffer();
@@ -2624,10 +2685,19 @@ public:
             if (!ReadbackOrErr)
               return ReadbackOrErr.takeError();
             ReadbackBuffer = std::move(*ReadbackOrErr);
+
+            if (R.HasCounter) {
+              auto CounterReadbackOrErr =
+                  createBuffer("Readback", ReadbackDesc, sizeof(uint32_t));
+              if (!CounterReadbackOrErr)
+                return CounterReadbackOrErr.takeError();
+              CounterReadbackBuffer = std::move(*CounterReadbackOrErr);
+            }
           }
 
           ResourceSet RSet(std::move(UploadBuffer), std::move(Buffer),
-                           std::move(ReadbackBuffer));
+                           std::move(ReadbackBuffer),
+                           std::move(CounterReadbackBuffer));
           ResBundle.push_back(std::move(RSet));
         }
       } else if (R.isTexture()) {
@@ -2988,23 +3058,31 @@ public:
       auto *DataIt = R.first->BufferPtr->Data.begin();
       for (; RSIt != R.second.end() && DataIt != R.first->BufferPtr->Data.end();
            ++RSIt, ++DataIt) {
-        DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RSIt->Readback);
-        auto DataPtrOrErr = ReadbackDX.map();
+        offloadtest::Buffer &Readback = *RSIt->Readback;
+        auto DataPtrOrErr = Readback.map();
         if (!DataPtrOrErr)
           return DataPtrOrErr.takeError();
         void *DataPtr = *DataPtrOrErr;
 
         memcpy(DataIt->get(), DataPtr, R.first->size());
 
+        Readback.unmap();
+
         if (R.first->HasCounter) {
-          uint32_t Counter;
-          memcpy(&Counter,
-                 static_cast<char *>(DataPtr) +
-                     getUAVBufferCounterOffset(*R.first),
-                 sizeof(uint32_t));
-          R.first->BufferPtr->Counters.push_back(Counter);
+          auto CounterPtrOrErr = Readback.mapCounter();
+          if (!CounterPtrOrErr)
+            return CounterPtrOrErr.takeError();
+          const uint32_t *CounterPtr = *CounterPtrOrErr;
+          R.first->BufferPtr->Counters.push_back(*CounterPtr);
+          Readback.unmapCounter();
+
+          // uint32_t Counter;
+          // memcpy(&Counter,
+          //        static_cast<char *>(DataPtr) +
+          //            getUAVBufferCounterOffset(*R.first),
+          //        sizeof(uint32_t));
+          // R.first->BufferPtr->Counters.push_back(Counter);
         }
-        ReadbackDX.unmap();
       }
 
       return llvm::Error::success();
