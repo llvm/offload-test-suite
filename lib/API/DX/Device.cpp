@@ -1999,10 +1999,11 @@ public:
   // Create a SamplerFeedback Texture2D plus staging + readback.
   // Layout:
   //   * Buffer  : opaque feedback resource (DXGI_FORMAT_SAMPLER_FEEDBACK_*).
-  //               Requires ID3D12Device8::CreateCommittedResource2 for MipRegion.
-  //   * Staging : R8_UINT texture for ResolveSubresourceRegion(DECODE_SAMPLER_FEEDBACK).
+  //               CreateCommittedResource2 is required for MipRegion.
+  //   * Staging : R8_UINT texture for ResolveSubresourceRegion
+  //               (DECODE_SAMPLER_FEEDBACK).
   //   * Readback: row-major buffer for CPU access.
-  // No Upload buffer (feedback is GPU-write-only; runtime initialises to 0xFF).
+  // No Upload buffer (feedback is GPU-write-only; initialised to 0xFF).
   llvm::Expected<ResourceBundle> createFeedbackUAV(Resource &R,
                                                    InvocationState & /*IS*/) {
     ResourceBundle Bundle;
