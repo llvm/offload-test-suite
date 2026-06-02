@@ -2482,7 +2482,8 @@ public:
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
-    ImageCreateInfo.arrayLayers = 1;
+    ImageCreateInfo.arrayLayers =
+        std::max(1u, static_cast<uint32_t>(B.OutputProps.ArraySize));
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -2841,7 +2842,8 @@ public:
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-          ViewCreateInfo.subresourceRange.layerCount = 1;
+          ViewCreateInfo.subresourceRange.layerCount = std::max(
+              1u, static_cast<uint32_t>(R.BufferPtr->OutputProps.ArraySize));
           ViewCreateInfo.subresourceRange.levelCount =
               R.BufferPtr->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
@@ -3094,27 +3096,33 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const uint32_t ArraySize =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.ArraySize));
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
+      // Subresource ordering: slice-major, mip-major within slice
+      // (matches D3D12 and the YAML data layout used by Tex*Array tests).
+      for (uint32_t Slice = 0; Slice < ArraySize; ++Slice) {
+        for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
+          VkBufferImageCopy Region = {};
+          Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
+                                                   ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                   : VK_IMAGE_ASPECT_COLOR_BIT;
+          Region.imageSubresource.mipLevel = I;
+          Region.imageSubresource.baseArrayLayer = Slice;
+          Region.imageSubresource.layerCount = 1;
+          Region.imageExtent.width =
+              std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
+          Region.imageExtent.height =
+              std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
+          Region.imageExtent.depth =
+              std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
+          Region.bufferOffset = CurrentOffset;
+          Regions.push_back(Region);
+          CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
+                           Region.imageExtent.height *
+                           Region.imageExtent.depth * B.getElementSize();
+        }
       }
 
       VkImageSubresourceRange SubRange = {};
@@ -3123,7 +3131,7 @@ public:
                                 : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      SubRange.layerCount = ArraySize;
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -3240,13 +3248,15 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const uint32_t ArraySize =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.ArraySize));
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask = B.Format == DataFormat::Depth32
                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
                                 : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      SubRange.layerCount = ArraySize;
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -3268,25 +3278,29 @@ public:
 
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
+      // Subresource ordering: slice-major, mip-major within slice
+      // (matches D3D12 and the YAML data layout used by Tex*Array tests).
+      for (uint32_t Slice = 0; Slice < ArraySize; ++Slice) {
+        for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
+          VkBufferImageCopy Region = {};
+          Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
+                                                   ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                   : VK_IMAGE_ASPECT_COLOR_BIT;
+          Region.imageSubresource.mipLevel = I;
+          Region.imageSubresource.baseArrayLayer = Slice;
+          Region.imageSubresource.layerCount = 1;
+          Region.imageExtent.width =
+              std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
+          Region.imageExtent.height =
+              std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
+          Region.imageExtent.depth =
+              std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
+          Region.bufferOffset = CurrentOffset;
+          Regions.push_back(Region);
+          CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
+                           Region.imageExtent.height *
+                           Region.imageExtent.depth * B.getElementSize();
+        }
       }
 
       for (auto &ResRef : R.ResourceRefs)

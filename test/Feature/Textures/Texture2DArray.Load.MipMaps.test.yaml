@@ -91,8 +91,8 @@ Results:
 #--- end
 
 
-# Texture2DArray support is currently DirectX-only.
-# UNSUPPORTED: Vulkan || Metal
+# Texture2DArray multi-mip + multi-slice: DX + VK. Metal still pending.
+# UNSUPPORTED: Metal
 
 # Clang HLSL has no Texture2DArray template yet.
 # XFAIL: Clang
