@@ -335,6 +335,8 @@ public:
       Buf->release();
   }
 
+  const BufferCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Metal;
   }

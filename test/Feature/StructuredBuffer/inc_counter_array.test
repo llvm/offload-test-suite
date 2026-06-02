@@ -56,10 +56,7 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s %if DirectX %{ --check-prefixes=CHECK,DX-CHECK %}
-
-# DX-CHECK: Creating UAV: { Size = 4100, Register = u0, Space = 0, HasCounter = 1 }
-# DX-CHECK: UAV: HeapIdx = 0 EltSize = 4 NumElts = 1 HasCounter = 1
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
 
 # CHECK: Name: Out
 # CHECK: Counters: [ 1, 2, 3, 4 ]

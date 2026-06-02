@@ -471,15 +471,14 @@ public:
 
   void unmap() override { vkUnmapMemory(Dev, Memory); }
 
-  llvm::Expected<uint32_t *> mapCounter() override { return nullptr; }
-  void unmapCounter() override {}
-
   ~VulkanBuffer() override {
     if (CounterBuffer != nullptr)
       vkDestroyBuffer(Dev, CounterBuffer, nullptr);
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
+
+  const BufferCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Vulkan;
@@ -936,14 +935,14 @@ public:
     auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
     auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
 
-    if (!DXSrc.Desc.HasCounter)
+    if (!VKSrc.Desc.HasCounter)
       return llvm::createStringError(
           "Counter resource passed does not hvae a counter.");
 
     const VkBufferCopy Region{
-        0,                             /*srcOffset*/
-        0,                             /*dstOffset*/
-        Region.size = sizeof(uint32_t) /*size*/
+        0,               /*srcOffset*/
+        0,               /*dstOffset*/
+        sizeof(uint32_t) /*size*/
     };
     addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     insertDebugSignpost("copyCounterToBuffer 4B");

@@ -79,13 +79,11 @@ public:
   virtual llvm::Expected<void *> map() = 0;
   virtual void unmap() = 0;
 
-  virtual llvm::Expected<uint32_t *> mapCounter() = 0;
-  virtual void unmapCounter() = 0;
-
   Buffer(const Buffer &) = delete;
   Buffer &operator=(const Buffer &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  virtual const BufferCreateDesc &getDesc() const = 0;
 
 protected:
   explicit Buffer(GPUAPI API) : API(API) {}

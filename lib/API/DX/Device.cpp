@@ -426,8 +426,10 @@ public:
            D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle,
            D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
-        Desc(Desc), SizeInBytes(SizeInBytes), PreferredState(PreferredState),
-        SRVHandle(SRVHandle), UAVHandle(UAVHandle), CBVHandle(CBVHandle) {}
+        Desc(Desc), SizeInBytes(SizeInBytes),
+        CounterOffsetInBytes(CounterOffsetInBytes),
+        PreferredState(PreferredState), SRVHandle(SRVHandle),
+        UAVHandle(UAVHandle), CBVHandle(CBVHandle) {}
   DXBuffer(const DXBuffer &) = delete;
   DXBuffer(DXBuffer &&) = delete;
   DXBuffer &operator=(const DXBuffer &) = delete;
@@ -448,25 +450,7 @@ public:
 
   void unmap() override { Buffer->Unmap(0, nullptr); }
 
-  llvm::Expected<uint32_t *> mapCounter() override {
-    if (!Desc.HasCounter)
-      return llvm::createStringError("Buffer does not have a counter to map");
-
-    if (Desc.Location == MemoryLocation::GpuOnly)
-      return llvm::createStringError(std::errc::invalid_argument,
-                                     "Cannot map a GpuOnly buffer.");
-    void *Ptr = nullptr;
-    const D3D12_RANGE Range = {CounterOffsetInBytes, 4};
-    if (auto Err =
-            HR::toError(Buffer->Map(0, &Range, &Ptr), "Failed to map buffer."))
-      return std::move(Err);
-
-    return (uint32_t *)Ptr;
-  }
-  void unmapCounter() override {
-    const D3D12_RANGE Range = {CounterOffsetInBytes, 4};
-    Buffer->Unmap(0, &Range);
-  }
+  const BufferCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::DirectX;
@@ -896,7 +880,7 @@ public:
           D3D12_RESOURCE_STATE_COPY_DEST));
     CB.flushBarrier();
 
-    insertDebugSignpost(llvm::formatv("copyCounterToBuffer {0}B", Size).str());
+    insertDebugSignpost("copyCounterToBuffer 4B");
     CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), 0, DXSrc.Buffer.Get(),
                                  DXSrc.CounterOffsetInBytes, sizeof(uint32_t));
 
@@ -2770,7 +2754,6 @@ public:
     // Bind descriptors in descriptor tables.
     if (IS.DescHeap) {
       uint32_t HeapIndex = 0;
-      printf("IS.DescHeap: 0x%p\n", IS.DescHeap.Get());
       const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
           IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
       const uint32_t DescHandleIncSize =
@@ -3030,6 +3013,11 @@ public:
                   *RS.Buffer, 0, *RS.Readback, 0,
                   RS.Readback->getSizeInBytes()))
             return Err;
+
+          if (RS.Buffer->getDesc().HasCounter)
+            if (auto Err = ReadbackEncoder->copyCounterToBuffer(
+                    *RS.Buffer, *RS.CounterReadback))
+              return Err;
         }
       }
       return llvm::Error::success();
@@ -3050,7 +3038,7 @@ public:
   }
 
   llvm::Error readBack(Pipeline &P, InvocationState &IS) {
-    auto MemCpyBack = [](ResourcePair &R) -> llvm::Error {
+    auto MemCpyBack = [this](ResourcePair &R) -> llvm::Error {
       if (!R.first->isReadWrite())
         return llvm::Error::success();
 
@@ -3062,26 +3050,39 @@ public:
         auto DataPtrOrErr = Readback.map();
         if (!DataPtrOrErr)
           return DataPtrOrErr.takeError();
-        void *DataPtr = *DataPtrOrErr;
+        const void *DataPtr = *DataPtrOrErr;
 
-        memcpy(DataIt->get(), DataPtr, R.first->size());
+        if (R.first->isTexture()) {
+          const TextureCreateDesc &Desc = RSIt->Texture->getDesc();
+          const uint32_t SrcStrideInBytes =
+              getTextureUploadRowStrideInBytes(Desc);
+          const uint32_t DstStrideInBytes =
+              Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+          assert(DstStrideInBytes <= SrcStrideInBytes &&
+                 "Destination should not have padding and thus should be <= "
+                 "than SrcStride where we do expect potential padding.");
+          uint8_t *Dst = (uint8_t *)DataIt->get();
+          const uint8_t *Src = (const uint8_t *)DataPtr;
+
+          for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
+            memcpy(Dst, Src, DstStrideInBytes);
+            Dst += DstStrideInBytes;
+            Src += SrcStrideInBytes;
+          }
+        } else {
+          memcpy(DataIt->get(), DataPtr, R.first->size());
+        }
 
         Readback.unmap();
 
         if (R.first->HasCounter) {
-          auto CounterPtrOrErr = Readback.mapCounter();
+          offloadtest::Buffer &CounterReadback = *RSIt->CounterReadback;
+          auto CounterPtrOrErr = CounterReadback.map();
           if (!CounterPtrOrErr)
             return CounterPtrOrErr.takeError();
-          const uint32_t *CounterPtr = *CounterPtrOrErr;
+          const uint32_t *CounterPtr = (const uint32_t *)*CounterPtrOrErr;
           R.first->BufferPtr->Counters.push_back(*CounterPtr);
-          Readback.unmapCounter();
-
-          // uint32_t Counter;
-          // memcpy(&Counter,
-          //        static_cast<char *>(DataPtr) +
-          //            getUAVBufferCounterOffset(*R.first),
-          //        sizeof(uint32_t));
-          // R.first->BufferPtr->Counters.push_back(Counter);
+          CounterReadback.unmap();
         }
       }
 
