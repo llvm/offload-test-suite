@@ -712,8 +712,20 @@ public:
   }
 
   void addPendingUAVBarrier() { PendingUAVBarrier = true; }
-  void addResourceTransition(D3D12_RESOURCE_BARRIER Transition) {
-    PendingTransitions.push_back(Transition);
+  void addResourceTransition(ID3D12Resource *pResource,
+                             D3D12_RESOURCE_STATES StateBefore,
+                             D3D12_RESOURCE_STATES StateAfter) {
+
+    for (auto &Trans : PendingTransitions) {
+      if (Trans.Transition.pResource == pResource) {
+        assert(StateBefore == Trans.Transition.StateAfter);
+        Trans.Transition.StateAfter = StateAfter;
+        return;
+      }
+    }
+
+    PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+        pResource, StateBefore, StateAfter));
   }
 
   void flushBarrier() {
@@ -722,11 +734,6 @@ public:
       PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::UAV(nullptr));
       PendingUAVBarrier = false;
     }
-
-    // if (!PendingUAVBarrier)
-    //   return;
-    // const D3D12_RESOURCE_BARRIER Barrier =
-    //     CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
 
     if (!PendingTransitions.empty()) {
       CmdList->ResourceBarrier(PendingTransitions.size(),
@@ -835,13 +842,11 @@ public:
     auto &DXDst = llvm::cast<DXBuffer>(Dst);
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Buffer.Get(), DXSrc.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_SOURCE));
+      CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_SOURCE);
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Buffer.Get(), DXDst.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_DEST));
+      CB.addResourceTransition(DXDst.Buffer.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
     CB.flushBarrier();
 
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
@@ -849,13 +854,13 @@ public:
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-          DXSrc.PreferredState));
+      CB.addResourceTransition(DXSrc.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_SOURCE,
+                               DXSrc.PreferredState);
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-          DXDst.PreferredState));
+      CB.addResourceTransition(DXDst.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_DEST,
+                               DXDst.PreferredState);
     CB.flushBarrier();
 
     return llvm::Error::success();
@@ -871,13 +876,11 @@ public:
           "Counter resource passed does not hvae a counter.");
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Buffer.Get(), DXSrc.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_SOURCE));
+      CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_SOURCE);
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Buffer.Get(), DXDst.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_DEST));
+      CB.addResourceTransition(DXDst.Buffer.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
     CB.flushBarrier();
 
     insertDebugSignpost("copyCounterToBuffer 4B");
@@ -885,13 +888,13 @@ public:
                                  DXSrc.CounterOffsetInBytes, sizeof(uint32_t));
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-          DXSrc.PreferredState));
+      CB.addResourceTransition(DXSrc.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_SOURCE,
+                               DXSrc.PreferredState);
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-          DXDst.PreferredState));
+      CB.addResourceTransition(DXDst.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_DEST,
+                               DXDst.PreferredState);
     CB.flushBarrier();
     return llvm::Error::success();
   }
@@ -901,14 +904,12 @@ public:
     auto &DXDst = llvm::cast<DXTexture>(Dst);
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Buffer.Get(), DXSrc.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_SOURCE));
+      CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_SOURCE);
 
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Resource.Get(), DXDst.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_DEST));
+      CB.addResourceTransition(DXDst.Resource.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
     CB.flushBarrier();
 
     const uint32_t ElementSize = getFormatSizeInBytes(DXDst.Desc.Fmt);
@@ -922,14 +923,14 @@ public:
     CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-          DXSrc.PreferredState));
+      CB.addResourceTransition(DXSrc.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_SOURCE,
+                               DXSrc.PreferredState);
 
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-          DXDst.PreferredState));
+      CB.addResourceTransition(DXDst.Resource.Get(),
+                               D3D12_RESOURCE_STATE_COPY_DEST,
+                               DXDst.PreferredState);
 
     return llvm::Error::success();
   }
@@ -938,17 +939,13 @@ public:
     auto &DXSrc = llvm::cast<DXTexture>(Src);
     auto &DXDst = llvm::cast<DXBuffer>(Dst);
 
-    CB.flushBarrier(); // workaround
-
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Resource.Get(), DXSrc.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_SOURCE));
+      CB.addResourceTransition(DXSrc.Resource.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_SOURCE);
 
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Buffer.Get(), DXDst.PreferredState,
-          D3D12_RESOURCE_STATE_COPY_DEST));
+      CB.addResourceTransition(DXDst.Buffer.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
 
     CB.flushBarrier();
 
@@ -963,14 +960,14 @@ public:
     CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXSrc.Resource.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-          DXSrc.PreferredState));
+      CB.addResourceTransition(DXSrc.Resource.Get(),
+                               D3D12_RESOURCE_STATE_COPY_SOURCE,
+                               DXSrc.PreferredState);
 
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
-      CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXDst.Buffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-          DXDst.PreferredState));
+      CB.addResourceTransition(DXDst.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_DEST,
+                               DXDst.PreferredState);
 
     return llvm::Error::success();
   }
@@ -1105,16 +1102,16 @@ public:
     for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
       auto &DXTex = llvm::cast<DXTexture>(*Tex);
       if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
-        CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-            DXTex.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
-            DXTex.PreferredState));
+        CB.addResourceTransition(DXTex.Resource.Get(),
+                                 D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                 DXTex.PreferredState);
     }
     if (Desc.DepthStencil) {
       auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
       if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
-        CB.addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-            DXTex.Resource.Get(), D3D12_RESOURCE_STATE_DEPTH_WRITE,
-            DXTex.PreferredState));
+        CB.addResourceTransition(DXTex.Resource.Get(),
+                                 D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                 DXTex.PreferredState);
     }
 
     popDebugGroup();
@@ -1183,16 +1180,14 @@ DXCommandBuffer::createRenderEncoder(
   for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
     auto &DXTex = llvm::cast<DXTexture>(*Tex);
     if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
-      this->addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXTex.Resource.Get(), DXTex.PreferredState,
-          D3D12_RESOURCE_STATE_RENDER_TARGET));
+      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
+                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
   }
   if (Desc.DepthStencil) {
     auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
     if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
-      this->addResourceTransition(CD3DX12_RESOURCE_BARRIER::Transition(
-          DXTex.Resource.Get(), DXTex.PreferredState,
-          D3D12_RESOURCE_STATE_DEPTH_WRITE));
+      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
+                                  D3D12_RESOURCE_STATE_DEPTH_WRITE);
   }
 
   this->flushBarrier();
