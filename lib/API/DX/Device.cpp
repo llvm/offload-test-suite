@@ -2557,26 +2557,16 @@ public:
     if (!IS.RTReadback)
       return llvm::Error::success();
 
-    void *Mapped = nullptr;
-    auto &Readback = llvm::cast<DXBuffer>(*IS.RTReadback);
-    if (auto Err = HR::toError(Readback.Buffer->Map(0, nullptr, &Mapped),
-                               "Failed to map render target readback"))
-      return Err;
+    auto DataPtrOrErr = IS.RTReadback->map();
+    if (!DataPtrOrErr)
+      return DataPtrOrErr.takeError();
+    const void *Mapped = *DataPtrOrErr;
 
-    // Query the copy footprint to get the actual padded row pitch used by
-    // the copy operation (D3D12 requires 256-byte aligned rows).
-    auto &RT = llvm::cast<DXTexture>(*IS.RenderTarget);
-    const D3D12_RESOURCE_DESC RTDesc = RT.Resource->GetDesc();
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT Placed = {};
-    uint32_t NumRows = 0;
-    uint64_t RowSizeInBytes = 0;
-    uint64_t TotalBytes = 0;
-    Device->GetCopyableFootprints(&RTDesc, 0u, 1u, 0u, &Placed, &NumRows,
-                                  &RowSizeInBytes, &TotalBytes);
+    const uint32_t SrcStrideInBytes =
+        getTextureUploadRowStrideInBytes(IS.RenderTarget->getDesc());
 
-    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped,
-                                                 Placed.Footprint.RowPitch);
-    Readback.Buffer->Unmap(0, nullptr);
+    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped, SrcStrideInBytes);
+    IS.RTReadback->unmap();
     return llvm::Error::success();
   }
 
