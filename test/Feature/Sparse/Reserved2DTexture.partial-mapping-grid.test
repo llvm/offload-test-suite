@@ -90,11 +90,10 @@ DescriptorSets:
 
 # Sparse Texture2D support is DirectX-only today; VK lacks the
 # vkQueueBindSparse + sparseResidencyImage2D wiring (tracked in #1050).
+# Clang is fine here because the shader does not read the residency
+# `status` output of Texture2D.Load — only the data return value is
+# tested. See bb01e34 for the same fix on Reserved2DTexture.unmapped.
 # UNSUPPORTED: Vulkan, Metal
-
-# Clang's HLSL -> DXIL lowering does not yet implement the Texture2D.Load
-# overload that exposes the residency status output.
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
