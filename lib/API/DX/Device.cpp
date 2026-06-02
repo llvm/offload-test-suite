@@ -289,10 +289,9 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_FLAGS Flags =
       R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                       : D3D12_RESOURCE_FLAG_NONE;
-  const D3D12_RESOURCE_DESC ResDesc = {Dimension,        0,         Width,
-                                       Height,           DepthOrArraySize,
-                                       MipLevels,        Format,    {1, 0},
-                                       Layout,           Flags};
+  const D3D12_RESOURCE_DESC ResDesc = {
+      Dimension, 0,      Width,  Height, DepthOrArraySize,
+      MipLevels, Format, {1, 0}, Layout, Flags};
   return ResDesc;
 }
 
@@ -326,7 +325,9 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::Texture2DArray:
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
     Desc.Texture2DArray = D3D12_TEX2D_ARRAY_SRV{
-        0, 1, 0, static_cast<UINT>(R.BufferPtr->OutputProps.ArraySize), 0, 0};
+        0, static_cast<UINT>(R.BufferPtr->OutputProps.MipLevels),
+        0, static_cast<UINT>(R.BufferPtr->OutputProps.ArraySize),
+        0, 0};
     break;
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
@@ -1601,34 +1602,30 @@ public:
   void addResourceUploadCommands(
       Resource &R, InvocationState &IS, ComPtr<ID3D12Resource> Destination,
       ComPtr<ID3D12Resource> Source,
-      llvm::ArrayRef<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> MipFootprints = {}) {
+      llvm::ArrayRef<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> SubresFootprints =
+          {}) {
     addUploadBeginBarrier(IS, Destination);
     if (R.isTexture()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      if (!MipFootprints.empty()) {
-        for (uint32_t Mip = 0; Mip < MipFootprints.size(); ++Mip) {
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), Mip);
+      if (!SubresFootprints.empty()) {
+        // Multi-subresource path (mips and/or array slices). Subresource index
+        // ordering matches D3D12: Sub = Slice * MipLevels + Mip.
+        for (uint32_t Sub = 0; Sub < SubresFootprints.size(); ++Sub) {
+          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), Sub);
           const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(),
-                                                     MipFootprints[Mip]);
+                                                     SubresFootprints[Sub]);
           IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
         }
       } else {
-        const DXGI_FORMAT DXFormat = getDXFormat(B.Format, B.Channels);
-        const uint32_t RowPitch = B.OutputProps.Width * B.getElementSize();
-        const uint32_t SliceBytes = RowPitch * B.OutputProps.Height;
-        const uint32_t NumSlices = (R.Kind == ResourceKind::Texture2DArray ||
-                                    R.Kind == ResourceKind::RWTexture2DArray)
-                                       ? B.OutputProps.ArraySize
-                                       : 1;
-        for (uint32_t Slice = 0; Slice < NumSlices; ++Slice) {
-          const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-              Slice * SliceBytes,
-              CD3DX12_SUBRESOURCE_FOOTPRINT(DXFormat, B.OutputProps.Width,
-                                            B.OutputProps.Height, 1, RowPitch)};
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), Slice);
-          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
-          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-        }
+        // Single-subresource fast path (no mips, no array slices).
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+            0, CD3DX12_SUBRESOURCE_FOOTPRINT(
+                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+                   B.OutputProps.Height, 1,
+                   B.OutputProps.Width * B.getElementSize())};
+        const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
+        const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
+        IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
       }
     } else
       IS.CB->CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
@@ -1712,23 +1709,35 @@ public:
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
 
-    const bool IsMipMappedTexture =
-        R.isTexture() && R.BufferPtr->OutputProps.MipLevels > 1;
-    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> MipFootprints;
-    llvm::SmallVector<UINT> MipNumRows;
-    llvm::SmallVector<UINT64> MipRowSizes;
-    UINT64 MipTotalBytes = 0;
-    if (IsMipMappedTexture) {
-      const uint32_t MipLevels = R.BufferPtr->OutputProps.MipLevels;
-      MipFootprints.resize(MipLevels);
-      MipNumRows.resize(MipLevels);
-      MipRowSizes.resize(MipLevels);
-      Device->GetCopyableFootprints(&ResDesc, 0, MipLevels, 0,
-                                    MipFootprints.data(), MipNumRows.data(),
-                                    MipRowSizes.data(), &MipTotalBytes);
+    const bool IsTexture = R.isTexture();
+    const uint32_t MipLevels =
+        IsTexture ? R.BufferPtr->OutputProps.MipLevels : 1;
+    const uint32_t ArraySize =
+        IsTexture && (R.Kind == ResourceKind::Texture2DArray ||
+                      R.Kind == ResourceKind::RWTexture2DArray)
+            ? R.BufferPtr->OutputProps.ArraySize
+            : 1;
+    // Use the GetCopyableFootprints layout whenever a texture has multiple
+    // subresources (mip > 1, array slices > 1, or both). This keeps row-pitch
+    // alignment (D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) handled by the runtime
+    // for every (mip, slice) instead of the tight Width*EltSize assumption.
+    const bool NeedsSubresourceLayout =
+        IsTexture && (MipLevels > 1 || ArraySize > 1);
+    const uint32_t NumSubresources = MipLevels * ArraySize;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> SubresFootprints;
+    llvm::SmallVector<UINT> SubresNumRows;
+    llvm::SmallVector<UINT64> SubresRowSizes;
+    UINT64 SubresTotalBytes = 0;
+    if (NeedsSubresourceLayout) {
+      SubresFootprints.resize(NumSubresources);
+      SubresNumRows.resize(NumSubresources);
+      SubresRowSizes.resize(NumSubresources);
+      Device->GetCopyableFootprints(
+          &ResDesc, 0, NumSubresources, 0, SubresFootprints.data(),
+          SubresNumRows.data(), SubresRowSizes.data(), &SubresTotalBytes);
     }
     const D3D12_RESOURCE_DESC UploadResDesc = CD3DX12_RESOURCE_DESC::Buffer(
-        IsMipMappedTexture ? MipTotalBytes : R.size());
+        NeedsSubresourceLayout ? SubresTotalBytes : R.size());
 
     uint32_t RegOffset = 0;
 
@@ -1780,22 +1789,24 @@ public:
       // Upload data initialization
       void *ResDataPtr = nullptr;
       if (SUCCEEDED(UploadBuffer->Map(0, NULL, &ResDataPtr))) {
-        if (IsMipMappedTexture) {
-          // Source CPU data is tightly packed for all mips (per docs).
-          // Destination upload buffer has D3D12-aligned per-mip layout from
-          // GetCopyableFootprints; copy each mip row-by-row applying the
-          // possibly-padded row pitch.
+        if (NeedsSubresourceLayout) {
+          // Source CPU data is tightly packed in subresource order
+          // (slice-major, mip-major within slice: Sub = Slice * MipLevels + Mip
+          // matching D3D12). Destination upload buffer has D3D12-aligned
+          // per-subresource layout from GetCopyableFootprints; copy each
+          // subresource row-by-row applying the possibly-padded row pitch.
           const uint8_t *Src = reinterpret_cast<const uint8_t *>(ResData.get());
           uint8_t *Dst = static_cast<uint8_t *>(ResDataPtr);
-          for (uint32_t Mip = 0; Mip < MipFootprints.size(); ++Mip) {
-            const auto &FP = MipFootprints[Mip];
-            const size_t TightRowBytes = static_cast<size_t>(MipRowSizes[Mip]);
+          for (uint32_t Sub = 0; Sub < NumSubresources; ++Sub) {
+            const auto &FP = SubresFootprints[Sub];
+            const size_t TightRowBytes =
+                static_cast<size_t>(SubresRowSizes[Sub]);
             const size_t PaddedRowPitch =
                 static_cast<size_t>(FP.Footprint.RowPitch);
-            for (UINT Row = 0; Row < MipNumRows[Mip]; ++Row)
+            for (UINT Row = 0; Row < SubresNumRows[Sub]; ++Row)
               memcpy(Dst + FP.Offset + Row * PaddedRowPitch,
                      Src + Row * TightRowBytes, TightRowBytes);
-            Src += TightRowBytes * MipNumRows[Mip];
+            Src += TightRowBytes * SubresNumRows[Sub];
           }
         } else {
           memcpy(ResDataPtr, ResData.get(), R.size());
@@ -1806,7 +1817,7 @@ public:
                                        "Failed to map SRV upload buffer.");
       }
 
-      addResourceUploadCommands(R, IS, Buffer, UploadBuffer, MipFootprints);
+      addResourceUploadCommands(R, IS, Buffer, UploadBuffer, SubresFootprints);
 
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, Heap);
       RegOffset++;
@@ -1847,8 +1858,33 @@ public:
 
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(BufferSize);
+    const bool IsTexture = R.isTexture();
+    const uint32_t MipLevels =
+        IsTexture ? R.BufferPtr->OutputProps.MipLevels : 1;
+    const uint32_t ArraySize =
+        IsTexture && (R.Kind == ResourceKind::Texture2DArray ||
+                      R.Kind == ResourceKind::RWTexture2DArray)
+            ? R.BufferPtr->OutputProps.ArraySize
+            : 1;
+    // UAVs only ever address a single mip per descriptor;
+    // getResourceDescription already rejects mip>1 for non-SRV kinds.
+    // Multi-subresource layout is only needed here for array slices.
+    const bool NeedsSubresourceLayout = IsTexture && ArraySize > 1;
+    const uint32_t NumSubresources = MipLevels * ArraySize;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> SubresFootprints;
+    llvm::SmallVector<UINT> SubresNumRows;
+    llvm::SmallVector<UINT64> SubresRowSizes;
+    UINT64 SubresTotalBytes = 0;
+    if (NeedsSubresourceLayout) {
+      SubresFootprints.resize(NumSubresources);
+      SubresNumRows.resize(NumSubresources);
+      SubresRowSizes.resize(NumSubresources);
+      Device->GetCopyableFootprints(
+          &ResDesc, 0, NumSubresources, 0, SubresFootprints.data(),
+          SubresNumRows.data(), SubresRowSizes.data(), &SubresTotalBytes);
+    }
+    const D3D12_RESOURCE_DESC UploadResDesc = CD3DX12_RESOURCE_DESC::Buffer(
+        NeedsSubresourceLayout ? SubresTotalBytes : BufferSize);
 
     uint32_t RegOffset = 0;
 
@@ -1906,14 +1942,30 @@ public:
       // Upload data initialization
       void *ResDataPtr = nullptr;
       if (SUCCEEDED(UploadBuffer->Map(0, NULL, &ResDataPtr))) {
-        memcpy(ResDataPtr, ResData.get(), R.size());
+        if (NeedsSubresourceLayout) {
+          const uint8_t *Src = reinterpret_cast<const uint8_t *>(ResData.get());
+          uint8_t *Dst = static_cast<uint8_t *>(ResDataPtr);
+          for (uint32_t Sub = 0; Sub < NumSubresources; ++Sub) {
+            const auto &FP = SubresFootprints[Sub];
+            const size_t TightRowBytes =
+                static_cast<size_t>(SubresRowSizes[Sub]);
+            const size_t PaddedRowPitch =
+                static_cast<size_t>(FP.Footprint.RowPitch);
+            for (UINT Row = 0; Row < SubresNumRows[Sub]; ++Row)
+              memcpy(Dst + FP.Offset + Row * PaddedRowPitch,
+                     Src + Row * TightRowBytes, TightRowBytes);
+            Src += TightRowBytes * SubresNumRows[Sub];
+          }
+        } else {
+          memcpy(ResDataPtr, ResData.get(), R.size());
+        }
         UploadBuffer->Unmap(0, nullptr);
       } else {
         return llvm::createStringError(std::errc::io_error,
                                        "Failed to map UAV upload buffer.");
       }
 
-      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+      addResourceUploadCommands(R, IS, Buffer, UploadBuffer, SubresFootprints);
 
       Bundle.emplace_back(UploadBuffer, Buffer, std::move(*ReadbackOrErr),
                           Heap);
