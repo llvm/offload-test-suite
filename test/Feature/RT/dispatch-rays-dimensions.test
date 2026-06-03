@@ -1,0 +1,62 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[shader("raygeneration")]
+void RayGen() {
+  // DispatchRaysDimensions() echoes the host-side {W, H, D}. Every lane sees
+  // the same constant; write the packed value at the lane's linear index so
+  // the result is independent of which lane orders its store first.
+  const uint3 D = DispatchRaysDimensions();
+  const uint Idx = DispatchRaysIndex().y * D.x + DispatchRaysIndex().x;
+  // Pack {W, H} into one uint for an exact comparison; the dispatch is 2D so
+  // D.z is always 1 (no need to round-trip it through the buffer).
+  Output[Idx] = (D.x << 16) | (D.y & 0xFFFF);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: RayGen
+Buffers:
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 24
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    # Dispatch is 2x3x1 (W=2, H=3, D=1) so every lane writes (2<<16)|3 = 0x20003.
+    Data: [ 0x20003, 0x20003, 0x20003, 0x20003, 0x20003, 0x20003 ]
+RayTracingPipelineConfig:
+  MaxTraceRecursionDepth: 1
+  MaxPayloadSizeInBytes: 0
+ShaderBindingTable:
+  RayGen:
+    ShaderName: RayGen
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+DispatchParameters:
+  DispatchGroupCount: [ 2, 3, 1 ]
+Results:
+  - Result: DispatchRaysDimensionsEcho
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: raytracing-pipeline
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
