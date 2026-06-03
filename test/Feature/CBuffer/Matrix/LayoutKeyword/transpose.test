@@ -1,0 +1,188 @@
+#--- source.hlsl
+
+cbuffer CB_RM_2x3 : register(b0) {
+    row_major float2x3 rm_2x3;
+};
+
+cbuffer CB_CM_2x3 : register(b1) {
+    column_major float2x3 cm_2x3;
+};
+
+cbuffer CB_RM_3x2 : register(b2) {
+    row_major float3x2 rm_3x2;
+};
+
+cbuffer CB_CM_3x2 : register(b3) {
+    column_major float3x2 cm_3x2;
+};
+
+RWBuffer<float> OutRM2x3 : register(u0);
+RWBuffer<float> OutCM2x3 : register(u1);
+RWBuffer<float> OutRM3x2 : register(u2);
+RWBuffer<float> OutCM3x2 : register(u3);
+
+float3x2 transpose_rm_2x3(row_major float2x3 m) { return transpose(m); }
+float3x2 transpose_cm_2x3(column_major float2x3 m) { return transpose(m); }
+float2x3 transpose_rm_3x2(row_major float3x2 m) { return transpose(m); }
+float2x3 transpose_cm_3x2(column_major float3x2 m) { return transpose(m); }
+
+[numthreads(1,1,1)]
+void main() {
+    {
+        float3x2 t = transpose_rm_2x3(rm_2x3);
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 2; c++)
+                OutRM2x3[r * 2 + c] = t[r][c];
+    }
+    {
+        float3x2 t = transpose_cm_2x3(cm_2x3);
+        for (int r = 0; r < 3; r++)
+            for (int c = 0; c < 2; c++)
+                OutCM2x3[r * 2 + c] = t[r][c];
+    }
+    {
+        float2x3 t = transpose_rm_3x2(rm_3x2);
+        for (int r = 0; r < 2; r++)
+            for (int c = 0; c < 3; c++)
+                OutRM3x2[r * 3 + c] = t[r][c];
+    }
+    {
+        float2x3 t = transpose_cm_3x2(cm_3x2);
+        for (int r = 0; r < 2; r++)
+            for (int c = 0; c < 3; c++)
+                OutCM3x2[r * 3 + c] = t[r][c];
+    }
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: CB_RM_2x3
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 0x5a5a5a5a,
+            4.0, 5.0, 6.0 ]
+  - Name: CB_CM_2x3
+    Format: Float32
+    Data: [ 1.0, 2.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.0, 4.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            5.0, 6.0 ]
+  - Name: CB_RM_3x2
+    Format: Float32
+    Data: [ 1.0, 2.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.0, 4.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            5.0, 6.0 ]
+  - Name: CB_CM_3x2
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 0x5a5a5a5a,
+            4.0, 5.0, 6.0 ]
+  - Name: OutRM2x3
+    Format: Float32
+    FillSize: 24
+  - Name: ExpectedOutRM2x3
+    Format: Float32
+    Data: [ 1.0, 4.0, 2.0, 5.0, 3.0, 6.0 ]
+  - Name: OutCM2x3
+    Format: Float32
+    FillSize: 24
+  - Name: ExpectedOutCM2x3
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 ]
+  - Name: OutRM3x2
+    Format: Float32
+    FillSize: 24
+  - Name: ExpectedOutRM3x2
+    Format: Float32
+    Data: [ 1.0, 3.0, 5.0, 2.0, 4.0, 6.0 ]
+  - Name: OutCM3x2
+    Format: Float32
+    FillSize: 24
+  - Name: ExpectedOutCM3x2
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0 ]
+Results:
+  - Result: OutRM2x3
+    Rule: BufferExact
+    Actual: OutRM2x3
+    Expected: ExpectedOutRM2x3
+  - Result: OutCM2x3
+    Rule: BufferExact
+    Actual: OutCM2x3
+    Expected: ExpectedOutCM2x3
+  - Result: OutRM3x2
+    Rule: BufferExact
+    Actual: OutRM3x2
+    Expected: ExpectedOutRM3x2
+  - Result: OutCM3x2
+    Rule: BufferExact
+    Actual: OutCM3x2
+    Expected: ExpectedOutCM3x2
+DescriptorSets:
+  - Resources:
+    - Name: CB_RM_2x3
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: CB_CM_2x3
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: CB_RM_3x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: CB_CM_3x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutRM2x3
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutCM2x3
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutRM3x2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: OutCM3x2
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+...
+#--- end
+
+# Task: https://github.com/llvm/llvm-project/issues/192262
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

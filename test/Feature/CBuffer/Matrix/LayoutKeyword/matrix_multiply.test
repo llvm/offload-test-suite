@@ -1,0 +1,202 @@
+#--- source.hlsl
+
+cbuffer CB_RM_2x3 : register(b0) {
+    row_major float2x3 rm_2x3;
+};
+
+cbuffer CB_CM_2x3 : register(b1) {
+    column_major float2x3 cm_2x3;
+};
+
+cbuffer CB_RM_3x2 : register(b2) {
+    row_major float3x2 rm_3x2;
+};
+
+cbuffer CB_CM_3x2 : register(b3) {
+    column_major float3x2 cm_3x2;
+};
+
+cbuffer CB_Vec : register(b4) {
+    float2 v;
+};
+
+RWBuffer<float> VecMatRM : register(u0);
+RWBuffer<float> VecMatCM : register(u1);
+RWBuffer<float> MatMatRMCM : register(u2);
+RWBuffer<float> MatMatCMRM : register(u3);
+
+float3 vec_mat_rm(float2 v, row_major float2x3 m) { return mul(v, m); }
+float3 vec_mat_cm(float2 v, column_major float2x3 m) { return mul(v, m); }
+float2x2 mat_mat_rm_cm(row_major float2x3 a, column_major float3x2 b) { return mul(a, b); }
+float2x2 mat_mat_cm_rm(column_major float2x3 a, row_major float3x2 b) { return mul(a, b); }
+
+[numthreads(1,1,1)]
+void main() {
+    float3 r1 = vec_mat_rm(v, rm_2x3);
+    VecMatRM[0] = r1.x;
+    VecMatRM[1] = r1.y;
+    VecMatRM[2] = r1.z;
+
+    float3 r2 = vec_mat_cm(v, cm_2x3);
+    VecMatCM[0] = r2.x;
+    VecMatCM[1] = r2.y;
+    VecMatCM[2] = r2.z;
+
+    float2x2 r3 = mat_mat_rm_cm(rm_2x3, cm_3x2);
+    MatMatRMCM[0] = r3[0][0];
+    MatMatRMCM[1] = r3[0][1];
+    MatMatRMCM[2] = r3[1][0];
+    MatMatRMCM[3] = r3[1][1];
+
+    float2x2 r4 = mat_mat_cm_rm(cm_2x3, rm_3x2);
+    MatMatCMRM[0] = r4[0][0];
+    MatMatCMRM[1] = r4[0][1];
+    MatMatCMRM[2] = r4[1][0];
+    MatMatCMRM[3] = r4[1][1];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: CB_RM_2x3
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 0x5a5a5a5a,
+            4.0, 5.0, 6.0 ]
+  - Name: CB_CM_2x3
+    Format: Float32
+    Data: [ 1.0, 2.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.0, 4.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            5.0, 6.0 ]
+  - Name: CB_RM_3x2
+    Format: Float32
+    Data: [ 1.0, 2.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.0, 4.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            5.0, 6.0 ]
+  - Name: CB_CM_3x2
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 0x5a5a5a5a,
+            4.0, 5.0, 6.0 ]
+  - Name: CB_Vec
+    Format: Float32
+    Data: [ 1.0, 2.0 ]
+  - Name: VecMatRM
+    Format: Float32
+    FillSize: 12
+  - Name: ExpectedVecMatRM
+    Format: Float32
+    Data: [ 9.0, 12.0, 15.0 ]
+  - Name: VecMatCM
+    Format: Float32
+    FillSize: 12
+  - Name: ExpectedVecMatCM
+    Format: Float32
+    Data: [ 5.0, 11.0, 17.0 ]
+  - Name: MatMatRMCM
+    Format: Float32
+    FillSize: 16
+  - Name: ExpectedMatMatRMCM
+    Format: Float32
+    Data: [ 14.0, 32.0, 32.0, 77.0 ]
+  - Name: MatMatCMRM
+    Format: Float32
+    FillSize: 16
+  - Name: ExpectedMatMatCMRM
+    Format: Float32
+    Data: [ 35.0, 44.0, 44.0, 56.0 ]
+Results:
+  - Result: VecMatRM
+    Rule: BufferExact
+    Actual: VecMatRM
+    Expected: ExpectedVecMatRM
+  - Result: VecMatCM
+    Rule: BufferExact
+    Actual: VecMatCM
+    Expected: ExpectedVecMatCM
+  - Result: MatMatRMCM
+    Rule: BufferExact
+    Actual: MatMatRMCM
+    Expected: ExpectedMatMatRMCM
+  - Result: MatMatCMRM
+    Rule: BufferExact
+    Actual: MatMatCMRM
+    Expected: ExpectedMatMatCMRM
+DescriptorSets:
+  - Resources:
+    - Name: CB_RM_2x3
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: CB_CM_2x3
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: CB_RM_3x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: CB_CM_3x2
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: CB_Vec
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: VecMatRM
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: VecMatCM
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: MatMatRMCM
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: MatMatCMRM
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+...
+#--- end
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
+# XFAIL: Vulkan && DXC
+
+# Task: https://github.com/llvm/llvm-project/issues/192262
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
