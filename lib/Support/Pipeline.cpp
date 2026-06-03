@@ -721,8 +721,8 @@ void MappingTraits<offloadtest::SBTEntry>::mapping(IO &I,
   }
 }
 
-void MappingTraits<offloadtest::ShaderBindingTable>::mapping(
-    IO &I, offloadtest::ShaderBindingTable &S) {
+void MappingTraits<offloadtest::ShaderBindingTableDesc>::mapping(
+    IO &I, offloadtest::ShaderBindingTableDesc &S) {
   I.mapRequired("RayGen", S.RayGen);
   I.mapOptional("Miss", S.Miss);
   I.mapOptional("HitGroup", S.HitGroup);

@@ -20,6 +20,7 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/RenderPass.h"
+#include "API/ShaderBindingTable.h"
 #include "API/Texture.h"
 
 #include "Support/Pipeline.h"
@@ -82,6 +83,21 @@ struct ShaderContainer {
   std::string EntryPoint;
   const llvm::MemoryBuffer *Shader;
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
+};
+
+struct RayTracingShader {
+  Stages Stage;
+  std::string EntryPoint;
+};
+
+struct RayTracingPipelineCreateDesc {
+  // All RT shaders are compiled into a single DXIL library; every entry in
+  // `Shaders` references this same blob via the backend's library-loading
+  // path.
+  const llvm::MemoryBuffer *Library = nullptr;
+  llvm::SmallVector<RayTracingShader> Shaders;
+  llvm::SmallVector<HitGroup> HitGroups;
+  RayTracingPipelineConfig Config;
 };
 
 struct TraditionalRasterPipelineCreateDesc {
@@ -258,6 +274,14 @@ public:
   createMeshShaderRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   const RayTracingPipelineCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &PSO,
+                           const ShaderBindingTableDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;

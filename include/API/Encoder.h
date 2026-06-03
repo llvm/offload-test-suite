@@ -25,6 +25,7 @@ class Buffer;
 class Texture;
 class PipelineState;
 class AccelerationStructure;
+class ShaderBindingTable;
 struct BLASBuildRequest;
 struct TLASBuildRequest;
 
@@ -110,6 +111,17 @@ public:
   /// Metal). A barrier covering AS-build writes is implicitly emitted before
   /// any subsequent command that reads from the freshly-built structures.
   virtual llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) = 0;
+
+  /// Trace rays from a RayTracing pipeline. \p PSO must have been created via
+  /// Device::createPipelineRT and \p SBT via Device::createShaderBindingTable
+  /// on that same PSO. \p Width, \p Height, \p Depth are the dispatch
+  /// dimensions passed through to the backend's DispatchRays equivalent
+  /// (D3D12 DispatchRays, Vulkan vkCmdTraceRaysKHR, Metal compute dispatch
+  /// after metal_irconverter lowering).
+  virtual llvm::Error dispatchRays(const PipelineState &PSO,
+                                   const ShaderBindingTable &SBT,
+                                   uint32_t Width, uint32_t Height,
+                                   uint32_t Depth) = 0;
 };
 
 struct Viewport {

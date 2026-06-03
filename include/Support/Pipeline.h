@@ -593,7 +593,7 @@ struct SBTEntry {
   llvm::SmallVector<uint8_t> LocalRootData;
 };
 
-struct ShaderBindingTable {
+struct ShaderBindingTableDesc {
   SBTEntry RayGen;
   llvm::SmallVector<SBTEntry> Miss;
   llvm::SmallVector<SBTEntry> HitGroup;
@@ -615,7 +615,7 @@ struct Pipeline {
   AccelerationStructureDescs AccelStructs;
   std::optional<RayTracingPipelineConfig> RTConfig;
   llvm::SmallVector<HitGroup> HitGroups;
-  std::optional<ShaderBindingTable> SBT;
+  std::optional<ShaderBindingTableDesc> SBT;
 
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)
@@ -826,8 +826,8 @@ template <> struct MappingTraits<offloadtest::SBTEntry> {
   static void mapping(IO &I, offloadtest::SBTEntry &E);
 };
 
-template <> struct MappingTraits<offloadtest::ShaderBindingTable> {
-  static void mapping(IO &I, offloadtest::ShaderBindingTable &S);
+template <> struct MappingTraits<offloadtest::ShaderBindingTableDesc> {
+  static void mapping(IO &I, offloadtest::ShaderBindingTableDesc &S);
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
