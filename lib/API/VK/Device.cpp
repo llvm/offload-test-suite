@@ -1071,14 +1071,16 @@ public:
 
 class VulkanRenderEncoder : public offloadtest::RenderEncoder {
   VulkanCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
 
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
   bool ScissorSet = false;
 
 public:
-  VulkanRenderEncoder(VulkanCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {
+  VulkanRenderEncoder(VulkanCommandBuffer &CB,
+                      const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB), Desc(Desc) {
     pushDebugGroup("RenderEncoder");
   }
   VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
@@ -1179,6 +1181,29 @@ public:
 
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
+
+    for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+      CB.addImageTransition(
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                      /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                      /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+    }
+
+    if (Desc.DepthStencil) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+      CB.addImageTransition(
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                              /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                              /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+    }
+
     popDebugGroup();
   }
 };
@@ -1265,6 +1290,31 @@ VulkanCommandBuffer::createRenderEncoder(
     ClearValues.push_back(CV);
   }
 
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    this->addImageTransition(
+        this->PendingSrcAccess, /*SrcAccessMask*/
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+        Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+        Tex.Image, Tex.FullRange);
+
+    Tex.IsInUndefinedLayout = false;
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    this->addImageTransition(
+        this->PendingSrcAccess, /*SrcAccessMask*/
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+        Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+        Tex.Image, Tex.FullRange);
+
+    Tex.IsInUndefinedLayout = false;
+  }
   VkFramebufferCreateInfo FBCI = {};
   FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   FBCI.renderPass = VKPass.Handle;
@@ -1294,9 +1344,11 @@ VulkanCommandBuffer::createRenderEncoder(
   BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
   BeginInfo.pClearValues = ClearValues.data();
 
+  this->flushBarrier();
+
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  return std::make_unique<VulkanRenderEncoder>(*this);
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
 }
 
 class VulkanDevice : public offloadtest::Device {
