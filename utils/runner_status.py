@@ -62,6 +62,7 @@ def api_get(path):
         ["gh", "api", "-H", "Accept: application/vnd.github+json", path],
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return json.loads(result.stdout)
