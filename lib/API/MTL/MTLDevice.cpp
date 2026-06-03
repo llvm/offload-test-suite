@@ -2031,9 +2031,8 @@ public:
           PipelineDesc.setShader(Shader.Stage, std::move(SC));
         }
 
-        auto PipelineStateOrErr =
-            createPipelineAsMsPs("Mesh Shader Pipeline State", Bindings,
-                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+        auto PipelineStateOrErr = createMeshShaderRasterPipeline(
+            "Mesh Shader Pipeline State", Bindings, PipelineDesc);
         if (!PipelineStateOrErr)
           return PipelineStateOrErr.takeError();
         IS.Pipeline = std::move(*PipelineStateOrErr);
