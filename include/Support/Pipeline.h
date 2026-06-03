@@ -295,6 +295,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
+    case ResourceKind::AccelerationStructure:
       return false;
     }
     llvm_unreachable("All cases handled");
