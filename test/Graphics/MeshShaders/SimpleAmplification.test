@@ -44,7 +44,7 @@ void main(
         color *= float4(1.0, 0.0, 0.0, 1.0);
     } else if (groupThreadID == 1) {
         position = float4(0.25, -0.25, 0.0, 1.0);
-        color *= float4(0.0, 2.0, 0.0, 1.0);
+        color *= float4(0.0, 2.0, 0.0, 1.0); // Note 2.0 on the green component.
     } else /*if (groupThreadID == 2)*/ {
         position = float4(-0.25, -0.25, 0.0, 1.0);
         color *= float4(0.0, 0.0, 1.0, 1.0);
