@@ -3864,10 +3864,13 @@ llvm::Error offloadtest::initializeVulkanDevices(
   }
   const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
       queryInstanceExtensions(nullptr);
-  if (Config.EnableDebugLayer) {
+  bool DebugUtilsEnabled = false;
+  if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
     const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
+    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName)) {
       EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
+      DebugUtilsEnabled = true;
+    }
   }
 
   CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
@@ -3880,11 +3883,8 @@ llvm::Error offloadtest::initializeVulkanDevices(
                              "Failed to create Vulkan instance"))
     return Err;
 
-#ifndef NDEBUG
-  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
-#else
-  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
-#endif
+  VkDebugUtilsMessengerEXT DebugMessenger =
+      DebugUtilsEnabled ? registerDebugUtilCallback(Instance) : VK_NULL_HANDLE;
 
   const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
       std::make_shared<VulkanInstance>(Instance, DebugMessenger);
