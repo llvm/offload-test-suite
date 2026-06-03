@@ -1865,34 +1865,34 @@ public:
         return Err;
     }
 
-    MTL::MeshRenderPipelineDescriptor *Desc =
+    MTL::MeshRenderPipelineDescriptor *MSPDesc =
         MTL::MeshRenderPipelineDescriptor::alloc()->init();
-    auto DescScope = llvm::scope_exit([&] { Desc->release(); });
+    auto DescScope = llvm::scope_exit([&] { MSPDesc->release(); });
 
-    Desc->setMeshFunction(MSFn.get());
+    MSPDesc->setMeshFunction(MSFn.get());
     if (ASFn)
-      Desc->setObjectFunction(ASFn.get());
+      MSPDesc->setObjectFunction(ASFn.get());
     if (PSFn)
-      Desc->setFragmentFunction(PSFn.get());
+      MSPDesc->setFragmentFunction(PSFn.get());
 
     for (size_t I = 0; I < Desc.RTFormats.size(); ++I) {
       MTL::RenderPipelineColorAttachmentDescriptor *RPCA =
           MTL::RenderPipelineColorAttachmentDescriptor::alloc()->init();
       RPCA->setPixelFormat(getMetalPixelFormat(Desc.RTFormats[I]));
-      Desc->colorAttachments()->setObject(RPCA, I);
+      MSPDesc->colorAttachments()->setObject(RPCA, I);
       RPCA->release();
     }
 
     if (Desc.DSFormat) {
       const MTL::PixelFormat DSPixelFormat =
           getMetalPixelFormat(*Desc.DSFormat);
-      Desc->setDepthAttachmentPixelFormat(DSPixelFormat);
+      MSPDesc->setDepthAttachmentPixelFormat(DSPixelFormat);
       if (isStencilFormat(*Desc.DSFormat))
-        Desc->setStencilAttachmentPixelFormat(DSPixelFormat);
+        MSPDesc->setStencilAttachmentPixelFormat(DSPixelFormat);
     }
 
     MTL::RenderPipelineState *PSO = Device->newRenderPipelineState(
-        Desc, MTL::PipelineOptionNone, /*reflection=*/nullptr, &Error);
+        MSPDesc, MTL::PipelineOptionNone, /*reflection=*/nullptr, &Error);
     if (Error)
       return toError(Error);
 
