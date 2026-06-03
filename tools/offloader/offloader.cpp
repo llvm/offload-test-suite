@@ -113,26 +113,35 @@ static int run() {
   YIn >> PipelineDesc;
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
-  // Read in the shaders. Ray tracing PSOs compile every entry point into a
-  // single library blob, so one input file backs all Shaders[] entries; the
-  // backend reads the blob from Shaders.front() and uses the rest only for
-  // their (Stage, Entry) metadata. Other pipelines expect one object file per
-  // stage.
-  if (PipelineDesc.isRayTracing()) {
-    if (InputShader.size() != 1)
-      ExitOnErr(createStringError(
-          std::errc::invalid_argument,
-          "RayTracing pipeline expects a single shader library, %d provided",
-          InputShader.size()));
-    PipelineDesc.Shaders.front().Shader = readFile(InputShader[0]);
+  // Read in the shaders.
+  //
+  // RayTracing pipelines compile every entry point — raygen, miss,
+  // closest-hit, any-hit, intersection, callable — into a single DXIL
+  // library via `dxc -T lib_6_x` / `clang-dxc -T lib_6_x`. That's the
+  // shape every real DXR app ships: D3D12's CreateStateObject requires a
+  // DXIL-library subobject anyway, and the driver fuses entry points
+  // across the whole library at link time. So when an RT pipeline is
+  // paired with a single input file, fan that one blob across every
+  // Shaders[] entry rather than asking the test author to duplicate the
+  // path N times on the offloader command line.
+  if (PipelineDesc.isRayTracing() && InputShader.size() == 1 &&
+      PipelineDesc.Shaders.size() > 1) {
+    std::unique_ptr<MemoryBuffer> Lib = readFile(InputShader[0]);
+    const StringRef LibBytes = Lib->getBuffer();
+    const StringRef LibName = Lib->getBufferIdentifier();
+    for (size_t I = 0; I < PipelineDesc.Shaders.size(); ++I)
+      PipelineDesc.Shaders[I].Shader =
+          MemoryBuffer::getMemBufferCopy(LibBytes, LibName);
   } else {
+    for (size_t I = 0; I < InputShader.size(); ++I) {
+      PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+    }
+
     if (InputShader.size() != PipelineDesc.Shaders.size())
       ExitOnErr(createStringError(
           std::errc::invalid_argument,
           "Pipeline description expects %d shader(s) %d provided",
           PipelineDesc.Shaders.size(), InputShader.size()));
-    for (size_t I = 0; I < InputShader.size(); ++I)
-      PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
   }
 
   // Try to guess the API by reading the shader binary.
