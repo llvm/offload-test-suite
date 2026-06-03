@@ -223,6 +223,18 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_TASK_BIT_EXT;
   case Stages::Mesh:
     return VK_SHADER_STAGE_MESH_BIT_EXT;
+  case Stages::RayGeneration:
+    return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+  case Stages::Miss:
+    return VK_SHADER_STAGE_MISS_BIT_KHR;
+  case Stages::ClosestHit:
+    return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+  case Stages::AnyHit:
+    return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+  case Stages::Intersection:
+    return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+  case Stages::Callable:
+    return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
   }
   llvm_unreachable("All cases handled");
 }
@@ -4280,6 +4292,9 @@ public:
       if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
+    } else if (P.isRayTracing()) {
+      return llvm::createStringError(
+          "RayTracing pipeline not yet supported on Vulkan");
     } else {
       return llvm::createStringError(
           "Pipeline was neither Compute nor Traditional Raster");

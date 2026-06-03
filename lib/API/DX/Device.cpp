@@ -2879,6 +2879,9 @@ public:
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
+    } else if (P.isRayTracing()) {
+      return llvm::createStringError(
+          "RayTracing pipeline not yet supported on DirectX");
     } else {
       return llvm::createStringError("Pipeline was neither Compute nor Raster");
     }
