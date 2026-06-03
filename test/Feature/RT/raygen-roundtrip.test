@@ -1,0 +1,113 @@
+#--- source.hlsl
+
+struct Payload {
+  uint Value;
+};
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[shader("raygeneration")]
+void RayGen() {
+  Payload P;
+  P.Value = 0;
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
+  Output[DispatchRaysIndex().x] = P.Value;
+}
+
+[shader("miss")]
+void MissMain(inout Payload P) {
+  P.Value = 0xDEAD;
+}
+
+[shader("closesthit")]
+void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Value = 0xBEEF;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: RayGen
+  - Stage: Miss
+    Entry: MissMain
+  - Stage: ClosestHit
+    Entry: ClosestHitMain
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 48879 ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+RayTracingPipelineConfig:
+  MaxTraceRecursionDepth: 1
+  MaxPayloadSizeInBytes: 4
+  MaxAttributeSizeInBytes: 8
+HitGroups:
+  - Name: TriangleHitGroup
+    Type: Triangles
+    ClosestHit: ClosestHitMain
+ShaderBindingTable:
+  RayGen:
+    ShaderName: RayGen
+  Miss:
+    - ShaderName: MissMain
+  HitGroup:
+    - ShaderName: TriangleHitGroup
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+DispatchParameters:
+  DispatchGroupCount: [ 1, 1, 1 ]
+Results:
+  - Result: RaygenRoundtrip
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: raytracing-pipeline
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# XFAIL: *
+
+# RUN: split-file %s %t
+# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

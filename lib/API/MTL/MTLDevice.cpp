@@ -148,6 +148,13 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageAmplification;
   case Stages::Mesh:
     return IRShaderStageMesh;
+  case Stages::RayGeneration:
+  case Stages::Miss:
+  case Stages::ClosestHit:
+  case Stages::AnyHit:
+  case Stages::Intersection:
+  case Stages::Callable:
+    llvm_unreachable("RayTracing shaders take a different path on Metal.");
   }
   llvm_unreachable("All cases handled");
 }
@@ -2370,6 +2377,9 @@ public:
 
       if (auto Err = createGraphicsCommands(P, IS))
         return Err;
+    } else if (P.isRayTracing()) {
+      return llvm::createStringError(
+          "RayTracing pipeline not yet supported on Metal");
     }
 
     auto SubmitResult = GraphicsQueue.submit(std::move(IS.CB));

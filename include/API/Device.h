@@ -121,6 +121,12 @@ struct TraditionalRasterPipelineCreateDesc {
     case Stages::Compute:
     case Stages::Amplification:
     case Stages::Mesh:
+    case Stages::RayGeneration:
+    case Stages::Miss:
+    case Stages::ClosestHit:
+    case Stages::AnyHit:
+    case Stages::Intersection:
+    case Stages::Callable:
       llvm_unreachable("Not a traditional raster pipeline stage.");
     }
   }
@@ -151,6 +157,12 @@ struct MeshShaderRasterPipelineCreateDesc {
     case Stages::Domain:
     case Stages::Geometry:
     case Stages::Compute:
+    case Stages::RayGeneration:
+    case Stages::Miss:
+    case Stages::ClosestHit:
+    case Stages::AnyHit:
+    case Stages::Intersection:
+    case Stages::Callable:
       llvm_unreachable("Not a mesh raster pipeline stage.");
     }
   }
