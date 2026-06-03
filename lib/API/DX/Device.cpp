@@ -360,11 +360,13 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+  D3D12_RESOURCE_STATES PreferredState;
 
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
-           BufferCreateDesc Desc, size_t SizeInBytes)
+           BufferCreateDesc Desc, size_t SizeInBytes,
+           D3D12_RESOURCE_STATES PreferredState)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
-        Desc(Desc), SizeInBytes(SizeInBytes) {}
+        Desc(Desc), SizeInBytes(SizeInBytes), PreferredState(PreferredState) {}
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
@@ -389,6 +391,7 @@ public:
 class DXTexture : public offloadtest::Texture {
 public:
   ComPtr<ID3D12Resource> Resource;
+  D3D12_RESOURCE_STATES PreferredState;
 
   // TODO:
   // Ideally SRVs/UAVs would also live here, but they currently require a
@@ -404,9 +407,9 @@ public:
   TextureCreateDesc Desc;
 
   DXTexture(ComPtr<ID3D12Resource> Resource, llvm::StringRef Name,
-            TextureCreateDesc Desc)
-      : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource), Name(Name),
-        Desc(Desc) {}
+            TextureCreateDesc Desc, D3D12_RESOURCE_STATES PreferredState)
+      : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource),
+        PreferredState(PreferredState), Name(Name), Desc(Desc) {}
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
@@ -577,6 +580,7 @@ public:
   ComPtr<ID3D12GraphicsCommandListX> CmdList;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
+  llvm::SmallVector<D3D12_RESOURCE_BARRIER> PendingTransitions;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12DeviceX> Device) {
@@ -602,14 +606,34 @@ public:
   }
 
   void addPendingUAVBarrier() { PendingUAVBarrier = true; }
+  void addResourceTransition(ID3D12Resource *pResource,
+                             D3D12_RESOURCE_STATES StateBefore,
+                             D3D12_RESOURCE_STATES StateAfter) {
+
+    for (auto &Trans : PendingTransitions) {
+      if (Trans.Transition.pResource == pResource) {
+        assert(StateBefore == Trans.Transition.StateAfter);
+        Trans.Transition.StateAfter = StateAfter;
+        return;
+      }
+    }
+
+    PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
+        pResource, StateBefore, StateAfter));
+  }
 
   void flushBarrier() {
-    if (!PendingUAVBarrier)
-      return;
-    const D3D12_RESOURCE_BARRIER Barrier =
-        CD3DX12_RESOURCE_BARRIER::UAV(nullptr);
-    CmdList->ResourceBarrier(1, &Barrier);
-    PendingUAVBarrier = false;
+
+    if (PendingUAVBarrier) {
+      PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::UAV(nullptr));
+      PendingUAVBarrier = false;
+    }
+
+    if (!PendingTransitions.empty()) {
+      CmdList->ResourceBarrier(PendingTransitions.size(),
+                               PendingTransitions.data());
+      PendingTransitions.clear();
+    }
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
@@ -710,10 +734,28 @@ public:
                                  size_t Size) override {
     auto &DXSrc = static_cast<DXBuffer &>(Src);
     auto &DXDst = static_cast<DXBuffer &>(Dst);
-    addUAVBarrier();
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_SOURCE);
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(DXDst.Buffer.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
+    CB.flushBarrier();
+
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     CB.CmdList->CopyBufferRegion(DXDst.Buffer.Get(), DstOffset,
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(DXSrc.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_SOURCE,
+                               DXSrc.PreferredState);
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(DXDst.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_DEST,
+                               DXDst.PreferredState);
+
     return llvm::Error::success();
   }
 
@@ -741,6 +783,7 @@ public:
 
 class DXRenderEncoder : public offloadtest::RenderEncoder {
   DXCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
 
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
@@ -765,8 +808,9 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
   }
 
 public:
-  DXRenderEncoder(DXCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::DirectX), CB(CB) {}
+  DXRenderEncoder(DXCommandBuffer &CB,
+                  const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::DirectX), CB(CB), Desc(Desc) {}
   DXRenderEncoder(const DXRenderEncoder &CB) = delete;
   DXRenderEncoder(DXRenderEncoder &&CB) = delete;
   DXRenderEncoder &operator=(DXRenderEncoder &CB) = delete;
@@ -840,7 +884,25 @@ public:
     return llvm::Error::success();
   }
 
-  void endEncodingImpl() override { popDebugGroup(); }
+  void endEncodingImpl() override {
+    // State transitions
+    for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+      auto &DXTex = llvm::cast<DXTexture>(*Tex);
+      if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
+        CB.addResourceTransition(DXTex.Resource.Get(),
+                                 D3D12_RESOURCE_STATE_RENDER_TARGET,
+                                 DXTex.PreferredState);
+    }
+    if (Desc.DepthStencil) {
+      auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
+      if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+        CB.addResourceTransition(DXTex.Resource.Get(),
+                                 D3D12_RESOURCE_STATE_DEPTH_WRITE,
+                                 DXTex.PreferredState);
+    }
+
+    popDebugGroup();
+  }
 };
 
 llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
@@ -901,6 +963,22 @@ DXCommandBuffer::createRenderEncoder(
     DSVHandle = DXDS.DSVHandle;
   }
 
+  // State transitions
+  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+    auto &DXTex = llvm::cast<DXTexture>(*Tex);
+    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
+      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
+                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
+  }
+  if (Desc.DepthStencil) {
+    auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
+    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
+                                  D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  }
+
+  this->flushBarrier();
+
   CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
                               RTVHandles.data(),
                               /*RTsSingleHandleToDescriptorRange=*/false,
@@ -941,7 +1019,7 @@ DXCommandBuffer::createRenderEncoder(
     }
   }
 
-  auto Enc = std::make_unique<DXRenderEncoder>(*this);
+  auto Enc = std::make_unique<DXRenderEncoder>(*this, Desc);
   Enc->pushDebugGroup("RenderEncoder");
   return Enc;
 }
@@ -1383,7 +1461,8 @@ public:
                         "Failed to create buffer."))
       return Err;
 
-    return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes);
+    return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes,
+                                      InitialState);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -1426,11 +1505,11 @@ public:
       ClearValuePtr = &ClearValue;
     }
 
-    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
-    if ((Desc.Usage & TextureUsage::RenderTarget) != 0)
-      InitialState = D3D12_RESOURCE_STATE_RENDER_TARGET;
-    else if ((Desc.Usage & TextureUsage::DepthStencil) != 0)
-      InitialState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+    D3D12_RESOURCE_STATES InitialState =
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    if ((Desc.Usage & TextureUsage::Storage))
+      InitialState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
     ComPtr<ID3D12Resource> DeviceTexture;
     if (auto Err = HR::toError(Device->CreateCommittedResource(
@@ -1440,7 +1519,8 @@ public:
                                "Failed to create texture."))
       return Err;
 
-    auto Tex = std::make_unique<DXTexture>(DeviceTexture, Name, Desc);
+    auto Tex =
+        std::make_unique<DXTexture>(DeviceTexture, Name, Desc, InitialState);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
