@@ -6,12 +6,13 @@ struct Payload {
     float3 color;
 };
 
+groupshared Payload gs_payload;
+
 [numthreads(1, 1, 1)]
 void main()
 {
-    Payload payload = (Payload)0;
-    payload.color = float3(1.0, 0.5, 1.0);
-    DispatchMesh(1, 1, 1, payload);
+    gs_payload.color = float3(1.0, 0.5, 1.0);
+    DispatchMesh(1, 1, 1, gs_payload);
 }
 
 #--- mesh.hlsl
@@ -42,7 +43,7 @@ void main(
         color *= float4(1.0, 0.0, 0.0, 1.0);
     } else if (groupThreadID == 1) {
         position = float4(0.25, -0.25, 0.0, 1.0);
-        color *= float4(0.0, 1.0, 0.0, 1.0);
+        color *= float4(0.0, 2.0, 0.0, 1.0);
     } else /*if (groupThreadID == 2)*/ {
         position = float4(-0.25, -0.25, 0.0, 1.0);
         color *= float4(0.0, 0.0, 1.0, 1.0);
@@ -106,4 +107,4 @@ REQUIRES: MeshShader
 # RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
 # RUN: %dxc_target -T ps_6_5 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-amplification.o %t-mesh.o %t-pixel.o -r Output -o %t/Output.png
-# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/MeshShaders/SimpleAmplification.png -rules %t/rules.yaml
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/SimpleTriangle.png -rules %t/rules.yaml
