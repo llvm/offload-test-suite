@@ -182,6 +182,12 @@ def setDeviceFeatures(config, device, compiler):
         setWaveSizeFeaturesDirectX(config, device)
         if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
             config.available_features.add("acceleration-structure")
+            # PSO-based raytracing (state objects, DispatchRays, SBT) needs
+            # the same Tier1.0+ surface as inline RT on D3D12. The DX
+            # backend implementation lands in a follow-up PR; until then
+            # tests that REQUIRE this feature will still see the per-
+            # backend not-yet-supported error and XFAIL where applicable.
+            config.available_features.add("raytracing-pipeline")
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
@@ -216,6 +222,13 @@ def setDeviceFeatures(config, device, compiler):
 
         if "VK_KHR_acceleration_structure" in config.available_features:
             config.available_features.add("acceleration-structure")
+
+        # Same plumbing-vs-impl split as DX: the lit detection tracks the
+        # device capability, the backend implementation lands later. The
+        # framework's RT bring-up returns a not-yet-supported error from
+        # the Vulkan backend until PR 2 wires up VK_KHR_ray_tracing_pipeline.
+        if "VK_KHR_ray_tracing_pipeline" in config.available_features:
+            config.available_features.add("raytracing-pipeline")
 
 
 offloader_args = []
@@ -261,16 +274,36 @@ if config.offloadtest_test_clang:
                 "%dxc_target", FindTool("clang-dxc"), extra_args=ExtraCompilerArgs
             )
         )
+        tools.append(
+            ToolSubst(
+                "%dxc_target_lib", FindTool("clang-dxc"), extra_args=ExtraCompilerArgs
+            )
+        )
     else:
         tools.append(
             ToolSubst(
                 "%dxc_target", FindTool("clang-dxc"), extra_args=ExtraCompilerArgs
             )
         )
+        tools.append(
+            ToolSubst(
+                "%dxc_target_lib", FindTool("clang-dxc"), extra_args=ExtraCompilerArgs
+            )
+        )
     HLSLCompiler = "Clang"
 else:
     tools.append(
         ToolSubst("%dxc_target", config.offloadtest_dxc, extra_args=ExtraCompilerArgs)
+    )
+    # %dxc_target_lib is the DXIL-library variant: tests pass `-T lib_6_5`
+    # (or similar) to emit a library with multiple entry points, which is
+    # the input shape for RT pipeline state object creation. The compiler
+    # binary is the same; the separate substitution names the intent so
+    # the test reader can tell at a glance.
+    tools.append(
+        ToolSubst(
+            "%dxc_target_lib", config.offloadtest_dxc, extra_args=ExtraCompilerArgs
+        )
     )
     HLSLCompiler = "DXC"
 
