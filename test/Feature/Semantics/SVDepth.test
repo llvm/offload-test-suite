@@ -105,7 +105,9 @@ Bindings:
       Offset: 0
       Name: POSITION
   RenderTarget: RenderTarget
-  DepthBuffer: DepthTarget
+  DepthBuffer:
+    Name: DepthTarget
+    Format: D32Float
 DescriptorSets: []
 Results:
   - Result: DepthValues

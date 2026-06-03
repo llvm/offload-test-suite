@@ -108,25 +108,27 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
 }
 
 llvm::Expected<std::unique_ptr<Texture>>
-offloadtest::createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf) {
-  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
-  if (!TexFmtOrErr)
-    return TexFmtOrErr.takeError();
-  if (*TexFmtOrErr != Format::D32Float)
+offloadtest::createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf,
+                                            Format Fmt) {
+  if (!isDepthFormat(Fmt))
     return llvm::createStringError(
         std::errc::invalid_argument,
-        "Depth buffer binding requires DataFormat::Depth32 with 1 channel.");
+        "Depth buffer binding requires a depth format; got '%s'.",
+        getFormatName(Fmt).data());
 
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
   Desc.Usage = TextureUsage::DepthStencil;
-  Desc.Fmt = *TexFmtOrErr;
+  Desc.Fmt = Fmt;
   Desc.Width = Buf.OutputProps.Width;
   Desc.Height = Buf.OutputProps.Height;
   Desc.MipLevels = 1;
   Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
 
-  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
+  // The CPUBuffer here is the readback destination, not a format source. Skip
+  // the toFormat-based consistency check (which can't express depth-stencil
+  // formats) and validate only that the readback buffer is sized to match.
+  if (auto Err = validateTextureDimsMatchCPUBuffer(Desc, Buf))
     return Err;
 
   return Dev.createTexture("DepthBuffer", Desc);

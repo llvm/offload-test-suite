@@ -166,10 +166,10 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
     }
 
     if (!P.Bindings.DepthBuffer.empty()) {
-      P.Bindings.DepthBufferPtr = P.getBuffer(P.Bindings.DepthBuffer);
-      if (!P.Bindings.DepthBufferPtr)
-        I.setError(Twine("Referenced depth buffer ") + P.Bindings.DepthBuffer +
-                   " not found!");
+      P.Bindings.DepthBuffer.Ptr = P.getBuffer(P.Bindings.DepthBuffer.Name);
+      if (!P.Bindings.DepthBuffer.Ptr)
+        I.setError(Twine("Referenced depth buffer ") +
+                   P.Bindings.DepthBuffer.Name + " not found!");
     }
 
     // Resolve buffer name references in acceleration structure descriptions.
@@ -484,6 +484,12 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
   I.mapOptional("PatchControlPoints", B.PatchControlPoints);
+}
+
+void MappingTraits<offloadtest::IOBindings::DepthBufferBinding>::mapping(
+    IO &I, offloadtest::IOBindings::DepthBufferBinding &B) {
+  I.mapRequired("Name", B.Name);
+  I.mapOptional("Format", B.Fmt, offloadtest::Format::D32Float);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(

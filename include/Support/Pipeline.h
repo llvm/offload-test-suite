@@ -421,10 +421,20 @@ struct IOBindings {
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
 
-  // Optional depth target bound for readback; when unset, backends create an
-  // internal depth target.
-  std::string DepthBuffer;
-  CPUBuffer *DepthBufferPtr = nullptr;
+  // Optional depth target bound for readback; when Name is empty, backends
+  // create an internal depth target. Fmt names the GPU texture format
+  // explicitly so the YAML doesn't have to round-trip through
+  // (DataFormat + Channels) and so depth-stencil formats like D32FloatS8Uint
+  // can be selected directly. Ptr is resolved after parsing to the named
+  // CPUBuffer entry that owns the readback storage.
+  struct DepthBufferBinding {
+    std::string Name;
+    Format Fmt = Format::D32Float;
+    CPUBuffer *Ptr = nullptr;
+
+    bool empty() const { return Name.empty(); }
+  };
+  DepthBufferBinding DepthBuffer;
 
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
@@ -671,6 +681,10 @@ template <> struct MappingTraits<offloadtest::VulkanBinding> {
 
 template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::IOBindings::DepthBufferBinding> {
+  static void mapping(IO &I, offloadtest::IOBindings::DepthBufferBinding &B);
 };
 
 template <> struct MappingTraits<offloadtest::PushConstantValue> {

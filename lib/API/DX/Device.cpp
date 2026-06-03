@@ -2289,8 +2289,8 @@ public:
       Device->GetCopyableFootprints(&DSDesc, 0u, 1u, 0u, &DSPlaced, &DSNumRows,
                                     &DSRowSizeInBytes, &DSTotalBytes);
 
-      P.Bindings.DepthBufferPtr->copyFromTexture(DSMapped,
-                                                 DSPlaced.Footprint.RowPitch);
+      P.Bindings.DepthBuffer.Ptr->copyFromTexture(DSMapped,
+                                                  DSPlaced.Footprint.RowPitch);
       DSReadback.Buffer->Unmap(0, nullptr);
     }
 
@@ -2330,9 +2330,10 @@ public:
     // If the test bound a CPU-readable depth buffer, create the depth target
     // from it and allocate a readback buffer. Otherwise fall back to the
     // default depth target (which is not read back).
-    if (P.Bindings.DepthBufferPtr) {
-      const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
-      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
+    if (P.Bindings.DepthBuffer.Ptr) {
+      const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
+      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(
+          *this, DSBuf, P.Bindings.DepthBuffer.Fmt);
       if (!TexOrErr)
         return TexOrErr.takeError();
       IS.DepthStencil = std::move(*TexOrErr);
@@ -2444,7 +2445,7 @@ public:
               D3D12_RESOURCE_STATE_COPY_SOURCE);
       IS.CB->CmdList->ResourceBarrier(1, &DSBarrier);
 
-      const CPUBuffer &DSBuf = *P.Bindings.DepthBufferPtr;
+      const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
       // CopyTextureRegion footprint format must match the source resource
       // (D32_FLOAT), not the shader-visible R32_FLOAT SRV cast.
       const DXGI_FORMAT DSResFormat = DS.Resource->GetDesc().Format;

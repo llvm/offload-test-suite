@@ -1371,7 +1371,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    if (P.Bindings.DepthBufferPtr)
+    if (P.Bindings.DepthBuffer.Ptr)
       return llvm::createStringError(
           std::errc::not_supported,
           "Bindings.DepthBuffer is not yet supported on the Metal backend.");
