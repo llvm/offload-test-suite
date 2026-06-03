@@ -729,6 +729,12 @@ public:
   // ID3D12Device5 entry point and helper allocators.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
 
+  llvm::Error dispatchRays(const PipelineState &, const ShaderBindingTable &,
+                           uint32_t, uint32_t, uint32_t) override {
+    return llvm::createStringError(
+        "RayTracing dispatchRays not yet supported on DirectX");
+  }
+
   void endEncodingImpl() override { popDebugGroup(); }
 };
 
@@ -1374,6 +1380,20 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef, const BindingsDesc &,
+                   const RayTracingPipelineCreateDesc &) override {
+    return llvm::createStringError(
+        "RayTracing pipeline state not yet supported on DirectX");
+  }
+
+  llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &,
+                           const ShaderBindingTableDesc &) override {
+    return llvm::createStringError(
+        "RayTracing shader binding table not yet supported on DirectX");
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>

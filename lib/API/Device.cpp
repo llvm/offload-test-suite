@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "API/Encoder.h"
 #include "API/FormatConversion.h"
+#include "API/ShaderBindingTable.h"
 
 #include "Config.h"
 
@@ -38,6 +39,56 @@ Texture::~Texture() {}
 RenderPass::~RenderPass() {}
 
 AccelerationStructure::~AccelerationStructure() {}
+
+ShaderBindingTable::~ShaderBindingTable() {}
+
+static uint32_t alignUp(uint32_t Value, uint32_t Alignment) {
+  return (Value + Alignment - 1) & ~(Alignment - 1);
+}
+
+SBTLayout offloadtest::computeSBTLayout(uint32_t IdentifierSize,
+                                        uint32_t RecordAlign,
+                                        uint32_t BaseAlign,
+                                        const ShaderBindingTableDesc &Desc) {
+  auto StrideFor = [&](llvm::ArrayRef<SBTEntry> Entries) {
+    size_t MaxLocal = 0;
+    for (const auto &E : Entries)
+      MaxLocal = std::max<size_t>(MaxLocal, E.LocalRootData.size());
+    return alignUp(IdentifierSize + static_cast<uint32_t>(MaxLocal),
+                   RecordAlign);
+  };
+  auto RegionSize = [&](uint32_t Count, uint32_t Stride) {
+    return Count == 0 ? 0u : alignUp(Count * Stride, BaseAlign);
+  };
+
+  // Vulkan dispatches exactly one raygen per vkCmdTraceRaysKHR and D3D12's
+  // RayGenerationShaderRecord field is a single record; the descriptor only
+  // carries one raygen entry.
+  const llvm::ArrayRef<SBTEntry> RGEntries(&Desc.RayGen, 1);
+
+  SBTLayout L;
+  L.RayGen.Stride = StrideFor(RGEntries);
+  L.RayGen.Size = RegionSize(1, L.RayGen.Stride);
+  L.RayGen.Offset = 0;
+
+  L.Miss.Stride = StrideFor(Desc.Miss);
+  L.Miss.Size =
+      RegionSize(static_cast<uint32_t>(Desc.Miss.size()), L.Miss.Stride);
+  L.Miss.Offset = L.RayGen.Offset + L.RayGen.Size;
+
+  L.HitGroup.Stride = StrideFor(Desc.HitGroup);
+  L.HitGroup.Size = RegionSize(static_cast<uint32_t>(Desc.HitGroup.size()),
+                               L.HitGroup.Stride);
+  L.HitGroup.Offset = L.Miss.Offset + L.Miss.Size;
+
+  L.Callable.Stride = StrideFor(Desc.Callable);
+  L.Callable.Size = RegionSize(static_cast<uint32_t>(Desc.Callable.size()),
+                               L.Callable.Stride);
+  L.Callable.Offset = L.HitGroup.Offset + L.HitGroup.Size;
+
+  L.TotalSize = L.Callable.Offset + L.Callable.Size;
+  return L;
+}
 
 Device::~Device() {}
 
