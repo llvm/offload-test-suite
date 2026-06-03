@@ -1,5 +1,6 @@
-// Test that has a really simple passthrough amplification shader that halfs the
-// green color component on all triangle vertices.
+// Test that has a really simple passthrough amplification shader that sets a
+// color in the payload to verify that the amplification shader is running and
+// the payload is passed correctly to the mesh shader.
 
 #--- amplification.hlsl
 struct Payload {
@@ -68,6 +69,7 @@ float4 main(PSInput input) : SV_TARGET
 {
     return input.color;
 }
+
 #--- pipeline.yaml
 ---
 Shaders:
