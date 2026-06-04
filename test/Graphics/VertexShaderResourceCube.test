@@ -11,27 +11,21 @@
 // The vertex shader reads every per-draw transform from a bound resource, to
 // exercise vertex-stage resource access:
 //   * the camera view-projection from a constant buffer (b0)
-//   * the local-to-world matrix from a StructuredBuffer (t1)  -- faces 0..2
-//   * the SAME local-to-world matrix from a ByteAddressBuffer (t2) -- faces 3..5
+//   * the local-to-world matrix from a StructuredBuffer (t0)  -- faces 0..2
+//   * the SAME local-to-world matrix from a ByteAddressBuffer (t1) -- faces 3..5
 //
 // Both buffers hold identical bytes, so the two halves of the cube line up
 // exactly -- a built-in self check: if either buffer-read path is wrong, that
 // half is transformed differently and the silhouette splits.
-//
-// Note the register numbering (b0, t1, t2): HLSL packs b#/t#/u# into a single
-// Vulkan binding-number space, so the numbers must be unique across types or the
-// SPIR-V bindings collide and resources bind to the wrong slots. The matrices are
-// stored row-major in the buffers, so they are declared row_major (cbuffer and
-// StructuredBuffer matrices default to column-major in DXC).
 
-cbuffer Camera : register(b0)
+[[vk::binding(0)]] cbuffer Camera : register(b0)
 {
     row_major float4x4 worldToClip;
 };
 
 struct WorldMat { row_major float4x4 m; };
-StructuredBuffer<WorldMat> WorldSB : register(t1);
-ByteAddressBuffer          WorldBAB : register(t2);
+[[vk::binding(1)]] StructuredBuffer<WorldMat> WorldSB : register(t0);
+[[vk::binding(2)]] ByteAddressBuffer          WorldBAB : register(t1);
 
 struct VSOutput
 {
@@ -168,14 +162,14 @@ DescriptorSets:
     - Name: WorldSB
       Kind: StructuredBuffer
       DirectXBinding:
-        Register: 1
+        Register: 0
         Space: 0
       VulkanBinding:
         Binding: 1
     - Name: WorldBAB
       Kind: ByteAddressBuffer
       DirectXBinding:
-        Register: 2
+        Register: 1
         Space: 0
       VulkanBinding:
         Binding: 2
