@@ -2214,6 +2214,13 @@ public:
         Tri.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
       }
 
+      // Scratch sizing depends on whether Transform3x4 will be present at
+      // build time; signal that with any non-NULL sentinel here — the DXR
+      // spec lets the value be NULL or non-NULL for the prebuild query and
+      // does not dereference it.
+      if (T.Transform)
+        Tri.Transform3x4 = 1;
+
       GeomDescs.push_back(GD);
     }
     return queryBLASPrebuildSize(GeomDescs);
@@ -2907,6 +2914,19 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
                 IB->Buffer->GetGPUVirtualAddress() + T.IndexBufferOffset;
             GD.Triangles.IndexCount = T.IndexCount;
             GD.Triangles.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
+          }
+          if (T.Transform) {
+            const BufferCreateDesc XformDesc{MemoryLocation::CpuToGpu,
+                                             BufferUsage::Storage};
+            auto XformOrErr = offloadtest::createBufferWithData(
+                *Dev, "AS-Geom-Transform", XformDesc, T.Transform->data(),
+                T.Transform->size() * sizeof(float), nullptr, nullptr);
+            if (!XformOrErr)
+              return XformOrErr.takeError();
+            auto *XformBuf = llvm::cast<DXBuffer>(XformOrErr->get());
+            GD.Triangles.Transform3x4 =
+                XformBuf->Buffer->GetGPUVirtualAddress();
+            CB.KeepAliveOwned.push_back(std::move(*XformOrErr));
           }
           GeomDescs.push_back(GD);
         }
