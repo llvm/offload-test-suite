@@ -1,0 +1,86 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // A single AABB at [-1, 1]^3. The candidate path fires once per AABB
+  // hit; the shader supplies a fixed hit-t of 1.5 (inside the box on the
+  // -z ray below). After the loop CommittedStatus() must report
+  // COMMITTED_PROCEDURAL_PRIMITIVE_HIT (2).
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 2);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_NONE> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  while (Q.Proceed()) {
+    if (Q.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE)
+      Q.CommitProceduralPrimitiveHit(1.5);
+  }
+  Output[0] = (uint)Q.CommittedStatus();
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: AABBs
+    Format: Float32
+    Stride: 24
+    # D3D12_RAYTRACING_AABB / VkAabbPositionsKHR layout:
+    # { MinX, MinY, MinZ, MaxX, MaxY, MaxZ }, one box per stride.
+    Data: [ -1.0, -1.0, -1.0, 1.0, 1.0, 1.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    # COMMITTED_PROCEDURAL_PRIMITIVE_HIT = 2
+    Data: [ 2 ]
+AccelerationStructures:
+  BLAS:
+    - Name: AABBBLAS
+      AABBs:
+        - AABBBuffer: AABBs
+          AABBCount: 1
+          AABBStride: 24
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: AABBBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: AABBProcedural
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
