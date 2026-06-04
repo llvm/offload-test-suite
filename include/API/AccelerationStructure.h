@@ -17,7 +17,9 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Error.h"
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <variant>
 
 namespace offloadtest {
@@ -39,6 +41,10 @@ struct TriangleGeometryDesc {
   uint32_t IndexCount = 0;
   IndexFormat IdxFormat = IndexFormat::Uint32;
   bool Opaque = true;
+  // Optional BLAS-side bake transform, 3x4 row-major. Vertices are
+  // multiplied by this before AS build, so the resulting BLAS reports
+  // transformed positions via Object* shader queries.
+  std::optional<std::array<float, 12>> Transform;
 };
 
 struct AABBGeometryDesc {
