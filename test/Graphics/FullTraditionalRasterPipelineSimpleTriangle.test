@@ -232,8 +232,10 @@ DescriptorSets: []
 #--- end
 
 # Metal has no native geometry shader stage, and its tessellation maps HS/DS
-# onto a compute kernel + post-tessellation vertex function that isn't wired up
-# here. Skip this backend entirely.
+# onto a compute kernel + post-tessellation vertex function. Metal Shader
+# Converter can emulate both stages
+# (https://developer.apple.com/metal/shader-converter/#emulating-geometry), so
+# this is technically possible, but that emulation path isn't wired up here.
 # UNSUPPORTED: Metal
 
 # XFAIL: Clang
