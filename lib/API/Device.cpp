@@ -200,6 +200,8 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
       memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
       Inst.InstanceID = I.InstanceID;
       Inst.InstanceMask = I.InstanceMask;
+      Inst.InstanceContributionToHitGroupIndex =
+          I.InstanceContributionToHitGroupIndex;
       Inst.BLAS = It->second;
       Req.Instances.push_back(Inst);
     }

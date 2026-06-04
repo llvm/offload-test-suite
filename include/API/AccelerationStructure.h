@@ -55,6 +55,8 @@ struct AccelerationStructureInstance {
   float Transform[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
   uint32_t InstanceID = 0;
   uint8_t InstanceMask = 0xFF;
+  // 24-bit; high bits are truncated by the backend to match DXR's bitfield.
+  uint32_t InstanceContributionToHitGroupIndex = 0;
   AccelerationStructure *BLAS = nullptr;
 };
 
