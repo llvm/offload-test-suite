@@ -515,6 +515,7 @@ struct InstanceDesc {
   float Transform[12] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
   uint32_t InstanceID = 0;
   uint8_t InstanceMask = 0xFF;
+  uint32_t InstanceContributionToHitGroupIndex = 0;
 };
 
 struct TLASDesc {
