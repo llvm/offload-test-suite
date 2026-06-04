@@ -1,0 +1,167 @@
+# Tessellates one isoline into four segments and captures each generated vertex's
+# along-line coordinate from the domain shader into a UAV; the five evenly spaced
+# values prove the isoline domain ran and subdivided the line as expected.
+
+#--- vertex.hlsl
+struct VSOutput
+{
+    float4 position : POSITION;
+};
+
+VSOutput main(float4 position : POSITION)
+{
+    VSOutput o;
+    o.position = position;
+    return o;
+}
+
+#--- hull.hlsl
+struct HSInput
+{
+    float4 position : POSITION;
+};
+
+struct HSOutput
+{
+    float4 position : POSITION;
+};
+
+struct HSPatchConstants
+{
+    float Edges[2] : SV_TessFactor; // isoline: two factors, no SV_InsideTessFactor
+};
+
+HSPatchConstants PatchConstants(InputPatch<HSInput, 2> patch,
+                                uint patchID : SV_PrimitiveID)
+{
+    HSPatchConstants c;
+    c.Edges[0] = 1.0; // number of lines
+    c.Edges[1] = 4.0; // segments per line
+    return c;
+}
+
+[domain("isoline")]
+[partitioning("integer")]
+[outputtopology("line")]
+[outputcontrolpoints(2)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 2> patch,
+              uint i : SV_OutputControlPointID)
+{
+    HSOutput o;
+    o.position = patch[i].position;
+    return o;
+}
+
+#--- domain.hlsl
+struct DSInput
+{
+    float4 position : POSITION;
+};
+
+struct DSPatchConstants
+{
+    float Edges[2] : SV_TessFactor;
+};
+
+struct DSOutput
+{
+    float4 position : SV_POSITION;
+};
+
+// Record each generated vertex's along-line coordinate (SV_DomainLocation.x) into
+// a UAV slot keyed by its segment. Writing is idempotent (overwrite, not add), so
+// the result does not depend on how many times the domain shader runs -- the
+// per-vertex invocation count is implementation-defined. 
+// With four segments the vertices land at u = {0, 0.25, 0.5, 0.75, 1}.
+RWStructuredBuffer<float> Captured : register(u0);
+
+[domain("isoline")]
+DSOutput main(DSPatchConstants constants,
+              float2 uv : SV_DomainLocation,
+              const OutputPatch<DSInput, 2> patch)
+{
+    uint idx = (uint)round(uv.x * 4.0);
+    Captured[idx] = uv.x;
+
+    DSOutput o;
+    o.position = lerp(patch[0].position, patch[1].position, uv.x);
+    return o;
+}
+
+#--- pixel.hlsl
+float4 main(float4 position : SV_POSITION) : SV_TARGET
+{
+    return float4(1.0, 1.0, 1.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 8 # float2 position
+    Data: [ -1.0, 0.0,
+             1.0, 0.0 ]
+  # One float per along-line segment position (segments + 1 = 5).
+  - Name: Captured
+    Format: Float32
+    Stride: 4
+    FillSize: 20 # 5 floats
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 render target (required for a raster pipeline)
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  Topology: PatchList
+  PatchControlPoints: 2
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: Captured
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# UNSUPPORTED: Metal
+
+# Clang's HLSL frontend does not support tessellation. 
+# WARP orders the isoline tessellation factors opposite to real 
+# D3D12 hardware and Vulkan, so it tessellates this into one-segment 
+# lines and fails the check.
+# XFAIL: Clang || WARP
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o   %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o %t/domain.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o | FileCheck %s
+
+# One isoline of four segments -> five evenly spaced along-line coordinates.
+# CHECK: Name: Captured
+# CHECK: Data: [ 0, 0.25, 0.5, 0.75, 1 ]
