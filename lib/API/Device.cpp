@@ -248,6 +248,7 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
       Inst.InstanceMask = I.InstanceMask;
       Inst.InstanceContributionToHitGroupIndex =
           I.InstanceContributionToHitGroupIndex;
+      Inst.Flags = I.Flags;
       Inst.BLAS = It->second;
       Req.Instances.push_back(Inst);
     }

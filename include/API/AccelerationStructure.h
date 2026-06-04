@@ -14,6 +14,7 @@
 #include "API/Resources.h"
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Error.h"
 
@@ -21,6 +22,18 @@
 #include <variant>
 
 namespace offloadtest {
+LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
+
+// Bit values match D3D12_RAYTRACING_INSTANCE_FLAGS, VkGeometryInstanceFlagBits-
+// KHR, and MTLAccelerationStructureInstanceOptions so backends can pass the
+// value through unchanged.
+enum AccelerationStructureInstanceFlags : uint32_t {
+  InstanceFlagNone = 0,
+  TriangleCullDisable = 1 << 0,
+  TriangleFrontCounterclockwise = 1 << 1,
+  ForceOpaque = 1 << 2,
+  ForceNonOpaque = 1 << 3,
+};
 
 struct AccelerationStructureSizes {
   uint64_t ResultDataMaxSizeInBytes = 0;
@@ -57,6 +70,7 @@ struct AccelerationStructureInstance {
   uint8_t InstanceMask = 0xFF;
   // 24-bit; high bits are truncated by the backend to match DXR's bitfield.
   uint32_t InstanceContributionToHitGroupIndex = 0;
+  AccelerationStructureInstanceFlags Flags = InstanceFlagNone;
   AccelerationStructure *BLAS = nullptr;
 };
 
@@ -177,5 +191,10 @@ protected:
 };
 
 } // namespace offloadtest
+
+namespace llvm {
+LLVM_DECLARE_ENUM_AS_BITMASK(::offloadtest::AccelerationStructureInstanceFlags,
+                             ::offloadtest::ForceNonOpaque);
+} // namespace llvm
 
 #endif // OFFLOADTEST_API_ACCELERATIONSTRUCTURE_H

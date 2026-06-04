@@ -13,6 +13,7 @@
 #ifndef OFFLOADTEST_SUPPORT_PIPELINE_H
 #define OFFLOADTEST_SUPPORT_PIPELINE_H
 
+#include "API/AccelerationStructure.h"
 #include "API/Enums.h"
 #include "API/Resources.h"
 #include "llvm/ADT/SmallVector.h"
@@ -554,6 +555,7 @@ struct InstanceDesc {
   uint32_t InstanceID = 0;
   uint8_t InstanceMask = 0xFF;
   uint32_t InstanceContributionToHitGroupIndex = 0;
+  AccelerationStructureInstanceFlags Flags = InstanceFlagNone;
 };
 
 struct TLASDesc {
@@ -828,6 +830,19 @@ template <> struct MappingTraits<offloadtest::SBTEntry> {
 
 template <> struct MappingTraits<offloadtest::ShaderBindingTableDesc> {
   static void mapping(IO &I, offloadtest::ShaderBindingTableDesc &S);
+};
+
+template <>
+struct ScalarBitSetTraits<offloadtest::AccelerationStructureInstanceFlags> {
+  static void bitset(IO &I,
+                     offloadtest::AccelerationStructureInstanceFlags &V) {
+#define BIT_CASE(Val) I.bitSetCase(V, #Val, offloadtest::Val)
+    BIT_CASE(TriangleCullDisable);
+    BIT_CASE(TriangleFrontCounterclockwise);
+    BIT_CASE(ForceOpaque);
+    BIT_CASE(ForceNonOpaque);
+#undef BIT_CASE
+  }
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::Rule> {

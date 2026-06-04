@@ -4818,7 +4818,9 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         NI.mask = Inst.InstanceMask;
         NI.instanceShaderBindingTableRecordOffset =
             Inst.InstanceContributionToHitGroupIndex & 0xFFFFFFu;
-        NI.flags = 0;
+        // Bits in AccelerationStructureInstanceFlags match
+        // VkGeometryInstanceFlagBitsKHR by design.
+        NI.flags = static_cast<VkGeometryInstanceFlagsKHR>(Inst.Flags);
         auto *BLASPtr = llvm::cast<VulkanAccelerationStructure>(Inst.BLAS);
         NI.accelerationStructureReference = BLASPtr->getDeviceAddress();
         Native.push_back(NI);
