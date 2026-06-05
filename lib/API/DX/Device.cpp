@@ -241,16 +241,13 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
   const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
-  if (B.OutputProps.MipLevels != 1)
-    return llvm::createStringError(std::errc::not_supported,
-                                   "Multiple mip levels are not yet supported "
-                                   "for DirectX textures.");
-
   const DXGI_FORMAT Format =
       R.isTexture() ? getDXFormat(B.Format, B.Channels) : DXGI_FORMAT_UNKNOWN;
   const uint32_t Width =
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
+  const uint16_t MipLevels =
+      R.isTexture() ? static_cast<uint16_t>(B.OutputProps.MipLevels) : 1;
   D3D12_TEXTURE_LAYOUT Layout;
 
   if (R.isTexture())
@@ -265,8 +262,8 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_FLAGS Flags =
       R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                       : D3D12_RESOURCE_FLAG_NONE;
-  const D3D12_RESOURCE_DESC ResDesc = {Dimension, 0,      Width,  Height, 1, 1,
-                                       Format,    {1, 0}, Layout, Flags};
+  const D3D12_RESOURCE_DESC ResDesc = {
+      Dimension, 0, Width, Height, 1, MipLevels, Format, {1, 0}, Layout, Flags};
   return ResDesc;
 }
 
@@ -294,7 +291,8 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
     break;
   case ResourceKind::Texture2D:
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    Desc.Texture2D = D3D12_TEX2D_SRV{0, 1, 0, 0};
+    Desc.Texture2D = D3D12_TEX2D_SRV{
+        0, static_cast<UINT>(R.BufferPtr->OutputProps.MipLevels), 0, 0.0f};
     break;
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
@@ -1559,21 +1557,31 @@ public:
     return std::make_unique<DXRenderPass>(Desc);
   }
 
-  void addResourceUploadCommands(Resource &R, InvocationState &IS,
-                                 ComPtr<ID3D12Resource> Destination,
-                                 ComPtr<ID3D12Resource> Source) {
+  void addResourceUploadCommands(
+      Resource &R, InvocationState &IS, ComPtr<ID3D12Resource> Destination,
+      ComPtr<ID3D12Resource> Source,
+      llvm::ArrayRef<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> MipFootprints = {}) {
     addUploadBeginBarrier(IS, Destination);
     if (R.isTexture()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-          0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                 getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                 B.OutputProps.Height, 1,
-                 B.OutputProps.Width * B.getElementSize())};
-      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
-      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
+      if (!MipFootprints.empty()) {
+        for (uint32_t Mip = 0; Mip < MipFootprints.size(); ++Mip) {
+          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), Mip);
+          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(),
+                                                     MipFootprints[Mip]);
+          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+        }
+      } else {
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+            0, CD3DX12_SUBRESOURCE_FOOTPRINT(
+                   getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+                   B.OutputProps.Height, 1,
+                   B.OutputProps.Width * B.getElementSize())};
+        const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
+        const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
 
-      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+        IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      }
     } else
       IS.CB->CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
                                        R.size());
@@ -1655,8 +1663,24 @@ public:
     const D3D12_RESOURCE_DESC ResDesc = *ResDescOrErr;
     const D3D12_HEAP_PROPERTIES UploadHeapProp =
         CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
-    const D3D12_RESOURCE_DESC UploadResDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(R.size());
+
+    const bool IsMipMappedTexture =
+        R.isTexture() && R.BufferPtr->OutputProps.MipLevels > 1;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> MipFootprints;
+    llvm::SmallVector<UINT> MipNumRows;
+    llvm::SmallVector<UINT64> MipRowSizes;
+    UINT64 MipTotalBytes = 0;
+    if (IsMipMappedTexture) {
+      const uint32_t MipLevels = R.BufferPtr->OutputProps.MipLevels;
+      MipFootprints.resize(MipLevels);
+      MipNumRows.resize(MipLevels);
+      MipRowSizes.resize(MipLevels);
+      Device->GetCopyableFootprints(&ResDesc, 0, MipLevels, 0,
+                                    MipFootprints.data(), MipNumRows.data(),
+                                    MipRowSizes.data(), &MipTotalBytes);
+    }
+    const D3D12_RESOURCE_DESC UploadResDesc = CD3DX12_RESOURCE_DESC::Buffer(
+        IsMipMappedTexture ? MipTotalBytes : R.size());
 
     uint32_t RegOffset = 0;
 
@@ -1708,14 +1732,33 @@ public:
       // Upload data initialization
       void *ResDataPtr = nullptr;
       if (SUCCEEDED(UploadBuffer->Map(0, NULL, &ResDataPtr))) {
-        memcpy(ResDataPtr, ResData.get(), R.size());
+        if (IsMipMappedTexture) {
+          // Source CPU data is tightly packed for all mips (per docs).
+          // Destination upload buffer has D3D12-aligned per-mip layout from
+          // GetCopyableFootprints; copy each mip row-by-row applying the
+          // possibly-padded row pitch.
+          const uint8_t *Src = reinterpret_cast<const uint8_t *>(ResData.get());
+          uint8_t *Dst = static_cast<uint8_t *>(ResDataPtr);
+          for (uint32_t Mip = 0; Mip < MipFootprints.size(); ++Mip) {
+            const auto &FP = MipFootprints[Mip];
+            const size_t TightRowBytes = static_cast<size_t>(MipRowSizes[Mip]);
+            const size_t PaddedRowPitch =
+                static_cast<size_t>(FP.Footprint.RowPitch);
+            for (UINT Row = 0; Row < MipNumRows[Mip]; ++Row)
+              memcpy(Dst + FP.Offset + Row * PaddedRowPitch,
+                     Src + Row * TightRowBytes, TightRowBytes);
+            Src += TightRowBytes * MipNumRows[Mip];
+          }
+        } else {
+          memcpy(ResDataPtr, ResData.get(), R.size());
+        }
         UploadBuffer->Unmap(0, nullptr);
       } else {
         return llvm::createStringError(std::errc::io_error,
                                        "Failed to map SRV upload buffer.");
       }
 
-      addResourceUploadCommands(R, IS, Buffer, UploadBuffer);
+      addResourceUploadCommands(R, IS, Buffer, UploadBuffer, MipFootprints);
 
       Bundle.emplace_back(UploadBuffer, Buffer, nullptr, Heap);
       RegOffset++;
