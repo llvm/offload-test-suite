@@ -377,22 +377,34 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       - name: Install lit and pyyaml
-        # The test runner needs only lit + pyyaml; no source checkout is
-        # available so we can't pip install -r requirements.txt. Keep
-        # this list in sync with OffloadTest/test/requirements.txt.
+        # The test runner needs only lit + pyyaml. We install from the
+        # requirements.txt that the build job ships inside the install
+        # prefix (test/CMakeLists.txt installs it under the
+        # offload-test-suite component). That keeps a single source of
+        # truth for pinned versions and avoids drift between this step
+        # and OffloadTest/test/requirements.txt.
+        #
         # We invoke pip explicitly here instead of relying on
         # setup-python's `pip-install:` input, which was observed to
         # silently no-op on our self-hosted Windows runners.
-        # The runner service account (NetworkService) can't write to
-        # the system site-packages under C:\Program Files\Python313, so
-        # pip falls back to a --user install. That puts lit.exe in
-        # %APPDATA%\Python\Python313\Scripts\ which is NOT on PATH.
-        # We compute that dir from sysconfig and prepend it to PATH for
-        # all subsequent steps so `lit` resolves correctly.
+        #
+        # When pip can't write to the interpreter's system site-packages
+        # (e.g. on self-hosted Windows runners running as NetworkService,
+        # which can't write under C:\Program Files\Python313; or on a
+        # POSIX host where the system Python is owned by root), pip
+        # falls back to a --user install. The console script wrappers
+        # (e.g. lit.exe on Windows, lit on POSIX) then land in the
+        # user-scheme scripts dir, which is NOT on PATH by default:
+        #   - Windows: %APPDATA%\Python\PythonXY\Scripts
+        #   - Linux:   ~/.local/bin
+        #   - macOS:   ~/Library/Python/X.Y/bin
+        # We compute that dir from sysconfig (portable across all three
+        # platforms) and prepend it to PATH for all subsequent steps so
+        # `lit` resolves correctly regardless of where pip put it.
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install lit pyyaml
+          python -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
           user_scripts=$(python -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
           echo "User scripts dir: $user_scripts"
           echo "$user_scripts" >> "$GITHUB_PATH"
