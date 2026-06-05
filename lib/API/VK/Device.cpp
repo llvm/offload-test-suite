@@ -1522,6 +1522,21 @@ public:
     const uint64_t DriverInfoSz =
         strnlen(DriverProps.driverInfo, VK_MAX_DRIVER_INFO_SIZE);
     DriverVersion = std::string(DriverProps.driverInfo, DriverInfoSz);
+
+    // 0x8086 is the Vendor ID for Intel
+    if (Props.vendorID == 0x8086) {
+      const IntelGpuEra Era =
+          getIntelGpuEra(static_cast<uint16_t>(Props.deviceID));
+      if (Era == IntelGpuEra::Gen7_to_10)
+        GPUGeneration = "Intel Gen7-10";
+      else if (Era == IntelGpuEra::Gen11_to_14_and_Xe)
+        GPUGeneration = "Intel Gen11-14/Xe";
+      else
+        GPUGeneration = "Intel Unknown";
+    } else {
+      // We don't have a need yet to identify other GPU vendors.
+      GPUGeneration = "Unknown";
+    }
 #if defined(__APPLE__) && defined(__aarch64__)
     // Apple silicon Macs may have multiple Vulkan drivers sharing one device
     // name. Include the driver name in the description to enable
@@ -4284,6 +4299,7 @@ llvm::Error offloadtest::initializeVulkanDevices(
     return Err;
 
   for (const auto &PDev : PhysicalDevices) {
+
     auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
                                             AvailableInstanceLayers);
     if (!DeviceOrErr) {

@@ -25,6 +25,9 @@ llvm::Error findAndValidateRenderPassTextureSize(const RenderPassBeginDesc &,
                                                  uint32_t *OutWidth,
                                                  uint32_t *OutHeight);
 
+enum class IntelGpuEra { UnknownOrLegacy, Gen7_to_10, Gen11_to_14_and_Xe };
+
+IntelGpuEra getIntelGpuEra(uint16_t deviceId);
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_UTIL_H

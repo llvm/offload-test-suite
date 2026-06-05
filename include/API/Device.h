@@ -191,6 +191,7 @@ protected:
   std::string Description;
   std::string DriverName;
   std::string DriverVersion;
+  std::string GPUGeneration;
 
 public:
   virtual const Capabilities &getCapabilities() = 0;
