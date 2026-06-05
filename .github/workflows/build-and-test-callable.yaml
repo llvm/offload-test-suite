@@ -211,7 +211,7 @@ jobs:
       # track hit rate / cache size across runs and diagnose cold-cache
       # blowups on new builders. Always-runs so we still get stats on
       # build failure.
-      - name: sccache stats
+      - name: Dump sccache Stats
         if: always()
         shell: bash
         run: sccache --show-stats || true
