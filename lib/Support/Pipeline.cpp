@@ -102,21 +102,25 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
         }
 
         // MipLevels only applies to textures; non-texture resources ignore
-        // the field in the backends. Skip resources whose buffer pointer
-        // didn't resolve - a missing-buffer error was already raised above.
-        if (R.isTexture() && R.BufferPtr) {
-          const int Mips = R.BufferPtr->OutputProps.MipLevels;
-          if (Mips < 1)
-            I.setError(Twine("Resource ") + R.Name +
-                       ": MipLevels must be >= 1. Auto-generated mip chains "
-                       "(MipLevels = 0) are not supported by the test "
-                       "framework; per-mip CPU data must be provided.");
-          else if (Mips > 1 &&
-                   getDescriptorKind(R.Kind) != DescriptorKind::SRV)
-            I.setError(Twine("Resource ") + R.Name +
-                       ": Multiple mip levels are only supported for "
-                       "read-only SRV textures.");
-        }
+        // the field in the backends.
+        if (!R.isTexture())
+          continue;
+
+        // Prevent a null deref if buffer resolution above failed; the missing
+        // buffer was already reported.
+        if (!R.BufferPtr)
+          continue;
+
+        const int Mips = R.BufferPtr->OutputProps.MipLevels;
+        if (Mips < 1)
+          I.setError(Twine("Resource '") + R.Name +
+                     "': MipLevels must be >= 1. Auto-generated mip chains "
+                     "(MipLevels = 0) are not supported by the test "
+                     "framework; per-mip CPU data must be provided");
+        else if (Mips > 1 && getDescriptorKind(R.Kind) != DescriptorKind::SRV)
+          I.setError(Twine("Resource '") + R.Name +
+                     "': multiple mip levels are only supported for "
+                     "read-only SRV textures");
       }
     }
 
