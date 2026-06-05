@@ -1,0 +1,62 @@
+#--- source.hlsl
+RWByteAddressBuffer gBuf0 : register(u0);
+RWByteAddressBuffer gBuf1 : register(u1);
+
+struct ResHolder { RWByteAddressBuffer buf; };
+
+[numthreads(1,1,1)]
+void main(uint tid : SV_GroupThreadID) {
+    ResHolder h;
+    h.buf = gBuf0;
+    if (tid)
+      h.buf = gBuf1;
+    h.buf.Store(0, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: gBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedGBuf0
+    Format: Int32
+    Stride: 4
+    Data: [42]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf0
+    Expected: ExpectedGBuf0
+DescriptorSets:
+  - Resources:
+    - Name: gBuf0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gBuf1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# This case is genuinely ambiguous (`h.buf` may be either `gBuf0` or `gBuf1`
+# depending on `tid`). DXC correctly rejects with "local resource not
+# guaranteed to map to unique global resource". Clang silently accepts —
+# `-Whlsl-explicit-binding` does not fire across struct member access.
+# XFAIL: *
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
