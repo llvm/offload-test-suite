@@ -103,6 +103,9 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
       }
     }
 
+    if (auto Err = P.validateResources())
+      I.setError(llvm::toString(std::move(Err)));
+
     // Initialize result Buffers
     for (auto &R : P.Results) {
       R.ActualPtr = P.getBuffer(R.Actual);
@@ -765,5 +768,36 @@ llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
     break;
   }
 
+  return llvm::Error::success();
+}
+
+llvm::Error offloadtest::Pipeline::validateResources() {
+  for (const auto &D : Sets) {
+    for (const auto &R : D.Resources) {
+      // MipLevels only applies to textures. Non-texture resources (buffers,
+      // samplers, constant buffers, etc.) ignore the field in the backends, so
+      // skip them here to avoid misleading errors. Also skip resources whose
+      // buffer pointer didn't resolve - a missing-buffer error was already
+      // raised above.
+      if (!R.isTexture() || R.BufferPtr == nullptr)
+        continue;
+
+      const int Mips = R.BufferPtr->OutputProps.MipLevels;
+      if (Mips < 1)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Resource '%s': MipLevels must be >= 1. Auto-generated mip "
+            "chains (MipLevels = 0) are not supported by the test framework; "
+            "per-mip CPU data must be provided.",
+            R.Name.c_str());
+
+      if (Mips > 1 && getDescriptorKind(R.Kind) != DescriptorKind::SRV)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Resource '%s': Multiple mip levels are only supported for "
+            "read-only SRV textures.",
+            R.Name.c_str());
+    }
+  }
   return llvm::Error::success();
 }
