@@ -1,0 +1,191 @@
+#--- source.hlsl
+
+cbuffer CB_RM : register(b0) {
+    row_major float2x3 rm;
+};
+
+cbuffer CB_CM : register(b1) {
+    column_major float2x3 cm;
+};
+
+RWBuffer<float> OutRM : register(u0);
+RWBuffer<float> OutCM : register(u1);
+
+// Zero-based row swizzle getters
+float3 row_swizzle_m_rm(int row, row_major float2x3 m) {
+    return row == 0 ? m._m00_m01_m02 : m._m10_m11_m12;
+}
+
+float3 row_swizzle_m_cm(int row, column_major float2x3 m) {
+    return row == 0 ? m._m00_m01_m02 : m._m10_m11_m12;
+}
+
+// Zero-based column swizzle getters
+float2 col_swizzle_m_rm(int col, row_major float2x3 m) {
+    if (col == 0) return m._m00_m10;
+    if (col == 1) return m._m01_m11;
+    return m._m02_m12;
+}
+
+float2 col_swizzle_m_cm(int col, column_major float2x3 m) {
+    if (col == 0) return m._m00_m10;
+    if (col == 1) return m._m01_m11;
+    return m._m02_m12;
+}
+
+// One-based row swizzle getters
+float3 row_swizzle_1_rm(int row, row_major float2x3 m) {
+    return row == 0 ? m._11_12_13 : m._21_22_23;
+}
+
+float3 row_swizzle_1_cm(int row, column_major float2x3 m) {
+    return row == 0 ? m._11_12_13 : m._21_22_23;
+}
+
+[numthreads(1,1,1)]
+void main() {
+    // Row-major output
+    {
+        // Zero-based row swizzles
+        float3 r0 = row_swizzle_m_rm(0, rm);
+        OutRM[0] = r0.x; OutRM[1] = r0.y; OutRM[2] = r0.z;
+        float3 r1 = row_swizzle_m_rm(1, rm);
+        OutRM[3] = r1.x; OutRM[4] = r1.y; OutRM[5] = r1.z;
+
+        // Zero-based column swizzles
+        float2 c0 = col_swizzle_m_rm(0, rm);
+        OutRM[6] = c0.x; OutRM[7] = c0.y;
+        float2 c1 = col_swizzle_m_rm(1, rm);
+        OutRM[8] = c1.x; OutRM[9] = c1.y;
+        float2 c2 = col_swizzle_m_rm(2, rm);
+        OutRM[10] = c2.x; OutRM[11] = c2.y;
+
+        // One-based row swizzles
+        float3 o0 = row_swizzle_1_rm(0, rm);
+        OutRM[12] = o0.x; OutRM[13] = o0.y; OutRM[14] = o0.z;
+        float3 o1 = row_swizzle_1_rm(1, rm);
+        OutRM[15] = o1.x; OutRM[16] = o1.y; OutRM[17] = o1.z;
+    }
+
+    // Column-major output
+    {
+        // Zero-based row swizzles
+        float3 r0 = row_swizzle_m_cm(0, cm);
+        OutCM[0] = r0.x; OutCM[1] = r0.y; OutCM[2] = r0.z;
+        float3 r1 = row_swizzle_m_cm(1, cm);
+        OutCM[3] = r1.x; OutCM[4] = r1.y; OutCM[5] = r1.z;
+
+        // Zero-based column swizzles
+        float2 c0 = col_swizzle_m_cm(0, cm);
+        OutCM[6] = c0.x; OutCM[7] = c0.y;
+        float2 c1 = col_swizzle_m_cm(1, cm);
+        OutCM[8] = c1.x; OutCM[9] = c1.y;
+        float2 c2 = col_swizzle_m_cm(2, cm);
+        OutCM[10] = c2.x; OutCM[11] = c2.y;
+
+        // One-based row swizzles
+        float3 o0 = row_swizzle_1_cm(0, cm);
+        OutCM[12] = o0.x; OutCM[13] = o0.y; OutCM[14] = o0.z;
+        float3 o1 = row_swizzle_1_cm(1, cm);
+        OutCM[15] = o1.x; OutCM[16] = o1.y; OutCM[17] = o1.z;
+    }
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: CB_RM
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 0x5a5a5a5a,
+            4.0, 5.0, 6.0 ]
+  - Name: CB_CM
+    Format: Float32
+    Data: [ 1.0, 2.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            3.0, 4.0, 0x5a5a5a5a, 0x5a5a5a5a,
+            5.0, 6.0 ]
+  - Name: OutRM
+    Format: Float32
+    FillSize: 72
+  - Name: ExpectedOutRM
+    Format: Float32
+    # rm = [[1,2,3],[4,5,6]]
+    # [0..2]  row 0 _m-based: 1,2,3
+    # [3..5]  row 1 _m-based: 4,5,6
+    # [6..7]  col 0 _m-based: 1,4
+    # [8..9]  col 1 _m-based: 2,5
+    # [10..11] col 2 _m-based: 3,6
+    # [12..14] row 0 _1-based: 1,2,3
+    # [15..17] row 1 _1-based: 4,5,6
+    Data: [ 1.0, 2.0, 3.0,  4.0, 5.0, 6.0,
+            1.0, 4.0,  2.0, 5.0,  3.0, 6.0,
+            1.0, 2.0, 3.0,  4.0, 5.0, 6.0 ]
+  - Name: OutCM
+    Format: Float32
+    FillSize: 72
+  - Name: ExpectedOutCM
+    Format: Float32
+    # cm = [[1,3,5],[2,4,6]]
+    # [0..2]  row 0 _m-based: 1,3,5
+    # [3..5]  row 1 _m-based: 2,4,6
+    # [6..7]  col 0 _m-based: 1,2
+    # [8..9]  col 1 _m-based: 3,4
+    # [10..11] col 2 _m-based: 5,6
+    # [12..14] row 0 _1-based: 1,3,5
+    # [15..17] row 1 _1-based: 2,4,6
+    Data: [ 1.0, 3.0, 5.0,  2.0, 4.0, 6.0,
+            1.0, 2.0,  3.0, 4.0,  5.0, 6.0,
+            1.0, 3.0, 5.0,  2.0, 4.0, 6.0 ]
+Results:
+  - Result: OutRM
+    Rule: BufferExact
+    Actual: OutRM
+    Expected: ExpectedOutRM
+  - Result: OutCM
+    Rule: BufferExact
+    Actual: OutCM
+    Expected: ExpectedOutCM
+DescriptorSets:
+  - Resources:
+    - Name: CB_RM
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: CB_CM
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutRM
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutCM
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
+# XFAIL: Vulkan && DXC
+
+# Task: https://github.com/llvm/llvm-project/issues/192262
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
