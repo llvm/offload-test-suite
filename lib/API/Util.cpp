@@ -64,6 +64,8 @@ offloadtest::IntelGpuEra offloadtest::getIntelGpuEra(uint16_t DeviceId) {
   case 0x5600: // Arc Alchemist (Discrete Xe-HPG)
   case 0x4F00: // DG1 (Discrete Xe-LP)
   case 0x0B00: // Ponte Vecchio (Xe-HPC / Data Center Max)
+  case 0xE200: // Battlemage Discrete
+  case 0x6400: // Lunar Lake Integrated
     return IntelGpuEra::Gen11_to_14_and_Xe;
   default:
     return IntelGpuEra::UnknownOrLegacy;
