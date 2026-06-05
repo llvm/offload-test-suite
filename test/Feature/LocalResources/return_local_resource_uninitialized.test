@@ -1,5 +1,4 @@
 #--- source.hlsl
-// Test that returning an uninitialized local resource compiles and runs without crashing.
 RWByteAddressBuffer gBuf : register(u0);
 
 RWByteAddressBuffer GetUninitialized() {
@@ -10,7 +9,7 @@ RWByteAddressBuffer GetUninitialized() {
 [numthreads(1,1,1)]
 void main() {
     RWByteAddressBuffer tmp = GetUninitialized();
-    gBuf.Store(0, 42);
+    tmp.Store(0, 42);
 }
 //--- pipeline.yaml
 ---
@@ -44,8 +43,9 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/192523
-# XFAIL: Clang && Vulkan
+# Test that uses the returned uninitialized handle: DXC errors at codegen
+# (binding-uniqueness wording) and Clang ICEs in DXIL Op Lowering.
+# XFAIL: *
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
