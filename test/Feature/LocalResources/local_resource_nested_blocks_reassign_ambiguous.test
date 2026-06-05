@@ -1,0 +1,61 @@
+#--- source.hlsl
+RWByteAddressBuffer gBuf1 : register(u1);
+RWByteAddressBuffer gBuf2 : register(u2);
+
+uint Pass_NestedBlocks(uint cond, uint idx) {
+    RWByteAddressBuffer buf;
+    {
+        buf = gBuf1;
+        if (cond) {
+            buf = gBuf2;
+        }
+    }
+    buf.Store(idx * 4, 32);
+    return 32;
+}
+
+[numthreads(8,8,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    uint idx = tid.x + tid.y * 8;
+    Pass_NestedBlocks(tid.x & 1, idx);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [32]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Genuinely ambiguous: `buf` may be `gBuf1` or `gBuf2` at the access site
+# depending on `cond`. DXC correctly errors at codegen. Clang only emits
+# the -Whlsl-explicit-binding warning and proceeds.
+# XFAIL: *
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
