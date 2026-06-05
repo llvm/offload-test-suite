@@ -49,7 +49,7 @@ llvm::Error offloadtest::findAndValidateRenderPassTextureSize(
 }
 
 offloadtest::IntelGpuEra offloadtest::getIntelGpuEra(uint16_t DeviceId) {
-  uint16_t FamilyPrefix = DeviceId & 0xFF00;
+  const uint16_t FamilyPrefix = DeviceId & 0xFF00;
   switch (FamilyPrefix) {
   case 0x5900: // Kaby Lake (7th Gen)
   case 0x3E00: // Coffee Lake / Whiskey Lake (8th/9th Gen)
