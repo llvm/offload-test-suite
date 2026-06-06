@@ -46,25 +46,25 @@ Buffers:
     Data: [ 0, 0, 0, 1, 1, 1 ]
   - Name: AndTrueTrueOut
     Format: Int32
-    FillSize: 24
+    Data: [ 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40 ]
   - Name: AndTrueTrueExpectedOut
     Format: Int32
     Data: [ 1, 1, 1, 1, 1, 1 ]
   - Name: AndTrueFalseOut
     Format: Int32
-    FillSize: 24
+    Data: [ 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40 ]
   - Name: AndTrueFalseExpectedOut
     Format: Int32
     Data: [ 0, 0, 0, 0, 0, 0 ]
   - Name: AndTrueMixOut
     Format: Int32
-    FillSize: 24
+    Data: [ 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40 ]
   - Name: AndTrueMixExpectedOut
     Format: Int32
     Data: [ 0, 0, 0, 1, 1, 1 ]
   - Name: AndTrueMix2Out
     Format: Int32
-    FillSize: 24
+    Data: [ 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40, 0x5e40 ]
   - Name: AndTrueMix2ExpectedOut
     Format: Int32
     Data: [ 1, 1, 1, 0, 0, 0 ]
@@ -136,7 +136,7 @@ DescriptorSets:
 
 # Note: Metal does not support boolean matrix types. For
 # Vulkan KosmicKrisp and MoltenVK the output is always False.
-# UNSUPPORTED: Darwin
+# UNSUPPORTED: Metal || KosmicKrisp || MoltenVK
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
