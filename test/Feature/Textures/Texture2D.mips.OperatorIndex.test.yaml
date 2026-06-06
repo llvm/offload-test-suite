@@ -61,8 +61,8 @@ Results:
 #--- end
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
-# XFAIL: DirectX
-
+# DXC+DX (d3d12/warp) now supported; Clang+DX still has a separate issue.
+# XFAIL: Clang && DirectX
 # XFAIL: Metal
 
 # RUN: split-file %s %t
