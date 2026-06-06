@@ -56,7 +56,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/599
-# XFAIL: Intel && Vulkan && Clang
+# XFAIL: Intel-Gen-10 && Vulkan && Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/696
 # XFAIL:Intel-Gen-Current && DirectX && Clang

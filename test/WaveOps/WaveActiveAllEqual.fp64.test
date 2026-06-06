@@ -150,7 +150,7 @@ DescriptorSets:
 # XFAIL: WARP && (x64 || x86) && !AVX512
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/944
-# XFAIL: Intel && DirectX
+# XFAIL: Intel-Gen-10 && DirectX
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang

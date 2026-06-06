@@ -65,7 +65,7 @@ DescriptorSets:
 # REQUIRES: Double, Int64
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/471
-# XFAIL: Vulkan && Intel
+# XFAIL: Vulkan && Intel-Gen-10
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
