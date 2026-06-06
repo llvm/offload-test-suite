@@ -177,6 +177,9 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1084
 # XFAIL: NV && Clang && DirectX
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1293
+# XFAIL: Intel-Gen-Current && Clang && DirectX
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/1102
 # XFAIL: AMD && DirectX
 

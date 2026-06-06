@@ -96,6 +96,8 @@ DescriptorSets:
 # Results: [ 1.1, 2.2, 0, 0, 5.5, 6.6, 0, 0 ]
 # XFAIL: Vulkan && QC && DXC
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/696
+# XFAIL:Intel-Gen-Current && DirectX && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

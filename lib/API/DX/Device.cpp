@@ -1014,6 +1014,26 @@ public:
     Description = std::move(Desc);
     DriverVersion = std::move(DriverVer);
     DriverName = "DirectX";
+
+    DXCoreHardwareID HardwareID;
+    if (SUCCEEDED(Adapter->GetProperty(DXCoreAdapterProperty::HardwareID,
+                                       &HardwareID))) {
+      // 0x8086 is the Vendor ID for Intel
+      if (HardwareID.vendorID == 0x8086) {
+        FamilyPrefix = static_cast<uint16_t>(HardwareID.deviceID) & 0xFF00;
+        const IntelGpuEra Era =
+            getIntelGpuEra(static_cast<uint16_t>(HardwareID.deviceID));
+        if (Era == IntelGpuEra::Gen7_to_10)
+          GPUGeneration = "Intel Gen7-10";
+        else if (Era == IntelGpuEra::Gen11_to_14_and_Xe)
+          GPUGeneration = "Intel Gen11-14/Xe";
+        else
+          GPUGeneration = "Intel Unknown";
+      } else {
+        // We don't have a need yet to identify other GPU vendors.
+        GPUGeneration = "Unknown";
+      }
+    }
   }
   DXDevice(const DXDevice &) = delete;
   DXDevice &operator=(const DXDevice &) = delete;

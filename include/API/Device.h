@@ -191,6 +191,8 @@ protected:
   std::string Description;
   std::string DriverName;
   std::string DriverVersion;
+  std::string GPUGeneration;
+  uint16_t FamilyPrefix = 0;
 
 public:
   virtual const Capabilities &getCapabilities() = 0;
@@ -247,6 +249,8 @@ public:
   llvm::StringRef getDescription() const { return Description; }
   llvm::StringRef getDriverName() const { return DriverName; }
   llvm::StringRef getDriverVersion() const { return DriverVersion; }
+  llvm::StringRef getGPUGeneration() const { return GPUGeneration; }
+  uint16_t getFamilyPrefix() const { return FamilyPrefix; }
 };
 
 llvm::Error
