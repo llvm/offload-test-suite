@@ -37,6 +37,11 @@ enum MeshShaderTier {
 #include "DXFeatures.def"
 };
 
+#define SAMPLER_FEEDBACK_TIER_ENUM(NewCase, Str, Value) NewCase = Value,
+enum SamplerFeedbackTier {
+#include "DXFeatures.def"
+};
+
 #define RAYTRACING_TIER_ENUM(NewCase, Str, Value) NewCase = Value,
 enum RaytracingTier {
 #include "DXFeatures.def"
@@ -54,6 +59,10 @@ template <> struct CapabilityPrinter<directx::RootSignature> {
 
 template <> struct CapabilityPrinter<directx::MeshShaderTier> {
   static std::string toString(const directx::MeshShaderTier &V);
+};
+
+template <> struct CapabilityPrinter<directx::SamplerFeedbackTier> {
+  static std::string toString(const directx::SamplerFeedbackTier &V);
 };
 
 template <> struct CapabilityPrinter<directx::RaytracingTier> {

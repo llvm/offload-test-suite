@@ -444,6 +444,8 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
   I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapOptional("TilesMapped", R.TilesMapped);
   I.mapOptional("IsReserved", R.IsReserved);
+  I.mapOptional("PairedResource", R.PairedResource);
+  I.mapOptional("FeedbackKind", R.FBKind, offloadtest::FeedbackKind::MinMip);
   I.mapRequired("DirectXBinding", R.DXBinding);
   I.mapOptional("VulkanBinding", R.VKBinding);
 }
@@ -546,6 +548,8 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
   I.mapOptional("MipLevels", P.MipLevels, 1);
+  I.mapOptional("MipRegionWidth", P.MipRegionWidth, 4);
+  I.mapOptional("MipRegionHeight", P.MipRegionHeight, 4);
 }
 
 void MappingTraits<offloadtest::dx::RootResource>::mapping(

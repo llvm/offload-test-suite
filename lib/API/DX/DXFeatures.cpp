@@ -43,6 +43,15 @@ static ArrayRef<EnumEntry<MeshShaderTier>> getMeshShaderTiers() {
   return ArrayRef(MeshShaderTierNames);
 }
 
+#define SAMPLER_FEEDBACK_TIER_ENUM(NewCase, Str, Value) {#Str, NewCase},
+static const EnumEntry<directx::SamplerFeedbackTier> SamplerFeedbackTierNames[]{
+#include "DXFeatures.def"
+};
+
+static ArrayRef<EnumEntry<SamplerFeedbackTier>> getSamplerFeedbackTiers() {
+  return ArrayRef(SamplerFeedbackTierNames);
+}
+
 #define RAYTRACING_TIER_ENUM(NewCase, Str, Value) {#Str, NewCase},
 static const EnumEntry<directx::RaytracingTier> RaytracingTierNames[]{
 #include "DXFeatures.def"
@@ -74,6 +83,11 @@ std::string CapabilityPrinter<directx::RootSignature>::toString(
 std::string CapabilityPrinter<directx::MeshShaderTier>::toString(
     const directx::MeshShaderTier &V) {
   return enumEntryToString(getMeshShaderTiers(), V);
+}
+
+std::string CapabilityPrinter<directx::SamplerFeedbackTier>::toString(
+    const directx::SamplerFeedbackTier &V) {
+  return enumEntryToString(getSamplerFeedbackTiers(), V);
 }
 
 std::string CapabilityPrinter<directx::RaytracingTier>::toString(

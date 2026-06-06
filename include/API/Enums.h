@@ -23,6 +23,7 @@ enum class ResourceKind {
   ConstantBuffer,
   Sampler,
   SampledTexture2D,
+  FeedbackTexture2D,
   AccelerationStructure,
 };
 
