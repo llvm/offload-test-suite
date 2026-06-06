@@ -148,6 +148,29 @@ inline MTL::VertexFormat getMetalVertexFormat(Format Fmt) {
   llvm_unreachable("All Format cases handled");
 }
 
+inline MTL::AttributeFormat getMetalPositionFormat(Format Fmt) {
+  switch (Fmt) {
+  case Format::RG32Float:
+    return MTL::AttributeFormatFloat2;
+  case Format::RGB32Float:
+    return MTL::AttributeFormatFloat3;
+  case Format::RGBA32Float:
+    return MTL::AttributeFormatFloat4;
+  default:
+    llvm_unreachable("Format is not position-compatible");
+  }
+}
+
+inline MTL::IndexType getMetalIndexType(IndexFormat Fmt) {
+  switch (Fmt) {
+  case IndexFormat::Uint16:
+    return MTL::IndexTypeUInt16;
+  case IndexFormat::Uint32:
+    return MTL::IndexTypeUInt32;
+  }
+  llvm_unreachable("All IndexFormat cases handled");
+}
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_MTLRESOURCES_H

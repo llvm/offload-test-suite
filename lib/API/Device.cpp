@@ -36,6 +36,8 @@ Texture::~Texture() {}
 
 RenderPass::~RenderPass() {}
 
+AccelerationStructure::~AccelerationStructure() {}
+
 Device::~Device() {}
 
 llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
