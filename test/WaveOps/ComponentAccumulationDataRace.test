@@ -64,6 +64,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/445
 # XFAIL: DirectX && Intel-Gen-10
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1293
+# XFAIL: DirectX && Clang && Intel-Gen-Current
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
