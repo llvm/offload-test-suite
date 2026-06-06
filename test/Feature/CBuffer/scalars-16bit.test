@@ -58,7 +58,7 @@ DescriptorSets:
 # XFAIL: QC && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/932
-# XFAIL:  Intel-Legacy-GPU && DirectX
+# XFAIL: Intel-Gen-10 && DirectX
 
 # REQUIRES: Half, Int16
 

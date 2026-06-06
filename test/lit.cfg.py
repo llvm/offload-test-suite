@@ -114,9 +114,9 @@ def setDeviceFeatures(config, device, compiler):
 
     if "Intel" in device["Description"]:
         if device["GPUGeneration"] == "Intel Gen11-14/Xe":
-            config.available_features.add("Intel-Modern-GPU")
+            config.available_features.add("Intel-Gen-Current")
         if device["GPUGeneration"] == "Intel Gen7-10":
-            config.available_features.add("Intel-Legacy-GPU")
+            config.available_features.add("Intel-Gen-10")
         config.available_features.add("Intel")
         if "UHD Graphics" in device["Description"] and API == "DirectX":
             # When Intel resolves the driver issue and tests XFAILing on the

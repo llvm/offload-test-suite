@@ -1020,6 +1020,7 @@ public:
                                        &HardwareID))) {
       // 0x8086 is the Vendor ID for Intel
       if (HardwareID.vendorID == 0x8086) {
+        FamilyPrefix = static_cast<uint16_t>(HardwareID.deviceID) & 0xFF00;
         const IntelGpuEra Era =
             getIntelGpuEra(static_cast<uint16_t>(HardwareID.deviceID));
         if (Era == IntelGpuEra::Gen7_to_10)

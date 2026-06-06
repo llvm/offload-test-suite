@@ -14,6 +14,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/Format.h"
 #include "llvm/Support/InitLLVM.h"
 
 using namespace llvm;
@@ -50,6 +51,8 @@ int main(int ArgC, char **ArgV) {
       outs() << C;
     }
     outs() << "\"\n";
+    outs() << "  GPUGeneration: " << D->getGPUGeneration() << "\n";
+    outs() << "  FamilyPrefix: " << format_hex(D->getFamilyPrefix(), 6) << "\n";
     outs() << "  Features: \n";
     for (const auto &C : D->getCapabilities()) {
       outs() << "    ";
