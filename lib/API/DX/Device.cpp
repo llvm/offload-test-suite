@@ -976,27 +976,31 @@ private:
     ComPtr<ID3D12Resource> Buffer;
     std::unique_ptr<offloadtest::Buffer> Readback;
     ComPtr<ID3D12Heap> Heap;
+    // Populated for AS resources; mutually exclusive with the
+    // Upload/Buffer/Readback/Heap fields above.
+    DXAccelerationStructure *AS = nullptr;
     ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
                 std::unique_ptr<offloadtest::Buffer> Readback,
                 ComPtr<ID3D12Heap> Heap = nullptr)
         : Upload(Upload), Buffer(Buffer), Readback(std::move(Readback)),
           Heap(Heap) {}
+    explicit ResourceSet(DXAccelerationStructure *AS) : AS(AS) {}
     ResourceSet(const ResourceSet &) = delete;
     ResourceSet(ResourceSet &&A)
         : Upload(A.Upload), Buffer(A.Buffer), Readback(std::move(A.Readback)),
-          Heap(A.Heap) {}
+          Heap(A.Heap), AS(A.AS) {}
     ResourceSet &operator=(const ResourceSet &) = delete;
     ResourceSet &operator=(ResourceSet &&A) {
       Upload = A.Upload;
       Buffer = A.Buffer;
       Readback = std::move(A.Readback);
       Heap = A.Heap;
+      AS = A.AS;
       return *this;
     }
   };
 
-  // ResourceBundle will contain one ResourceSet for a singular resource
-  // or multiple ResourceSets for resource array.
+  // ResourceBundle holds one ResourceSet per array element (singular = 1).
   using ResourceBundle = llvm::SmallVector<ResourceSet>;
   using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
 
@@ -2166,13 +2170,20 @@ public:
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto CreateBuffer =
-        [&IS,
+        [&P, &IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
-      // Acceleration structures are created separately; descriptor binding for
-      // AS resources is wired up in the per-table binding loop below.
+      // OutAS layout from buildPipelineAccelerationStructures: BLASes
+      // first, then TLASes — both in P.AccelStructs declaration order.
       if (R.isAccelerationStructure()) {
-        Resources.push_back(std::make_pair(&R, ResourceBundle{}));
+        assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+        assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+        const size_t TLASIdx = R.TLASPtr - &P.AccelStructs.TLAS[0];
+        const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
+        ResourceBundle Bundle;
+        Bundle.emplace_back(
+            llvm::cast<DXAccelerationStructure>(IS.AccelStructs[ASIdx].get()));
+        Resources.push_back(std::make_pair(&R, std::move(Bundle)));
         return llvm::Error::success();
       }
       switch (getDescriptorKind(R.Kind)) {
@@ -2219,15 +2230,7 @@ public:
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     for (auto &T : IS.DescTables) {
       for (auto &R : T.Resources) {
-        if (R.first->isAccelerationStructure()) {
-          assert(R.first->TLASPtr && "AS resource must be resolved to a TLAS");
-          assert(R.first->getArraySize() == 1 && "AS arrays not yet supported");
-          // OutAS layout from buildPipelineAccelerationStructures: BLASes
-          // first, then TLASes — both in P.AccelStructs declaration order.
-          const size_t TLASIdx = R.first->TLASPtr - &P.AccelStructs.TLAS[0];
-          const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
-          auto *DXAS =
-              llvm::cast<DXAccelerationStructure>(IS.AccelStructs[ASIdx].get());
+        if (DXAccelerationStructure *DXAS = R.second[0].AS) {
           D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
           SRVDesc.Format = DXGI_FORMAT_UNKNOWN;
           SRVDesc.ViewDimension =

@@ -1203,10 +1203,14 @@ private:
   struct ResourceRef {
     ResourceRef(BufferRef H, BufferRef D) : Host(H), Device(D) {}
     ResourceRef(BufferRef H, ImageRef I) : Host(H), Image(I) {}
+    explicit ResourceRef(VulkanAccelerationStructure *AS) : AS(AS) {}
 
-    BufferRef Host;
-    BufferRef Device;
-    ImageRef Image;
+    BufferRef Host{};
+    BufferRef Device{};
+    ImageRef Image{};
+    // Populated for AS resources; mutually exclusive with the buffer/image
+    // fields above.
+    VulkanAccelerationStructure *AS = nullptr;
   };
 
   struct ResourceBundle {
@@ -3029,12 +3033,19 @@ public:
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
 
-  llvm::Error createResource(Resource &R, InvocationState &IS) {
-    // Acceleration structures are created separately; push a placeholder so
-    // the resource index stays in sync with the descriptor set layout.
+  llvm::Error createResource(Pipeline &P, Resource &R, InvocationState &IS) {
+    // OutAS layout from buildPipelineAccelerationStructures: BLASes first,
+    // then TLASes — both in P.AccelStructs declaration order.
     if (R.isAccelerationStructure()) {
-      const ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
-      IS.Resources.push_back(Bundle);
+      assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+      assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+      const size_t TLASIdx = R.TLASPtr - &P.AccelStructs.TLAS[0];
+      const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
+      auto *VkAS =
+          llvm::cast<VulkanAccelerationStructure>(IS.AccelStructs[ASIdx].get());
+      ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
+      Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+      IS.Resources.push_back(std::move(Bundle));
       return llvm::Error::success();
     }
 
@@ -3153,7 +3164,7 @@ public:
   llvm::Error createResources(Pipeline &P, InvocationState &IS) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
-        if (auto Err = createResource(R, IS))
+        if (auto Err = createResource(P, R, IS))
           return Err;
       }
     }
@@ -3322,15 +3333,8 @@ public:
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
-        if (R.isAccelerationStructure()) {
-          assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-          assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-          // OutAS layout from buildPipelineAccelerationStructures: BLASes
-          // first, then TLASes — both in P.AccelStructs declaration order.
-          const size_t TLASIdx = R.TLASPtr - &P.AccelStructs.TLAS[0];
-          const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
-          auto *VkAS = llvm::cast<VulkanAccelerationStructure>(
-              IS.AccelStructs[ASIdx].get());
+        if (VulkanAccelerationStructure *VkAS =
+                IS.Resources[OverallResIdx].ResourceRefs[0].AS) {
           const size_t HandleStart = ASHandles.size();
           ASHandles.push_back(VkAS->AccelStruct);
           VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
