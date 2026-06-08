@@ -747,6 +747,17 @@ public:
     auto &DXSrc = static_cast<DXBuffer &>(Src);
     auto &DXDst = static_cast<DXBuffer &>(Dst);
 
+    // NOTE: Edge case in case of all the following being the case
+    // - multiple calls of copyBufferToBuffer with the same Dst Buffer
+    // - The Dst Buffer having a PreferredState of
+    // D3D12_RESOURCE_STATE_COPY_DEST
+    // - Each Src Buffer having a PreferredState of
+    // D3D12_RESOURCE_STATE_COPY_SOURCE
+    // In that case no barrier would be emitted
+    // and a race condition would occur. There are ways to solve this with
+    // legacy barriers, but switching to enhanced barriers is a better solution
+    // to this problem.
+
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
       CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
                                D3D12_RESOURCE_STATE_COPY_SOURCE);
