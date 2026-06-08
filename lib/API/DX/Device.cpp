@@ -360,6 +360,12 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+
+  // Contract: If a command on the command buffer needs a resource to be in a
+  // different state it should always transition it back to the PreferredState
+  // afterwards. The PreferredState is the state of the most common use case for
+  // that resource. This allows us to do state transitions without state
+  // tracking.
   D3D12_RESOURCE_STATES PreferredState;
 
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
@@ -391,6 +397,12 @@ public:
 class DXTexture : public offloadtest::Texture {
 public:
   ComPtr<ID3D12Resource> Resource;
+
+  // Contract: If a command on the command buffer needs a resource to be in a
+  // different state it should always transition it back to the PreferredState
+  // afterwards. The PreferredState is the state of the most common use case for
+  // that resource. This allows us to do state transitions without state
+  // tracking.
   D3D12_RESOURCE_STATES PreferredState;
 
   // TODO:
