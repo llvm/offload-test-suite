@@ -52,7 +52,7 @@ DescriptorSets:
 # XFAIL: Clang && !Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/520
-# XFAIL: QC
+# XFAIL: QC && Clang
 
 # Bug https://github.com/llvm/offload-test-suite/issues/521
 # XFAIL: NV && DirectX

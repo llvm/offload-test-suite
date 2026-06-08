@@ -50,7 +50,7 @@ DescriptorSets:
 # UNSUPPORTED: Metal || DirectX
 #
 # Bug https://github.com/llvm/offload-test-suite/issues/1294
-# XFAIL: Vulkan && DXC
+# XFAIL: Vulkan && DXC && Intel-Gen-Current
 #
 # min16 not supported.
 # XFAIL: Clang
