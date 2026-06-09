@@ -518,8 +518,9 @@ public:
                               VkAccelerationStructureKHR AccelStruct,
                               VkBuffer Buffer, VkDeviceMemory Memory,
                               VkDeviceAddress DeviceAddress,
-                              PFN_vkDestroyAccelerationStructureKHR FnDestroyAS)
-      : offloadtest::AccelerationStructure(GPUAPI::Vulkan), Dev(Dev),
+                              PFN_vkDestroyAccelerationStructureKHR FnDestroyAS,
+                              const AccelerationStructureSizes &Sizes)
+      : offloadtest::AccelerationStructure(GPUAPI::Vulkan, Sizes), Dev(Dev),
         AccelStruct(AccelStruct), Buffer(Buffer), Memory(Memory),
         DeviceAddress(DeviceAddress), FnDestroyAS(FnDestroyAS) {}
 
@@ -2575,14 +2576,10 @@ public:
                         VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
   }
 
-  llvm::Expected<BLASBuildRequest> createTriangleBLASBuildRequest(
-      llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
+  llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
     if (auto Err = validateBLASGeometry(Triangles))
       return Err;
-
-    BLASBuildRequest Req;
-    Req.Geometry = llvm::SmallVector<TriangleGeometryDesc>(Triangles.begin(),
-                                                           Triangles.end());
 
     llvm::SmallVector<VkAccelerationStructureGeometryKHR> Geoms;
     Geoms.reserve(Triangles.size());
@@ -2613,18 +2610,13 @@ public:
                                             : T.VertexCount / 3);
     }
 
-    queryBLASPrebuildSize(Geoms, MaxPrimCounts, Req.Sizes);
-    return Req;
+    return queryBLASPrebuildSize(Geoms, MaxPrimCounts);
   }
 
-  llvm::Expected<BLASBuildRequest>
-  createAABBBLASBuildRequest(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
+  llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
     if (auto Err = validateBLASGeometry(AABBs))
       return Err;
-
-    BLASBuildRequest Req;
-    Req.Geometry =
-        llvm::SmallVector<AABBGeometryDesc>(AABBs.begin(), AABBs.end());
 
     llvm::SmallVector<VkAccelerationStructureGeometryKHR> Geoms;
     Geoms.reserve(AABBs.size());
@@ -2648,15 +2640,13 @@ public:
       MaxPrimCounts.push_back(A.AABBCount);
     }
 
-    queryBLASPrebuildSize(Geoms, MaxPrimCounts, Req.Sizes);
-    return Req;
+    return queryBLASPrebuildSize(Geoms, MaxPrimCounts);
   }
 
 private:
-  void queryBLASPrebuildSize(
+  AccelerationStructureSizes queryBLASPrebuildSize(
       llvm::ArrayRef<VkAccelerationStructureGeometryKHR> Geoms,
-      llvm::ArrayRef<uint32_t> MaxPrimCounts,
-      AccelerationStructureSizes &OutSizes) {
+      llvm::ArrayRef<uint32_t> MaxPrimCounts) {
     VkAccelerationStructureBuildGeometryInfoKHR BuildInfo = {};
     BuildInfo.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -2671,20 +2661,53 @@ private:
     RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                      &BuildInfo, MaxPrimCounts.data(), &SizesInfo);
 
-    OutSizes.ResultDataMaxSizeInBytes = SizesInfo.accelerationStructureSize;
-    OutSizes.ScratchDataSizeInBytes = SizesInfo.buildScratchSize;
-    OutSizes.UpdateScratchDataSizeInBytes = SizesInfo.updateScratchSize;
+    return {SizesInfo.accelerationStructureSize, SizesInfo.buildScratchSize,
+            SizesInfo.updateScratchSize};
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  allocateAS(const AccelerationStructureSizes &Sizes,
+             VkAccelerationStructureTypeKHR Type, const char *Kind) {
+    if (!HasRayTracingSupport)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    auto BufOrErr = createBufferWithDeviceAddress(
+        Sizes.ResultDataMaxSizeInBytes,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+
+    VkAccelerationStructureCreateInfoKHR CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    CreateInfo.buffer = BufOrErr->Buffer;
+    CreateInfo.size = Sizes.ResultDataMaxSizeInBytes;
+    CreateInfo.type = Type;
+
+    VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
+                        "Failed to create " + llvm::Twine(Kind) + ".")) {
+      vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
+      vkFreeMemory(Device, BufOrErr->Memory, nullptr);
+      return Err;
+    }
+
+    VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
+    AddrInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    AddrInfo.accelerationStructure = AccelStruct;
+    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
+
+    return std::make_unique<VulkanAccelerationStructure>(
+        Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
+        RT.DestroyAS, Sizes);
   }
 
 public:
-  llvm::Expected<TLASBuildRequest> createTLASBuildRequest(
-      llvm::ArrayRef<AccelerationStructureInstance> Instances) override {
-    TLASBuildRequest Req;
-    Req.Instances.assign(Instances.begin(), Instances.end());
-
-    if (auto Err = validateTLASBuildRequest(Req))
-      return Err;
-
+  llvm::Expected<AccelerationStructureSizes>
+  getTLASBuildSizes(uint32_t InstanceCount) override {
     VkAccelerationStructureGeometryKHR Geom = {};
     Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
     Geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
@@ -2698,8 +2721,6 @@ public:
     BuildInfo.geometryCount = 1;
     BuildInfo.pGeometries = &Geom;
 
-    const uint32_t InstanceCount = static_cast<uint32_t>(Instances.size());
-
     VkAccelerationStructureBuildSizesInfoKHR SizesInfo = {};
     SizesInfo.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
@@ -2707,89 +2728,21 @@ public:
     RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                      &BuildInfo, &InstanceCount, &SizesInfo);
 
-    Req.Sizes.ResultDataMaxSizeInBytes = SizesInfo.accelerationStructureSize;
-    Req.Sizes.ScratchDataSizeInBytes = SizesInfo.buildScratchSize;
-    Req.Sizes.UpdateScratchDataSizeInBytes = SizesInfo.updateScratchSize;
-
-    return Req;
+    return AccelerationStructureSizes{SizesInfo.accelerationStructureSize,
+                                      SizesInfo.buildScratchSize,
+                                      SizesInfo.updateScratchSize};
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createAccelerationStructure(const BLASBuildRequest &Request) override {
-    if (!HasRayTracingSupport)
-      return llvm::createStringError(
-          std::errc::not_supported,
-          "Ray tracing is not supported on this device.");
-
-    auto BufOrErr = createBufferWithDeviceAddress(
-        Request.Sizes.ResultDataMaxSizeInBytes,
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-
-    VkAccelerationStructureCreateInfoKHR CreateInfo = {};
-    CreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    CreateInfo.buffer = BufOrErr->Buffer;
-    CreateInfo.size = Request.Sizes.ResultDataMaxSizeInBytes;
-    CreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
-
-    VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
-    if (auto Err =
-            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
-                        "Failed to create BLAS.")) {
-      vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
-      vkFreeMemory(Device, BufOrErr->Memory, nullptr);
-      return Err;
-    }
-
-    VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
-    AddrInfo.sType =
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    AddrInfo.accelerationStructure = AccelStruct;
-    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
-
-    return std::make_unique<VulkanAccelerationStructure>(
-        Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
-        RT.DestroyAS);
+  createBLAS(const AccelerationStructureSizes &Sizes) override {
+    return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                      "BLAS");
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createAccelerationStructure(const TLASBuildRequest &Request) override {
-    if (!HasRayTracingSupport)
-      return llvm::createStringError(
-          std::errc::not_supported,
-          "Ray tracing is not supported on this device.");
-
-    auto BufOrErr = createBufferWithDeviceAddress(
-        Request.Sizes.ResultDataMaxSizeInBytes,
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-
-    VkAccelerationStructureCreateInfoKHR CreateInfo = {};
-    CreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
-    CreateInfo.buffer = BufOrErr->Buffer;
-    CreateInfo.size = Request.Sizes.ResultDataMaxSizeInBytes;
-    CreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
-
-    VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
-    if (auto Err =
-            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
-                        "Failed to create TLAS.")) {
-      vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
-      vkFreeMemory(Device, BufOrErr->Memory, nullptr);
-      return Err;
-    }
-
-    VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
-    AddrInfo.sType =
-        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    AddrInfo.accelerationStructure = AccelStruct;
-    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
-
-    return std::make_unique<VulkanAccelerationStructure>(
-        Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
-        RT.DestroyAS);
+  createTLAS(const AccelerationStructureSizes &Sizes) override {
+    return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+                      "TLAS");
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,

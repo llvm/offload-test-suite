@@ -264,20 +264,27 @@ public:
   virtual llvm::Expected<std::unique_ptr<CommandBuffer>>
   createCommandBuffer() = 0;
 
-  virtual llvm::Expected<BLASBuildRequest> createTriangleBLASBuildRequest(
-      llvm::ArrayRef<TriangleGeometryDesc> Triangles) = 0;
+  // Sizing queries: return the result/scratch sizes the backend needs to
+  // allocate an AS that can hold the given build inputs. The build-input
+  // pointers (geometry buffers, BLAS handles) are never consulted — only
+  // counts/strides — so these can be called before BLAS handles exist.
+  virtual llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<TriangleGeometryDesc> Triangles) = 0;
 
-  virtual llvm::Expected<BLASBuildRequest>
-  createAABBBLASBuildRequest(llvm::ArrayRef<AABBGeometryDesc> AABBs) = 0;
+  virtual llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<AABBGeometryDesc> AABBs) = 0;
 
-  virtual llvm::Expected<TLASBuildRequest> createTLASBuildRequest(
-      llvm::ArrayRef<AccelerationStructureInstance> Instances) = 0;
+  virtual llvm::Expected<AccelerationStructureSizes>
+  getTLASBuildSizes(uint32_t InstanceCount) = 0;
+
+  // Allocate the AS storage (no GPU build). The build is recorded later via
+  // ComputeEncoder::batchBuildAS(), which is the only place that consumes the
+  // associated *BuildRequest.
+  virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
+  createBLAS(const AccelerationStructureSizes &Sizes) = 0;
 
   virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
-  createAccelerationStructure(const BLASBuildRequest &Request) = 0;
-
-  virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
-  createAccelerationStructure(const TLASBuildRequest &Request) = 0;
+  createTLAS(const AccelerationStructureSizes &Sizes) = 0;
 
   virtual ~Device() = 0;
 
