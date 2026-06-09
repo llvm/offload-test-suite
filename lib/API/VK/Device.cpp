@@ -934,7 +934,8 @@ class VulkanRenderEncoder : public offloadtest::RenderEncoder {
   bool ScissorSet = false;
 
 public:
-  VulkanRenderEncoder(VulkanCommandBuffer &CB, const offloadtest::RenderPassBeginDesc &Desc)
+  VulkanRenderEncoder(VulkanCommandBuffer &CB,
+                      const offloadtest::RenderPassBeginDesc &Desc)
       : RenderEncoder(GPUAPI::Vulkan), CB(CB), Desc(Desc) {
     pushDebugGroup("RenderEncoder");
   }
@@ -1147,28 +1148,34 @@ VulkanCommandBuffer::createRenderEncoder(
 
   for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
     auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
-    this->addImageTransition(
-        this->PendingSrcAccess, /*SrcAccessMask*/
-        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
-        Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
-        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
-        Tex.Image, Tex.FullRange);
+    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex.Image, Tex.FullRange);
 
-    Tex.IsInUndefinedLayout = false;
+      Tex.IsInUndefinedLayout = false;
+    }
   }
 
   if (Desc.DepthStencil) {
     auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
-    this->addImageTransition(
-        this->PendingSrcAccess, /*SrcAccessMask*/
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
-        Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
-        Tex.Image, Tex.FullRange);
 
-    Tex.IsInUndefinedLayout = false;
+    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
+        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+
+      Tex.IsInUndefinedLayout = false;
+    }
   }
 
   VkFramebufferCreateInfo FBCI = {};
