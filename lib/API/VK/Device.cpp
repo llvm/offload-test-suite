@@ -486,16 +486,27 @@ public:
   std::string Name;
   TextureCreateDesc Desc;
 
+  VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+  VkImageSubresourceRange FullRange;
+  bool IsInUndefinedLayout = true;
+
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
-                llvm::StringRef Name, TextureCreateDesc Desc)
+                llvm::StringRef Name, TextureCreateDesc Desc,
+                VkImageLayout PreferredLayout,
+                VkImageSubresourceRange FullRange)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), Name(Name), Desc(Desc) {}
+        Memory(Memory), Name(Name), Desc(Desc),
+        PreferredLayout(PreferredLayout), FullRange(FullRange) {}
 
   ~VulkanTexture() override {
     if (View)
       vkDestroyImageView(Dev, View, nullptr);
     vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  VkImageLayout preferredLayoutOrUndefined() {
+    return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
   }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
@@ -691,28 +702,44 @@ public:
   VkPipelineStageFlags PendingDstStage = 0;
   VkAccessFlags PendingDstAccess = 0;
 
+  llvm::SmallVector<VkImageMemoryBarrier> PendingImageTransitions;
+
+  void addImageTransition(VkAccessFlags SrcAccessMask,
+                          VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
+                          VkImageLayout NewLayout, VkImage Image,
+                          VkImageSubresourceRange SubresourceRange) {
+    PendingImageTransitions.push_back(VkImageMemoryBarrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
+        nullptr,                                /*pNext*/
+        SrcAccessMask,
+        DstAccessMask,
+        OldLayout,
+        NewLayout,
+        0, /*srcQueueFamilyIndex*/
+        0, /*dstQueueFamilyIndex*/
+        Image,
+        SubresourceRange,
+    });
+  }
+
   void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
     PendingDstStage |= Stage;
     PendingDstAccess |= Access;
   }
 
   void flushBarrier() {
-    if (PendingSrcStage == 0) {
-      // Nothing produced yet — no barrier needed, but carry dst forward as
-      // the next src (the command we're about to run will produce at these
-      // stages).
-      PendingSrcStage = PendingDstStage;
-      PendingSrcAccess = PendingDstAccess;
-      PendingDstStage = 0;
-      PendingDstAccess = 0;
-      return;
+    if (PendingSrcStage != 0 || !PendingImageTransitions.empty()) {
+      VkMemoryBarrier Barrier = {};
+      Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      Barrier.srcAccessMask = PendingSrcAccess;
+      Barrier.dstAccessMask = PendingDstAccess;
+      vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
+                           &Barrier, 0, nullptr, PendingImageTransitions.size(),
+                           PendingImageTransitions.data());
+
+      PendingImageTransitions.clear();
     }
-    VkMemoryBarrier Barrier = {};
-    Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    Barrier.srcAccessMask = PendingSrcAccess;
-    Barrier.dstAccessMask = PendingDstAccess;
-    vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
-                         &Barrier, 0, nullptr, 0, nullptr);
+
     PendingSrcStage = PendingDstStage;
     PendingSrcAccess = PendingDstAccess;
     PendingDstStage = 0;
@@ -900,14 +927,15 @@ public:
 
 class VulkanRenderEncoder : public offloadtest::RenderEncoder {
   VulkanCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
 
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
   bool ScissorSet = false;
 
 public:
-  VulkanRenderEncoder(VulkanCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {
+  VulkanRenderEncoder(VulkanCommandBuffer &CB, const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB), Desc(Desc) {
     pushDebugGroup("RenderEncoder");
   }
   VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
@@ -1008,6 +1036,29 @@ public:
 
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
+
+    for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+      CB.addImageTransition(
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                      /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                      /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+    }
+
+    if (Desc.DepthStencil) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+      CB.addImageTransition(
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                              /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                              /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+    }
+
     popDebugGroup();
   }
 };
@@ -1094,6 +1145,32 @@ VulkanCommandBuffer::createRenderEncoder(
     ClearValues.push_back(CV);
   }
 
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    this->addImageTransition(
+        this->PendingSrcAccess, /*SrcAccessMask*/
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+        Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+        Tex.Image, Tex.FullRange);
+
+    Tex.IsInUndefinedLayout = false;
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    this->addImageTransition(
+        this->PendingSrcAccess, /*SrcAccessMask*/
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+        Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+        Tex.Image, Tex.FullRange);
+
+    Tex.IsInUndefinedLayout = false;
+  }
+
   VkFramebufferCreateInfo FBCI = {};
   FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   FBCI.renderPass = VKPass.Handle;
@@ -1125,7 +1202,7 @@ VulkanCommandBuffer::createRenderEncoder(
 
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  return std::make_unique<VulkanRenderEncoder>(*this);
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
 }
 
 class VulkanDevice : public offloadtest::Device {
@@ -2320,8 +2397,26 @@ public:
       return Err;
     }
 
-    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc);
+    VkImageAspectFlags FullAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (isDepthFormat(Desc.Fmt)) {
+      FullAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+      if (isStencilFormat(Desc.Fmt))
+        FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    const VkImageSubresourceRange FullRange{
+        FullAspectMask,
+        0, /*baseMipLevel*/
+        Desc.MipLevels,
+        0, /*baseArrayLayer*/
+        1, /*layerCount*/
+    };
+
+    VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if ((Desc.Usage & TextureUsage::Storage))
+      PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    auto Tex = std::make_unique<VulkanTexture>(
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
