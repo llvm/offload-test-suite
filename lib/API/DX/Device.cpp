@@ -422,15 +422,69 @@ public:
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
+  // True for pipelines created via createPipelineRT — used by SBT / dispatch
+  // code to safely downcast to DXRayTracingPipelineState (parallel to
+  // VulkanPipelineState::IsRayTracing).
+  bool IsRayTracing = false;
 
   DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
                   ComPtr<ID3D12PipelineState> PSO,
-                  std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology)
+                  std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology,
+                  bool IsRT = false)
       : offloadtest::PipelineState(GPUAPI::DirectX), Name(Name),
-        RootSig(RootSig), PSO(PSO), Topology(Topology) {}
+        RootSig(RootSig), PSO(PSO), Topology(Topology), IsRayTracing(IsRT) {}
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::DirectX;
+  }
+};
+
+/// RT pipeline state: holds the ID3D12StateObject + cached
+/// ID3D12StateObjectProperties for SBT identifier queries plus a
+/// shader-name → identifier-pointer map. The `void *` identifiers are
+/// owned by Properties — keep it alive for the SBT's lifetime.
+class DXRayTracingPipelineState : public DXPipelineState {
+public:
+  ComPtr<ID3D12StateObject> StateObject;
+  ComPtr<ID3D12StateObjectProperties> Properties;
+  llvm::StringMap<const void *> ShaderIdentifiers;
+
+  DXRayTracingPipelineState(llvm::StringRef Name,
+                            ComPtr<ID3D12RootSignature> RootSig,
+                            ComPtr<ID3D12StateObject> SO,
+                            ComPtr<ID3D12StateObjectProperties> Props)
+      : DXPipelineState(Name, RootSig, /*PSO=*/nullptr, std::nullopt,
+                        /*IsRT=*/true),
+        StateObject(SO), Properties(Props) {}
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    if (B->getAPI() != GPUAPI::DirectX)
+      return false;
+    return static_cast<const DXPipelineState *>(B)->IsRayTracing;
+  }
+};
+
+class DXShaderBindingTable : public offloadtest::ShaderBindingTable {
+public:
+  ComPtr<ID3D12Resource> Buffer;
+  // Pre-built ranges for D3D12_DISPATCH_RAYS_DESC. Sizes are zero for
+  // empty regions; raygen is a single record so it uses the no-stride
+  // variant.
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE RayGenRange{};
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE MissRange{};
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE HitGroupRange{};
+  D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE CallableRange{};
+
+  DXShaderBindingTable(ComPtr<ID3D12Resource> Buf,
+                       D3D12_GPU_VIRTUAL_ADDRESS_RANGE RG,
+                       D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE MS,
+                       D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE HG,
+                       D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE CL)
+      : offloadtest::ShaderBindingTable(GPUAPI::DirectX), Buffer(Buf),
+        RayGenRange(RG), MissRange(MS), HitGroupRange(HG), CallableRange(CL) {}
+
+  static bool classof(const offloadtest::ShaderBindingTable *S) {
+    return S->getAPI() == GPUAPI::DirectX;
   }
 };
 
@@ -571,12 +625,20 @@ public:
       override;
 };
 
+class DXDevice; // forward decl — defined below in this same anon ns
+
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandListX> CmdList;
+  /// Back-pointer to the owning device. Used by encoders that need access to
+  /// device-level resources (e.g. allocating AS scratch buffers).
+  DXDevice *Dev = nullptr;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
+  /// Buffers that must outlive command-buffer submission (e.g. AS scratch
+  /// and TLAS instance buffers used during builds).
+  llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> KeepAliveOwned;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12DeviceX> Device) {
@@ -716,6 +778,16 @@ public:
                                  DXSrc.Buffer.Get(), SrcOffset, Size);
     return llvm::Error::success();
   }
+
+  // Defined out-of-line below — needs DXDevice's full type for access to the
+  // ID3D12Device5 entry point and helper allocators.
+  llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
+
+  // Defined out-of-line below — needs DXDevice's full type for access to
+  // Device5 and the DXRayTracingPipelineState definition.
+  llvm::Error dispatchRays(const PipelineState &PSO,
+                           const ShaderBindingTable &SBT, uint32_t Width,
+                           uint32_t Height, uint32_t Depth) override;
 
   void endEncodingImpl() override { popDebugGroup(); }
 };
@@ -947,6 +1019,10 @@ DXCommandBuffer::createRenderEncoder(
 }
 
 class DXDevice : public offloadtest::Device {
+  // DXComputeEncoder needs access to Device5 for AS build commands and to the
+  // raw ID3D12Device for scratch buffer allocation.
+  friend class DXComputeEncoder;
+
 private:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12DeviceX> Device;
@@ -960,27 +1036,31 @@ private:
     ComPtr<ID3D12Resource> Buffer;
     std::unique_ptr<offloadtest::Buffer> Readback;
     ComPtr<ID3D12Heap> Heap;
+    // Populated for AS resources; mutually exclusive with the
+    // Upload/Buffer/Readback/Heap fields above.
+    DXAccelerationStructure *AS = nullptr;
     ResourceSet(ComPtr<ID3D12Resource> Upload, ComPtr<ID3D12Resource> Buffer,
                 std::unique_ptr<offloadtest::Buffer> Readback,
                 ComPtr<ID3D12Heap> Heap = nullptr)
         : Upload(Upload), Buffer(Buffer), Readback(std::move(Readback)),
           Heap(Heap) {}
+    explicit ResourceSet(DXAccelerationStructure *AS) : AS(AS) {}
     ResourceSet(const ResourceSet &) = delete;
     ResourceSet(ResourceSet &&A)
         : Upload(A.Upload), Buffer(A.Buffer), Readback(std::move(A.Readback)),
-          Heap(A.Heap) {}
+          Heap(A.Heap), AS(A.AS) {}
     ResourceSet &operator=(const ResourceSet &) = delete;
     ResourceSet &operator=(ResourceSet &&A) {
       Upload = A.Upload;
       Buffer = A.Buffer;
       Readback = std::move(A.Readback);
       Heap = A.Heap;
+      AS = A.AS;
       return *this;
     }
   };
 
-  // ResourceBundle will contain one ResourceSet for a singular resource
-  // or multiple ResourceSets for resource array.
+  // ResourceBundle holds one ResourceSet per array element (singular = 1).
   using ResourceBundle = llvm::SmallVector<ResourceSet>;
   using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
 
@@ -992,6 +1072,8 @@ private:
     ComPtr<ID3D12DescriptorHeap> DescHeap;
     std::unique_ptr<DXCommandBuffer> CB;
     std::unique_ptr<PipelineState> Pipeline;
+    // Lifetime-tied to the pipeline; only set for RT pipelines.
+    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
 
     // Resources for graphics pipelines.
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
@@ -1002,6 +1084,12 @@ private:
 
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
+
+    // Built acceleration structures, kept alive for the pipeline lifetime.
+    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
+        AccelStructs;
+    // Vertex/index buffers consumed during AS builds; must outlive submission.
+    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
 
 public:
@@ -1350,6 +1438,238 @@ public:
     return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
   }
 
+  static std::wstring widen(llvm::StringRef S) {
+    // Entry-point names and hit-group names are ASCII; a straight 1:1 widen
+    // is sufficient.
+    return std::wstring(S.begin(), S.end());
+  }
+
+  static D3D12_HIT_GROUP_TYPE getDXHitGroupType(HitGroupType T) {
+    switch (T) {
+    case HitGroupType::Triangles:
+      return D3D12_HIT_GROUP_TYPE_TRIANGLES;
+    case HitGroupType::Procedural:
+      return D3D12_HIT_GROUP_TYPE_PROCEDURAL_PRIMITIVE;
+    }
+    llvm_unreachable("All HitGroupType cases handled");
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef Name, const BindingsDesc &BndDesc,
+                   const RayTracingPipelineCreateDesc &Desc) override {
+    if (!Device5)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Device does not support raytracing (ID3D12Device5 query failed).");
+    if (!Desc.Library)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "RayTracingPipelineCreateDesc.Library is "
+                                     "null — backend needs a DXIL blob.");
+
+    // Global root signature: try the library's embedded RTS0 part first;
+    // fall back to building one from BindingsDesc.
+    ShaderContainer LibContainer = {};
+    LibContainer.Shader = Desc.Library;
+    ComPtr<ID3D12RootSignature> RootSig;
+    if (auto Err = createRootSignature(Name, BndDesc, LibContainer,
+                                       /*IsGraphics=*/false, RootSig))
+      return Err;
+
+    CD3DX12_STATE_OBJECT_DESC SODesc(
+        D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE);
+
+    // DXIL library subobject — add every Shader's entry point as an export.
+    // Wide-string storage must outlive SODesc since the subobject only stores
+    // pointers into it.
+    auto *Lib = SODesc.CreateSubobject<CD3DX12_DXIL_LIBRARY_SUBOBJECT>();
+    const llvm::StringRef LibBytes = Desc.Library->getBuffer();
+    const D3D12_SHADER_BYTECODE Bytecode = {LibBytes.data(), LibBytes.size()};
+    Lib->SetDXILLibrary(&Bytecode);
+    llvm::SmallVector<std::wstring, 8> WideNames;
+    WideNames.reserve(Desc.Shaders.size() + Desc.HitGroups.size());
+    for (const auto &Sh : Desc.Shaders) {
+      WideNames.push_back(widen(Sh.EntryPoint));
+      Lib->DefineExport(WideNames.back().c_str());
+    }
+
+    // One hit-group subobject per HitGroup entry.
+    for (const auto &HG : Desc.HitGroups) {
+      auto *HGObj = SODesc.CreateSubobject<CD3DX12_HIT_GROUP_SUBOBJECT>();
+      HGObj->SetHitGroupType(getDXHitGroupType(HG.Type));
+      WideNames.push_back(widen(HG.Name));
+      HGObj->SetHitGroupExport(WideNames.back().c_str());
+      WideNames.push_back(widen(HG.ClosestHit));
+      HGObj->SetClosestHitShaderImport(WideNames.back().c_str());
+      if (HG.AnyHit) {
+        WideNames.push_back(widen(*HG.AnyHit));
+        HGObj->SetAnyHitShaderImport(WideNames.back().c_str());
+      }
+      if (HG.Intersection) {
+        WideNames.push_back(widen(*HG.Intersection));
+        HGObj->SetIntersectionShaderImport(WideNames.back().c_str());
+      }
+    }
+
+    // Pipeline-wide shader config (max payload + max attribute bytes).
+    auto *ShaderCfg =
+        SODesc.CreateSubobject<CD3DX12_RAYTRACING_SHADER_CONFIG_SUBOBJECT>();
+    ShaderCfg->Config(Desc.Config.MaxPayloadSizeInBytes,
+                      Desc.Config.MaxAttributeSizeInBytes);
+
+    // Pipeline-wide config (max recursion depth).
+    auto *PipelineCfg =
+        SODesc.CreateSubobject<CD3DX12_RAYTRACING_PIPELINE_CONFIG_SUBOBJECT>();
+    PipelineCfg->Config(Desc.Config.MaxTraceRecursionDepth);
+
+    // Global root signature.
+    auto *GlobalRS =
+        SODesc.CreateSubobject<CD3DX12_GLOBAL_ROOT_SIGNATURE_SUBOBJECT>();
+    GlobalRS->SetRootSignature(RootSig.Get());
+
+    ComPtr<ID3D12StateObject> StateObject;
+    if (auto Err = HR::toError(
+            Device5->CreateStateObject(SODesc, IID_PPV_ARGS(&StateObject)),
+            "Failed to create raytracing state object."))
+      return Err;
+
+    ComPtr<ID3D12StateObjectProperties> Properties;
+    if (auto Err = HR::toError(
+            StateObject.As(&Properties),
+            "Failed to query ID3D12StateObjectProperties from state object."))
+      return Err;
+
+    auto State = std::make_unique<DXRayTracingPipelineState>(
+        Name, RootSig, StateObject, Properties);
+    // Cache identifiers up-front. The driver-owned blobs are alive for
+    // Properties' lifetime, which lives on the PSO.
+    //
+    // GetShaderIdentifier only returns non-null for entries that are
+    // directly bindable from an SBT record: raygen / miss / callable
+    // shaders and hit groups. Closest-hit / any-hit / intersection are
+    // bound *through* a hit-group subobject and aren't separately
+    // addressable, so skip them.
+    for (const auto &Sh : Desc.Shaders) {
+      switch (Sh.Stage) {
+      case Stages::RayGeneration:
+      case Stages::Miss:
+      case Stages::Callable:
+        break;
+      default:
+        continue;
+      }
+      const std::wstring W = widen(Sh.EntryPoint);
+      const void *Id = Properties->GetShaderIdentifier(W.c_str());
+      if (!Id)
+        return llvm::createStringError(
+            "GetShaderIdentifier returned null for shader '%s'",
+            Sh.EntryPoint.c_str());
+      State->ShaderIdentifiers[Sh.EntryPoint] = Id;
+    }
+    for (const auto &HG : Desc.HitGroups) {
+      const std::wstring W = widen(HG.Name);
+      const void *Id = Properties->GetShaderIdentifier(W.c_str());
+      if (!Id)
+        return llvm::createStringError(
+            "GetShaderIdentifier returned null for hit group '%s'",
+            HG.Name.c_str());
+      State->ShaderIdentifiers[HG.Name] = Id;
+    }
+    return State;
+  }
+
+  llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &PSO,
+                           const ShaderBindingTableDesc &Desc) override {
+    if (!llvm::isa<DXRayTracingPipelineState>(&PSO))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "createShaderBindingTable requires a RayTracing PipelineState");
+    const auto &DXRTPSO = llvm::cast<DXRayTracingPipelineState>(PSO);
+
+    constexpr uint32_t IdSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+    const SBTLayout Layout =
+        computeSBTLayout(IdSize, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT,
+                         D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT, Desc);
+    const uint32_t TotalSize = Layout.TotalSize;
+    const llvm::ArrayRef<SBTEntry> RGEntries(&Desc.RayGen, 1);
+
+    // Upload heap so the CPU can write the SBT directly. The state-object
+    // identifiers don't need to live in default heap; using upload keeps
+    // PR3 simple. A staging copy to default heap is a follow-up.
+    const D3D12_HEAP_PROPERTIES HeapProps =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
+    const D3D12_RESOURCE_DESC BufDesc =
+        CD3DX12_RESOURCE_DESC::Buffer(TotalSize);
+    ComPtr<ID3D12Resource> Buffer;
+    if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &BufDesc,
+                                   D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+                                   IID_PPV_ARGS(&Buffer)),
+                               "Failed to create SBT buffer."))
+      return Err;
+
+    void *Mapped = nullptr;
+    const D3D12_RANGE ReadRange{0, 0};
+    if (auto Err = HR::toError(Buffer->Map(0, &ReadRange, &Mapped),
+                               "Failed to map SBT buffer."))
+      return Err;
+    std::memset(Mapped, 0, TotalSize);
+    auto *MappedBytes = static_cast<uint8_t *>(Mapped);
+
+    auto WriteEntries = [&](uint8_t *Region, llvm::ArrayRef<SBTEntry> Entries,
+                            uint32_t Stride) -> llvm::Error {
+      for (size_t I = 0; I < Entries.size(); ++I) {
+        const auto &E = Entries[I];
+        auto It = DXRTPSO.ShaderIdentifiers.find(E.ShaderName);
+        if (It == DXRTPSO.ShaderIdentifiers.end())
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "SBT references unknown shader/hit-group name: '%s'",
+              E.ShaderName.c_str());
+        uint8_t *Dst = Region + I * Stride;
+        std::memcpy(Dst, It->second, IdSize);
+        if (!E.LocalRootData.empty())
+          std::memcpy(Dst + IdSize, E.LocalRootData.data(),
+                      E.LocalRootData.size());
+      }
+      return llvm::Error::success();
+    };
+
+    auto WriteRegion = [&](const SBTRegionLayout &R,
+                           llvm::ArrayRef<SBTEntry> Entries) -> llvm::Error {
+      return WriteEntries(MappedBytes + R.Offset, Entries, R.Stride);
+    };
+    auto UnmapAndReturn = [&](llvm::Error Err) {
+      Buffer->Unmap(0, nullptr);
+      return Err;
+    };
+    if (auto Err = WriteRegion(Layout.RayGen, RGEntries))
+      return UnmapAndReturn(std::move(Err));
+    if (auto Err = WriteRegion(Layout.Miss, Desc.Miss))
+      return UnmapAndReturn(std::move(Err));
+    if (auto Err = WriteRegion(Layout.HitGroup, Desc.HitGroup))
+      return UnmapAndReturn(std::move(Err));
+    if (auto Err = WriteRegion(Layout.Callable, Desc.Callable))
+      return UnmapAndReturn(std::move(Err));
+    Buffer->Unmap(0, nullptr);
+
+    // D3D12_GPU_VIRTUAL_ADDRESS_RANGE / …_AND_STRIDE expect a zero address
+    // for empty regions, matching the helper's Size == 0 sentinel.
+    const D3D12_GPU_VIRTUAL_ADDRESS Base = Buffer->GetGPUVirtualAddress();
+    auto MakeRange = [&](const SBTRegionLayout &R) {
+      return D3D12_GPU_VIRTUAL_ADDRESS_RANGE{R.Size ? Base + R.Offset : 0,
+                                             R.Size};
+    };
+    auto MakeRangeAndStride = [&](const SBTRegionLayout &R) {
+      return D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+          R.Size ? Base + R.Offset : 0, R.Size, R.Stride};
+    };
+    return std::make_unique<DXShaderBindingTable>(
+        Buffer, MakeRange(Layout.RayGen), MakeRangeAndStride(Layout.Miss),
+        MakeRangeAndStride(Layout.HitGroup),
+        MakeRangeAndStride(Layout.Callable));
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return DXFence::create(Device.Get(), Name);
@@ -1588,7 +1908,11 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return DXCommandBuffer::create(Device);
+    auto CBOrErr = DXCommandBuffer::create(Device);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    (*CBOrErr)->Dev = this;
+    return std::unique_ptr<offloadtest::CommandBuffer>(std::move(*CBOrErr));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
@@ -2140,9 +2464,22 @@ public:
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto CreateBuffer =
-        [&IS,
+        [&P, &IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
+      // OutAS layout from buildPipelineAccelerationStructures: BLASes
+      // first, then TLASes — both in P.AccelStructs declaration order.
+      if (R.isAccelerationStructure()) {
+        assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+        assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+        const size_t TLASIdx = R.TLASPtr - &P.AccelStructs.TLAS[0];
+        const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
+        ResourceBundle Bundle;
+        Bundle.emplace_back(
+            llvm::cast<DXAccelerationStructure>(IS.AccelStructs[ASIdx].get()));
+        Resources.push_back(std::make_pair(&R, std::move(Bundle)));
+        return llvm::Error::success();
+      }
       switch (getDescriptorKind(R.Kind)) {
       case DescriptorKind::SRV: {
         auto ExRes = createSRV(R, IS);
@@ -2183,8 +2520,28 @@ public:
 
     // Bind descriptors in descriptor tables.
     uint32_t HeapIndex = 0;
+    const uint32_t DescIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
     for (auto &T : IS.DescTables) {
       for (auto &R : T.Resources) {
+        if (DXAccelerationStructure *DXAS = R.second[0].AS) {
+          D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+          SRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+          SRVDesc.ViewDimension =
+              D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+          SRVDesc.Shader4ComponentMapping =
+              D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+          SRVDesc.RaytracingAccelerationStructure.Location =
+              DXAS->getGPUVirtualAddress();
+          D3D12_CPU_DESCRIPTOR_HANDLE Handle =
+              IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
+          Handle.ptr += HeapIndex * DescIncSize;
+          // AS SRVs are created with a null resource; the AS lives in the
+          // buffer referenced by Location.
+          Device->CreateShaderResourceView(nullptr, &SRVDesc, Handle);
+          HeapIndex += R.first->getArraySize();
+          continue;
+        }
         switch (getDescriptorKind(R.first->Kind)) {
         case DescriptorKind::SRV:
           HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
@@ -2347,11 +2704,20 @@ public:
       if (!EncoderOrErr)
         return EncoderOrErr.takeError();
       auto &Encoder = *EncoderOrErr.get();
-      if (auto Err = Encoder.dispatch(
-              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
-              P.DispatchParameters.DispatchGroupCount[1],
-              P.DispatchParameters.DispatchGroupCount[2]))
+      if (P.isRayTracing()) {
+        if (auto Err = Encoder.dispatchRays(
+                *IS.Pipeline, *IS.SBT,
+                P.DispatchParameters.DispatchGroupCount[0],
+                P.DispatchParameters.DispatchGroupCount[1],
+                P.DispatchParameters.DispatchGroupCount[2]))
+          return Err;
+      } else if (auto Err = Encoder.dispatch(
+                     *IS.Pipeline.get(),
+                     P.DispatchParameters.DispatchGroupCount[0],
+                     P.DispatchParameters.DispatchGroupCount[1],
+                     P.DispatchParameters.DispatchGroupCount[2])) {
         return Err;
+      }
       Encoder.endEncoding();
     }
 
@@ -2630,7 +2996,18 @@ public:
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
+    State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
+
+    if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
+      auto EncOrErr = State.CB->createComputeEncoder();
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      if (auto Err = offloadtest::buildPipelineAccelerationStructures(
+              *this, **EncOrErr, P, State.AccelStructs, State.ASInputBuffers))
+        return Err;
+      (*EncOrErr)->endEncoding();
+    }
 
     if (auto Err = createBuffers(P, State))
       return Err;
@@ -2805,6 +3182,37 @@ public:
       if (auto Err = createGraphicsCommands(P, State))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
+    } else if (P.isRayTracing()) {
+      if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "RayTracing pipeline requires Shaders, "
+            "ShaderBindingTable, and RayTracingPipelineConfig.");
+
+      RayTracingPipelineCreateDesc RTDesc{};
+      RTDesc.Library = P.Shaders.front().Shader.get();
+      RTDesc.HitGroups = P.HitGroups;
+      RTDesc.Config = *P.RTConfig;
+      RTDesc.Shaders.reserve(P.Shaders.size());
+      for (const auto &Sh : P.Shaders)
+        RTDesc.Shaders.push_back({Sh.Stage, Sh.Entry});
+
+      auto PSOOrErr =
+          createPipelineRT("RayTracing Pipeline State", BndDesc, RTDesc);
+      if (!PSOOrErr)
+        return PSOOrErr.takeError();
+      State.Pipeline = std::move(*PSOOrErr);
+      llvm::outs() << "RayTracing Pipeline created.\n";
+
+      auto SBTOrErr = createShaderBindingTable(*State.Pipeline, *P.SBT);
+      if (!SBTOrErr)
+        return SBTOrErr.takeError();
+      State.SBT = std::move(*SBTOrErr);
+      llvm::outs() << "Shader Binding Table created.\n";
+
+      if (auto Err = createComputeCommands(P, State))
+        return Err;
+      llvm::outs() << "RayTracing command list created.\n";
     } else {
       return llvm::createStringError("Pipeline was neither Compute nor Raster");
     }
@@ -2822,6 +3230,202 @@ public:
     return llvm::Error::success();
   }
 };
+
+llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
+  if (Items.empty())
+    return llvm::Error::success();
+  if (!CB.Dev || !CB.Dev->Device)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Ray tracing not supported on this command buffer's device.");
+  DXDevice *Dev = CB.Dev;
+
+  // BuildRaytracingAccelerationStructure lives on ID3D12GraphicsCommandList4.
+  ComPtr<ID3D12GraphicsCommandList4> CmdList4;
+  if (auto Err = HR::toError(CB.CmdList.As(&CmdList4),
+                             "Failed to query ID3D12GraphicsCommandList4."))
+    return Err;
+
+  // Flush a pending barrier before reading, like dispatch(): a TLAS build must
+  // observe BLASes built in the previous batch.
+  CB.flushBarrier();
+
+  // Per the ComputeEncoder::batchBuildAS contract, the caller guarantees no
+  // inter-item memory dependencies within a batch (BLAS and TLAS go in
+  // separate batches, so a TLAS never sees BLASes from the same call). Each
+  // item also gets its own scratch resource, so there's no aliasing between
+  // the builds — no intra-loop UAV barrier is needed.
+  for (const auto &Item : Items) {
+    auto *DXAS = llvm::cast<DXAccelerationStructure>(Item.AS);
+
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC Desc = {};
+    Desc.DestAccelerationStructureData = DXAS->getGPUVirtualAddress();
+
+    llvm::SmallVector<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs;
+    uint64_t ScratchSize = 0;
+
+    if (const auto *BLAS = llvm::dyn_cast<const BLASBuildRequest *>(Item.Req)) {
+      Desc.Inputs.Type =
+          D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+      Desc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+
+      if (const auto *Tris =
+              std::get_if<llvm::SmallVector<TriangleGeometryDesc>>(
+                  &BLAS->Geometry)) {
+        GeomDescs.reserve(Tris->size());
+        for (const auto &T : *Tris) {
+          D3D12_RAYTRACING_GEOMETRY_DESC GD = {};
+          GD.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+          if (T.Opaque)
+            GD.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+          auto *VB = llvm::cast<DXBuffer>(T.VertexBuffer);
+          GD.Triangles.VertexBuffer.StartAddress =
+              VB->Buffer->GetGPUVirtualAddress() + T.VertexBufferOffset;
+          GD.Triangles.VertexBuffer.StrideInBytes = T.VertexStride;
+          GD.Triangles.VertexCount = T.VertexCount;
+          GD.Triangles.VertexFormat = getDXGIFormat(T.VertexFormat);
+          if (T.IndexBuffer) {
+            auto *IB = llvm::cast<DXBuffer>(T.IndexBuffer);
+            GD.Triangles.IndexBuffer =
+                IB->Buffer->GetGPUVirtualAddress() + T.IndexBufferOffset;
+            GD.Triangles.IndexCount = T.IndexCount;
+            GD.Triangles.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
+          }
+          GeomDescs.push_back(GD);
+        }
+      } else {
+        const auto &AABBs =
+            std::get<llvm::SmallVector<AABBGeometryDesc>>(BLAS->Geometry);
+        GeomDescs.reserve(AABBs.size());
+        for (const auto &A : AABBs) {
+          D3D12_RAYTRACING_GEOMETRY_DESC GD = {};
+          GD.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+          if (A.Opaque)
+            GD.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+          auto *AB = llvm::cast<DXBuffer>(A.AABBBuffer);
+          GD.AABBs.AABBs.StartAddress =
+              AB->Buffer->GetGPUVirtualAddress() + A.AABBBufferOffset;
+          GD.AABBs.AABBs.StrideInBytes = A.AABBStride;
+          GD.AABBs.AABBCount = A.AABBCount;
+          GeomDescs.push_back(GD);
+        }
+      }
+      Desc.Inputs.NumDescs = static_cast<UINT>(GeomDescs.size());
+      Desc.Inputs.pGeometryDescs = GeomDescs.data();
+      ScratchSize = BLAS->Sizes.ScratchDataSizeInBytes;
+    } else {
+      const auto *TLAS = llvm::cast<const TLASBuildRequest *>(Item.Req);
+      Desc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+      Desc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+      Desc.Inputs.NumDescs = static_cast<UINT>(TLAS->Instances.size());
+
+      // D3D12_RAYTRACING_INSTANCE_DESC has the same byte layout as
+      // VkAccelerationStructureInstanceKHR. Serialize and upload via the
+      // shared abstract-API helper using an upload-heap (CpuToGpu) buffer.
+      llvm::SmallVector<D3D12_RAYTRACING_INSTANCE_DESC> Native;
+      Native.reserve(TLAS->Instances.size());
+      for (const auto &Inst : TLAS->Instances) {
+        D3D12_RAYTRACING_INSTANCE_DESC NI = {};
+        static_assert(sizeof(NI.Transform) == sizeof(Inst.Transform),
+                      "Transform layout mismatch");
+        memcpy(&NI.Transform, Inst.Transform, sizeof(Inst.Transform));
+        // D3D12_RAYTRACING_INSTANCE_DESC packs InstanceID into a 24-bit
+        // bitfield; truncate explicitly so the value matches the VK path
+        // (vkInstanceCustomIndex is likewise 24-bit) instead of relying on
+        // silent narrowing.
+        NI.InstanceID = Inst.InstanceID & 0xFFFFFFu;
+        NI.InstanceMask = Inst.InstanceMask;
+        NI.InstanceContributionToHitGroupIndex = 0;
+        NI.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        auto *BLASPtr = llvm::cast<DXAccelerationStructure>(Inst.BLAS);
+        NI.AccelerationStructure = BLASPtr->getGPUVirtualAddress();
+        Native.push_back(NI);
+      }
+      const size_t Bytes =
+          Native.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+
+      const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
+                                        BufferUsage::Storage};
+      auto InstBufOrErr = offloadtest::createBufferWithData(
+          *Dev, "TLAS-Instances", UploadDesc, Native.data(), Bytes, nullptr,
+          nullptr);
+      if (!InstBufOrErr)
+        return InstBufOrErr.takeError();
+      auto *DXInstBuf = llvm::cast<DXBuffer>(InstBufOrErr->get());
+      Desc.Inputs.InstanceDescs = DXInstBuf->Buffer->GetGPUVirtualAddress();
+
+      CB.KeepAliveOwned.push_back(std::move(*InstBufOrErr));
+      ScratchSize = TLAS->Sizes.ScratchDataSizeInBytes;
+    }
+
+    // Allocate scratch in the default heap; createBuffer applies
+    // ALLOW_UNORDERED_ACCESS for default-heap allocations and creates the
+    // resource in COMMON state, which D3D12 implicitly promotes to
+    // UNORDERED_ACCESS on first GPU access during the AS build.
+    const BufferCreateDesc ScratchDesc{MemoryLocation::GpuOnly,
+                                       BufferUsage::Storage};
+    auto ScratchOrErr =
+        Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
+    if (!ScratchOrErr)
+      return ScratchOrErr.takeError();
+    auto *DXScratchBuf = llvm::cast<DXBuffer>(ScratchOrErr->get());
+    Desc.ScratchAccelerationStructureData =
+        DXScratchBuf->Buffer->GetGPUVirtualAddress();
+    CB.KeepAliveOwned.push_back(std::move(*ScratchOrErr));
+
+    insertDebugSignpost("BuildRaytracingAccelerationStructure");
+    CmdList4->BuildRaytracingAccelerationStructure(&Desc, 0, nullptr);
+  }
+
+  // Signal that this batch's AS writes need a barrier before the next reader.
+  CB.addPendingUAVBarrier();
+  return llvm::Error::success();
+}
+
+llvm::Error DXComputeEncoder::dispatchRays(const PipelineState &PSO,
+                                           const ShaderBindingTable &SBT,
+                                           uint32_t Width, uint32_t Height,
+                                           uint32_t Depth) {
+  if (!llvm::isa<DXRayTracingPipelineState>(&PSO))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "dispatchRays requires a RayTracing PipelineState.");
+  if (!llvm::isa<DXShaderBindingTable>(&SBT))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "dispatchRays requires a DirectX ShaderBindingTable.");
+  const auto &DXRTPSO = llvm::cast<DXRayTracingPipelineState>(PSO);
+  const auto &DXSBT = llvm::cast<DXShaderBindingTable>(SBT);
+
+  // SetPipelineState1 and DispatchRays live on ID3D12GraphicsCommandList4.
+  // The AS-build path (line ~3000 above) follows the same query pattern.
+  ComPtr<ID3D12GraphicsCommandList4> CmdList4;
+  if (auto Err =
+          HR::toError(CB.CmdList.As(&CmdList4),
+                      "ID3D12GraphicsCommandList4 query failed; raytracing "
+                      "is unsupported on this command list."))
+    return Err;
+
+  addUAVBarrier();
+  insertDebugSignpost(
+      llvm::formatv("DispatchRays [{0},{1},{2}]", Width, Height, Depth).str());
+
+  // Global root signature is shared with the compute bind point; bind it on
+  // the underlying command list before SetPipelineState1.
+  CB.CmdList->SetComputeRootSignature(DXRTPSO.RootSig.Get());
+  CmdList4->SetPipelineState1(DXRTPSO.StateObject.Get());
+
+  D3D12_DISPATCH_RAYS_DESC RaysDesc{};
+  RaysDesc.RayGenerationShaderRecord = DXSBT.RayGenRange;
+  RaysDesc.MissShaderTable = DXSBT.MissRange;
+  RaysDesc.HitGroupTable = DXSBT.HitGroupRange;
+  RaysDesc.CallableShaderTable = DXSBT.CallableRange;
+  RaysDesc.Width = Width;
+  RaysDesc.Height = Height;
+  RaysDesc.Depth = Depth;
+  CmdList4->DispatchRays(&RaysDesc);
+  return llvm::Error::success();
+}
 } // namespace
 
 llvm::Expected<offloadtest::SubmitResult> DXQueue::submit(

@@ -20,6 +20,7 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/RenderPass.h"
+#include "API/ShaderBindingTable.h"
 #include "API/Texture.h"
 
 #include "Support/Pipeline.h"
@@ -83,6 +84,21 @@ struct ShaderContainer {
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
 };
 
+struct RayTracingShader {
+  Stages Stage;
+  std::string EntryPoint;
+};
+
+struct RayTracingPipelineCreateDesc {
+  // All RT shaders are compiled into a single DXIL library; every entry in
+  // `Shaders` references this same blob via the backend's library-loading
+  // path.
+  const llvm::MemoryBuffer *Library = nullptr;
+  llvm::SmallVector<RayTracingShader> Shaders;
+  llvm::SmallVector<HitGroup> HitGroups;
+  RayTracingPipelineConfig Config;
+};
+
 struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<InputLayoutDesc> InputLayout;
   llvm::SmallVector<Format> RTFormats;
@@ -120,6 +136,12 @@ struct TraditionalRasterPipelineCreateDesc {
     case Stages::Compute:
     case Stages::Amplification:
     case Stages::Mesh:
+    case Stages::RayGeneration:
+    case Stages::Miss:
+    case Stages::ClosestHit:
+    case Stages::AnyHit:
+    case Stages::Intersection:
+    case Stages::Callable:
       llvm_unreachable("Not a traditional raster pipeline stage.");
     }
   }
@@ -211,6 +233,14 @@ public:
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) = 0;
 
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   const RayTracingPipelineCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &PSO,
+                           const ShaderBindingTableDesc &Desc) = 0;
+
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
 
@@ -280,6 +310,21 @@ createBufferWithData(Device &Dev, std::string Name,
                      const BufferCreateDesc &Desc, const void *Data,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
+
+// Builds all BLAS / TLAS objects defined in `P.AccelStructs` using the
+// supplied compute encoder. Uploads each BLAS's vertex/index data, creates
+// the BLASBuildRequest + AS object via `Dev`, and records the build via
+// `Enc.batchBuildAS`. Then resolves TLAS instance references and records the
+// TLAS batch with a separate call (so the AS-build-write barrier between
+// BLAS and TLAS is automatic).
+//
+// Built AS objects are pushed to `OutAS` (in declaration order: BLASes first,
+// then TLASes). Vertex/index buffers used as build inputs are pushed to
+// `OutInputBuffers`; both must outlive command-buffer submission.
+llvm::Error buildPipelineAccelerationStructures(
+    Device &Dev, ComputeEncoder &Enc, Pipeline &P,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers);
 
 } // namespace offloadtest
 
