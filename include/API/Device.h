@@ -125,6 +125,36 @@ struct TraditionalRasterPipelineCreateDesc {
   }
 };
 
+struct MeshShaderRasterPipelineCreateDesc {
+  llvm::SmallVector<Format> RTFormats;
+  std::optional<Format> DSFormat;
+  PrimitiveTopology Topology;
+
+  ShaderContainer MS;
+  std::optional<ShaderContainer> AS;
+  std::optional<ShaderContainer> PS;
+
+  void setShader(Stages Stage, ShaderContainer &&SC) {
+    switch (Stage) {
+    case Stages::Amplification:
+      AS = std::move(SC);
+      break;
+    case Stages::Mesh:
+      MS = std::move(SC);
+      break;
+    case Stages::Pixel:
+      PS = std::move(SC);
+      break;
+    case Stages::Vertex:
+    case Stages::Hull:
+    case Stages::Domain:
+    case Stages::Geometry:
+    case Stages::Compute:
+      llvm_unreachable("Not a mesh raster pipeline stage.");
+    }
+  }
+};
+
 class PipelineState {
 public:
   GPUAPI API;
@@ -210,6 +240,11 @@ public:
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createMeshShaderRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const MeshShaderRasterPipelineCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;

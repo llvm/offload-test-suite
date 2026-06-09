@@ -1271,21 +1271,18 @@ public:
         getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints));
   }
 
-  llvm::Expected<std::unique_ptr<PipelineState>>
-  createPipelineAsMsPs(llvm::StringRef Name, const BindingsDesc &BndDesc,
-                       llvm::ArrayRef<Format> RTFormats,
-                       std::optional<Format> DSFormat,
-                       std::optional<ShaderContainer> AS, ShaderContainer MS,
-                       std::optional<ShaderContainer> PS) {
-    assert(RTFormats.size() <= 8);
+  llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
-    if (auto Err = createRootSignature(Name, BndDesc, MS,
+    if (auto Err = createRootSignature(Name, BindingsDesc, Desc.MS,
                                        /*IsGraphics=*/true, RootSig))
       return Err;
 
-    const D3D12_SHADER_BYTECODE MSBytecode = {MS.Shader->getBuffer().data(),
-                                              MS.Shader->getBuffer().size()};
+    const D3D12_SHADER_BYTECODE MSBytecode = {
+        Desc.MS.Shader->getBuffer().data(), Desc.MS.Shader->getBuffer().size()};
     if (MSBytecode.BytecodeLength == 0)
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -1293,26 +1290,26 @@ public:
 
     // The amplification (task) shader is optional.
     D3D12_SHADER_BYTECODE ASBytecode = {};
-    if (AS) {
-      assert((*AS).Shader->getBufferSize() > 0 &&
+    if (Desc.AS) {
+      assert((*Desc.AS).Shader->getBufferSize() > 0 &&
              "The passed task/amplification shader was empty.");
-      ASBytecode = {(*AS).Shader->getBuffer().data(),
-                    (*AS).Shader->getBuffer().size()};
+      ASBytecode = {(*Desc.AS).Shader->getBuffer().data(),
+                    (*Desc.AS).Shader->getBuffer().size()};
     }
 
     // The pixel shader is optional
     D3D12_SHADER_BYTECODE PSBytecode = {};
-    if (PS) {
-      assert((*PS).Shader->getBufferSize() > 0 &&
+    if (Desc.PS) {
+      assert((*Desc.PS).Shader->getBufferSize() > 0 &&
              "The passed pixel shader was empty.");
-      PSBytecode = {(*PS).Shader->getBuffer().data(),
-                    (*PS).Shader->getBuffer().size()};
+      PSBytecode = {(*Desc.PS).Shader->getBuffer().data(),
+                    (*Desc.PS).Shader->getBuffer().size()};
     }
 
     D3D12_RT_FORMAT_ARRAY RTArray = {};
-    RTArray.NumRenderTargets = static_cast<UINT>(RTFormats.size());
-    for (size_t I = 0; I < RTFormats.size(); ++I)
-      RTArray.RTFormats[I] = getDXGIFormat(RTFormats[I]);
+    RTArray.NumRenderTargets = static_cast<UINT>(Desc.RTFormats.size());
+    for (size_t I = 0; I < Desc.RTFormats.size(); ++I)
+      RTArray.RTFormats[I] = getDXGIFormat(Desc.RTFormats[I]);
 
     CD3DX12_DEPTH_STENCIL_DESC1 DepthStencil(D3D12_DEFAULT);
     DepthStencil.DepthEnable = true;
@@ -1332,10 +1329,10 @@ public:
     Stream.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     Stream.DepthStencilState = DepthStencil;
     Stream.SampleMask = UINT_MAX;
-    Stream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    Stream.PrimitiveTopologyType = getDXPrimitiveTopologyType(Desc.Topology);
     Stream.RTVFormats = RTArray;
-    if (DSFormat)
-      Stream.DSVFormat = getDXGIFormat(*DSFormat);
+    if (Desc.DSFormat)
+      Stream.DSVFormat = getDXGIFormat(*Desc.DSFormat);
     Stream.SampleDesc = SampleDesc;
 
     const D3D12_PIPELINE_STATE_STREAM_DESC StreamDesc = {sizeof(Stream),
@@ -2763,38 +2760,24 @@ public:
         llvm::outs() << "Traditional Raster Pipeline created.\n";
 
       } else if (P.isMeshShaderRaster()) {
-
-        std::optional<ShaderContainer> AS = {};
-        ShaderContainer MS = {};
-        std::optional<ShaderContainer> PS = {};
+        MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
+        PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         for (auto &Shader : P.Shaders) {
-          if (Shader.Stage == Stages::Amplification) {
-            ShaderContainer Container;
-            Container.EntryPoint = Shader.Entry;
-            Container.Shader = Shader.Shader.get();
-            AS = Container;
-          } else if (Shader.Stage == Stages::Mesh) {
-            MS.EntryPoint = Shader.Entry;
-            MS.Shader = Shader.Shader.get();
-          } else if (Shader.Stage == Stages::Pixel) {
-            ShaderContainer Container;
-            Container.EntryPoint = Shader.Entry;
-            Container.Shader = Shader.Shader.get();
-            PS = Container;
-          }
+          ShaderContainer SC = {};
+          SC.EntryPoint = Shader.Entry;
+          SC.Shader = Shader.Shader.get();
+          PipelineDesc.setShader(Shader.Stage, std::move(SC));
         }
 
         auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
                                     P.Bindings.RTargetBufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
+        PipelineDesc.RTFormats.push_back(*FormatOrErr);
 
-        llvm::SmallVector<Format> RTFormats;
-        RTFormats.push_back(*FormatOrErr);
-
-        auto PipelineStateOrErr =
-            createPipelineAsMsPs("Mesh Shader Pipeline State", BndDesc,
-                                 RTFormats, Format::D32FloatS8Uint, AS, MS, PS);
+        auto PipelineStateOrErr = createMeshShaderRasterPipeline(
+            "Mesh Shader Pipeline State", BndDesc, PipelineDesc);
 
         if (!PipelineStateOrErr)
           return PipelineStateOrErr.takeError();
