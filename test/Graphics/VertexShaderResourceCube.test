@@ -11,85 +11,75 @@
 // The vertex shader reads every per-draw transform from a bound resource, to
 // exercise vertex-stage resource access:
 //   * the camera view-projection from a constant buffer (b0)
-//   * the local-to-world matrix from a StructuredBuffer (t0)  -- faces 0..2
-//   * the SAME local-to-world matrix from a ByteAddressBuffer (t1) -- faces 3..5
+//   * the local-to-world matrix from a StructuredBuffer (t0), faces 0..2
+//   * the same matrix from a ByteAddressBuffer (t1), faces 3..5
 //
 // Both buffers hold identical bytes, so the two halves of the cube line up
 // exactly -- a built-in self check: if either buffer-read path is wrong, that
 // half is transformed differently and the silhouette splits.
 
-[[vk::binding(0)]] cbuffer Camera : register(b0)
-{
-    row_major float4x4 worldToClip;
+[[vk::binding(0, 0)]] cbuffer Camera : register(b0) {
+  row_major float4x4 worldToClip;
 };
 
-struct WorldMat { row_major float4x4 m; };
-[[vk::binding(1)]] StructuredBuffer<WorldMat> WorldSB : register(t0);
-[[vk::binding(2)]] ByteAddressBuffer          WorldBAB : register(t1);
+struct WorldMat {
+  row_major float4x4 m;
+};
+[[vk::binding(1, 0)]] StructuredBuffer<WorldMat> WorldSB : register(t0);
+[[vk::binding(2, 0)]] ByteAddressBuffer WorldBAB : register(t1);
 
-struct VSOutput
-{
-    float4 position             : SV_Position;
-    float3 normal               : NORMAL;   // float varying (interpolated)
-    nointerpolation uint faceID : FACEID;   // integer varying (flat)
+struct VSOutput {
+  float4 position : SV_Position;
+  float3 normal : NORMAL;               // float varying (interpolated)
+  nointerpolation uint faceID : FACEID; // integer varying (flat)
 };
 
-static const float3 FaceNormals[6] =
-{
-    float3( 1.0,  0.0,  0.0), float3(-1.0,  0.0,  0.0),
-    float3( 0.0,  1.0,  0.0), float3( 0.0, -1.0,  0.0),
-    float3( 0.0,  0.0,  1.0), float3( 0.0,  0.0, -1.0),
+static const float3 FaceNormals[6] = {
+    float3(1.0, 0.0, 0.0),  float3(-1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0),
+    float3(0.0, -1.0, 0.0), float3(0.0, 0.0, 1.0),  float3(0.0, 0.0, -1.0),
 };
 
-VSOutput main(float3 localPos : POSITION, uint vid : SV_VertexID)
-{
-    uint face = vid / 6; // 6 vertices (two triangles) per cube face
+VSOutput main(float3 localPos : POSITION, uint vid : SV_VertexID) {
+  uint face = vid / 6; // 6 vertices (two triangles) per cube face
 
-    float4x4 localToWorld;
-    if (vid < 18)
-    {
-        localToWorld = WorldSB[0].m;                // faces 0..2 via StructuredBuffer
-    }
-    else
-    {
-        float4 r0 = asfloat(WorldBAB.Load4(0));     // faces 3..5 via ByteAddressBuffer
-        float4 r1 = asfloat(WorldBAB.Load4(16));
-        float4 r2 = asfloat(WorldBAB.Load4(32));
-        float4 r3 = asfloat(WorldBAB.Load4(48));
-        localToWorld = float4x4(r0, r1, r2, r3);
-    }
+  float4x4 localToWorld;
+  if (vid < 18) {
+    localToWorld = WorldSB[0].m; // faces 0..2 via StructuredBuffer
+  } else {
+    float4 r0 = asfloat(WorldBAB.Load4(0)); // faces 3..5 via ByteAddressBuffer
+    float4 r1 = asfloat(WorldBAB.Load4(16));
+    float4 r2 = asfloat(WorldBAB.Load4(32));
+    float4 r3 = asfloat(WorldBAB.Load4(48));
+    localToWorld = float4x4(r0, r1, r2, r3);
+  }
 
-    float4 worldPos = mul(localToWorld, float4(localPos, 1.0));
+  float4 worldPos = mul(localToWorld, float4(localPos, 1.0));
 
-    VSOutput o;
-    o.position = mul(worldToClip, worldPos);         // perspective -> SV_Position.w != 1
-    o.normal   = mul((float3x3)localToWorld, FaceNormals[face]);
-    o.faceID   = face;
-    return o;
+  VSOutput o;
+  o.position = mul(worldToClip, worldPos); // perspective -> SV_Position.w != 1
+  o.normal = mul((float3x3)localToWorld, FaceNormals[face]);
+  o.faceID = face;
+  return o;
 }
 
 #--- pixel.hlsl
-struct PSInput
-{
-    float4 position             : SV_Position;
-    float3 normal               : NORMAL;
-    nointerpolation uint faceID : FACEID;
+struct PSInput {
+  float4 position : SV_Position;
+  float3 normal : NORMAL;
+  nointerpolation uint faceID : FACEID;
 };
 
-static const float3 Palette[6] =
-{
-    float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0),
-    float3(0.0, 0.0, 1.0), float3(1.0, 1.0, 0.0),
-    float3(1.0, 0.0, 1.0), float3(0.0, 1.0, 1.0),
+static const float3 Palette[6] = {
+    float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0),
+    float3(1.0, 1.0, 0.0), float3(1.0, 0.0, 1.0), float3(0.0, 1.0, 1.0),
 };
 
-float4 main(PSInput input) : SV_Target
-{
-    float3 N    = normalize(input.normal);
-    float3 L    = normalize(float3(0.0, 1.0, 0.0));
-    float  ndl  = saturate(dot(N, L));
-    float3 base = Palette[input.faceID];
-    return float4(base * (0.30 + 0.70 * ndl), 1.0);
+float4 main(PSInput input) : SV_Target {
+  float3 N = normalize(input.normal);
+  float3 L = normalize(float3(0.0, 1.0, 0.0));
+  float ndl = saturate(dot(N, L));
+  float3 base = Palette[input.faceID];
+  return float4(base * (0.30 + 0.70 * ndl), 1.0);
 }
 
 #--- pipeline.yaml
@@ -104,15 +94,42 @@ Buffers:
   - Name: VertexData
     Format: Float32
     Stride: 12
-    Data: [ 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5,
-            0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5,
-            -0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5,
-            -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5,
-            0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5,
-            0.5, -0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5,
-            0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, -0.5, 0.5,
-            -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5,
-            0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5 ]
+    Data: [ 0.5, -0.5, -0.5,
+            0.5, 0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, -0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, -0.5, 0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, -0.5, -0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, 0.5, 0.5,
+            0.5, 0.5, 0.5,
+            -0.5, 0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, 0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, -0.5, -0.5,
+            0.5, -0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            0.5, -0.5, -0.5,
+            0.5, -0.5, 0.5,
+            0.5, -0.5, 0.5,
+            0.5, 0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            0.5, -0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, -0.5, -0.5,
+            -0.5, 0.5, -0.5,
+            0.5, 0.5, -0.5,
+            -0.5, -0.5, -0.5,
+            0.5, 0.5, -0.5,
+            0.5, -0.5, -0.5 ]
   # Camera view-projection (LH, z in [0,1]), row-major. Read in the VS as a cbuffer.
   - Name: Camera
     Format: Float32
