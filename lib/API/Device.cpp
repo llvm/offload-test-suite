@@ -175,3 +175,83 @@ offloadtest::createBufferWithData(
 
   return Buffer;
 }
+
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
+offloadtest::createTextureWithData(
+    Device &Dev, std::string Name, const TextureCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
+    std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
+
+  const uint64_t PackedRowStrideInBytes =
+      Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
+    return llvm::createStringError(
+        "Data upload is not enough for texture size.");
+
+  auto TextureOrErr = Dev.createTexture(Name, Desc);
+  if (!TextureOrErr)
+    return TextureOrErr.takeError();
+  auto Texture = std::move(*TextureOrErr);
+
+  if (Desc.Location == MemoryLocation::GpuOnly) {
+    if (OutUploadBuffer == nullptr)
+      return llvm::createStringError("An upload buffer is required to create a "
+                                     "GpuOnly texture with data.");
+
+    const uint64_t TexRowStrideInBytes =
+        Dev.getTextureUploadRowStrideInBytes(Desc);
+    const uint64_t UploadBufferSizeInBytes =
+        (Desc.Height - 1) * TexRowStrideInBytes + PackedRowStrideInBytes;
+
+    // Create Upload buffer
+    const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+    std::string UploadBufferName = Name + " (Upload Buffer)";
+    auto UploadBufferOrErr =
+        Dev.createBuffer(UploadBufferName, UploadDesc, UploadBufferSizeInBytes);
+    if (!UploadBufferOrErr)
+      return UploadBufferOrErr.takeError();
+    *OutUploadBuffer = std::move(*UploadBufferOrErr);
+
+    auto MappedPtrOrErr = (*OutUploadBuffer)->map();
+    if (!MappedPtrOrErr)
+      return MappedPtrOrErr.takeError();
+
+    uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
+    const uint8_t *SrcPtr = (const uint8_t *)Data;
+
+    for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
+      memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
+      DstPtr += TexRowStrideInBytes;
+      SrcPtr += PackedRowStrideInBytes;
+    }
+    (*OutUploadBuffer)->unmap();
+
+    // Copy Buffer to Buffer
+    if (auto Err = Encoder->copyBufferToTexture(**OutUploadBuffer, *Texture))
+      return Err;
+
+  } else {
+    auto MappedStrideInBytesOrErr = Texture->getMappedRowPitchInBytes();
+    if (!MappedStrideInBytesOrErr)
+      return MappedStrideInBytesOrErr.takeError();
+    const uint32_t MappedStrideInBytes = *MappedStrideInBytesOrErr;
+
+    // Copy data over
+    auto MappedPtrOrErr = Texture->map();
+    if (!MappedPtrOrErr)
+      return MappedPtrOrErr.takeError();
+
+    uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
+    const uint8_t *SrcPtr = (const uint8_t *)Data;
+
+    for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
+      memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
+      DstPtr += MappedStrideInBytes;
+      SrcPtr += PackedRowStrideInBytes;
+    }
+
+    Texture->unmap();
+  }
+
+  return Texture;
+}

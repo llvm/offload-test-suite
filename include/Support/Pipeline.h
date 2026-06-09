@@ -232,7 +232,7 @@ struct Resource {
   std::optional<VulkanBinding> VKBinding;
   CPUBuffer *BufferPtr = nullptr;
   Sampler *SamplerPtr = nullptr;
-  bool HasCounter;
+  bool HasCounter = false;
   std::optional<uint32_t> TilesMapped;
   bool IsReserved = false;
   TLASDesc *TLASPtr = nullptr;
@@ -272,6 +272,26 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+    case ResourceKind::SampledTexture2D:
+    case ResourceKind::AccelerationStructure:
+      return false;
+    }
+    llvm_unreachable("All cases handled");
+  }
+
+  bool isBuffer() const {
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+      return true;
+    case ResourceKind::Sampler:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:

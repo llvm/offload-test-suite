@@ -19,6 +19,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/MathExtras.h"
 
 #include "../Util.h"
 
@@ -427,15 +428,23 @@ class VulkanBuffer : public offloadtest::Buffer {
 public:
   VkDevice Dev; // Needed for clean-up
   VkBuffer Buffer;
+  VkBuffer CounterBuffer;
   VkDeviceMemory Memory;
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
-               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkBuffer CounterBuffer,
+               VkDeviceMemory Memory, llvm::StringRef Name,
+               BufferCreateDesc Desc, size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Vulkan), Dev(Dev), Buffer(Buffer),
-        Memory(Memory), Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+        CounterBuffer(CounterBuffer), Memory(Memory), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
+
+  VulkanBuffer(const VulkanBuffer &) = delete;
+  VulkanBuffer(VulkanBuffer &&) = delete;
+  VulkanBuffer &operator=(const VulkanBuffer &) = delete;
+  VulkanBuffer &operator=(VulkanBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
@@ -463,9 +472,13 @@ public:
   void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   ~VulkanBuffer() override {
+    if (CounterBuffer != nullptr)
+      vkDestroyBuffer(Dev, CounterBuffer, nullptr);
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
+
+  const BufferCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Vulkan;
@@ -483,13 +496,28 @@ public:
   // currently created during descriptor set setup, which determines their
   // binding layout.
   VkImageView View = VK_NULL_HANDLE;
+  VkImageSubresourceRange FullRange;
   std::string Name;
   TextureCreateDesc Desc;
+  VkImageTiling Tiling = VK_IMAGE_TILING_OPTIMAL;
+
+  VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+  bool IsInUndefinedLayout = true;
+  uint64_t SizeInBytes;
+
+  VkImageLayout preferredLayoutOrUndefined() {
+    return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
+  }
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
-                llvm::StringRef Name, TextureCreateDesc Desc)
+                llvm::StringRef Name, TextureCreateDesc Desc,
+                VkImageLayout PreferredLayout,
+                VkImageSubresourceRange FullRange, VkImageTiling Tiling,
+                uint64_t SizeInBytes)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), Name(Name), Desc(Desc) {}
+        Memory(Memory), FullRange(FullRange), Name(Name), Desc(Desc),
+        Tiling(Tiling), PreferredLayout(PreferredLayout),
+        SizeInBytes(SizeInBytes) {}
 
   ~VulkanTexture() override {
     if (View)
@@ -498,7 +526,49 @@ public:
     vkFreeMemory(Dev, Memory, nullptr);
   }
 
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly texture.");
+    void *Ptr = nullptr;
+    if (vkMapMemory(Dev, Memory, 0, SizeInBytes, 0, &Ptr) != VK_SUCCESS)
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to map texture.");
+    // HOST_CACHED memory that is *not* HOST_COHERENT (GpuToCpu) needs explicit
+    // invalidation so the CPU sees the GPU-side writes.
+    if (Desc.Location == MemoryLocation::GpuToCpu) {
+      VkMappedMemoryRange Range = {};
+      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      Range.memory = Memory;
+      Range.offset = 0;
+      Range.size = VK_WHOLE_SIZE;
+      vkInvalidateMappedMemoryRanges(Dev, 1, &Range);
+    }
+    return Ptr;
+  }
+
+  void unmap() override { vkUnmapMemory(Dev, Memory); }
+
   const TextureCreateDesc &getDesc() const override { return Desc; }
+
+  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Cannot query mapped row pitch of a GpuOnly texture.");
+    if (Tiling != VK_IMAGE_TILING_LINEAR)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Mapped row pitch is only defined for linear-tiled textures.");
+
+    VkImageSubresource Sub = {};
+    Sub.aspectMask = FullRange.aspectMask;
+    Sub.mipLevel = 0;
+    Sub.arrayLayer = 0;
+    VkSubresourceLayout Layout = {};
+    vkGetImageSubresourceLayout(Dev, Image, &Sub, &Layout);
+    return static_cast<uint32_t>(Layout.rowPitch);
+  }
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Vulkan;
@@ -690,6 +760,25 @@ public:
   VkAccessFlags PendingSrcAccess = VK_ACCESS_HOST_WRITE_BIT;
   VkPipelineStageFlags PendingDstStage = 0;
   VkAccessFlags PendingDstAccess = 0;
+  llvm::SmallVector<VkImageMemoryBarrier> PendingImageTransitions;
+
+  void addImageTransition(VkAccessFlags SrcAccessMask,
+                          VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
+                          VkImageLayout NewLayout, VkImage Image,
+                          VkImageSubresourceRange SubresourceRange) {
+    PendingImageTransitions.push_back(VkImageMemoryBarrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
+        nullptr,                                /*pNext*/
+        SrcAccessMask,
+        DstAccessMask,
+        OldLayout,
+        NewLayout,
+        0, /*srcQueueFamilyIndex*/
+        0, /*dstQueueFamilyIndex*/
+        Image,
+        SubresourceRange,
+    });
+  }
 
   void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
     PendingDstStage |= Stage;
@@ -697,22 +786,18 @@ public:
   }
 
   void flushBarrier() {
-    if (PendingSrcStage == 0) {
-      // Nothing produced yet — no barrier needed, but carry dst forward as
-      // the next src (the command we're about to run will produce at these
-      // stages).
-      PendingSrcStage = PendingDstStage;
-      PendingSrcAccess = PendingDstAccess;
-      PendingDstStage = 0;
-      PendingDstAccess = 0;
-      return;
+    if (PendingSrcStage != 0 || !PendingImageTransitions.empty()) {
+      VkMemoryBarrier Barrier = {};
+      Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      Barrier.srcAccessMask = PendingSrcAccess;
+      Barrier.dstAccessMask = PendingDstAccess;
+      vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
+                           &Barrier, 0, nullptr, PendingImageTransitions.size(),
+                           PendingImageTransitions.data());
+
+      PendingImageTransitions.clear();
     }
-    VkMemoryBarrier Barrier = {};
-    Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    Barrier.srcAccessMask = PendingSrcAccess;
-    Barrier.dstAccessMask = PendingDstAccess;
-    vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
-                         &Barrier, 0, nullptr, 0, nullptr);
+
     PendingSrcStage = PendingDstStage;
     PendingSrcAccess = PendingDstAccess;
     PendingDstStage = 0;
@@ -833,8 +918,8 @@ public:
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
-    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
-    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
     VkBufferCopy Region = {};
     Region.srcOffset = SrcOffset;
     Region.dstOffset = DstOffset;
@@ -842,6 +927,92 @@ public:
     addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
     vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyCounterToBuffer(offloadtest::Buffer &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
+
+    if (!VKSrc.Desc.HasCounter)
+      return llvm::createStringError(
+          "Counter resource passed does not hvae a counter.");
+
+    const VkBufferCopy Region{
+        0,               /*srcOffset*/
+        0,               /*dstOffset*/
+        sizeof(uint32_t) /*size*/
+    };
+    addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost("copyCounterToBuffer 4B");
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.CounterBuffer, VKDst.Buffer, 1,
+                    &Region);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToTexture(offloadtest::Buffer &Src,
+                                  offloadtest::Texture &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst.Image, VKDst.FullRange);
+    VKDst.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst.Image, VKDst.FullRange);
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanTexture>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT,        /*DstAccessMask*/
+                          VKSrc.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
+                          VKSrc.Image, VKSrc.FullRange);
+    VKSrc.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
+                           0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,              /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
+                          VKSrc.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKSrc.Image, VKSrc.FullRange);
+
     return llvm::Error::success();
   }
 
@@ -900,14 +1071,16 @@ public:
 
 class VulkanRenderEncoder : public offloadtest::RenderEncoder {
   VulkanCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
 
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
   bool ScissorSet = false;
 
 public:
-  VulkanRenderEncoder(VulkanCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {
+  VulkanRenderEncoder(VulkanCommandBuffer &CB,
+                      const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB), Desc(Desc) {
     pushDebugGroup("RenderEncoder");
   }
   VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
@@ -1008,6 +1181,29 @@ public:
 
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
+
+    for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+      CB.addImageTransition(
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                      /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                      /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+    }
+
+    if (Desc.DepthStencil) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+      CB.addImageTransition(
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                              /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                              /*NewLayout*/
+          Tex.Image, Tex.FullRange);
+    }
+
     popDebugGroup();
   }
 };
@@ -1094,6 +1290,31 @@ VulkanCommandBuffer::createRenderEncoder(
     ClearValues.push_back(CV);
   }
 
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    this->addImageTransition(
+        this->PendingSrcAccess, /*SrcAccessMask*/
+        VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+        Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+        Tex.Image, Tex.FullRange);
+
+    Tex.IsInUndefinedLayout = false;
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    this->addImageTransition(
+        this->PendingSrcAccess, /*SrcAccessMask*/
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+            VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+        Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+        Tex.Image, Tex.FullRange);
+
+    Tex.IsInUndefinedLayout = false;
+  }
   VkFramebufferCreateInfo FBCI = {};
   FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   FBCI.renderPass = VKPass.Handle;
@@ -1123,9 +1344,11 @@ VulkanCommandBuffer::createRenderEncoder(
   BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
   BeginInfo.pClearValues = ClearValues.data();
 
+  this->flushBarrier();
+
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  return std::make_unique<VulkanRenderEncoder>(*this);
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
 }
 
 class VulkanDevice : public offloadtest::Device {
@@ -2224,47 +2447,114 @@ public:
     BufInfo.size = SizeInBytes;
     BufInfo.usage =
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
     switch (Desc.Usage) {
     case BufferUsage::Storage:
       BufInfo.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::ConstantBuffer:
+      BufInfo.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::IndexBuffer:
+      BufInfo.usage |=
+          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       break;
     case BufferUsage::VertexBuffer:
       BufInfo.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       break;
+    case BufferUsage::IndirectArgs:
+      BufInfo.usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
     }
-    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer DeviceBuffer;
+    VkBuffer BufferObject;
     if (auto Err = VK::toError(
-            vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer),
+            vkCreateBuffer(Device, &BufInfo, nullptr, &BufferObject),
             "Failed to create device buffer."))
       return Err;
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, BufferObject, &MemReqs);
 
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
     auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
                                  getVulkanMemoryFlags(Desc.Location));
-    if (!MemIdx)
+    if (!MemIdx) {
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return MemIdx.takeError();
+    }
     AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkBuffer CounterBuffer = nullptr;
+    VkMemoryRequirements CounterMemReqs = {};
+    VkDeviceSize CounterOffsetInBytes = 0;
+    if (Desc.HasCounter) {
+      VkBuffer CounterBuffer;
+      VkBufferCreateInfo CounterBufferInfo = {};
+      CounterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      CounterBufferInfo.size = sizeof(uint32_t);
+      CounterBufferInfo.usage = BufInfo.usage;
+      CounterBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      if (auto Err = VK::toError(vkCreateBuffer(Device, &CounterBufferInfo,
+                                                nullptr, &CounterBuffer),
+                                 "Could not create counter buffer.")) {
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        return Err;
+      }
+
+      vkGetBufferMemoryRequirements(Device, CounterBuffer, &CounterMemReqs);
+
+      CounterOffsetInBytes =
+          llvm::alignTo(AllocInfo.allocationSize, CounterMemReqs.alignment);
+      AllocInfo.allocationSize = CounterOffsetInBytes + CounterMemReqs.size;
+
+      assert(MemReqs.memoryTypeBits == CounterMemReqs.memoryTypeBits &&
+             "We are expecting the main resource and counter resource to have "
+             "the same memory type.");
+    }
 
     VkDeviceMemory DeviceMemory;
     if (auto Err = VK::toError(
             vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
-            "Failed to allocate device memory."))
+            "Failed to allocate device memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return Err;
-    if (auto Err = VK::toError(
-            vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0),
-            "Failed to bind device buffer memory."))
-      return Err;
+    }
 
-    return std::make_unique<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
-                                          Name, Desc, SizeInBytes);
+    if (auto Err = VK::toError(
+            vkBindBufferMemory(Device, BufferObject, DeviceMemory, 0),
+            "Failed to bind device buffer memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return Err;
+    }
+
+    if (CounterBuffer != nullptr) {
+      if (auto Err = VK::toError(vkBindBufferMemory(Device, CounterBuffer,
+                                                    DeviceMemory,
+                                                    CounterOffsetInBytes),
+                                 "Failed to bind counter buffer memory.")) {
+        if (CounterBuffer)
+          vkDestroyBuffer(Device, CounterBuffer, nullptr);
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        vkFreeMemory(Device, DeviceMemory, nullptr);
+        return Err;
+      }
+    }
+
+    return std::make_unique<VulkanBuffer>(Device, BufferObject, CounterBuffer,
+                                          DeviceMemory, Name, Desc,
+                                          SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -2280,7 +2570,9 @@ public:
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = 1;
     ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
+                           ? VK_IMAGE_TILING_OPTIMAL
+                           : VK_IMAGE_TILING_LINEAR;
     ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
     ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -2320,8 +2612,27 @@ public:
       return Err;
     }
 
-    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc);
+    VkImageAspectFlags FullAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (isDepthFormat(Desc.Fmt)) {
+      FullAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+      if (isStencilFormat(Desc.Fmt))
+        FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    const VkImageSubresourceRange FullRange{
+        FullAspectMask,
+        0, /*baseMipLevel*/
+        Desc.MipLevels,
+        0, /*baseArrayLayer*/
+        1, /*layerCount*/
+    };
+
+    VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if ((Desc.Usage & TextureUsage::Storage))
+      PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    auto Tex = std::make_unique<VulkanTexture>(
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
+        ImageInfo.tiling, MemReqs.size);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -2351,6 +2662,14 @@ public:
     }
 
     return Tex;
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    const uint64_t TightRow =
+        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
+    return static_cast<uint32_t>(llvm::alignTo(
+        TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
   }
 
   const Capabilities &getCapabilities() override {

@@ -308,6 +308,10 @@ public:
             size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
+  MTLBuffer(const MTLBuffer &) = delete;
+  MTLBuffer(MTLBuffer &&) = delete;
+  MTLBuffer &operator=(const MTLBuffer &) = delete;
+  MTLBuffer &operator=(MTLBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
@@ -331,6 +335,8 @@ public:
       Buf->release();
   }
 
+  const BufferCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Metal;
   }
@@ -351,6 +357,16 @@ public:
   }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
+
+  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Cannot query mapped row pitch of a GpuOnly texture.");
+    // Metal host-visible textures are accessed via getBytes/replaceRegion with
+    // a caller-supplied bytesPerRow, so a tightly packed stride is valid.
+    return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  }
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Metal;
@@ -1547,6 +1563,9 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+    assert(!Desc.HasCounter &&
+           "Metal Backend does not support buffers with a counter.");
+
     MTL::Buffer *Buf = Device->newBuffer(
         SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)
@@ -1572,6 +1591,11 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
     return std::make_unique<MTLTexture>(Tex, Name, Desc);
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
