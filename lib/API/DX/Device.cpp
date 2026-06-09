@@ -1484,8 +1484,9 @@ public:
                         "Failed to create buffer."))
       return Err;
 
+    const D3D12_RESOURCE_STATES PreferredState = InitialState;
     return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes,
-                                      InitialState);
+                                      PreferredState);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -1542,8 +1543,9 @@ public:
                                "Failed to create texture."))
       return Err;
 
+    const D3D12_RESOURCE_STATES PreferredState = InitialState;
     auto Tex =
-        std::make_unique<DXTexture>(DeviceTexture, Name, Desc, InitialState);
+        std::make_unique<DXTexture>(DeviceTexture, Name, Desc, PreferredState);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
