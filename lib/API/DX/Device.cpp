@@ -2023,27 +2023,6 @@ public:
     return std::make_unique<DXAccelerationStructure>(ASBuffer);
   }
 
-  void addResourceUploadCommands(Resource &R, InvocationState &IS,
-                                 ComPtr<ID3D12Resource> Destination,
-                                 ComPtr<ID3D12Resource> Source) {
-    addUploadBeginBarrier(IS, Destination);
-    if (R.isTexture()) {
-      const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-          0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                 getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                 B.OutputProps.Height, 1,
-                 B.OutputProps.Width * B.getElementSize())};
-      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
-      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
-
-      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
-    } else
-      IS.CB->CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
-                                       R.size());
-    addUploadEndBarrier(IS, Destination, R.isReadWrite());
-  }
-
   static UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
     UINT Ret;
     if (NumTiles.has_value())
