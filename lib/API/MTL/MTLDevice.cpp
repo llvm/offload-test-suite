@@ -17,6 +17,9 @@
 #define IR_PRIVATE_IMPLEMENTATION
 #include "metal_irconverter.h"
 #include "metal_irconverter_runtime.h"
+// ir_raytracing.h depends on types defined in metal_irconverter_runtime.h —
+// keep this include in its own block so clang-format won't sort it above.
+#include "ir_raytracing.h"
 
 #include "API/Device.h"
 #include "API/Encoder.h"
@@ -145,6 +148,18 @@ static IRShaderStage getShaderStage(Stages Stage) {
     return IRShaderStageAmplification;
   case Stages::Mesh:
     return IRShaderStageMesh;
+  case Stages::RayGeneration:
+    return IRShaderStageRayGeneration;
+  case Stages::Miss:
+    return IRShaderStageMiss;
+  case Stages::ClosestHit:
+    return IRShaderStageClosestHit;
+  case Stages::AnyHit:
+    return IRShaderStageAnyHit;
+  case Stages::Intersection:
+    return IRShaderStageIntersection;
+  case Stages::Callable:
+    return IRShaderStageCallable;
   }
   llvm_unreachable("All cases handled");
 }
@@ -261,6 +276,10 @@ public:
   MTL::Size MeshThreadsPerThreadgroup{1, 1, 1};
   MTL::Size ObjectThreadsPerThreadgroup{1, 1, 1};
 
+  // True for pipelines created via createPipelineRT; mirrors the VK / DX
+  // backends' IsRayTracing flag so classof can downcast safely.
+  bool IsRayTracing = false;
+
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
                    MTL::ComputePipelineState *ComputePipeline,
@@ -294,6 +313,102 @@ public:
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::Metal;
+  }
+
+protected:
+  // RT subclass constructor — keeps Compute/RenderPipeline null while sharing
+  // the rest of the layout (Name, root signature, argument buffer).
+  MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
+                   std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
+                   bool IsRT)
+      : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
+        RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
+        IsRayTracing(IsRT) {}
+};
+
+/// Ray tracing pipeline state. Layered on top of MTLPipelineState so the
+/// existing argument-buffer / root-signature plumbing keeps working; adds the
+/// raygen compute pipeline (held in ComputePipeline) plus the
+/// IRShaderIdentifier records the SBT builder needs to populate per-record
+/// entries.
+///
+/// The Metal RT path goes through `metal_irconverter`:
+///   • each entry point is compiled to a Metal IR function;
+///   • raygen is compiled as a kernel (IRRayGenerationCompilationKernel) so
+///     it becomes the compute function of the pipeline;
+///   • miss / closest-hit / any-hit / intersection / callable are compiled as
+///     visible functions, attached to the pipeline via LinkedFunctions, and
+///     looked up by name in a MTLVisibleFunctionTable;
+///   • the SBT records IRShaderIdentifier values whose `shaderHandle` is the
+///     slot in that visible function table.
+class MTLRayTracingPipelineState : public MTLPipelineState {
+public:
+  // ResourceID-based callable tables wired into IRDispatchRaysArgument.
+  MTL::VisibleFunctionTable *VFT = nullptr;
+  MTL::IntersectionFunctionTable *IFT = nullptr;
+
+  // Per shader entry / hit-group: pre-built IRShaderIdentifier the SBT
+  // builder memcpys into each record. Keys are EntryPoint strings for
+  // raygen / miss / callable shaders and HitGroup.Name for hit groups.
+  llvm::StringMap<IRShaderIdentifier> ShaderIdentifiers;
+
+  // Keep the per-stage Metal libraries / functions alive as long as the
+  // pipeline owns the visible-function-table indices that reference them.
+  llvm::SmallVector<MTL::Library *> Libraries;
+  llvm::SmallVector<MTL::Function *> Functions;
+
+  MTLRayTracingPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
+                             std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuf)
+      : MTLPipelineState(Name, std::move(RootSig), std::move(ArgBuf),
+                         /*IsRT=*/true) {}
+
+  ~MTLRayTracingPipelineState() override {
+    if (VFT)
+      VFT->release();
+    if (IFT)
+      IFT->release();
+    for (MTL::Function *F : Functions)
+      if (F)
+        F->release();
+    for (MTL::Library *L : Libraries)
+      if (L)
+        L->release();
+  }
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    if (B->getAPI() != GPUAPI::Metal)
+      return false;
+    return static_cast<const MTLPipelineState *>(B)->IsRayTracing;
+  }
+};
+
+/// Metal-side shader binding table. There is no `MTLShaderBindingTable` in
+/// the Metal API — the irconverter runtime expects the four SBT regions to be
+/// laid out as `IRShaderIdentifier` records in a single buffer whose ranges
+/// are referenced from an `IRDispatchRaysArgument` struct at dispatch time.
+class MTLShaderBindingTable : public offloadtest::ShaderBindingTable {
+public:
+  MTL::Buffer *Buffer = nullptr;
+  IRVirtualAddressRange RayGenRegion{};
+  IRVirtualAddressRangeAndStride MissRegion{};
+  IRVirtualAddressRangeAndStride HitGroupRegion{};
+  IRVirtualAddressRangeAndStride CallableRegion{};
+
+  MTLShaderBindingTable(MTL::Buffer *Buf, IRVirtualAddressRange RG,
+                        IRVirtualAddressRangeAndStride MS,
+                        IRVirtualAddressRangeAndStride HG,
+                        IRVirtualAddressRangeAndStride CL)
+      : offloadtest::ShaderBindingTable(GPUAPI::Metal), Buffer(Buf),
+        RayGenRegion(RG), MissRegion(MS), HitGroupRegion(HG),
+        CallableRegion(CL) {}
+
+  ~MTLShaderBindingTable() override {
+    if (Buffer)
+      Buffer->release();
+  }
+
+  static bool classof(const offloadtest::ShaderBindingTable *S) {
+    return S->getAPI() == GPUAPI::Metal;
   }
 };
 
@@ -373,9 +488,18 @@ public:
   }
 };
 
+class MTLDevice; // forward decl — defined below in this same anon ns
+
 class MTLCommandBuffer : public offloadtest::CommandBuffer {
 public:
   MTL::CommandBuffer *CmdBuffer = nullptr;
+  /// Back-pointer to the owning device; used by encoders that need to
+  /// allocate scratch / instance buffers for AS builds.
+  MTLDevice *Dev = nullptr;
+  /// MTL::Buffer objects (e.g. AS scratch and TLAS instance buffers) that
+  /// must outlive command-buffer submission. Released when the CB is
+  /// destroyed.
+  llvm::SmallVector<MTL::Buffer *> KeepAliveMTLBuffers;
 
   static llvm::Expected<std::unique_ptr<MTLCommandBuffer>>
   create(MTL::CommandQueue *Queue) {
@@ -387,7 +511,11 @@ public:
     return CB;
   }
 
-  ~MTLCommandBuffer() override = default;
+  ~MTLCommandBuffer() override {
+    for (auto *B : KeepAliveMTLBuffers)
+      if (B)
+        B->release();
+  }
 
   static bool classof(const CommandBuffer *CB) {
     return CB->getKind() == GPUAPI::Metal;
@@ -451,9 +579,13 @@ llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
 }
 
 class MTLComputeEncoder : public offloadtest::ComputeEncoder {
+  MTLCommandBuffer *CB = nullptr;
   MTL::CommandBuffer *CmdBuffer;
   MTL::ComputeCommandEncoder *ComputeEnc = nullptr;
   MTL::BlitCommandEncoder *BlitEnc = nullptr;
+  /// Lazy AS encoder, created when batchBuildAS is called and torn down at
+  /// the next encoder transition (via endEncodingImpl).
+  MTL::AccelerationStructureCommandEncoder *ASEnc = nullptr;
 
   /// Accumulated barrier scope from commands recorded since the last barrier.
   MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
@@ -498,9 +630,9 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
   }
 
 public:
-  MTLComputeEncoder(MTL::CommandBuffer *CmdBuffer,
+  MTLComputeEncoder(MTLCommandBuffer *CB, MTL::CommandBuffer *CmdBuffer,
                     MTL::ComputeCommandEncoder *Encoder)
-      : ComputeEncoder(GPUAPI::Metal), CmdBuffer(CmdBuffer),
+      : ComputeEncoder(GPUAPI::Metal), CB(CB), CmdBuffer(CmdBuffer),
         ComputeEnc(Encoder) {}
 
   ~MTLComputeEncoder() override { endEncoding(); }
@@ -571,6 +703,59 @@ public:
     return llvm::Error::success();
   }
 
+  // Defined out-of-line below — needs MTLDevice's full type for access to the
+  // MTL::Device handle (used to allocate scratch and instance buffers).
+  llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
+
+  // Dispatch threads using a raygen compute kernel synthesized by the
+  // irconverter. All bindings (descriptor heap, top-level argument buffer,
+  // IRDispatchRaysArgument at slot 3, visible/intersection function tables,
+  // and the SBT buffer) must already be set on the active compute encoder by
+  // the caller — this method only binds the pipeline state and issues the
+  // dispatch.
+  llvm::Error dispatchRays(const PipelineState &PSO, const ShaderBindingTable &,
+                           uint32_t Width, uint32_t Height,
+                           uint32_t Depth) override {
+    if (!llvm::isa<MTLRayTracingPipelineState>(&PSO))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "dispatchRays requires a RayTracing PipelineState.");
+    const auto &RTPSO = llvm::cast<MTLRayTracingPipelineState>(PSO);
+    if (!RTPSO.ComputePipeline)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RayTracing PipelineState has no compute pipeline state.");
+    if (auto Err = ensureComputeEncoder())
+      return Err;
+    flushBarrier();
+    insertDebugSignpost(
+        llvm::formatv("DispatchRays [{0},{1},{2}]", Width, Height, Depth)
+            .str());
+    ComputeEnc->setComputePipelineState(RTPSO.ComputePipeline);
+
+    // DispatchRays(W, H, D) launches W*H*D rays; tid in the irconverter raygen
+    // kernel is the per-ray index. Pass grid as raw (W, H, D) and let Metal
+    // ceil-divide by ThreadsPerGroup to compute threadgroup count.
+    const MTL::Size GridSize(Width, Height, Depth);
+    ComputeEnc->dispatchThreads(GridSize, RTPSO.ThreadsPerGroup);
+    addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
+    return llvm::Error::success();
+  }
+
+  /// Lazily transition into an AccelerationStructureCommandEncoder; mirrors
+  /// the existing compute↔blit lazy switch.
+  llvm::Error ensureASEncoder() {
+    if (ASEnc)
+      return llvm::Error::success();
+    endEncodingImpl();
+    ASEnc = CmdBuffer->accelerationStructureCommandEncoder();
+    if (!ASEnc)
+      return llvm::createStringError(
+          std::errc::device_or_resource_busy,
+          "Failed to create Metal acceleration-structure encoder.");
+    return llvm::Error::success();
+  }
+
   void endEncodingImpl() override {
     if (ComputeEnc) {
       flushBarrier();
@@ -581,6 +766,10 @@ public:
     if (BlitEnc) {
       BlitEnc->endEncoding();
       BlitEnc = nullptr;
+    }
+    if (ASEnc) {
+      ASEnc->endEncoding();
+      ASEnc = nullptr;
     }
   }
 };
@@ -595,7 +784,7 @@ MTLCommandBuffer::createComputeEncoder() {
         "Failed to create Metal compute command encoder.");
   NativeEncoder->pushDebugGroup(
       NS::String::string("ComputeEncoder", NS::UTF8StringEncoding));
-  return std::make_unique<MTLComputeEncoder>(CmdBuffer, NativeEncoder);
+  return std::make_unique<MTLComputeEncoder>(this, CmdBuffer, NativeEncoder);
 }
 
 static MTL::LoadAction getMTLLoadAction(offloadtest::LoadAction Action) {
@@ -879,17 +1068,23 @@ MTLCommandBuffer::createRenderEncoder(
 }
 
 class MTLDevice : public offloadtest::Device {
+  // MTLComputeEncoder needs access to the MTL::Device handle for AS scratch
+  // and instance buffer allocation.
+  friend class MTLComputeEncoder;
+
   Capabilities Caps;
   MTL::Device *Device;
   MTLQueue GraphicsQueue;
 
   struct ResourceSet {
     MTLPtr<MTL::Resource> Resource;
+    // Populated for AS resources; mutually exclusive with Resource above.
+    MetalAccelerationStructure *AS = nullptr;
     ResourceSet(MTL::Resource *Resource) : Resource(Resource) {}
+    explicit ResourceSet(MetalAccelerationStructure *AS) : AS(AS) {}
   };
 
-  // ResourceBundle will contain one ResourceSet for a singular resource
-  // or multiple ResourceSets for resource array.
+  // ResourceBundle holds one ResourceSet per array element (singular = 1).
   using ResourceBundle = llvm::SmallVector<ResourceSet>;
   using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
 
@@ -909,10 +1104,21 @@ class MTLDevice : public offloadtest::Device {
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<MTLCommandBuffer> CB;
     std::unique_ptr<PipelineState> Pipeline;
+    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     // TODO: Support RootResources?
+
+    // Built acceleration structures, kept alive for the pipeline lifetime.
+    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
+        AccelStructs;
+    // Vertex/index buffers consumed during AS builds; must outlive submission.
+    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
+    // Per-AS-descriptor header + instance-contribution buffers backing inline
+    // RT bindings; must be resident on the dispatch encoder so the shader can
+    // read the header.
+    llvm::SmallVector<MTL::Buffer *> ASDescriptorBuffers;
   };
 
   llvm::Error createRootSignature(
@@ -1074,6 +1280,61 @@ class MTLDevice : public offloadtest::Device {
           std::errc::not_supported,
           "Failed to retrieve shader reflection from IR object.");
     }
+
+    return MetalIR{std::move(MetalLib), std::move(Reflection)};
+  }
+
+  // Compile a single ray-tracing entry point out of a DXIL library to a Metal
+  // library + reflection. The compiler is configured with the global root
+  // signature and a IRRayTracingPipelineConfiguration that mirrors the
+  // pipeline's RTConfig — raygen is forced to kernel-mode compilation so it
+  // becomes the compute function on the pipeline state, while every other
+  // RT stage is emitted as a visible function callable from the raygen kernel
+  // through a MTLVisibleFunctionTable.
+  llvm::Expected<MetalIR>
+  convertRTShaderToMetalIR(Stages Stage, IRRootSignature *RootSig,
+                           const IRRayTracingPipelineConfiguration *RTConfig,
+                           llvm::StringRef Entry,
+                           const llvm::MemoryBuffer &Library) {
+    IRCompilerPtr Compiler(IRCompilerCreate());
+    if (!Compiler)
+      return llvm::createStringError(std::errc::not_supported,
+                                     "Failed to create IR compiler instance.");
+    if (!RootSig)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Root signature must be created before converting to Metal IR.");
+
+    IRCompilerSetEntryPointName(Compiler.get(), std::string(Entry).c_str());
+    IRCompilerSetGlobalRootSignature(Compiler.get(), RootSig);
+    IRCompilerSetRayTracingPipelineConfiguration(Compiler.get(), RTConfig);
+
+    const llvm::StringRef Bytes = Library.getBuffer();
+    IRObjectPtr DXIL(
+        IRObjectCreateFromDXIL(reinterpret_cast<const uint8_t *>(Bytes.data()),
+                               Bytes.size(), IRBytecodeOwnershipNone));
+
+    IRError *Err = nullptr;
+    IRObjectPtr ResultIR(IRCompilerAllocCompileAndLink(
+        Compiler.get(), std::string(Entry).c_str(), DXIL.get(), &Err));
+    if (Err)
+      return toError(IRErrorPtr(Err).get(),
+                     "Failed to compile RT shader to Metal IR");
+
+    const IRShaderStage ShaderStage = getShaderStage(Stage);
+    auto MetalLib = IRMetalLibBinaryPtr(IRMetalLibBinaryCreate());
+    if (!IRObjectGetMetalLibBinary(ResultIR.get(), ShaderStage, MetalLib.get()))
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to retrieve Metal library binary for RT entry '%s'",
+          std::string(Entry).c_str());
+
+    auto Reflection = IRShaderReflectionPtr(IRShaderReflectionCreate());
+    if (!IRObjectGetReflection(ResultIR.get(), ShaderStage, Reflection.get()))
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to retrieve RT shader reflection for entry '%s'",
+          std::string(Entry).c_str());
 
     return MetalIR{std::move(MetalLib), std::move(Reflection)};
   }
@@ -1249,9 +1510,22 @@ class MTLDevice : public offloadtest::Device {
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto CreateBuffer =
-        [&IS,
+        [&P, &IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
+      // OutAS layout from buildPipelineAccelerationStructures: BLASes
+      // first, then TLASes — both in P.AccelStructs declaration order.
+      if (R.isAccelerationStructure()) {
+        assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+        assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+        const size_t TLASIdx = R.TLASPtr - &P.AccelStructs.TLAS[0];
+        const size_t ASIdx = P.AccelStructs.BLAS.size() + TLASIdx;
+        ResourceBundle Bundle;
+        Bundle.emplace_back(llvm::cast<MetalAccelerationStructure>(
+            IS.AccelStructs[ASIdx].get()));
+        Resources.emplace_back(&R, std::move(Bundle));
+        return llvm::Error::success();
+      }
       switch (getDescriptorKind(R.Kind)) {
       case DescriptorKind::SRV: {
         auto ExRes = createSRV(R, IS);
@@ -1294,6 +1568,42 @@ class MTLDevice : public offloadtest::Device {
     uint32_t HeapIndex = 0;
     for (auto &T : IS.DescTables) {
       for (auto &R : T.Resources) {
+        if (MetalAccelerationStructure *MTLAS = R.second[0].AS) {
+          // Metal shader converter doesn't bind the AS directly; the shader
+          // reads a buffer containing an IRRaytracingAccelerationStructureGPU-
+          // Header that holds the AS's gpuResourceID plus a pointer to an
+          // instance-contributions array (one uint32 per instance, supplying
+          // the equivalent of D3D12's InstanceContributionToHitGroupIndex).
+          // Build both buffers here and point the descriptor entry at the
+          // header buffer's GPU address.
+          const uint32_t InstCount =
+              static_cast<uint32_t>(R.first->TLASPtr->Instances.size());
+          llvm::SmallVector<uint32_t> Contributions(InstCount, 0);
+          MTL::Buffer *ContribBuf = Device->newBuffer(
+              Contributions.data(), InstCount * sizeof(uint32_t),
+              MTL::ResourceStorageModeShared);
+          MTL::Buffer *HeaderBuf = Device->newBuffer(
+              sizeof(IRRaytracingAccelerationStructureGPUHeader),
+              MTL::ResourceStorageModeShared);
+          IRRaytracingSetAccelerationStructure(
+              static_cast<uint8_t *>(HeaderBuf->contents()),
+              MTLAS->AccelStruct->gpuResourceID(),
+              static_cast<uint8_t *>(ContribBuf->contents()),
+              ContribBuf->gpuAddress(), Contributions.data(), InstCount);
+          IS.CB->KeepAliveMTLBuffers.push_back(HeaderBuf);
+          IS.CB->KeepAliveMTLBuffers.push_back(ContribBuf);
+          // Only the header is read by the shader (via the descriptor's gpuVA).
+          // The contribution buffer is read indirectly via the header's
+          // addressOfInstanceContributions pointer, so both must be resident
+          // during dispatch.
+          IS.ASDescriptorBuffers.push_back(HeaderBuf);
+          IS.ASDescriptorBuffers.push_back(ContribBuf);
+
+          IRDescriptorTableSetAccelerationStructure(
+              IS.DescHeap->getEntryHandle(HeapIndex), HeaderBuf->gpuAddress());
+          HeapIndex += R.first->getArraySize();
+          continue;
+        }
         switch (getDescriptorKind(R.first->Kind)) {
         case DescriptorKind::SRV:
           HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
@@ -1353,11 +1663,112 @@ class MTLDevice : public offloadtest::Device {
           NativeEncoder->useResource(ResSet.Resource.get(),
                                      MTL::ResourceUsageRead |
                                          MTL::ResourceUsageWrite);
+    for (auto &AS : IS.AccelStructs) {
+      auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
+      NativeEncoder->useResource(MTLAS->AccelStruct, MTL::ResourceUsageRead);
+    }
+    for (MTL::Buffer *B : IS.ASDescriptorBuffers)
+      NativeEncoder->useResource(B, MTL::ResourceUsageRead);
 
     if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
                                     P.DispatchParameters.DispatchGroupCount[0],
                                     P.DispatchParameters.DispatchGroupCount[1],
                                     P.DispatchParameters.DispatchGroupCount[2]))
+      return Err;
+    Encoder.endEncoding();
+    return llvm::Error::success();
+  }
+
+  llvm::Error createRayTracingCommands(Pipeline &P, InvocationState &IS) {
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
+    MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
+
+    const auto &RTPSO =
+        llvm::cast<MTLRayTracingPipelineState>(*IS.Pipeline.get());
+    const auto &SBT = llvm::cast<MTLShaderBindingTable>(*IS.SBT.get());
+
+    // Bind the global descriptor heap + top-level argument buffer the same
+    // way the compute path does; the raygen kernel and any visible-function
+    // callees consume them at the same slots (kIRDescriptorHeapBindPoint and
+    // kIRArgumentBufferBindPoint).
+    MTLGPUDescriptorHandle Handle = {};
+    if (IS.DescHeap) {
+      IS.DescHeap->bind(NativeEncoder);
+      Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
+    }
+    for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
+      RTPSO.ArgBuffer->setRootDescriptorTable(Idx, Handle);
+      Handle.addOffset(P.Sets[Idx].Resources.size());
+    }
+    RTPSO.ArgBuffer->bind(NativeEncoder);
+
+    // Populate the per-dispatch IRDispatchRaysArgument: SBT region addresses
+    // (RayGen / Miss / HitGroup / Callable), GPU pointers to the global
+    // root-signature argument buffer + descriptor heaps, plus resource IDs
+    // for the visible / intersection function tables. The raygen kernel
+    // reads this struct from the buffer bound at kIRRayDispatchArgumentsBind-
+    // Point and any visible-function callees inherit it through the same
+    // pointer.
+    IRDispatchRaysArgument Args{};
+    Args.DispatchRaysDesc.RayGenerationShaderRecord = SBT.RayGenRegion;
+    Args.DispatchRaysDesc.MissShaderTable = SBT.MissRegion;
+    Args.DispatchRaysDesc.HitGroupTable = SBT.HitGroupRegion;
+    Args.DispatchRaysDesc.CallableShaderTable = SBT.CallableRegion;
+    Args.DispatchRaysDesc.Width = P.DispatchParameters.DispatchGroupCount[0];
+    Args.DispatchRaysDesc.Height = P.DispatchParameters.DispatchGroupCount[1];
+    Args.DispatchRaysDesc.Depth = P.DispatchParameters.DispatchGroupCount[2];
+    Args.GRS = RTPSO.ArgBuffer->getGPUAddress();
+    Args.ResDescHeap =
+        IS.DescHeap ? IS.DescHeap->getGPUDescriptorHandleForHeapStart().Ptr : 0;
+    Args.SmpDescHeap = 0;
+    Args.VisibleFunctionTable =
+        RTPSO.VFT ? RTPSO.VFT->gpuResourceID() : MTL::ResourceID{0};
+    Args.IntersectionFunctionTable =
+        RTPSO.IFT ? RTPSO.IFT->gpuResourceID() : MTL::ResourceID{0};
+    Args.IntersectionFunctionTables = 0;
+
+    MTL::Buffer *ArgsBuf = Device->newBuffer(
+        &Args, sizeof(IRDispatchRaysArgument), MTL::ResourceStorageModeShared);
+    if (!ArgsBuf)
+      return llvm::createStringError(
+          std::errc::not_enough_memory,
+          "Failed to allocate IRDispatchRaysArgument buffer.");
+    IS.CB->KeepAliveMTLBuffers.push_back(ArgsBuf);
+    NativeEncoder->setBuffer(ArgsBuf, 0, kIRRayDispatchArgumentsBindPoint);
+    NativeEncoder->useResource(ArgsBuf, MTL::ResourceUsageRead);
+
+    // Mark every dispatch-side resource resident: descriptor-table bundles,
+    // acceleration structures + their irconverter header/contribution
+    // buffers (so RayQuery/TraceRay can read them), the SBT buffer (the
+    // raygen kernel dereferences SBT addresses), and the visible /
+    // intersection function tables.
+    for (const auto &Table : IS.DescTables)
+      for (const auto &ResPair : Table.Resources)
+        for (const auto &ResSet : ResPair.second)
+          NativeEncoder->useResource(ResSet.Resource.get(),
+                                     MTL::ResourceUsageRead |
+                                         MTL::ResourceUsageWrite);
+    for (auto &AS : IS.AccelStructs) {
+      auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
+      NativeEncoder->useResource(MTLAS->AccelStruct, MTL::ResourceUsageRead);
+    }
+    for (MTL::Buffer *B : IS.ASDescriptorBuffers)
+      NativeEncoder->useResource(B, MTL::ResourceUsageRead);
+    if (SBT.Buffer)
+      NativeEncoder->useResource(SBT.Buffer, MTL::ResourceUsageRead);
+    if (RTPSO.VFT)
+      NativeEncoder->useResource(RTPSO.VFT, MTL::ResourceUsageRead);
+    if (RTPSO.IFT)
+      NativeEncoder->useResource(RTPSO.IFT, MTL::ResourceUsageRead);
+
+    if (auto Err =
+            Encoder.dispatchRays(*IS.Pipeline.get(), *IS.SBT.get(),
+                                 P.DispatchParameters.DispatchGroupCount[0],
+                                 P.DispatchParameters.DispatchGroupCount[1],
+                                 P.DispatchParameters.DispatchGroupCount[2]))
       return Err;
     Encoder.endEncoding();
     return llvm::Error::success();
@@ -1485,6 +1896,9 @@ class MTLDevice : public offloadtest::Device {
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
     auto MemCpyBack = [](ResourcePair &Pair) -> llvm::Error {
       const Resource &R = *Pair.first;
+      // AS resources don't have CPU-side readback data.
+      if (R.isAccelerationStructure())
+        return llvm::Error::success();
       if (!R.isReadWrite())
         return llvm::Error::success();
 
@@ -1539,6 +1953,286 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef Name, const BindingsDesc &BD,
+                   const RayTracingPipelineCreateDesc &Desc) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this Metal device.");
+    if (!Desc.Library)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "RayTracingPipelineCreateDesc.Library is "
+                                     "null — backend needs a DXIL blob.");
+
+    IRRootSignaturePtr RootSig;
+    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    if (auto Err =
+            createRootSignature(BD, /*IsGraphics=*/false, RootSig, ArgBuffer))
+      return Err;
+
+    // Configure the irconverter ray tracing pipeline. Raygen is compiled as a
+    // kernel so it can be dispatched directly; miss / closest-hit / any-hit /
+    // intersection / callable shaders are compiled as visible functions and
+    // looked up via a MTLVisibleFunctionTable at runtime.
+    auto RTConfig =
+        std::unique_ptr<IRRayTracingPipelineConfiguration,
+                        IRDeleter<IRRayTracingPipelineConfigurationDestroy>>(
+            IRRayTracingPipelineConfigurationCreate());
+    if (!RTConfig)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to create IRRayTracingPipelineConfiguration.");
+    IRRayTracingPipelineConfigurationSetMaxAttributeSizeInBytes(
+        RTConfig.get(), Desc.Config.MaxAttributeSizeInBytes);
+    IRRayTracingPipelineConfigurationSetMaxRecursiveDepth(
+        RTConfig.get(), static_cast<int>(Desc.Config.MaxTraceRecursionDepth));
+    IRRayTracingPipelineConfigurationSetRayGenerationCompilationMode(
+        RTConfig.get(), IRRayGenerationCompilationKernel);
+    IRRayTracingPipelineConfigurationSetIntersectionFunctionCompilationMode(
+        RTConfig.get(), IRIntersectionFunctionCompilationVisibleFunction);
+
+    auto State = std::make_unique<MTLRayTracingPipelineState>(
+        Name, std::move(RootSig), std::move(ArgBuffer));
+
+    // Compile each entry point. Raygen lands in `RaygenFn` (becomes the
+    // compute function); everything else gets linked in via LinkedFunctions
+    // and indexed by visible-function-table slot.
+    MTLPtr<MTL::Function> RaygenFn;
+    std::string RaygenEntry;
+    llvm::SmallVector<MTL::Function *, 4> VisibleFns;
+    llvm::StringMap<uint32_t> EntryToVFTIndex;
+    MTL::Size RaygenThreadsPerGroup(1, 1, 1);
+    for (const auto &Sh : Desc.Shaders) {
+      auto IROrErr = convertRTShaderToMetalIR(Sh.Stage, State->RootSig.get(),
+                                              RTConfig.get(), Sh.EntryPoint,
+                                              *Desc.Library);
+      if (!IROrErr)
+        return IROrErr.takeError();
+
+      dispatch_data_t Data = IRMetalLibGetBytecodeData(IROrErr->Binary.get());
+      NS::Error *Error = nullptr;
+      MTL::Library *Lib = Device->newLibrary(Data, &Error);
+      if (Error)
+        return toError(Error);
+      State->Libraries.push_back(Lib);
+
+      MTL::Function *Fn = Lib->newFunction(
+          NS::String::string(Sh.EntryPoint.c_str(), NS::UTF8StringEncoding));
+      if (!Fn)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Failed to find RT entry point '%s' in compiled Metal library.",
+            Sh.EntryPoint.c_str());
+
+      if (Sh.Stage == Stages::RayGeneration) {
+        RaygenFn.reset(Fn);
+        RaygenEntry = Sh.EntryPoint;
+        IRVersionedCSInfo Info;
+        if (IRShaderReflectionCopyComputeInfo(IROrErr->Reflection.get(),
+                                              IRReflectionVersion_1_0, &Info)) {
+          RaygenThreadsPerGroup =
+              MTL::Size(Info.info_1_0.tg_size[0], Info.info_1_0.tg_size[1],
+                        Info.info_1_0.tg_size[2]);
+          IRShaderReflectionReleaseComputeInfo(&Info);
+        }
+      } else {
+        const uint32_t Slot = static_cast<uint32_t>(VisibleFns.size());
+        VisibleFns.push_back(Fn);
+        EntryToVFTIndex[Sh.EntryPoint] = Slot;
+        State->Functions.push_back(Fn);
+      }
+    }
+    if (!RaygenFn)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RayTracing pipeline requires at least one RayGeneration shader.");
+
+    // Pre-build IRShaderIdentifier records for every name the SBT can
+    // reference. Raygen records carry no shader handle (the kernel is
+    // dispatched directly); miss / closest-hit / callable carry their
+    // visible-function-table index; hit groups reuse the closest-hit
+    // index since this PR1 bring-up only supports HitGroupType::Triangles
+    // without AnyHit/Intersection.
+    IRShaderIdentifier RaygenIdent{};
+    IRShaderIdentifierInit(&RaygenIdent, /*shaderHandle=*/0);
+    State->ShaderIdentifiers[RaygenEntry] = RaygenIdent;
+
+    for (const auto &Sh : Desc.Shaders) {
+      if (Sh.Stage == Stages::RayGeneration)
+        continue;
+      auto It = EntryToVFTIndex.find(Sh.EntryPoint);
+      assert(It != EntryToVFTIndex.end() && "missing visible-function index");
+      IRShaderIdentifier Ident{};
+      IRShaderIdentifierInit(&Ident, It->second);
+      State->ShaderIdentifiers[Sh.EntryPoint] = Ident;
+    }
+
+    for (const auto &HG : Desc.HitGroups) {
+      if (HG.AnyHit || HG.Intersection)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Metal RT bring-up only supports Triangle hit groups with a "
+            "ClosestHit shader; AnyHit/Intersection support is not "
+            "implemented yet.");
+      auto It = EntryToVFTIndex.find(HG.ClosestHit);
+      if (It == EntryToVFTIndex.end())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Hit group '%s' references unknown ClosestHit shader '%s'.",
+            HG.Name.c_str(), HG.ClosestHit.c_str());
+      IRShaderIdentifier Ident{};
+      IRShaderIdentifierInit(&Ident, It->second);
+      State->ShaderIdentifiers[HG.Name] = Ident;
+    }
+
+    // Pipeline descriptor: raygen as the compute function, everything else as
+    // linked functions reachable from the visible function table.
+    MTLPtr<MTL::ComputePipelineDescriptor> Desc2(
+        MTL::ComputePipelineDescriptor::alloc()->init());
+    Desc2->setComputeFunction(RaygenFn.get());
+    Desc2->setLabel(
+        NS::String::string(std::string(Name).c_str(), NS::UTF8StringEncoding));
+    // setMaxCallStackDepth defaults to 1, allowing the raygen kernel exactly
+    // one level of visible-function call. Nested TraceRay (depth ≥ 2) needs
+    // the call stack to nest at least that deep — match what the YAML
+    // RTConfig declares so recursive RT pipelines work.
+    Desc2->setMaxCallStackDepth(Desc.Config.MaxTraceRecursionDepth);
+    if (!VisibleFns.empty()) {
+      MTLPtr<MTL::LinkedFunctions> Linked(
+          MTL::LinkedFunctions::alloc()->init());
+      NS::Array *FnArr = NS::Array::array(
+          reinterpret_cast<NS::Object *const *>(VisibleFns.data()),
+          VisibleFns.size());
+      Linked->setFunctions(FnArr);
+      Desc2->setLinkedFunctions(Linked.get());
+    }
+
+    NS::Error *Error = nullptr;
+    MTL::ComputePipelineState *PSO = Device->newComputePipelineState(
+        Desc2.get(), MTL::PipelineOptionNone, /*reflection=*/nullptr, &Error);
+    if (Error)
+      return toError(Error);
+
+    // Populate the visible function table from function handles obtained on
+    // the freshly-created pipeline.
+    if (!VisibleFns.empty()) {
+      MTLPtr<MTL::VisibleFunctionTableDescriptor> VFTDesc(
+          MTL::VisibleFunctionTableDescriptor::alloc()->init());
+      VFTDesc->setFunctionCount(VisibleFns.size());
+      MTL::VisibleFunctionTable *VFT =
+          PSO->newVisibleFunctionTable(VFTDesc.get());
+      if (!VFT) {
+        PSO->release();
+        return llvm::createStringError(
+            std::errc::device_or_resource_busy,
+            "Failed to create MTL::VisibleFunctionTable for RT pipeline.");
+      }
+      for (uint32_t I = 0; I < VisibleFns.size(); ++I) {
+        MTL::FunctionHandle *H = PSO->functionHandle(VisibleFns[I]);
+        if (!H) {
+          VFT->release();
+          PSO->release();
+          return llvm::createStringError(
+              std::errc::not_supported,
+              "Pipeline has no FunctionHandle for linked function index %u.",
+              I);
+        }
+        VFT->setFunction(H, I);
+      }
+      State->VFT = VFT;
+    }
+
+    State->ComputePipeline = PSO;
+    State->ThreadsPerGroup = RaygenThreadsPerGroup;
+    return State;
+  }
+
+  llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &PSO,
+                           const ShaderBindingTableDesc &Desc) override {
+    if (!llvm::isa<MTLRayTracingPipelineState>(&PSO))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "createShaderBindingTable requires a RayTracing PipelineState.");
+    const auto &RTPSO = llvm::cast<MTLRayTracingPipelineState>(PSO);
+
+    // Layout: four concatenated regions of IRShaderIdentifier-sized records.
+    // computeSBTLayout aligns record stride/region size to the values we
+    // pass. Metal does not expose explicit record/table alignment knobs the
+    // way D3D12 does — pick natural alignment (16 bytes) so the irconverter
+    // runtime's pointer reads stay aligned.
+    constexpr uint32_t IdSize =
+        static_cast<uint32_t>(sizeof(IRShaderIdentifier));
+    constexpr uint32_t RecordAlign = 16;
+    constexpr uint32_t BaseAlign = 16;
+    const SBTLayout Layout =
+        computeSBTLayout(IdSize, RecordAlign, BaseAlign, Desc);
+    const uint32_t TotalSize = Layout.TotalSize;
+    const llvm::ArrayRef<SBTEntry> RGEntries(&Desc.RayGen, 1);
+
+    MTL::Buffer *Buffer =
+        Device->newBuffer(TotalSize, MTL::ResourceStorageModeShared);
+    if (!Buffer)
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate Metal SBT buffer.");
+    auto *Mapped = static_cast<uint8_t *>(Buffer->contents());
+    std::memset(Mapped, 0, TotalSize);
+
+    auto WriteEntries = [&](uint8_t *Region, llvm::ArrayRef<SBTEntry> Entries,
+                            uint32_t Stride) -> llvm::Error {
+      for (size_t I = 0; I < Entries.size(); ++I) {
+        const auto &E = Entries[I];
+        auto It = RTPSO.ShaderIdentifiers.find(E.ShaderName);
+        if (It == RTPSO.ShaderIdentifiers.end()) {
+          Buffer->release();
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "SBT references unknown shader/hit-group name: '%s'",
+              E.ShaderName.c_str());
+        }
+        uint8_t *Dst = Region + I * Stride;
+        std::memcpy(Dst, &It->second, sizeof(IRShaderIdentifier));
+        if (!E.LocalRootData.empty())
+          std::memcpy(Dst + sizeof(IRShaderIdentifier), E.LocalRootData.data(),
+                      E.LocalRootData.size());
+      }
+      return llvm::Error::success();
+    };
+
+    if (auto Err = WriteEntries(Mapped + Layout.RayGen.Offset, RGEntries,
+                                Layout.RayGen.Stride))
+      return Err;
+    if (auto Err = WriteEntries(Mapped + Layout.Miss.Offset, Desc.Miss,
+                                Layout.Miss.Stride))
+      return Err;
+    if (auto Err = WriteEntries(Mapped + Layout.HitGroup.Offset, Desc.HitGroup,
+                                Layout.HitGroup.Stride))
+      return Err;
+    if (auto Err = WriteEntries(Mapped + Layout.Callable.Offset, Desc.Callable,
+                                Layout.Callable.Stride))
+      return Err;
+
+    const uint64_t Base = Buffer->gpuAddress();
+    auto MakeRange = [&](const SBTRegionLayout &R) {
+      IRVirtualAddressRange V{};
+      V.StartAddress = R.Size ? Base + R.Offset : 0;
+      V.SizeInBytes = R.Size;
+      return V;
+    };
+    auto MakeRangeAndStride = [&](const SBTRegionLayout &R) {
+      IRVirtualAddressRangeAndStride V{};
+      V.StartAddress = R.Size ? Base + R.Offset : 0;
+      V.SizeInBytes = R.Size;
+      V.StrideInBytes = R.Stride;
+      return V;
+    };
+    return std::make_unique<MTLShaderBindingTable>(
+        Buffer, MakeRange(Layout.RayGen), MakeRangeAndStride(Layout.Miss),
+        MakeRangeAndStride(Layout.HitGroup),
+        MakeRangeAndStride(Layout.Callable));
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return MTLFence::create(Device, Name);
@@ -1576,7 +2270,11 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return MTLCommandBuffer::create(GraphicsQueue.Queue);
+    auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    (*CBOrErr)->Dev = this;
+    return std::unique_ptr<offloadtest::CommandBuffer>(std::move(*CBOrErr));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
@@ -2069,6 +2767,11 @@ public:
     auto *Descriptor =
         MTL::InstanceAccelerationStructureDescriptor::alloc()->init();
     Descriptor->setInstanceCount(Instances.size());
+    // UserID descriptor type so per-instance InstanceID survives the
+    // build and is returned by HLSL CommittedInstanceID()/InstanceIndex()
+    // semantics on the shader side.
+    Descriptor->setInstanceDescriptorType(
+        MTL::AccelerationStructureInstanceDescriptorTypeUserID);
 
     MTL::AccelerationStructureSizes Sizes =
         Device->accelerationStructureSizes(Descriptor);
@@ -2119,6 +2822,17 @@ public:
     if (!CBOrErr)
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
+    IS.CB->Dev = this;
+
+    if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
+      auto EncOrErr = IS.CB->createComputeEncoder();
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      if (auto Err = offloadtest::buildPipelineAccelerationStructures(
+              *this, **EncOrErr, P, IS.AccelStructs, IS.ASInputBuffers))
+        return Err;
+      (*EncOrErr)->endEncoding();
+    }
 
     if (auto Err = createDescriptorHeap(P, IS))
       return Err;
@@ -2246,6 +2960,38 @@ public:
 
       if (auto Err = createGraphicsCommands(P, IS))
         return Err;
+    } else if (P.isRayTracing()) {
+      if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "RayTracing pipeline requires Shaders, "
+            "ShaderBindingTable, and RayTracingPipelineConfig.");
+
+      RayTracingPipelineCreateDesc RTDesc{};
+      // All RT shader entries share the single DXIL library blob fanned out
+      // by the offloader CLI for RT pipelines.
+      RTDesc.Library = P.Shaders.front().Shader.get();
+      RTDesc.HitGroups = P.HitGroups;
+      RTDesc.Config = *P.RTConfig;
+      RTDesc.Shaders.reserve(P.Shaders.size());
+      for (const auto &Sh : P.Shaders)
+        RTDesc.Shaders.push_back({Sh.Stage, Sh.Entry});
+
+      auto PSOOrErr =
+          createPipelineRT("RayTracing Pipeline State", Bindings, RTDesc);
+      if (!PSOOrErr)
+        return PSOOrErr.takeError();
+      IS.Pipeline = std::move(*PSOOrErr);
+      llvm::outs() << "RayTracing Pipeline created.\n";
+
+      auto SBTOrErr = createShaderBindingTable(*IS.Pipeline, *P.SBT);
+      if (!SBTOrErr)
+        return SBTOrErr.takeError();
+      IS.SBT = std::move(*SBTOrErr);
+      llvm::outs() << "Shader Binding Table created.\n";
+
+      if (auto Err = createRayTracingCommands(P, IS))
+        return Err;
     }
 
     auto SubmitResult = GraphicsQueue.submit(std::move(IS.CB));
@@ -2275,6 +3021,163 @@ private:
                                             Device->supportsRaytracing())));
   }
 };
+
+llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
+  if (Items.empty())
+    return llvm::Error::success();
+  if (!CB || !CB->Dev)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal command buffer has no associated MTLDevice.");
+  MTL::Device *MTLDev = CB->Dev->Device;
+  if (!MTLDev->supportsRaytracing())
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Ray tracing is not supported on this Metal device.");
+
+  if (auto Err = ensureASEncoder())
+    return Err;
+
+  for (const auto &Item : Items) {
+    auto *AS = llvm::cast<MetalAccelerationStructure>(Item.AS);
+    MTL::AccelerationStructureDescriptor *Desc = nullptr;
+    uint64_t ScratchSize = 0;
+
+    if (const auto *BLAS = llvm::dyn_cast<const BLASBuildRequest *>(Item.Req)) {
+      llvm::SmallVector<MTL::AccelerationStructureGeometryDescriptor *> Geoms;
+      if (const auto *Tris =
+              std::get_if<llvm::SmallVector<TriangleGeometryDesc>>(
+                  &BLAS->Geometry)) {
+        Geoms.reserve(Tris->size());
+        for (const auto &T : *Tris) {
+          auto *TD =
+              MTL::AccelerationStructureTriangleGeometryDescriptor::alloc()
+                  ->init();
+          auto *VB = llvm::cast<MTLBuffer>(T.VertexBuffer);
+          TD->setVertexBuffer(VB->Buf);
+          TD->setVertexBufferOffset(T.VertexBufferOffset);
+          TD->setVertexStride(T.VertexStride);
+          TD->setVertexFormat(getMetalPositionFormat(T.VertexFormat));
+          TD->setTriangleCount(T.IndexBuffer ? T.IndexCount / 3
+                                             : T.VertexCount / 3);
+          if (T.IndexBuffer) {
+            auto *IB = llvm::cast<MTLBuffer>(T.IndexBuffer);
+            TD->setIndexBuffer(IB->Buf);
+            TD->setIndexBufferOffset(T.IndexBufferOffset);
+            TD->setIndexType(getMetalIndexType(T.IdxFormat));
+          }
+          TD->setOpaque(T.Opaque);
+          Geoms.push_back(TD);
+        }
+      } else {
+        const auto &AABBs =
+            std::get<llvm::SmallVector<AABBGeometryDesc>>(BLAS->Geometry);
+        Geoms.reserve(AABBs.size());
+        for (const auto &A : AABBs) {
+          auto *AD =
+              MTL::AccelerationStructureBoundingBoxGeometryDescriptor::alloc()
+                  ->init();
+          auto *BB = llvm::cast<MTLBuffer>(A.AABBBuffer);
+          AD->setBoundingBoxBuffer(BB->Buf);
+          AD->setBoundingBoxBufferOffset(A.AABBBufferOffset);
+          AD->setBoundingBoxStride(A.AABBStride);
+          AD->setBoundingBoxCount(A.AABBCount);
+          AD->setOpaque(A.Opaque);
+          Geoms.push_back(AD);
+        }
+      }
+      auto *PD = MTL::PrimitiveAccelerationStructureDescriptor::alloc()->init();
+      NS::Array *GeomArr = NS::Array::array(
+          reinterpret_cast<NS::Object *const *>(Geoms.data()), Geoms.size());
+      PD->setGeometryDescriptors(GeomArr);
+      Desc = PD;
+      ScratchSize = BLAS->Sizes.ScratchDataSizeInBytes;
+      for (auto *G : Geoms)
+        G->release();
+    } else {
+      const auto *TLAS = llvm::cast<const TLASBuildRequest *>(Item.Req);
+
+      // Metal's MTLAccelerationStructureInstanceDescriptor references BLASes
+      // by index into a separate `instancedAccelerationStructures` array,
+      // not by GPU address. Deduplicate the BLAS pointers and remember
+      // their indices.
+      llvm::SmallVector<MTL::AccelerationStructure *> UniqueBLASes;
+      llvm::SmallVector<uint32_t> InstanceASIdx;
+      InstanceASIdx.reserve(TLAS->Instances.size());
+      for (const auto &Inst : TLAS->Instances) {
+        auto *MTLBLAS = llvm::cast<MetalAccelerationStructure>(Inst.BLAS);
+        auto It = std::find(UniqueBLASes.begin(), UniqueBLASes.end(),
+                            MTLBLAS->AccelStruct);
+        uint32_t Idx;
+        if (It == UniqueBLASes.end()) {
+          Idx = static_cast<uint32_t>(UniqueBLASes.size());
+          UniqueBLASes.push_back(MTLBLAS->AccelStruct);
+        } else {
+          Idx = static_cast<uint32_t>(It - UniqueBLASes.begin());
+        }
+        InstanceASIdx.push_back(Idx);
+      }
+
+      // Pack instance descriptors. Layout differs from VK/DX12: indexed
+      // BLAS references with an extra userID slot so HLSL InstanceID()
+      // survives across the build.
+      const size_t InstByteSize =
+          TLAS->Instances.size() *
+          sizeof(MTL::AccelerationStructureUserIDInstanceDescriptor);
+      MTL::Buffer *InstBuf =
+          MTLDev->newBuffer(InstByteSize, MTL::ResourceStorageModeShared);
+      if (!InstBuf)
+        return llvm::createStringError(
+            std::errc::not_enough_memory,
+            "Failed to allocate TLAS instance buffer.");
+      auto *InstPtr =
+          static_cast<MTL::AccelerationStructureUserIDInstanceDescriptor *>(
+              InstBuf->contents());
+      for (size_t I = 0; I < TLAS->Instances.size(); ++I) {
+        const auto &Src = TLAS->Instances[I];
+        auto &D = InstPtr[I];
+        // Metal stores transform as packed 4x3 column-major; our high-level
+        // Transform[3][4] is row-major. Transpose into Metal's layout.
+        for (int Row = 0; Row < 3; ++Row)
+          for (int Col = 0; Col < 4; ++Col)
+            D.transformationMatrix.columns[Col][Row] = Src.Transform[Row][Col];
+        D.options = MTL::AccelerationStructureInstanceOptionNone;
+        D.mask = Src.InstanceMask;
+        D.intersectionFunctionTableOffset = 0;
+        D.accelerationStructureIndex = InstanceASIdx[I];
+        D.userID = Src.InstanceID;
+      }
+      CB->KeepAliveMTLBuffers.push_back(InstBuf);
+
+      auto *ID = MTL::InstanceAccelerationStructureDescriptor::alloc()->init();
+      ID->setInstanceDescriptorBuffer(InstBuf);
+      ID->setInstanceCount(TLAS->Instances.size());
+      ID->setInstanceDescriptorType(
+          MTL::AccelerationStructureInstanceDescriptorTypeUserID);
+      NS::Array *BLASArr = NS::Array::array(
+          reinterpret_cast<NS::Object *const *>(UniqueBLASes.data()),
+          UniqueBLASes.size());
+      ID->setInstancedAccelerationStructures(BLASArr);
+      Desc = ID;
+      ScratchSize = TLAS->Sizes.ScratchDataSizeInBytes;
+    }
+
+    MTL::Buffer *Scratch =
+        MTLDev->newBuffer(ScratchSize, MTL::ResourceStorageModePrivate);
+    if (!Scratch) {
+      Desc->release();
+      return llvm::createStringError(std::errc::not_enough_memory,
+                                     "Failed to allocate AS scratch buffer.");
+    }
+    CB->KeepAliveMTLBuffers.push_back(Scratch);
+
+    insertDebugSignpost("BuildAccelerationStructure");
+    ASEnc->buildAccelerationStructure(AS->AccelStruct, Desc, Scratch, 0);
+    Desc->release();
+  }
+
+  return llvm::Error::success();
+}
 } // namespace
 
 llvm::Error offloadtest::initializeMetalDevices(
