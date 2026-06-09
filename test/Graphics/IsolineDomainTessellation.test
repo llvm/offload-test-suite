@@ -149,11 +149,16 @@ DescriptorSets:
 
 # UNSUPPORTED: Metal
 
-# Clang's HLSL frontend does not support tessellation. 
-# WARP orders the isoline tessellation factors opposite to real 
-# D3D12 hardware and Vulkan, so it tessellates this into one-segment 
-# lines and fails the check.
-# XFAIL: Clang || WARP
+# Clang's HLSL frontend does not support tessellation.
+#
+# The two isoline tess factors are ordered Edges[0] = number of lines,
+# Edges[1] = segments per line by conformant implementations (NVIDIA D3D12 and
+# Intel's own Vulkan both pass). WARP and the Intel D3D12 driver swap the two, so
+# they tessellate this into one-segment lines and fail the segments==4 check.
+# That is a driver bug, not a spec ambiguity -- Intel's Vulkan gets it right on
+# the same GPU -- so those two paths are XFAILed; if either is fixed the XPASS
+# will flag that the XFAIL should be removed.
+# XFAIL: Clang || WARP || (Intel && DirectX)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
