@@ -92,7 +92,9 @@ class TestAnnotation:
 class TestResult:
     """A single test result from a CI run."""
 
-    test_name: str  # Relative path like "Feature/MaximalReconvergence/loop_peeling.test"
+    test_name: (
+        str  # Relative path like "Feature/MaximalReconvergence/loop_peeling.test"
+    )
     status: str  # PASS, FAIL, XFAIL, XPASS, UNSUPPORTED
     suite: str  # e.g., "clang-d3d12", "d3d12", "clang-vk"
 
@@ -155,8 +157,7 @@ def download_test_log(run_id):
     """
     try:
         result = subprocess.run(
-            ["gh", "run", "view", str(run_id), "--repo", f"{OWNER}/{REPO}",
-             "--log"],
+            ["gh", "run", "view", str(run_id), "--repo", f"{OWNER}/{REPO}", "--log"],
             capture_output=True,
             timeout=60,
         )
@@ -190,11 +191,13 @@ def parse_lit_log(log_text, suite):
             # if suite is not specified.
             if suite and lit_suite != suite:
                 continue
-            results.append(TestResult(
-                test_name=test_name.strip(),
-                status=status,
-                suite=lit_suite,
-            ))
+            results.append(
+                TestResult(
+                    test_name=test_name.strip(),
+                    status=status,
+                    suite=lit_suite,
+                )
+            )
     return results
 
 
@@ -225,11 +228,13 @@ def parse_xunit_xml(xml_text, suite):
 
         # classname is typically "OffloadTest-{suite}" or similar.
         lit_suite = classname.replace("OffloadTest-", "") if classname else suite
-        results.append(TestResult(
-            test_name=name.strip(),
-            status=status,
-            suite=lit_suite,
-        ))
+        results.append(
+            TestResult(
+                test_name=name.strip(),
+                status=status,
+                suite=lit_suite,
+            )
+        )
     return results
 
 
@@ -288,7 +293,7 @@ def suite_to_features(suite):
 
     if suite.startswith("clang-"):
         features.add("Clang")
-        rest = suite[len("clang-"):]
+        rest = suite[len("clang-") :]
     else:
         features.add("DXC")
         rest = suite
@@ -390,12 +395,14 @@ def scan_test_annotations(test_root):
                 m = re.match(r"#\s*(XFAIL|UNSUPPORTED):\s*(.+)", line)
                 if m:
                     kind, expression = m.groups()
-                    annotations[rel_path].append(TestAnnotation(
-                        file_path=str(path),
-                        line_number=i,
-                        kind=kind,
-                        expression=expression.strip(),
-                    ))
+                    annotations[rel_path].append(
+                        TestAnnotation(
+                            file_path=str(path),
+                            line_number=i,
+                            kind=kind,
+                            expression=expression.strip(),
+                        )
+                    )
     return annotations
 
 
@@ -425,8 +432,10 @@ def fetch_workflow_results(workflows, vendor_filter, num_runs, branch):
         print(color(YELLOW, "No matching scheduled workflows found."))
         return {}
 
-    print(f"Fetching results from {len(scheduled_workflows)} workflow(s), "
-          f"{num_runs} run(s) each...")
+    print(
+        f"Fetching results from {len(scheduled_workflows)} workflow(s), "
+        f"{num_runs} run(s) each..."
+    )
 
     # Collect run IDs to fetch logs for.
     runs_to_fetch = []  # (run_id, suite, vendor, workflow_name)
@@ -436,12 +445,19 @@ def fetch_workflow_results(workflows, vendor_filter, num_runs, branch):
         try:
             runs = get_completed_runs(wf["id"], count=num_runs, branch=branch)
             return [(r["id"], suite, vendor, wf["name"]) for r in runs]
-        except (subprocess.CalledProcessError, json.JSONDecodeError, TypeError,
-                KeyError, OSError):
+        except (
+            subprocess.CalledProcessError,
+            json.JSONDecodeError,
+            TypeError,
+            KeyError,
+            OSError,
+        ):
             return []
 
     with ThreadPoolExecutor(max_workers=8) as pool:
-        futures = [pool.submit(fetch_runs_for_workflow, wt) for wt in scheduled_workflows]
+        futures = [
+            pool.submit(fetch_runs_for_workflow, wt) for wt in scheduled_workflows
+        ]
         for f in as_completed(futures):
             runs_to_fetch.extend(f.result())
 
@@ -550,22 +566,28 @@ def find_missing_xfails(annotations, result_map, min_fail_rate=1.0):
             features = suite_to_features(suite)
             covered = False
             for annot in annotations.get(test_name, []):
-                if annot.kind == "XFAIL" and evaluate_bool_expr(annot.expression, features):
+                if annot.kind == "XFAIL" and evaluate_bool_expr(
+                    annot.expression, features
+                ):
                     covered = True
                     break
-                if annot.kind == "UNSUPPORTED" and evaluate_bool_expr(annot.expression, features):
+                if annot.kind == "UNSUPPORTED" and evaluate_bool_expr(
+                    annot.expression, features
+                ):
                     covered = True
                     break
 
             if not covered:
-                missing.append({
-                    "test_name": test_name,
-                    "suite": suite,
-                    "features": features,
-                    "fail_count": fail_count,
-                    "total_runs": total,
-                    "fail_rate": fail_rate,
-                })
+                missing.append(
+                    {
+                        "test_name": test_name,
+                        "suite": suite,
+                        "features": features,
+                        "fail_count": fail_count,
+                        "total_runs": total,
+                        "fail_rate": fail_rate,
+                    }
+                )
 
     return missing
 
@@ -651,7 +673,8 @@ def main():
         help="Only check workflows for a specific vendor (default: all).",
     )
     parser.add_argument(
-        "--runs", "-n",
+        "--runs",
+        "-n",
         type=int,
         default=5,
         help="Number of recent runs to check per workflow (default: 5).",
@@ -704,8 +727,10 @@ def main():
         1 for annots in annotations.values() for a in annots if a.kind == "XFAIL"
     )
     unsupported_count = total_annotations - xfail_count
-    print(f"  Found {xfail_count} XFAIL and {unsupported_count} UNSUPPORTED "
-          f"annotations across {len(annotations)} test files.")
+    print(
+        f"  Found {xfail_count} XFAIL and {unsupported_count} UNSUPPORTED "
+        f"annotations across {len(annotations)} test files."
+    )
     print()
 
     # Step 2: Fetch CI results.
@@ -730,8 +755,10 @@ def main():
 
     total_results = sum(len(v) for v in result_map.values())
     suites_seen = set(suite for suite, _ in result_map.keys())
-    print(f"Collected {total_results} test results across suites: "
-          f"{', '.join(sorted(suites_seen))}")
+    print(
+        f"Collected {total_results} test results across suites: "
+        f"{', '.join(sorted(suites_seen))}"
+    )
     print()
 
     # Step 3: Analysis.
@@ -749,10 +776,14 @@ def main():
     print(color(BOLD, f"\n{'='*70}"))
     if not args.missing_only:
         stale_n = len(stale)
-        print(f"  Stale XFAILs:   {color(GREEN if stale_n == 0 else YELLOW, str(stale_n))}")
+        print(
+            f"  Stale XFAILs:   {color(GREEN if stale_n == 0 else YELLOW, str(stale_n))}"
+        )
     if not args.stale_only:
         missing_n = len(missing)
-        print(f"  Missing XFAILs: {color(GREEN if missing_n == 0 else RED, str(missing_n))}")
+        print(
+            f"  Missing XFAILs: {color(GREEN if missing_n == 0 else RED, str(missing_n))}"
+        )
     print(color(BOLD, f"{'='*70}"))
 
     return 0
