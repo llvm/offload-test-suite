@@ -86,6 +86,7 @@ class TestAnnotation:
     line_number: int
     kind: str  # "XFAIL" or "UNSUPPORTED"
     expression: str  # e.g., "Clang && Vulkan"
+    issue_urls: list = field(default_factory=list)  # URLs from preceding comment lines
 
 
 @dataclass
@@ -383,6 +384,7 @@ def evaluate_bool_expr(expr, features):
 def scan_test_annotations(test_root):
     """Scan all .test and .yaml files for XFAIL/UNSUPPORTED annotations."""
     annotations = defaultdict(list)  # test_name -> [TestAnnotation]
+    url_pattern = re.compile(r"https?://\S+")
 
     for ext in ("*.test", "*.yaml"):
         for path in test_root.rglob(ext):
@@ -395,12 +397,17 @@ def scan_test_annotations(test_root):
                 m = re.match(r"#\s*(XFAIL|UNSUPPORTED):\s*(.+)", line)
                 if m:
                     kind, expression = m.groups()
+                    # Look at the preceding 3 lines for issue/PR URLs.
+                    issue_urls = []
+                    for ctx_line in lines[max(0, i - 4) : i - 1]:
+                        issue_urls.extend(url_pattern.findall(ctx_line))
                     annotations[rel_path].append(
                         TestAnnotation(
                             file_path=str(path),
                             line_number=i,
                             kind=kind,
                             expression=expression.strip(),
+                            issue_urls=issue_urls,
                         )
                     )
     return annotations
@@ -631,6 +638,9 @@ def print_stale_xfails(stale):
         rel = os.path.relpath(annot.file_path)
         print(f"\n  {color(CYAN, rel)}:{annot.line_number}")
         print(f"    # XFAIL: {annot.expression}")
+        if annot.issue_urls:
+            for url in annot.issue_urls:
+                print(f"    {color(DIM, url)}")
         print(f"    {color(GREEN, '→ Consider removing this annotation.')}")
 
 
