@@ -618,12 +618,12 @@ public:
   }
 
   void addPendingUAVBarrier() { PendingUAVBarrier = true; }
-  void addResourceTransition(ID3D12Resource *pResource,
+  void addResourceTransition(ID3D12Resource *Resource,
                              D3D12_RESOURCE_STATES StateBefore,
                              D3D12_RESOURCE_STATES StateAfter) {
 
     for (auto &Trans : PendingTransitions) {
-      if (Trans.Transition.pResource == pResource) {
+      if (Trans.Transition.pResource == Resource) {
         assert(StateBefore == Trans.Transition.StateAfter);
         Trans.Transition.StateAfter = StateAfter;
         return;
@@ -631,7 +631,7 @@ public:
     }
 
     PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
-        pResource, StateBefore, StateAfter));
+        Resource, StateBefore, StateAfter));
   }
 
   void flushBarrier() {
