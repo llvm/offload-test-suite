@@ -59,18 +59,26 @@ struct DSOutput {
   float4 position : SV_POSITION;
 };
 
-// Record each generated vertex's along-line coordinate (SV_DomainLocation.x)
-// into a UAV slot keyed by its segment. Writing is idempotent (overwrite, not
-// add), so the result does not depend on how many times the domain shader runs
-// -- the per-vertex invocation count is implementation-defined. With four
-// segments the vertices land at u = {0, 0.25, 0.5, 0.75, 1}.
-RWStructuredBuffer<float> Captured : register(u0);
+// Record each generated vertex's along-line (u) and across-line (v) domain
+// coordinates into two UAVs, each keyed by that coordinate (* 4). Writing is
+// idempotent (overwrite, not add), so the result does not depend on how many
+// times the domain shader runs -- the per-vertex invocation count is
+// implementation-defined.
+//
+// With the Vulkan factor order (Edges[0] = lines, Edges[1] = segments) this is
+// one line of four segments: u = {0, 0.25, 0.5, 0.75, 1} and v = 0 everywhere,
+// so CapturedU = [0, 0.25, 0.5, 0.75, 1] and CapturedV = [0, 0, 0, 0, 0]. A
+// backend that uses the opposite order instead produces four one-segment lines,
+// which mirrors the two buffers: CapturedU = [0, 0, 0, 0, 1] and
+// CapturedV = [0, 0.25, 0.5, 0.75, 0].
+RWStructuredBuffer<float> CapturedU : register(u0);
+RWStructuredBuffer<float> CapturedV : register(u1);
 
 [domain("isoline")]
 DSOutput main(DSPatchConstants constants, float2 uv : SV_DomainLocation,
               const OutputPatch<DSInput, 2> patch) {
-  uint idx = (uint)round(uv.x * 4.0);
-  Captured[idx] = uv.x;
+  CapturedU[(uint)round(uv.x * 4.0)] = uv.x;
+  CapturedV[(uint)round(uv.y * 4.0)] = uv.y;
 
   DSOutput o;
   o.position = lerp(patch[0].position, patch[1].position, uv.x);
@@ -99,8 +107,12 @@ Buffers:
     Stride: 8 # float2 position
     Data: [ -1.0, 0.0,
              1.0, 0.0 ]
-  # One float per along-line segment position (segments + 1 = 5).
-  - Name: Captured
+  # One float per along-line (u) and across-line (v) position; 5 slots each.
+  - Name: CapturedU
+    Format: Float32
+    Stride: 4
+    FillSize: 20 # 5 floats
+  - Name: CapturedV
     Format: Float32
     Stride: 4
     FillSize: 20 # 5 floats
@@ -124,13 +136,20 @@ Bindings:
   RenderTarget: Output
 DescriptorSets:
   - Resources:
-    - Name: Captured
+    - Name: CapturedU
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
+    - Name: CapturedV
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
 ...
 #--- end
 
@@ -180,6 +199,9 @@ DescriptorSets:
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o | FileCheck %s
 
-# One isoline of four segments -> five evenly spaced along-line coordinates.
-# CHECK: Name: Captured
+# One isoline of four segments: CapturedU holds the five along-line coordinates,
+# and CapturedV is flat (a single line at v = 0).
+# CHECK: Name: CapturedU
 # CHECK: Data: [ 0, 0.25, 0.5, 0.75, 1 ]
+# CHECK: Name: CapturedV
+# CHECK: Data: [ 0, 0, 0, 0, 0 ]
