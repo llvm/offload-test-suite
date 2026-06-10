@@ -21,6 +21,9 @@
 namespace offloadtest {
 
 enum class BufferUsage {
+  // Generic storage buffer (UAV/SSBO). Also covers acceleration-structure
+  // build inputs (vertex/index/instance buffers): backends widen this with
+  // any native AS-input flags they need.
   Storage,
   VertexBuffer,
 };

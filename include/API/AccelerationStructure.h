@@ -59,18 +59,20 @@ struct AccelerationStructureInstance {
 };
 
 struct BLASBuildRequest {
+  // Target AS this build writes into.
+  AccelerationStructure *AS = nullptr;
   // DXR / Vulkan / Metal all forbid mixing triangle and AABB geometry in a
   // single BLAS, so the geometry list is held as a variant — the invalid
   // mixed-geometry state is unrepresentable.
   std::variant<llvm::SmallVector<TriangleGeometryDesc>,
                llvm::SmallVector<AABBGeometryDesc>>
       Geometry;
-  AccelerationStructureSizes Sizes;
 };
 
 struct TLASBuildRequest {
+  // Target AS this build writes into.
+  AccelerationStructure *AS = nullptr;
   llvm::SmallVector<AccelerationStructureInstance> Instances;
-  AccelerationStructureSizes Sizes;
 };
 
 inline llvm::Error validateGeometryDesc(const TriangleGeometryDesc &D) {
@@ -154,6 +156,7 @@ inline llvm::Error validateTLASBuildRequest(const TLASBuildRequest &Req) {
 
 class AccelerationStructure {
   GPUAPI API;
+  AccelerationStructureSizes Sizes;
 
 public:
   virtual ~AccelerationStructure();
@@ -161,9 +164,14 @@ public:
   AccelerationStructure &operator=(const AccelerationStructure &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  // Result/scratch sizes the AS was allocated for. Available for the GPU
+  // build path so it can size the scratch buffer without re-querying.
+  const AccelerationStructureSizes &getSizes() const { return Sizes; }
 
 protected:
-  explicit AccelerationStructure(GPUAPI API) : API(API) {}
+  explicit AccelerationStructure(GPUAPI API,
+                                 const AccelerationStructureSizes &Sizes)
+      : API(API), Sizes(Sizes) {}
 };
 
 } // namespace offloadtest

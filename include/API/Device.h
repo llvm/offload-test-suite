@@ -264,20 +264,27 @@ public:
   virtual llvm::Expected<std::unique_ptr<CommandBuffer>>
   createCommandBuffer() = 0;
 
-  virtual llvm::Expected<BLASBuildRequest> createTriangleBLASBuildRequest(
-      llvm::ArrayRef<TriangleGeometryDesc> Triangles) = 0;
+  // Sizing queries: return the result/scratch sizes the backend needs to
+  // allocate an AS that can hold the given build inputs. The build-input
+  // pointers (geometry buffers, BLAS handles) are never consulted — only
+  // counts/strides — so these can be called before BLAS handles exist.
+  virtual llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<TriangleGeometryDesc> Triangles) = 0;
 
-  virtual llvm::Expected<BLASBuildRequest>
-  createAABBBLASBuildRequest(llvm::ArrayRef<AABBGeometryDesc> AABBs) = 0;
+  virtual llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<AABBGeometryDesc> AABBs) = 0;
 
-  virtual llvm::Expected<TLASBuildRequest> createTLASBuildRequest(
-      llvm::ArrayRef<AccelerationStructureInstance> Instances) = 0;
+  virtual llvm::Expected<AccelerationStructureSizes>
+  getTLASBuildSizes(uint32_t InstanceCount) = 0;
+
+  // Allocate the AS storage (no GPU build). The build is recorded later via
+  // ComputeEncoder::batchBuildAS(), which is the only place that consumes the
+  // associated *BuildRequest.
+  virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
+  createBLAS(const AccelerationStructureSizes &Sizes) = 0;
 
   virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
-  createAccelerationStructure(const BLASBuildRequest &Request) = 0;
-
-  virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
-  createAccelerationStructure(const TLASBuildRequest &Request) = 0;
+  createTLAS(const AccelerationStructureSizes &Sizes) = 0;
 
   virtual ~Device() = 0;
 
@@ -315,6 +322,25 @@ createBufferWithData(Device &Dev, std::string Name,
                      const BufferCreateDesc &Desc, const void *Data,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
+
+// Builds all BLAS / TLAS objects defined in `P.AccelStructs` using the
+// supplied compute encoder. Uploads each BLAS's vertex/index data, queries
+// sizes via `Dev.getBLASBuildSizes` / `Dev.getTLASBuildSizes`, allocates
+// the handles via `Dev.createBLAS` / `Dev.createTLAS`, and records the GPU
+// builds via two `Enc.batchBuildAS` calls (BLAS batch then TLAS batch — so
+// the AS-build-write barrier between BLAS and TLAS is automatic).
+//
+// Built AS objects are pushed to `OutAS` (in declaration order: BLASes first,
+// then TLASes). Vertex/index buffers used as build inputs are pushed to
+// `OutInputBuffers`; both must outlive command-buffer submission.
+//
+// TODO: `Pipeline` belongs to the test framework, not the rendering backend
+// API. This helper lives here only because `executeProgram` is still on
+// `Device` — once that moves out, this helper should follow.
+llvm::Error buildPipelineAccelerationStructures(
+    Device &Dev, ComputeEncoder &Enc, Pipeline &P,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers);
 
 } // namespace offloadtest
 

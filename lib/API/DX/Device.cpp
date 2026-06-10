@@ -453,8 +453,9 @@ class DXAccelerationStructure : public offloadtest::AccelerationStructure {
 public:
   ComPtr<ID3D12Resource> Resource;
 
-  DXAccelerationStructure(ComPtr<ID3D12Resource> Resource)
-      : offloadtest::AccelerationStructure(GPUAPI::DirectX),
+  DXAccelerationStructure(ComPtr<ID3D12Resource> Resource,
+                          const AccelerationStructureSizes &Sizes)
+      : offloadtest::AccelerationStructure(GPUAPI::DirectX, Sizes),
         Resource(Resource) {}
 
   D3D12_GPU_VIRTUAL_ADDRESS getGPUVirtualAddress() const {
@@ -586,13 +587,21 @@ public:
       override;
 };
 
+class DXDevice; // forward decl — defined below in this same anon ns
+
 class DXCommandBuffer : public offloadtest::CommandBuffer {
 public:
   ComPtr<ID3D12CommandAllocator> Allocator;
   ComPtr<ID3D12GraphicsCommandListX> CmdList;
+  /// Back-pointer to the owning device. Used by encoders that need access to
+  /// device-level resources (e.g. allocating AS scratch buffers).
+  DXDevice *Dev = nullptr;
   /// Whether a UAV barrier is pending from a prior compute command.
   bool PendingUAVBarrier = false;
   llvm::SmallVector<D3D12_RESOURCE_BARRIER> PendingTransitions;
+  /// Buffers that must outlive command-buffer submission (e.g. AS scratch
+  /// and TLAS instance buffers used during builds).
+  llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> KeepAliveOwned;
 
   static llvm::Expected<std::unique_ptr<DXCommandBuffer>>
   create(ComPtr<ID3D12DeviceX> Device) {
@@ -781,6 +790,10 @@ public:
 
     return llvm::Error::success();
   }
+
+  // Defined out-of-line below — needs DXDevice's full type for access to the
+  // ID3D12Device5 entry point and helper allocators.
+  llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
 
   void endEncodingImpl() override { popDebugGroup(); }
 };
@@ -1048,6 +1061,10 @@ DXCommandBuffer::createRenderEncoder(
 }
 
 class DXDevice : public offloadtest::Device {
+  // DXComputeEncoder needs access to Device5 for AS build commands and to the
+  // raw ID3D12Device for scratch buffer allocation.
+  friend class DXComputeEncoder;
+
 private:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12DeviceX> Device;
@@ -1103,6 +1120,12 @@ private:
 
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
+
+    // Built acceleration structures, kept alive for the pipeline lifetime.
+    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
+        AccelStructs;
+    // Vertex/index buffers consumed during AS builds; must outlive submission.
+    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
 
 public:
@@ -1690,7 +1713,11 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return DXCommandBuffer::create(Device);
+    auto CBOrErr = DXCommandBuffer::create(Device);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    (*CBOrErr)->Dev = this;
+    return std::unique_ptr<offloadtest::CommandBuffer>(std::move(*CBOrErr));
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
@@ -1698,18 +1725,13 @@ public:
     return std::make_unique<DXRenderPass>(Desc);
   }
 
-  llvm::Expected<BLASBuildRequest> createTriangleBLASBuildRequest(
-      llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
+  llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
     if (auto Err = validateBLASGeometry(Triangles))
       return Err;
 
-    BLASBuildRequest Req;
-    Req.Geometry = llvm::SmallVector<TriangleGeometryDesc>(Triangles.begin(),
-                                                           Triangles.end());
-
     llvm::SmallVector<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs;
     GeomDescs.reserve(Triangles.size());
-
     for (const auto &T : Triangles) {
       D3D12_RAYTRACING_GEOMETRY_DESC GD = {};
       GD.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
@@ -1730,24 +1752,16 @@ public:
 
       GeomDescs.push_back(GD);
     }
-
-    if (auto Err = queryBLASPrebuildSize(GeomDescs, Req.Sizes))
-      return Err;
-    return Req;
+    return queryBLASPrebuildSize(GeomDescs);
   }
 
-  llvm::Expected<BLASBuildRequest>
-  createAABBBLASBuildRequest(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
+  llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
     if (auto Err = validateBLASGeometry(AABBs))
       return Err;
 
-    BLASBuildRequest Req;
-    Req.Geometry =
-        llvm::SmallVector<AABBGeometryDesc>(AABBs.begin(), AABBs.end());
-
     llvm::SmallVector<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs;
     GeomDescs.reserve(AABBs.size());
-
     for (const auto &A : AABBs) {
       D3D12_RAYTRACING_GEOMETRY_DESC GD = {};
       GD.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
@@ -1759,16 +1773,12 @@ public:
 
       GeomDescs.push_back(GD);
     }
-
-    if (auto Err = queryBLASPrebuildSize(GeomDescs, Req.Sizes))
-      return Err;
-    return Req;
+    return queryBLASPrebuildSize(GeomDescs);
   }
 
 private:
-  llvm::Error queryBLASPrebuildSize(
-      llvm::ArrayRef<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs,
-      AccelerationStructureSizes &OutSizes) {
+  AccelerationStructureSizes queryBLASPrebuildSize(
+      llvm::ArrayRef<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs) {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS Inputs = {};
     Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
     Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
@@ -1778,78 +1788,56 @@ private:
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO Info = {};
     Device->GetRaytracingAccelerationStructurePrebuildInfo(&Inputs, &Info);
 
-    OutSizes.ResultDataMaxSizeInBytes = Info.ResultDataMaxSizeInBytes;
-    OutSizes.ScratchDataSizeInBytes = Info.ScratchDataSizeInBytes;
-    OutSizes.UpdateScratchDataSizeInBytes = Info.UpdateScratchDataSizeInBytes;
-    return llvm::Error::success();
+    return {Info.ResultDataMaxSizeInBytes, Info.ScratchDataSizeInBytes,
+            Info.UpdateScratchDataSizeInBytes};
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  allocateAS(const AccelerationStructureSizes &Sizes, const char *Kind) {
+    const uint64_t AlignedSize =
+        llvm::alignTo(Sizes.ResultDataMaxSizeInBytes,
+                      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
+    const D3D12_HEAP_PROPERTIES HeapProps =
+        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    const D3D12_RESOURCE_DESC BufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
+        AlignedSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+
+    ComPtr<ID3D12Resource> ASBuffer;
+    if (auto Err = HR::toError(
+            Device->CreateCommittedResource(
+                &HeapProps, D3D12_HEAP_FLAG_NONE, &BufferDesc,
+                D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr,
+                IID_PPV_ARGS(&ASBuffer)),
+            "Failed to create " + llvm::Twine(Kind) + " resource."))
+      return Err;
+
+    return std::make_unique<DXAccelerationStructure>(ASBuffer, Sizes);
   }
 
 public:
-  llvm::Expected<TLASBuildRequest> createTLASBuildRequest(
-      llvm::ArrayRef<AccelerationStructureInstance> Instances) override {
-    TLASBuildRequest Req;
-    Req.Instances.assign(Instances.begin(), Instances.end());
-
-    if (auto Err = validateTLASBuildRequest(Req))
-      return Err;
-
+  llvm::Expected<AccelerationStructureSizes>
+  getTLASBuildSizes(uint32_t InstanceCount) override {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS Inputs = {};
     Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
     Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-    Inputs.NumDescs = Instances.size();
+    Inputs.NumDescs = InstanceCount;
 
     D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO Info = {};
     Device->GetRaytracingAccelerationStructurePrebuildInfo(&Inputs, &Info);
 
-    Req.Sizes.ResultDataMaxSizeInBytes = Info.ResultDataMaxSizeInBytes;
-    Req.Sizes.ScratchDataSizeInBytes = Info.ScratchDataSizeInBytes;
-    Req.Sizes.UpdateScratchDataSizeInBytes = Info.UpdateScratchDataSizeInBytes;
-
-    return Req;
+    return AccelerationStructureSizes{Info.ResultDataMaxSizeInBytes,
+                                      Info.ScratchDataSizeInBytes,
+                                      Info.UpdateScratchDataSizeInBytes};
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createAccelerationStructure(const BLASBuildRequest &Request) override {
-    const uint64_t AlignedSize =
-        llvm::alignTo(Request.Sizes.ResultDataMaxSizeInBytes,
-                      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
-    const D3D12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    const D3D12_RESOURCE_DESC BufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
-        AlignedSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-    ComPtr<ID3D12Resource> ASBuffer;
-    if (auto Err = HR::toError(
-            Device->CreateCommittedResource(
-                &HeapProps, D3D12_HEAP_FLAG_NONE, &BufferDesc,
-                D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr,
-                IID_PPV_ARGS(&ASBuffer)),
-            "Failed to create BLAS resource."))
-      return Err;
-
-    return std::make_unique<DXAccelerationStructure>(ASBuffer);
+  createBLAS(const AccelerationStructureSizes &Sizes) override {
+    return allocateAS(Sizes, "BLAS");
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createAccelerationStructure(const TLASBuildRequest &Request) override {
-    const uint64_t AlignedSize =
-        llvm::alignTo(Request.Sizes.ResultDataMaxSizeInBytes,
-                      D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
-    const D3D12_HEAP_PROPERTIES HeapProps =
-        CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    const D3D12_RESOURCE_DESC BufferDesc = CD3DX12_RESOURCE_DESC::Buffer(
-        AlignedSize, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-
-    ComPtr<ID3D12Resource> ASBuffer;
-    if (auto Err = HR::toError(
-            Device->CreateCommittedResource(
-                &HeapProps, D3D12_HEAP_FLAG_NONE, &BufferDesc,
-                D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE, nullptr,
-                IID_PPV_ARGS(&ASBuffer)),
-            "Failed to create TLAS resource."))
-      return Err;
-
-    return std::make_unique<DXAccelerationStructure>(ASBuffer);
+  createTLAS(const AccelerationStructureSizes &Sizes) override {
+    return allocateAS(Sizes, "TLAS");
   }
 
   void addResourceUploadCommands(Resource &R, InvocationState &IS,
@@ -2732,7 +2720,18 @@ public:
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
+    State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
+
+    if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
+      auto EncOrErr = State.CB->createComputeEncoder();
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      if (auto Err = offloadtest::buildPipelineAccelerationStructures(
+              *this, **EncOrErr, P, State.AccelStructs, State.ASInputBuffers))
+        return Err;
+      (*EncOrErr)->endEncoding();
+    }
 
     if (auto Err = createBuffers(P, State))
       return Err;
@@ -2910,6 +2909,157 @@ public:
     return llvm::Error::success();
   }
 };
+
+llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
+  if (Items.empty())
+    return llvm::Error::success();
+  if (!CB.Dev || !CB.Dev->Device)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Ray tracing not supported on this command buffer's device.");
+  DXDevice *Dev = CB.Dev;
+
+  // BuildRaytracingAccelerationStructure() lives on ID3D12GraphicsCommandList4.
+  ComPtr<ID3D12GraphicsCommandList4> CmdList4;
+  if (auto Err = HR::toError(CB.CmdList.As(&CmdList4),
+                             "Failed to query ID3D12GraphicsCommandList4."))
+    return Err;
+
+  // Flush a pending barrier before reading, like dispatch(): a TLAS build must
+  // observe BLASes built in the previous batch.
+  CB.flushBarrier();
+
+  // Per the ComputeEncoder::batchBuildAS() contract, the caller guarantees no
+  // inter-item memory dependencies within a batch (BLAS and TLAS go in
+  // separate batches, so a TLAS never sees BLASes from the same call). Each
+  // item also gets its own scratch resource, so there's no aliasing between
+  // the builds — no intra-loop UAV barrier is needed.
+  for (const auto &Item : Items) {
+    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC Desc = {};
+    llvm::SmallVector<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs;
+    uint64_t ScratchSize = 0;
+
+    if (const auto *BLAS = llvm::dyn_cast<const BLASBuildRequest *>(Item)) {
+      auto *DXAS = llvm::cast<DXAccelerationStructure>(BLAS->AS);
+      Desc.DestAccelerationStructureData = DXAS->getGPUVirtualAddress();
+      Desc.Inputs.Type =
+          D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+      Desc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+
+      if (const auto *Tris =
+              std::get_if<llvm::SmallVector<TriangleGeometryDesc>>(
+                  &BLAS->Geometry)) {
+        GeomDescs.reserve(Tris->size());
+        for (const auto &T : *Tris) {
+          D3D12_RAYTRACING_GEOMETRY_DESC GD = {};
+          GD.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+          if (T.Opaque)
+            GD.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+          auto *VB = llvm::cast<DXBuffer>(T.VertexBuffer);
+          GD.Triangles.VertexBuffer.StartAddress =
+              VB->Buffer->GetGPUVirtualAddress() + T.VertexBufferOffset;
+          GD.Triangles.VertexBuffer.StrideInBytes = T.VertexStride;
+          GD.Triangles.VertexCount = T.VertexCount;
+          GD.Triangles.VertexFormat = getDXGIFormat(T.VertexFormat);
+          if (T.IndexBuffer) {
+            auto *IB = llvm::cast<DXBuffer>(T.IndexBuffer);
+            GD.Triangles.IndexBuffer =
+                IB->Buffer->GetGPUVirtualAddress() + T.IndexBufferOffset;
+            GD.Triangles.IndexCount = T.IndexCount;
+            GD.Triangles.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
+          }
+          GeomDescs.push_back(GD);
+        }
+      } else {
+        const auto &AABBs =
+            std::get<llvm::SmallVector<AABBGeometryDesc>>(BLAS->Geometry);
+        GeomDescs.reserve(AABBs.size());
+        for (const auto &A : AABBs) {
+          D3D12_RAYTRACING_GEOMETRY_DESC GD = {};
+          GD.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+          if (A.Opaque)
+            GD.Flags = D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+          auto *AB = llvm::cast<DXBuffer>(A.AABBBuffer);
+          GD.AABBs.AABBs.StartAddress =
+              AB->Buffer->GetGPUVirtualAddress() + A.AABBBufferOffset;
+          GD.AABBs.AABBs.StrideInBytes = A.AABBStride;
+          GD.AABBs.AABBCount = A.AABBCount;
+          GeomDescs.push_back(GD);
+        }
+      }
+      Desc.Inputs.NumDescs = static_cast<UINT>(GeomDescs.size());
+      Desc.Inputs.pGeometryDescs = GeomDescs.data();
+      ScratchSize = BLAS->AS->getSizes().ScratchDataSizeInBytes;
+    } else {
+      const auto *TLAS = llvm::cast<const TLASBuildRequest *>(Item);
+      auto *DXAS = llvm::cast<DXAccelerationStructure>(TLAS->AS);
+      Desc.DestAccelerationStructureData = DXAS->getGPUVirtualAddress();
+      Desc.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL;
+      Desc.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+      Desc.Inputs.NumDescs = static_cast<UINT>(TLAS->Instances.size());
+
+      // D3D12_RAYTRACING_INSTANCE_DESC has the same byte layout as
+      // VkAccelerationStructureInstanceKHR. Serialize and upload via the
+      // shared abstract-API helper using an upload-heap (CpuToGpu) buffer.
+      llvm::SmallVector<D3D12_RAYTRACING_INSTANCE_DESC> Native;
+      Native.reserve(TLAS->Instances.size());
+      for (const auto &Inst : TLAS->Instances) {
+        D3D12_RAYTRACING_INSTANCE_DESC NI = {};
+        static_assert(sizeof(NI.Transform) == sizeof(Inst.Transform),
+                      "Transform layout mismatch");
+        memcpy(&NI.Transform, Inst.Transform, sizeof(Inst.Transform));
+        // D3D12_RAYTRACING_INSTANCE_DESC packs InstanceID into a 24-bit
+        // bitfield; truncate explicitly so the value matches the VK path
+        // (vkInstanceCustomIndex is likewise 24-bit) instead of relying on
+        // silent narrowing.
+        NI.InstanceID = Inst.InstanceID & 0xFFFFFFu;
+        NI.InstanceMask = Inst.InstanceMask;
+        NI.InstanceContributionToHitGroupIndex = 0;
+        NI.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        auto *BLASPtr = llvm::cast<DXAccelerationStructure>(Inst.BLAS);
+        NI.AccelerationStructure = BLASPtr->getGPUVirtualAddress();
+        Native.push_back(NI);
+      }
+      const size_t Bytes =
+          Native.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
+
+      const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
+                                        BufferUsage::Storage};
+      auto InstBufOrErr = offloadtest::createBufferWithData(
+          *Dev, "TLAS-Instances", UploadDesc, Native.data(), Bytes, nullptr,
+          nullptr);
+      if (!InstBufOrErr)
+        return InstBufOrErr.takeError();
+      auto *DXInstBuf = llvm::cast<DXBuffer>(InstBufOrErr->get());
+      Desc.Inputs.InstanceDescs = DXInstBuf->Buffer->GetGPUVirtualAddress();
+
+      CB.KeepAliveOwned.push_back(std::move(*InstBufOrErr));
+      ScratchSize = TLAS->AS->getSizes().ScratchDataSizeInBytes;
+    }
+
+    // Allocate scratch in the default heap; createBuffer() applies
+    // ALLOW_UNORDERED_ACCESS for default-heap allocations and creates the
+    // resource in COMMON state, which D3D12 implicitly promotes to
+    // UNORDERED_ACCESS on first GPU access during the AS build.
+    const BufferCreateDesc ScratchDesc{MemoryLocation::GpuOnly,
+                                       BufferUsage::Storage};
+    auto ScratchOrErr =
+        Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
+    if (!ScratchOrErr)
+      return ScratchOrErr.takeError();
+    auto *DXScratchBuf = llvm::cast<DXBuffer>(ScratchOrErr->get());
+    Desc.ScratchAccelerationStructureData =
+        DXScratchBuf->Buffer->GetGPUVirtualAddress();
+    CB.KeepAliveOwned.push_back(std::move(*ScratchOrErr));
+
+    insertDebugSignpost("BuildRaytracingAccelerationStructure");
+    CmdList4->BuildRaytracingAccelerationStructure(&Desc, 0, nullptr);
+  }
+
+  // Signal that this batch's AS writes need a barrier before the next reader.
+  CB.addPendingUAVBarrier();
+  return llvm::Error::success();
+}
 } // namespace
 
 llvm::Expected<offloadtest::SubmitResult> DXQueue::submit(
