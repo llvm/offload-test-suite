@@ -198,6 +198,11 @@ DescriptorSets:
 ...
 #--- end
 
+# The Metal backend (MoltenVK) reports "Metal does not support buffer robustness"
+# and fails to render this vertex-stage resource-read test (no output is
+# produced), so skip it there.
+# UNSUPPORTED: Metal
+
 # XFAIL: Clang
 # REQUIRES: goldenimage
 
