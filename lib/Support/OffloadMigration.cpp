@@ -64,11 +64,8 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
 }
 
 static llvm::Expected<std::unique_ptr<AccelerationStructure>>
-createAS(Device &Dev, Resource &R) {
-  assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-  assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-  auto SizesOrErr =
-      Dev.getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+createAS(Device &Dev, uint32_t InstanceCount) {
+  auto SizesOrErr = Dev.getTLASBuildSizes(InstanceCount);
   if (!SizesOrErr)
     return SizesOrErr.takeError();
   return Dev.createTLAS(*SizesOrErr);
@@ -317,12 +314,19 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
         ResBundle.push_back(std::move(RSet));
       }
     } else if (R.isAccelerationStructure()) {
-      auto ASOrErr = createAS(Dev, R);
-      if (!ASOrErr)
-        return ASOrErr.takeError();
-      ResBundle.emplace_back(ASOrErr->get());
-      auto Inserted =
-          IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+      assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+      const TLASDesc &TD = *R.TLASPtr;
+      llvm::SmallVector<std::unique_ptr<AccelerationStructure>> Handles;
+      Handles.reserve(TD.ArraySize);
+      for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+        auto ASOrErr =
+            createAS(Dev, static_cast<uint32_t>(TD.Instances[Elt].size()));
+        if (!ASOrErr)
+          return ASOrErr.takeError();
+        ResBundle.emplace_back(ASOrErr->get());
+        Handles.push_back(std::move(*ASOrErr));
+      }
+      auto Inserted = IS.TLASes.try_emplace(TD.Name, std::move(Handles));
       assert(Inserted.second && "TLAS bound to multiple resources NYI");
       (void)Inserted;
     } else {

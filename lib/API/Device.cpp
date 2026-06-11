@@ -151,7 +151,8 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
 llvm::Error offloadtest::buildPipelineAccelerationStructures(
     Device &Dev, ComputeEncoder &Enc, Pipeline &P,
     llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
-    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+    const llvm::StringMap<
+        llvm::SmallVector<std::unique_ptr<AccelerationStructure>>>
         &PreallocatedTLASes,
     llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
   if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
@@ -228,36 +229,44 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   // Separate `batchBuildAS()` from the BLAS batch so the BLAS-write →
   // TLAS-read barrier between them is implicit.
   llvm::SmallVector<TLASBuildRequest> TLASRequests;
-  TLASRequests.reserve(PreallocatedTLASes.size());
   for (const TLASDesc &TD : P.AccelStructs.TLAS) {
     auto ASIt = PreallocatedTLASes.find(TD.Name);
     if (ASIt == PreallocatedTLASes.end())
       continue; // TLAS declared but not bound to any resource.
-    TLASBuildRequest Req;
-    Req.AS = ASIt->second.get();
-    Req.Instances.reserve(TD.Instances.size());
-    for (const auto &I : TD.Instances) {
-      auto It = BLASesByName.find(I.BLAS);
-      if (It == BLASesByName.end())
-        return llvm::createStringError(std::errc::invalid_argument,
-                                       "TLAS '%s' references unknown BLAS '%s'",
-                                       TD.Name.c_str(), I.BLAS.c_str());
+    const auto &Handles = ASIt->second;
+    assert(Handles.size() == TD.ArraySize &&
+           "PreallocatedTLASes entry size must equal TLASDesc::ArraySize");
+    assert(TD.Instances.size() == TD.ArraySize &&
+           "TLASDesc::Instances must have ArraySize entries (one per element)");
+    for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+      TLASBuildRequest Req;
+      Req.AS = Handles[Elt].get();
+      const auto &EltInstances = TD.Instances[Elt];
+      Req.Instances.reserve(EltInstances.size());
+      for (const auto &I : EltInstances) {
+        auto It = BLASesByName.find(I.BLAS);
+        if (It == BLASesByName.end())
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "TLAS '%s' element %u references unknown BLAS '%s'",
+              TD.Name.c_str(), Elt, I.BLAS.c_str());
 
-      AccelerationStructureInstance Inst;
-      static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
-                    "Transform layout mismatch");
-      memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
-      Inst.InstanceID = I.InstanceID;
-      Inst.InstanceMask = I.InstanceMask;
-      Inst.InstanceContributionToHitGroupIndex =
-          I.InstanceContributionToHitGroupIndex;
-      Inst.Flags = I.Flags;
-      Inst.BLAS = It->second;
-      Req.Instances.push_back(Inst);
+        AccelerationStructureInstance Inst;
+        static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
+                      "Transform layout mismatch");
+        memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
+        Inst.InstanceID = I.InstanceID;
+        Inst.InstanceMask = I.InstanceMask;
+        Inst.InstanceContributionToHitGroupIndex =
+            I.InstanceContributionToHitGroupIndex;
+        Inst.Flags = I.Flags;
+        Inst.BLAS = It->second;
+        Req.Instances.push_back(Inst);
+      }
+      if (auto Err = validateTLASBuildRequest(Req))
+        return Err;
+      TLASRequests.push_back(std::move(Req));
     }
-    if (auto Err = validateTLASBuildRequest(Req))
-      return Err;
-    TLASRequests.push_back(std::move(Req));
   }
 
   llvm::SmallVector<ASBuildItem> TLASBatch;
