@@ -1,15 +1,12 @@
 # Bundled hull-shader (HS) system-value test. Exercises:
 #   * SV_PrimitiveID         - HS input, in BOTH the patch-constant function and
 #                              the main control-point function (must agree).
-#                              primID in HS main is new coverage.
 #   * SV_OutputControlPointID - HS main input; each of the 3 invocations must see
 #                              its own index 0,1,2.
 #   * SV_TessFactor / SV_InsideTessFactor - set in HS, read back in DS (round-trip).
 #
 # SV_PrimitiveID: https://github.com/llvm/wg-hlsl/issues/160
 # SV_OutputControlPointID / SV_TessFactor: https://github.com/llvm/wg-hlsl/issues/141
-# Clang's HLSL -> DXIL lowering does not yet implement the tessellation stages,
-# so this is XFAIL on Clang. Metal has no Hull/Domain stages (see note below).
 #
 # The HS system values cannot be read back directly, so they are smuggled
 # downstream: HS main stashes (SV_PrimitiveID, SV_OutputControlPointID) into each
@@ -44,7 +41,6 @@ struct HSInput {
 
 struct HSOutput {
   float4 position : POSITION;
-  // SV_PrimitiveID and SV_OutputControlPointID observed by this HS invocation.
   uint hsPrimID : HSPRIMID;
   uint hsCpid : HSCPID;
 };
@@ -52,7 +48,8 @@ struct HSOutput {
 struct HSPatchConstants {
   float Edges[3] : SV_TessFactor;
   float Inside : SV_InsideTessFactor;
-  uint pcPrimID : PCPRIMID; // SV_PrimitiveID observed in the patch-constant func
+  // SV_PrimitiveID observed in the patch-constant function
+  uint pcPrimID : PCPRIMID;
 };
 
 HSPatchConstants PatchConstants(InputPatch<HSInput, 3> patch,
@@ -71,8 +68,7 @@ HSPatchConstants PatchConstants(InputPatch<HSInput, 3> patch,
 [outputtopology("triangle_cw")]
 [outputcontrolpoints(3)]
 [patchconstantfunc("PatchConstants")]
-HSOutput main(InputPatch<HSInput, 3> patch,
-              uint i : SV_OutputControlPointID,
+HSOutput main(InputPatch<HSInput, 3> patch, uint i : SV_OutputControlPointID,
               uint patchID : SV_PrimitiveID) {
   HSOutput o;
   o.position = patch[i].position;
@@ -114,7 +110,7 @@ DSOutput main(DSPatchConstants constants, float3 bary : SV_DomainLocation,
   o.position = bary.x * patch[0].position + bary.y * patch[1].position +
                bary.z * patch[2].position;
   o.pcPrimID = constants.pcPrimID;
-  o.hsMainPrimID = patch[0].hsPrimID; // identical across control points
+  o.hsMainPrimID = patch[0].hsPrimID;
   o.cpid0 = patch[0].hsCpid;
   o.cpid1 = patch[1].hsCpid;
   o.cpid2 = patch[2].hsCpid;
@@ -136,11 +132,11 @@ struct PSInput {
 };
 
 struct Record {
-  uint  PCPrimID;
-  uint  HSMainPrimID;
-  uint  Cpid0;
-  uint  Cpid1;
-  uint  Cpid2;
+  uint PCPrimID;
+  uint HSMainPrimID;
+  uint Cpid0;
+  uint Cpid1;
+  uint Cpid2;
   float EdgeFactor;
   float InsideFactor;
 };
@@ -148,15 +144,15 @@ struct Record {
 RWStructuredBuffer<Record> Output : register(u0);
 
 float4 main(PSInput input) : SV_TARGET {
-  uint idx = (uint)input.position.x; // 2x1 target, height 1
+  uint idx = (uint)input.position.x;
 
   Record r;
-  r.PCPrimID     = input.pcPrimID;
+  r.PCPrimID = input.pcPrimID;
   r.HSMainPrimID = input.hsMainPrimID;
-  r.Cpid0        = input.cpid0;
-  r.Cpid1        = input.cpid1;
-  r.Cpid2        = input.cpid2;
-  r.EdgeFactor   = input.edgeFactor;
+  r.Cpid0 = input.cpid0;
+  r.Cpid1 = input.cpid1;
+  r.Cpid2 = input.cpid2;
+  r.EdgeFactor = input.edgeFactor;
   r.InsideFactor = input.insideFactor;
   Output[idx] = r;
 
