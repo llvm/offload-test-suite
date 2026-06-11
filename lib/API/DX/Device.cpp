@@ -360,6 +360,7 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+  uint64_t CounterOffsetInBytes;
 
   // Contract: If a command on the command buffer needs a resource to be in a
   // different state it should always transition it back to the PreferredState
@@ -368,11 +369,25 @@ public:
   // tracking.
   D3D12_RESOURCE_STATES PreferredState;
 
+  D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle;
+  D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle;
+  D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle;
+
   DXBuffer(ComPtr<ID3D12Resource> Buffer, llvm::StringRef Name,
            BufferCreateDesc Desc, size_t SizeInBytes,
-           D3D12_RESOURCE_STATES PreferredState)
+           uint64_t CounterOffsetInBytes, D3D12_RESOURCE_STATES PreferredState,
+           D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle,
+           D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle,
+           D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle)
       : offloadtest::Buffer(GPUAPI::DirectX), Buffer(Buffer), Name(Name),
-        Desc(Desc), SizeInBytes(SizeInBytes), PreferredState(PreferredState) {}
+        Desc(Desc), SizeInBytes(SizeInBytes),
+        CounterOffsetInBytes(CounterOffsetInBytes),
+        PreferredState(PreferredState), SRVHandle(SRVHandle),
+        UAVHandle(UAVHandle), CBVHandle(CBVHandle) {}
+  DXBuffer(const DXBuffer &) = delete;
+  DXBuffer(DXBuffer &&) = delete;
+  DXBuffer &operator=(const DXBuffer &) = delete;
+  DXBuffer &operator=(DXBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
@@ -1072,6 +1087,7 @@ private:
   Capabilities Caps;
   DescriptorAllocator RTVAllocator;
   DescriptorAllocator DSVAllocator;
+  DescriptorAllocator CSUAllocator;
 
   struct ResourceSet {
     ComPtr<ID3D12Resource> Upload;
@@ -1131,10 +1147,12 @@ private:
 public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
-           std::string Desc, std::string DriverVer)
+           DescriptorAllocator CSUAllocator, std::string Desc,
+           std::string DriverVer)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
-        DSVAllocator(std::move(DSVAllocator)) {
+        DSVAllocator(std::move(DSVAllocator)),
+        CSUAllocator(std::move(CSUAllocator)) {
     Description = std::move(Desc);
     DriverVersion = std::move(DriverVer);
     DriverName = "DirectX";
@@ -1480,36 +1498,159 @@ public:
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     const D3D12_HEAP_TYPE HeapType = getDXHeapType(Desc.Location);
-
+    // This flag is only allowed on GpuOnly memory.
     const D3D12_RESOURCE_FLAGS Flags =
-        HeapType == D3D12_HEAP_TYPE_DEFAULT
+        Desc.Location == MemoryLocation::GpuOnly
             ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
             : D3D12_RESOURCE_FLAG_NONE;
 
+    // Modify the size if needed
+    UINT64 CounterOffsetInBytes = 0;
+    UINT64 BufferSizeInBytes = SizeInBytes;
+    if (Desc.Usage == BufferUsage::ConstantBuffer) {
+      if (Desc.HasCounter)
+        return llvm::createStringError(
+            "Constant Buffers are not allowed to have a counter.");
+
+      BufferSizeInBytes = getCBVSize(BufferSizeInBytes);
+    } else if (Desc.HasCounter) {
+      if (Desc.AccessType == BufferShaderAccessType::Raw)
+        return llvm::createStringError(
+            "Raw Resources are not allowed to have a counter.");
+
+      CounterOffsetInBytes = llvm::alignTo(
+          BufferSizeInBytes, D3D12_UAV_COUNTER_PLACEMENT_ALIGNMENT);
+      BufferSizeInBytes = CounterOffsetInBytes + sizeof(uint32_t);
+    }
+
     const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
-        CD3DX12_RESOURCE_DESC::Buffer(SizeInBytes, Flags);
+        CD3DX12_RESOURCE_DESC::Buffer(BufferSizeInBytes, Flags);
 
-    D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
-    if (HeapType == D3D12_HEAP_TYPE_UPLOAD)
-      InitialState = D3D12_RESOURCE_STATE_GENERIC_READ;
-    else if (HeapType == D3D12_HEAP_TYPE_READBACK)
-      // As per the readback heap docs
-      // > Resources in this heap must be created with
-      // > D3D12_RESOURCE_STATE_COPY_DEST, and cannot be changed away from this.
-      InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
+    D3D12_RESOURCE_STATES PreferredState = D3D12_RESOURCE_STATE_COMMON;
+    ComPtr<ID3D12Resource> BufferObject;
+    if (Desc.Backing == MemoryBacking::Sparse) {
+      if (auto Err = HR::toError(Device->CreateReservedResource(
+                                     &BufferDesc, D3D12_RESOURCE_STATE_COMMON,
+                                     nullptr, IID_PPV_ARGS(&BufferObject)),
+                                 "Failed to create reserved buffer."))
+        return Err;
+    } else {
+      D3D12_RESOURCE_STATES InitialState = D3D12_RESOURCE_STATE_COMMON;
+      if (HeapType == D3D12_HEAP_TYPE_UPLOAD)
+        InitialState = D3D12_RESOURCE_STATE_GENERIC_READ;
+      else if (HeapType == D3D12_HEAP_TYPE_READBACK)
+        // As per the readback heap docs
+        // > Resources in this heap must be created with
+        // > D3D12_RESOURCE_STATE_COPY_DEST, and cannot be changed away from
+        // this.
+        InitialState = D3D12_RESOURCE_STATE_COPY_DEST;
+      PreferredState = InitialState;
+      if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                     &HeapProps, D3D12_HEAP_FLAG_NONE,
+                                     &BufferDesc, InitialState, nullptr,
+                                     IID_PPV_ARGS(&BufferObject)),
+                                 "Failed to create buffer."))
+        return Err;
+    }
 
-    ComPtr<ID3D12Resource> DeviceBuffer;
-    if (auto Err =
-            HR::toError(Device->CreateCommittedResource(
-                            &HeapProps, D3D12_HEAP_FLAG_NONE, &BufferDesc,
-                            InitialState, nullptr, IID_PPV_ARGS(&DeviceBuffer)),
-                        "Failed to create buffer."))
-      return Err;
+    const std::wstring WStr(Name.begin(), Name.end());
+    BufferObject->SetName(WStr.c_str());
 
-    const D3D12_RESOURCE_STATES PreferredState = InitialState;
-    return std::make_unique<DXBuffer>(DeviceBuffer, Name, Desc, SizeInBytes,
-                                      PreferredState);
+    D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = {};
+    {
+      auto SRVHandleOrErr = CSUAllocator.allocate();
+      if (!SRVHandleOrErr)
+        return SRVHandleOrErr.takeError();
+      SRVHandle = *SRVHandleOrErr;
+
+      D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+      SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+      SRVDesc.Shader4ComponentMapping =
+          D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      switch (Desc.AccessType) {
+      case BufferShaderAccessType::Raw:
+        SRVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+        SRVDesc.Buffer.NumElements = static_cast<uint32_t>(SizeInBytes / 4);
+        SRVDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+        break;
+      case BufferShaderAccessType::Typed:
+        SRVDesc.Format = getDXGIFormat(Desc.AccessTypeParams.Fmt);
+        SRVDesc.Buffer.NumElements = static_cast<uint32_t>(
+            SizeInBytes / getFormatSizeInBytes(Desc.AccessTypeParams.Fmt));
+        break;
+      case BufferShaderAccessType::Structured:
+        assert(Desc.AccessTypeParams.StructureStride > 0 &&
+               "Structured buffers must have a Structure Stride.");
+        SRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+        SRVDesc.Buffer.NumElements = static_cast<uint32_t>(
+            SizeInBytes / Desc.AccessTypeParams.StructureStride);
+        SRVDesc.Buffer.StructureByteStride =
+            Desc.AccessTypeParams.StructureStride;
+        break;
+      }
+
+      Device->CreateShaderResourceView(BufferObject.Get(), &SRVDesc, SRVHandle);
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE UAVHandle = {};
+    if ((Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0) {
+      auto UAVHandleOrErr = CSUAllocator.allocate();
+      if (!UAVHandleOrErr)
+        return UAVHandleOrErr.takeError();
+      UAVHandle = *UAVHandleOrErr;
+
+      D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+      UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+      switch (Desc.AccessType) {
+      case BufferShaderAccessType::Raw:
+        UAVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
+        UAVDesc.Buffer.NumElements = static_cast<uint32_t>(SizeInBytes / 4);
+        UAVDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+        break;
+      case BufferShaderAccessType::Typed:
+        UAVDesc.Format = getDXGIFormat(Desc.AccessTypeParams.Fmt);
+        UAVDesc.Buffer.NumElements = static_cast<uint32_t>(
+            SizeInBytes / getFormatSizeInBytes(Desc.AccessTypeParams.Fmt));
+        break;
+      case BufferShaderAccessType::Structured:
+        assert(Desc.AccessTypeParams.StructureStride > 0 &&
+               "Structured buffers must have a Structure Stride.");
+        UAVDesc.Format = DXGI_FORMAT_UNKNOWN;
+        UAVDesc.Buffer.NumElements = static_cast<uint32_t>(
+            SizeInBytes / Desc.AccessTypeParams.StructureStride);
+        UAVDesc.Buffer.StructureByteStride =
+            Desc.AccessTypeParams.StructureStride;
+        break;
+      }
+
+      ID3D12Resource *CounterObject = nullptr;
+      if (Desc.HasCounter) {
+        UAVDesc.Buffer.CounterOffsetInBytes = CounterOffsetInBytes;
+        CounterObject = BufferObject.Get();
+      }
+
+      Device->CreateUnorderedAccessView(BufferObject.Get(), CounterObject,
+                                        &UAVDesc, UAVHandle);
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE CBVHandle = {};
+    if (Desc.Usage == BufferUsage::ConstantBuffer) {
+      auto CBVHandleOrErr = CSUAllocator.allocate();
+      if (!CBVHandleOrErr)
+        return CBVHandleOrErr.takeError();
+      CBVHandle = *CBVHandleOrErr;
+
+      D3D12_CONSTANT_BUFFER_VIEW_DESC CBVDesc = {};
+      CBVDesc.BufferLocation = BufferObject->GetGPUVirtualAddress();
+      CBVDesc.SizeInBytes = BufferSizeInBytes;
+
+      Device->CreateConstantBufferView(&CBVDesc, CBVHandle);
+    }
+
+    return std::make_unique<DXBuffer>(BufferObject, Name, Desc, SizeInBytes,
+                                      CounterOffsetInBytes, PreferredState,
+                                      SRVHandle, UAVHandle, CBVHandle);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -1652,10 +1793,16 @@ public:
     if (!DSVHeapOrErr)
       return DSVHeapOrErr.takeError();
 
+    auto CSUHeapOrErr = DescriptorAllocator::create(
+        Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 4096);
+    if (!CSUHeapOrErr)
+      return CSUHeapOrErr.takeError();
+
     return std::make_unique<DXDevice>(
         Adapter, Device, std::move(*GraphicsQueueOrErr),
         std::move(*RTVHeapOrErr), std::move(*DSVHeapOrErr),
-        std::string(DescVec.data()), std::move(DriverVer));
+        std::move(*CSUHeapOrErr), std::string(DescVec.data()),
+        std::move(DriverVer));
   }
 
   const Capabilities &getCapabilities() override {
@@ -3023,8 +3170,7 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       const size_t Bytes =
           Native.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC);
 
-      const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
-                                        BufferUsage::Storage};
+      const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
       auto InstBufOrErr = offloadtest::createBufferWithData(
           *Dev, "TLAS-Instances", UploadDesc, Native.data(), Bytes, nullptr,
           nullptr);
@@ -3037,12 +3183,7 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       ScratchSize = TLAS->AS->getSizes().ScratchDataSizeInBytes;
     }
 
-    // Allocate scratch in the default heap; createBuffer() applies
-    // ALLOW_UNORDERED_ACCESS for default-heap allocations and creates the
-    // resource in COMMON state, which D3D12 implicitly promotes to
-    // UNORDERED_ACCESS on first GPU access during the AS build.
-    const BufferCreateDesc ScratchDesc{MemoryLocation::GpuOnly,
-                                       BufferUsage::Storage};
+    const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
     auto ScratchOrErr =
         Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
     if (!ScratchOrErr)
