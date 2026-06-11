@@ -148,9 +148,7 @@ def analyze_current_status(workflows, regressions_only=False):
     printer = ResultPrinter()
 
     for workflow in workflows:
-        project = 'llvm/llvm-project'
-        if '-dxc-' in workflow:
-            project = 'Microsoft/DirectXShaderCompiler'
+        project = get_project_for_workflow(workflow)
 
         last_completed = get_last_run(workflow, status='completed')
         last_success = get_last_run(workflow, status='success')
@@ -188,9 +186,10 @@ def analyze_current_status(workflows, regressions_only=False):
         suite_failed_hash = read_until_githash(proc, 'llvm/offload-test-suite')
 
         printer.print_commit(project, failed_hash)
-        printer.print_commit('llvm/offload-test-suite', suite_failed_hash)
         if success_hash and failed_hash:
             printer.print_commit_range(project, success_hash, failed_hash)
+        printer.print_commit('llvm/offload-test-suite', suite_failed_hash)
+        if success_hash and failed_hash:
             printer.print_commit_range('llvm/offload-test-suite',
                                        suite_success_hash, suite_failed_hash)
         printer.printline()
@@ -202,6 +201,14 @@ def analyze_current_status(workflows, regressions_only=False):
                 printer.print_result(found.group('test'), found.group('result'))
         proc.wait()
         printer.printline()
+
+
+def get_project_for_workflow(workflow):
+    if '-clang-' in workflow:
+        return 'llvm/llvm-project'
+    if '-dxc-' in workflow:
+        return 'Microsoft/DirectXShaderCompiler'
+    raise CIResultsError(f'Workflow {workflow} is neither clang nor dxc')
 
 
 def workflow_status_key(workflow):
@@ -283,8 +290,10 @@ def find_failure_range(workflow, test_path, *,
     start_index = runid_index(runids, new_runid) if new_runid else 0
     end_index = runid_index(runids, old_runid) if old_runid else 0
 
+    project = get_project_for_workflow(workflow)
+
     # Sanity check that the starting index has the right state
-    new_hash, result = get_test_result(runids[start_index], test_path)
+    new_hash, result = get_test_result(runids[start_index], project, test_path)
     print(f'{start_index} - '
           f'Run {runids[start_index]} ({new_hash}): {result}',
           file=sys.stderr)
@@ -297,7 +306,8 @@ def find_failure_range(workflow, test_path, *,
         offset = 1
         while start_index + offset < len(runids):
             end_index = start_index + offset
-            old_hash, result = get_test_result(runids[end_index], test_path)
+            old_hash, result = get_test_result(
+                runids[end_index], project, test_path)
             print(f'{end_index} - '
                   f'Run {runids[end_index]} ({old_hash}): {result}',
                   file=sys.stderr)
@@ -315,7 +325,8 @@ def find_failure_range(workflow, test_path, *,
                 f'Try higher --run-limit and --new-runid={runids[start_index]}')
     else:
         # Sanity check that the end index has the right state
-        old_hash, result = get_test_result(runids[end_index], test_path)
+        old_hash, result = get_test_result(
+            runids[end_index], project, test_path)
         print(f'{end_index} - '
               f'Run {runids[end_index]} ({old_hash}): {result}',
               file=sys.stderr)
@@ -326,7 +337,8 @@ def find_failure_range(workflow, test_path, *,
     # Finally, we can bisect the logs.
     while end_index > start_index + 1:
         current_index = int((start_index + end_index) / 2)
-        git_hash, result = get_test_result(runids[current_index], test_path)
+        git_hash, result = get_test_result(
+            runids[current_index], project, test_path)
 
         print(f'{current_index} - '
               f'Run {runids[current_index]} ({git_hash}): {result}',
@@ -346,8 +358,7 @@ def find_failure_range(workflow, test_path, *,
             f'Bisection ended early? Range is {start_index} to {end_index}')
 
     print()
-    print(f'dxc range: {old_hash.dxc_hash}..{new_hash.dxc_hash}')
-    print(f'llvm range: {old_hash.llvm_hash}..{new_hash.llvm_hash}')
+    print(f'{project} range: {old_hash.project_hash}..{new_hash.project_hash}')
     print(f'test suite range: {old_hash.offload_hash}..{new_hash.offload_hash}')
 
 
@@ -413,29 +424,28 @@ def read_until_githash(proc, repo):
 
 
 class Hashes(object):
-    def __init__(self, dxc_hash, llvm_hash, offload_hash):
+    def __init__(self, project, project_hash, offload_hash):
+        self.project = project
         # Note: Without looking at the repos we can't actually calculate what's
         # sufficiently long for a short hash, so we just use something large.
-        self.dxc_hash = dxc_hash[:12]
-        self.llvm_hash = llvm_hash[:12]
+        self.project_hash = project_hash[:12]
         self.offload_hash = offload_hash[:12]
 
     def __repr__(self):
-        return (f'Hashes(dxc_hash={self.dxc_hash}, llvm_hash={self.llvm_hash}, '
+        return (f'Hashes(project={self.project}, '
+                f'project_hash={self.project_hash}, '
                 f'offload_hash={self.offload_hash})')
 
     def __str__(self):
-        return ', '.join([f'dxc: {self.dxc_hash or '-'}',
-                          f'llvm: {self.llvm_hash or '-'}',
+        return ', '.join([f'{self.project}: {self.project_hash or '-'}',
                           f'test-suite: {self.offload_hash or '-'}'])
 
 
-def get_test_result(databaseId, test_path):
+def get_test_result(databaseId, project, test_path):
     proc = get_log_proc(databaseId)
-    dxc_hash = read_until_githash(proc, 'Microsoft/DirectXShaderCompiler')
-    llvm_hash = read_until_githash(proc, 'llvm/llvm-project')
+    project_hash = read_until_githash(proc, project)
     offload_hash = read_until_githash(proc, 'llvm/offload-test-suite')
-    if not dxc_hash or not llvm_hash or not offload_hash:
+    if not project_hash or not offload_hash:
         raise CIResultsError(f'Failed to find repo hashes for run {databaseId}')
 
     test_re = re.compile(
@@ -449,7 +459,7 @@ def get_test_result(databaseId, test_path):
             break
     proc.terminate()
 
-    return Hashes(dxc_hash, llvm_hash, offload_hash), result
+    return Hashes(project, project_hash, offload_hash), result
 
 
 class ResultPrinter:
