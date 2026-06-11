@@ -2,15 +2,20 @@ name: macOS Metal Clang
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
   schedule:
     - cron: '*/30 * * * *' # run every 30 minutes
+  pull_request:
+    paths:
+     - .github/workflows/macos-clang-mtl.yaml
 
 jobs:
   macOS-Metal-Clang:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: macOS

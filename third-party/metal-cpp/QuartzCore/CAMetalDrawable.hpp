@@ -2,7 +2,7 @@
 //
 // QuartzCore/CAMetalDrawable.hpp
 //
-// Copyright 2020-2023 Apple Inc.
+// Copyright 2020-2024 Apple Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,24 +30,28 @@
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-namespace CA {
-class MetalDrawable : public NS::Referencing<MetalDrawable, MTL::Drawable> {
+namespace CA
+{
+class MetalDrawable : public NS::Referencing<MetalDrawable, MTL::Drawable>
+{
 public:
-  class MetalLayer *layer() const;
-  MTL::Texture *texture() const;
+    class MetalLayer* layer() const;
+    MTL::Texture*     texture() const;
 };
-} // namespace CA
-
-//-------------------------------------------------------------------------------------------------------------------------------------------------------------
-
-_CA_INLINE CA::MetalLayer *CA::MetalDrawable::layer() const {
-  return Object::sendMessage<MetalLayer *>(this, _CA_PRIVATE_SEL(layer));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_CA_INLINE MTL::Texture *CA::MetalDrawable::texture() const {
-  return Object::sendMessage<MTL::Texture *>(this, _CA_PRIVATE_SEL(texture));
+_CA_INLINE CA::MetalLayer* CA::MetalDrawable::layer() const
+{
+    return Object::sendMessage<MetalLayer*>(this, _CA_PRIVATE_SEL(layer));
+}
+
+//-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+_CA_INLINE MTL::Texture* CA::MetalDrawable::texture() const
+{
+    return Object::sendMessage<MTL::Texture*>(this, _CA_PRIVATE_SEL(texture));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------

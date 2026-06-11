@@ -15,7 +15,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: OutArray
     Format: Int32
@@ -45,10 +44,6 @@ DescriptorSets:
         Binding: 0
 ...
 #--- end
-
-# Offload tests are missing support for resource arrays on Metal
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
-# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
@@ -84,9 +79,9 @@ DescriptorSets:
 # CHECK: Width:           0
 # CHECK: Depth:           0
 # CHECK: ...
-# CHECK: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK: Full Hex representation of Expected Buffer Values:
 # CHECK: - [ 0x1, 0x2, 0x3, 0x4 ]
 # CHECK: - [ 0x5, 0x6, 0x7, 0x8 ]
-# CHECK: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK: Full Hex representation of Actual Buffer Values:
 # CHECK: - [ 0x0, 0xa, 0x14, 0x1e ]
 # CHECK: - [ 0x1, 0xb, 0x15, 0x1f ]

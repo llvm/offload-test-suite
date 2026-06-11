@@ -156,7 +156,8 @@ uint float_to_abgr(float3 rgb) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [32, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [32, 1, 1]
 Buffers:
   - Name: CONSTANTS
     Format: Int32
@@ -359,7 +360,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # No idea what is going on here, but the results are _way_ off.
-# XFAIL: Vulkan && Darwin
+# XFAIL: Clang && Vulkan && MoltenVK
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 %if Vulkan %{ -fvk-use-dx-layout %} -Fo %t.o %t/particle-life.hlsl

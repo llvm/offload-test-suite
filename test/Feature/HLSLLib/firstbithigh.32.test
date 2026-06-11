@@ -19,7 +19,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In1
     Format: Hex32
@@ -79,9 +78,6 @@ DescriptorSets:
         Binding: 2
 ...
 #--- end
-
-# Bug https://github.com/llvm/llvm-project/issues/145752
-# XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

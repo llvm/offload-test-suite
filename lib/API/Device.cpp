@@ -10,76 +10,297 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/Encoder.h"
+#include "API/FormatConversion.h"
 
 #include "Config.h"
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 
-#include <cstdlib>
 #include <memory>
 
 using namespace offloadtest;
 
-namespace {
-class DeviceContext {
-public:
-  using DeviceArray = Device::DeviceArray;
-  using DeviceIterator = Device::DeviceIterator;
+CommandEncoder::~CommandEncoder() {}
 
-private:
-  DeviceArray Devices;
+Buffer::~Buffer() {}
 
-  DeviceContext() = default;
-  ~DeviceContext() = default;
-  DeviceContext(const DeviceContext &) = delete;
+CommandBuffer::~CommandBuffer() {}
 
-public:
-  static DeviceContext &instance() {
-    static DeviceContext Ctx;
-    return Ctx;
-  }
+Fence::~Fence() {}
 
-  void registerDevice(std::shared_ptr<Device> D) { Devices.push_back(D); }
-  void unregisterDevices() { Devices.clear(); }
+Queue::~Queue() {}
 
-  DeviceIterator begin() { return Devices.begin(); }
+Texture::~Texture() {}
 
-  DeviceIterator end() { return Devices.end(); }
-};
-} // namespace
+RenderPass::~RenderPass() {}
+
+AccelerationStructure::~AccelerationStructure() {}
 
 Device::~Device() {}
 
-void Device::registerDevice(std::shared_ptr<Device> D) {
-  DeviceContext::instance().registerDevice(D);
+llvm::Expected<llvm::SmallVector<std::unique_ptr<Device>>>
+offloadtest::initializeDevices(const DeviceConfig Config) {
+  llvm::SmallVector<std::unique_ptr<Device>> Devices;
+  llvm::Error Err = llvm::Error::success();
+
+#ifdef OFFLOADTEST_ENABLE_D3D12
+  if (auto E = initializeDX12Devices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
+#endif
+
+#ifdef OFFLOADTEST_ENABLE_VULKAN
+  if (auto E = initializeVulkanDevices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
+#endif
+
+#ifdef OFFLOADTEST_ENABLE_METAL
+  if (auto E = initializeMetalDevices(Config, Devices))
+    Err = llvm::joinErrors(std::move(Err), std::move(E));
+#endif
+
+  if (Devices.empty()) {
+    if (Err)
+      return std::move(Err);
+    return llvm::createStringError(std::errc::no_such_device,
+                                   "No GPU devices found.");
+  }
+  // Log errors from backends that failed while others succeeded.
+  if (Err)
+    llvm::logAllUnhandledErrors(std::move(Err), llvm::errs());
+  return Devices;
 }
 
-llvm::Error Device::initialize(const DeviceConfig Config) {
-#ifdef OFFLOADTEST_ENABLE_D3D12
-  if (auto Err = initializeDXDevices(Config))
+llvm::Expected<std::unique_ptr<Texture>>
+offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
+                                             const CPUBuffer &Buf) {
+  auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
+  if (!TexFmtOrErr)
+    return TexFmtOrErr.takeError();
+
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::RenderTarget;
+  Desc.Fmt = *TexFmtOrErr;
+  Desc.Width = Buf.OutputProps.Width;
+  Desc.Height = Buf.OutputProps.Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearColor{};
+
+  if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
     return Err;
-#endif
-#ifdef OFFLOADTEST_ENABLE_VULKAN
-  if (auto Err = initializeVKDevices(Config))
-    return Err;
-  // Validation layers have internal state which require a specific destruction
-  // ordering. Relying on the global dtor call for this is unreliable and can
-  // cause a null-deref in the validation layers during the final
-  // vkDestroyInstance. This is a known limitation of the validation layers
-  // which explicitely requires using atexit.
-  atexit(Device::cleanupVKDevices);
-#endif
-#ifdef OFFLOADTEST_ENABLE_METAL
-  if (auto Err = initializeMtlDevices(Config))
-    return Err;
-#endif
+
+  return Dev.createTexture("RenderTarget", Desc);
+}
+
+llvm::Error offloadtest::buildPipelineAccelerationStructures(
+    Device &Dev, ComputeEncoder &Enc, Pipeline &P,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
+  if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
+    return llvm::Error::success();
+
+  // `BufferUsage::Storage` is the usage to pick for acceleration structure
+  // build inputs. Backends widen it with the native AS-input flags
+  // (e.g. Vulkan `SHADER_DEVICE_ADDRESS` + `ACCEL_BUILD_INPUT_READ_ONLY`)
+  // implicitly when ray tracing is supported.
+  const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
+                                    BufferUsage::Storage};
+
+  // Stash the request structs while we build them up — the encoder reads
+  // them through pointers stored in ASBuildItem.
+  llvm::SmallVector<BLASBuildRequest> BLASRequests;
+  BLASRequests.reserve(P.AccelStructs.BLAS.size());
+  llvm::StringMap<size_t> BLASIndex;
+
+  for (const auto &BD : P.AccelStructs.BLAS) {
+    llvm::SmallVector<TriangleGeometryDesc> Triangles;
+    Triangles.reserve(BD.Triangles.size());
+    for (const auto &T : BD.Triangles) {
+      assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
+      auto VBOrErr = createBufferWithData(
+          Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
+          T.VertexBufferPtr->size(), nullptr, nullptr);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+
+      TriangleGeometryDesc TGD;
+      TGD.VertexBuffer = VBOrErr->get();
+      TGD.VertexCount = T.VertexCount;
+      TGD.VertexStride = T.VertexStride;
+      TGD.VertexFormat = T.VertexFormat;
+      TGD.Opaque = T.Opaque;
+
+      OutInputBuffers.push_back(std::move(*VBOrErr));
+
+      if (T.IndexBufferPtr) {
+        auto IBOrErr = createBufferWithData(
+            Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
+            T.IndexBufferPtr->size(), nullptr, nullptr);
+        if (!IBOrErr)
+          return IBOrErr.takeError();
+        TGD.IndexBuffer = IBOrErr->get();
+        TGD.IndexCount = T.IndexCount;
+        TGD.IdxFormat = T.IdxFormat;
+        OutInputBuffers.push_back(std::move(*IBOrErr));
+      }
+      Triangles.push_back(TGD);
+    }
+    // TODO: AABB geometry support (would mirror the triangle path).
+
+    auto SizesOrErr = Dev.getBLASBuildSizes(Triangles);
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    auto ASOrErr = Dev.createBLAS(*SizesOrErr);
+    if (!ASOrErr)
+      return ASOrErr.takeError();
+
+    BLASBuildRequest Req;
+    Req.AS = ASOrErr->get();
+    Req.Geometry = std::move(Triangles);
+
+    BLASIndex[BD.Name] = OutAS.size();
+    OutAS.push_back(std::move(*ASOrErr));
+    BLASRequests.push_back(std::move(Req));
+  }
+
+  llvm::SmallVector<ASBuildItem> BLASBatch;
+  BLASBatch.reserve(BLASRequests.size());
+  for (const auto &Req : BLASRequests)
+    BLASBatch.push_back(&Req);
+  if (!BLASBatch.empty())
+    if (auto Err = Enc.batchBuildAS(BLASBatch))
+      return Err;
+
+  // TLAS pass — references BLASes built in the previous batch.
+  llvm::SmallVector<TLASBuildRequest> TLASRequests;
+  TLASRequests.reserve(P.AccelStructs.TLAS.size());
+
+  for (const auto &TD : P.AccelStructs.TLAS) {
+    TLASBuildRequest Req;
+    Req.Instances.reserve(TD.Instances.size());
+    for (const auto &I : TD.Instances) {
+      auto It = BLASIndex.find(I.BLAS);
+      if (It == BLASIndex.end())
+        return llvm::createStringError(std::errc::invalid_argument,
+                                       "TLAS '%s' references unknown BLAS '%s'",
+                                       TD.Name.c_str(), I.BLAS.c_str());
+
+      AccelerationStructureInstance Inst;
+      static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
+                    "Transform layout mismatch");
+      memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
+      Inst.InstanceID = I.InstanceID;
+      Inst.InstanceMask = I.InstanceMask;
+      Inst.BLAS = OutAS[It->second].get();
+      Req.Instances.push_back(Inst);
+    }
+    if (auto Err = validateTLASBuildRequest(Req))
+      return Err;
+    auto SizesOrErr =
+        Dev.getTLASBuildSizes(static_cast<uint32_t>(Req.Instances.size()));
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    auto ASOrErr = Dev.createTLAS(*SizesOrErr);
+    if (!ASOrErr)
+      return ASOrErr.takeError();
+
+    Req.AS = ASOrErr->get();
+    OutAS.push_back(std::move(*ASOrErr));
+    TLASRequests.push_back(std::move(Req));
+  }
+
+  llvm::SmallVector<ASBuildItem> TLASBatch;
+  TLASBatch.reserve(TLASRequests.size());
+  for (const auto &Req : TLASRequests)
+    TLASBatch.push_back(&Req);
+  if (!TLASBatch.empty())
+    if (auto Err = Enc.batchBuildAS(TLASBatch))
+      return Err;
+
   return llvm::Error::success();
 }
 
-void Device::uninitialize() { DeviceContext::instance().unregisterDevices(); }
+llvm::Expected<std::unique_ptr<Texture>>
+offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
+                                             uint32_t Height) {
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::DepthStencil;
+  Desc.Fmt = Format::D32FloatS8Uint;
+  Desc.Width = Width;
+  Desc.Height = Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
 
-Device::DeviceIterator Device::begin() {
-  return DeviceContext::instance().begin();
+  return Dev.createTexture("DepthStencil", Desc);
 }
 
-Device::DeviceIterator Device::end() { return DeviceContext::instance().end(); }
+// This is a separate function because recursion is not allowed in this code
+// base.
+static llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+createUploadBufferWithData(Device &Dev, std::string Name, const void *Data,
+                           size_t SizeInBytes) {
+
+  // Create Upload buffer
+  const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+  const std::string UploadBufferName = Name + " (Upload Buffer)";
+
+  auto UploadBufferOrErr =
+      Dev.createBuffer(UploadBufferName, UploadDesc, SizeInBytes);
+  if (!UploadBufferOrErr)
+    return UploadBufferOrErr.takeError();
+  auto UploadBuffer = std::move(*UploadBufferOrErr);
+
+  // Copy data over
+  auto MappedPtrOrErr = UploadBuffer->map();
+  if (!MappedPtrOrErr)
+    return MappedPtrOrErr.takeError();
+  void *MappedPtr = *MappedPtrOrErr;
+  memcpy(MappedPtr, Data, SizeInBytes);
+  UploadBuffer->unmap();
+
+  return std::move(UploadBuffer);
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+offloadtest::createBufferWithData(
+    Device &Dev, std::string Name, const BufferCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
+    std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
+  auto BufferOrErr = Dev.createBuffer(Name, Desc, SizeInBytes);
+  if (!BufferOrErr)
+    return BufferOrErr.takeError();
+  auto Buffer = std::move(*BufferOrErr);
+
+  if (Desc.Location == MemoryLocation::GpuOnly) {
+    if (OutUploadBuffer == nullptr)
+      return llvm::createStringError(
+          "An upload buffer is required to create a GpuOnly buffer with data.");
+
+    // Create Upload buffer
+    auto UploadBufferOrErr =
+        createUploadBufferWithData(Dev, Name, Data, SizeInBytes);
+    if (!UploadBufferOrErr)
+      return UploadBufferOrErr.takeError();
+    *OutUploadBuffer = std::move(*UploadBufferOrErr);
+
+    // Copy Buffer to Buffer
+    if (auto Err = Encoder->copyBufferToBuffer(**OutUploadBuffer, 0, *Buffer, 0,
+                                               SizeInBytes))
+      return Err;
+
+  } else {
+    // Copy data over
+    auto MappedPtrOrErr = Buffer->map();
+    if (!MappedPtrOrErr)
+      return MappedPtrOrErr.takeError();
+    void *MappedPtr = *MappedPtrOrErr;
+    memcpy(MappedPtr, Data, SizeInBytes);
+    Buffer->unmap();
+  }
+
+  return Buffer;
+}

@@ -18,7 +18,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Low
     Format: UInt32
@@ -81,12 +80,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 2
 #--- end
-
-# Bug https://github.com/llvm/llvm-project/issues/153513
-# XFAIL: Clang && Vulkan
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7699
-# XFAIL: DXC && Vulkan
 
 # REQUIRES: Double
 # RUN: split-file %s %t

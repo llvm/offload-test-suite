@@ -2,7 +2,7 @@
 //
 // Foundation/NSDate.hpp
 //
-// Copyright 2020-2023 Apple Inc.
+// Copyright 2020-2024 Apple Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 //
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+
 #pragma once
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
@@ -29,24 +30,24 @@
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-namespace NS {
+namespace NS
+{
 
 using TimeInterval = double;
 
-class Date : public Copying<Date> {
+class Date : public Copying<Date>
+{
 public:
-  static Date *dateWithTimeIntervalSinceNow(TimeInterval secs);
+    static Date* dateWithTimeIntervalSinceNow(TimeInterval secs);
 };
 
-} // namespace NS
+} // NS
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE NS::Date *
-NS::Date::dateWithTimeIntervalSinceNow(NS::TimeInterval secs) {
-  return NS::Object::sendMessage<NS::Date *>(
-      _NS_PRIVATE_CLS(NSDate), _NS_PRIVATE_SEL(dateWithTimeIntervalSinceNow_),
-      secs);
+_NS_INLINE NS::Date* NS::Date::dateWithTimeIntervalSinceNow(NS::TimeInterval secs)
+{
+    return NS::Object::sendMessage<NS::Date*>(_NS_PRIVATE_CLS(NSDate), _NS_PRIVATE_SEL(dateWithTimeIntervalSinceNow_), secs);
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------

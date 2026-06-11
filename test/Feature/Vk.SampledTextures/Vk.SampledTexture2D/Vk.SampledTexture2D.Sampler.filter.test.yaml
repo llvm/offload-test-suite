@@ -1,0 +1,144 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTexLinear : register(s0);
+[[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTexPoint : register(s1);
+[[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // 2x2 Texture:
+  // (0,0) Red   (1,0) Green
+  // (0,1) Blue  (1,1) White
+
+  // Linear sample at center (0.5, 0.5)
+  // Should average all 4 pixels: (0.5, 0.5, 0.5, 1.0)
+  float4 r0 = SampledTexLinear.SampleLevel(float2(0.5, 0.5), 0);
+
+  // Point sample at top-left center (0.25, 0.25)
+  // Should pick (0,0) -> Red
+  float4 r1 = SampledTexPoint.SampleLevel(float2(0.25, 0.25), 0);
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+  }
+  return float4(0,0,0,0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: SampledTexLinear
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
+            1.0, 1.0, 1.0, 1.0 ] # White (1,1)
+
+  - Name: SampledTexPoint
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 32 # 2 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.5, 0.5, 0.5, 1.0,  # Linear Result
+            1.0, 0.0, 0.0, 1.0 ] # Point Result
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps: { Width: 1, Height: 1, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: SampledTexLinear
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+  - Name: SampledTexPoint
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: SampledTexLinear
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: SampledTexPoint
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: SamplerTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: This is a Vulkan specific feature.
+# UNSUPPORTED: !Vulkan
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/181910
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

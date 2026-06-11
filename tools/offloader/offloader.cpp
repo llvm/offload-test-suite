@@ -63,6 +63,12 @@ static cl::opt<bool> Validation("validation-layer",
 
 static cl::opt<bool> UseWarp("warp", cl::desc("Use warp"));
 
+static cl::opt<std::string> AdapterRegex(
+    "adapter-regex",
+    cl::desc(
+        "Case-insensitive regular expression to match GPU adapter description"),
+    cl::value_desc("<regex>"), cl::init(""));
+
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
@@ -80,15 +86,26 @@ int main(int ArgC, char **ArgV) {
 
   if (run())
     return 1;
-  Device::uninitialize();
+
   return 0;
 }
 
-int run() {
+static bool matchesRegexIgnoreCase(StringRef GPUDescription,
+                                   StringRef SearchExpr) {
+  const llvm::Regex R(SearchExpr, llvm::Regex::IgnoreCase);
+  return R.isValid() && R.match(GPUDescription);
+}
+
+static int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   const DeviceConfig Config = {Debug, Validation};
-  logAllUnhandledErrors(Device::initialize(Config), errs(),
-                        "gpu-exec: warning: ");
+  auto DevicesOrErr = initializeDevices(Config);
+  if (!DevicesOrErr) {
+    logAllUnhandledErrors(DevicesOrErr.takeError(), errs(),
+                          "gpu-exec: error: ");
+    return 1;
+  }
+  auto Devices = std::move(*DevicesOrErr);
 
   const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
@@ -97,8 +114,9 @@ int run() {
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
   // Read in the shaders
-  for (size_t I = 0; I < InputShader.size(); ++I)
+  for (size_t I = 0; I < InputShader.size(); ++I) {
     PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+  }
 
   if (InputShader.size() != PipelineDesc.Shaders.size())
     ExitOnErr(createStringError(
@@ -110,15 +128,17 @@ int run() {
   const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
     if (Binary.starts_with("DXBC")) {
+#ifdef __APPLE__
+      APIToUse = GPUAPI::Metal;
+      outs() << "Using Metal API\n";
+#else
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
+#endif
     } else if (*reinterpret_cast<const uint32_t *>(Binary.data()) ==
                0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (Binary.starts_with("MTLB")) {
-      APIToUse = GPUAPI::Metal;
-      outs() << "Using Metal API\n";
     }
   }
 
@@ -131,15 +151,18 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
-  if (Device::devices().empty()) {
+  if (Devices.empty()) {
     errs() << "No device available.";
     return 1;
   }
 
-  for (const auto &D : Device::devices()) {
+  for (const auto &D : Devices) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")
+      continue;
+    if (!AdapterRegex.empty() &&
+        !matchesRegexIgnoreCase(D->getDescription(), AdapterRegex))
       continue;
     ExitOnErr(D->executeProgram(PipelineDesc));
 

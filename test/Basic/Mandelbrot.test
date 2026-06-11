@@ -57,7 +57,8 @@ const static int Dimension = 4096;
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [16384, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [16384, 1, 1]
 Buffers:
   - Name: Tex
     Format: Float32
@@ -66,7 +67,7 @@ Buffers:
     OutputProps:
       Height: 4096
       Width: 4096
-      Depth: 16
+      Depth: 1
 DescriptorSets:
   - Resources:
     - Name: Tex

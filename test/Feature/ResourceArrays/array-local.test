@@ -28,7 +28,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufA
     Format: Float32
@@ -78,9 +77,6 @@ DescriptorSets:
         Binding: 2
 ...
 #--- end
-
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/154669
 # XFAIL: Clang && Vulkan

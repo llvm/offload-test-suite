@@ -41,6 +41,11 @@ config.test_exec_root = os.path.join(
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
+# Environment equivalents (useful for ninja):
+#   OFFLOADTEST_GPU_NAME
+GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
+ShouldSearchByGPuName = len(GPUName) > 0
+
 tools = [
     ToolSubst("FileCheck", FindTool("FileCheck")),
     ToolSubst("split-file", FindTool("split-file")),
@@ -56,15 +61,62 @@ def getHighestShaderModel(features):
     return int(major), int(minor)
 
 
+def setWaveSizeFeaturesDirectX(config, device):
+    MinSize = device["Features"]["WaveLaneCountMin"]
+    MaxSize = device["Features"]["WaveLaneCountMax"]
+    if not MinSize or not MaxSize:
+        return
+
+    MinSizeInt = int(MinSize)
+    MaxSizeInt = int(MaxSize)
+
+    Wave_Prefix = "WaveSize_"
+
+    while MinSizeInt <= MaxSizeInt:
+        config.available_features.add(Wave_Prefix + str(MinSizeInt))
+        MinSizeInt *= 2
+
+
+def hostSupportsAVX512():
+    # Check if the host CPU supports AVX-512 instructions.
+    system = platform.system()
+    if system == "Windows":
+        import ctypes
+
+        # PF_AVX512F_INSTRUCTIONS_AVAILABLE = 41
+        return bool(ctypes.windll.kernel32.IsProcessorFeaturePresent(41))
+    elif system == "Linux":
+        # Applicable if run on WSL
+        try:
+            with open("/proc/cpuinfo", "r") as f:
+                for line in f:
+                    if line.startswith("flags"):
+                        return "avx512f" in line.split()
+        except (IOError, OSError):
+            return False
+        return False
+    # Extend to relevant platforms when applicable
+    return False
+
+
 def setDeviceFeatures(config, device, compiler):
     API = device["API"]
     config.available_features.add(API)
     config.available_features.add(compiler)
     config.available_features.add(config.offloadtest_os)
+    # Note: For now just Darwin. In the future just check
+    # not Windows.
+    if device["Driver"] and "Darwin" == config.offloadtest_os:
+        config.available_features.add(device["Driver"])
     if "Microsoft Basic Render Driver" in device["Description"]:
         config.available_features.add("WARP")
         config.available_features.add(config.warp_arch)
+
     if "Intel" in device["Description"]:
+        if device["GPUGeneration"] == "Intel Gen11-14/Xe":
+            config.available_features.add("Intel-Gen-Current")
+        if device["GPUGeneration"] == "Intel Gen7-10":
+            config.available_features.add("Intel-Gen-10")
         config.available_features.add("Intel")
         if "UHD Graphics" in device["Description"] and API == "DirectX":
             # When Intel resolves the driver issue and tests XFAILing on the
@@ -74,16 +126,41 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Intel-Memory-Coherence-Issue-226")
     if "NVIDIA" in device["Description"]:
         config.available_features.add("NV")
-        NV50SeriesRegex = re.compile("NVIDIA GeForce [A-Z]+ 50[0-9]+")
-        NV50SeriesMatch = NV50SeriesRegex.match(device["Description"])
-        if NV50SeriesMatch and API == "DirectX":
-            config.available_features.add("NV-Reconvergence-Issue-320")
-    if "AMD" in device["Description"]:
+    if "AMD" in device["Description"] or "Radeon" in device["Description"]:
         config.available_features.add("AMD")
     if "Qualcomm" in device["Description"]:
         config.available_features.add("QC")
 
+    appleSilicon = re.search(r"\bApple M(\d+)\b", device["Description"])
+    if appleSilicon:
+        gen = appleSilicon.group(1)
+        config.available_features.add(f"AppleM{gen}")
+
+    if hostSupportsAVX512():
+        config.available_features.add("AVX512")
+
     HighestShaderModel = getHighestShaderModel(device["Features"])
+    sm_major, sm_minor = HighestShaderModel
+
+    # Highest SM 6.x version DXC recognizes; used as the upper bound for
+    # back-ends that don't report a D3D HighestShaderModel cap.
+    HIGHEST_KNOWN_SM6_MINOR = 9
+
+    # Expose SM_6_X features so tests can gate on a minimum SM
+    # (e.g. `# REQUIRES: SM_6_6`).
+    if device["API"] == "DirectX":
+        # D3D12's HighestShaderModel cap is the top of a contiguous range
+        # starting at SM 6.0 for any DXIL-capable device.
+        if sm_major == 6:
+            for minor in range(sm_minor + 1):
+                config.available_features.add(f"SM_6_{minor}")
+    else:
+        # Vulkan/Metal device caps don't expose a D3D shader model; tests
+        # that hit unimplemented intrinsics on those back-ends should XFAIL
+        # the specific configuration.
+        for minor in range(HIGHEST_KNOWN_SM6_MINOR + 1):
+            config.available_features.add(f"SM_6_{minor}")
+
     if (6, 6) <= HighestShaderModel:
         # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
         config.available_features.add("DerivativesInCompute")
@@ -96,11 +173,24 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("Int64ShaderOps", False):
             config.available_features.add("Int64")
+        if device["Features"].get("AtomicInt64OnGroupSharedSupported", False):
+            config.available_features.add("Int64GroupSharedAtomics")
+        if device["Features"].get("AtomicInt64OnTypedResourceSupported", False):
+            config.available_features.add("Int64TypedResourceAtomics")
+        if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
+            config.available_features.add("MeshShader")
+        setWaveSizeFeaturesDirectX(config, device)
+        if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
+            config.available_features.add("acceleration-structure")
 
     if device["API"] == "Metal":
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
+        if device["Features"].get("MeshShader", False):
+            config.available_features.add("MeshShader")
+        if device["Features"].get("supportsRaytracing", False):
+            config.available_features.add("acceleration-structure")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):
@@ -111,10 +201,21 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Double")
         if device["Features"].get("shaderInt64", False):
             config.available_features.add("Int64")
+        if device["Features"].get("shaderSharedInt64Atomics", False):
+            config.available_features.add("Int64GroupSharedAtomics")
+        if device["Features"].get("shaderBufferInt64Atomics", False):
+            config.available_features.add("VulkanInt64BufferAtomics")
+        if device["Features"].get("shaderImageInt64Atomics", False):
+            config.available_features.add("Int64TypedResourceAtomics")
 
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
+            if Extension["ExtensionName"] == "VK_EXT_mesh_shader":
+                config.available_features.add("MeshShader")
+
+        if "VK_KHR_acceleration_structure" in config.available_features:
+            config.available_features.add("acceleration-structure")
 
 
 offloader_args = []
@@ -124,7 +225,8 @@ if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
-
+if ShouldSearchByGPuName:
+    offloader_args.extend([f'-adapter-regex="{GPUName}"'])
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
@@ -135,7 +237,6 @@ if config.offloadtest_enable_vulkan:
     if config.offloadtest_test_clang:
         ExtraCompilerArgs.append("-fspv-extension=DXC")
 if config.offloadtest_enable_metal:
-    ExtraCompilerArgs = ["-metal"]
     # metal-irconverter version: 3.0.0
     MSCVersionOutput = subprocess.check_output(
         ["metal-shaderconverter", "--version"]
@@ -183,19 +284,29 @@ api_query = os.path.join(config.llvm_tools_dir, "api-query")
 query_string = subprocess.check_output(api_query)
 devices = yaml.safe_load(query_string)
 target_device = None
-
 # Find the right device to configure against
-for device in devices["Devices"]:
+pattern = re.compile(GPUName, re.IGNORECASE)
+for device in devices.get("Devices", []):
     is_warp = "Microsoft Basic Render Driver" in device["Description"]
+    is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:
-        if is_warp and config.offloadtest_test_warp:
+        if ShouldSearchByGPuName and is_gpu_name_match:
             target_device = device
-        elif not is_warp and not config.offloadtest_test_warp:
+        elif is_warp and config.offloadtest_test_warp:
+            target_device = device
+        elif (
+            not ShouldSearchByGPuName
+            and not is_warp
+            and not config.offloadtest_test_warp
+        ):
             target_device = device
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
-        target_device = device
+        if ShouldSearchByGPuName and is_gpu_name_match:
+            target_device = device
+        elif not ShouldSearchByGPuName:
+            target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
         break

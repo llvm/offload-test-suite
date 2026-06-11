@@ -25,6 +25,8 @@
 
 using namespace offloadtest;
 
+ImageComparatorBase::~ImageComparatorBase() {}
+
 template <typename DstType, typename SrcType>
 static void translatePixelData(Image &Dst, ImageRef Src, bool ForWrite) {
   const uint64_t Pixels = Dst.getHeight() * Dst.getWidth();
@@ -125,7 +127,7 @@ static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
                                    "Failed creating PNG data");
   png_infop PNGInfo = png_create_info_struct(PNG);
   FILE *F = nullptr;
-  auto ScopeExit = llvm::make_scope_exit([&PNG, &PNGInfo, &F]() {
+  const llvm::scope_exit ScopeExit([&PNG, &PNGInfo, &F]() {
     png_destroy_write_struct(&PNG, &PNGInfo);
     if (F)
       fclose(F);
@@ -157,10 +159,10 @@ static llvm::Error writePNGImpl(ImageRef Img, llvm::StringRef OutputPath) {
   png_bytepp Rows =
       (png_bytepp)png_malloc(PNG, Img.getHeight() * sizeof(png_bytep));
   const uint64_t RowSize = Img.getWidth() * Img.getChannels() * Img.getDepth();
-  // Step one row back from the end
-  const uint8_t *Row = reinterpret_cast<const uint8_t *>(Img.data()) +
-                       (RowSize * Img.getHeight()) - RowSize;
-  for (uint32_t I = 0; I < Img.getHeight(); ++I, Row -= RowSize)
+  // The host buffer has top-left origin (matching every backend's readback
+  // and the standard PNG row order), so we walk forward.
+  const uint8_t *Row = reinterpret_cast<const uint8_t *>(Img.data());
+  for (uint32_t I = 0; I < Img.getHeight(); ++I, Row += RowSize)
     Rows[I] = const_cast<png_bytep>(Row);
 
   png_write_image(PNG, Rows);
@@ -192,7 +194,7 @@ llvm::Expected<Image> Image::loadPNG(llvm::StringRef Path) {
     return llvm::createStringError(std::errc::io_error,
                                    "Failed reading PNG header from file");
 
-  auto ScopeExit = llvm::make_scope_exit([&PNG]() { png_image_free(&PNG); });
+  const llvm::scope_exit ScopeExit([&PNG]() { png_image_free(&PNG); });
 
   PNG.format = PNG_FORMAT_RGB;
   const size_t Size = PNG_IMAGE_SIZE(PNG);

@@ -39,7 +39,8 @@ void main(uint3 TID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [4, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [4, 1, 1]
 Buffers:
   - Name: InInt
     Format: Int32
@@ -115,8 +116,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/158129
-# XFAIL: Clang && Vulkan
+# Bug: https://github.com/llvm/llvm-project/issues/202481
+# XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

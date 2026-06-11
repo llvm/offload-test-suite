@@ -25,7 +25,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In0
     Format: Float64
@@ -80,12 +79,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 2
 #--- end
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7666
-# XFAIL: DXC && Vulkan
-
-# Bug https://github.com/llvm/llvm-project/issues/153091
-# XFAIL: Clang && Vulkan
 
 # REQUIRES: Double
 # RUN: split-file %s %t

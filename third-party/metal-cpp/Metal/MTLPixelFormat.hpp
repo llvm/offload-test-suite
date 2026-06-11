@@ -2,7 +2,7 @@
 //
 // Metal/MTLPixelFormat.hpp
 //
-// Copyright 2020-2023 Apple Inc.
+// Copyright 2020-2025 Apple Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,14 +20,14 @@
 
 #pragma once
 
+#include "../Foundation/Foundation.hpp"
 #include "MTLDefines.hpp"
 #include "MTLHeaderBridge.hpp"
 #include "MTLPrivate.hpp"
 
-#include <Foundation/Foundation.hpp>
-
-namespace MTL {
-_MTL_ENUM(NS::UInteger, PixelFormat){
+namespace MTL
+{
+_MTL_ENUM(NS::UInteger, PixelFormat) {
     PixelFormatInvalid = 0,
     PixelFormatA8Unorm = 1,
     PixelFormatR8Unorm = 10,
@@ -167,6 +167,7 @@ _MTL_ENUM(NS::UInteger, PixelFormat){
     PixelFormatDepth32Float_Stencil8 = 260,
     PixelFormatX32_Stencil8 = 261,
     PixelFormatX24_Stencil8 = 262,
+    PixelFormatUnspecialized = 263,
 };
 
 }

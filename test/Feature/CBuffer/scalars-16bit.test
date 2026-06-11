@@ -27,16 +27,14 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: CBScalars
     Format: Hex16
     Data: [ 0x3c00, 0x0001, 0xffff ]
   - Name: Out
     Format: Hex16
-    # Warp doesn't seem to be able to handle a stride of 6 so we use 8 here...
-    Stride: 8
-    FillSize: 8
+    Stride: 6
+    FillSize: 6
 DescriptorSets:
   - Resources:
     - Name: CBScalars
@@ -56,6 +54,12 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/576
+# XFAIL: QC && Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/932
+# XFAIL: Intel-Gen-10 && DirectX
+
 # REQUIRES: Half, Int16
 
 # RUN: split-file %s %t
@@ -67,4 +71,4 @@ DescriptorSets:
 
 # CHECK: - Name: Out
 # CHECK:   Format: Hex16
-# CHECK:   Data: [ 0x3C00, 0x1, 0xFFFF, 0x0 ]
+# CHECK:   Data: [ 0x3C00, 0x1, 0xFFFF ]

@@ -4,7 +4,7 @@
 
 ### Tier 1 Configurations
 
-Tier 1 configuraitons are regularly tested and expected to be known good.
+Tier 1 configurations are regularly tested and expected to be known good.
 Builders of these configurations are enabled in pre-merge testing and PRs should
 not regress these configurations.
 
@@ -13,6 +13,7 @@ When these configurations fail it should be high priority to correct them.
 Configurations:
 * Windows Intel GPU DirectX
 * Windows Intel GPU Vulkan
+* Windows NVIDIA GPU DirectX
 * Windows WARP LKG x64
 * Windows WARP LKG arm64
 
@@ -29,7 +30,7 @@ Tier 2 configurations.
 Configurations:
 * macOS Metal
 
-### Experimental Configurfations
+### Experimental Configurations
 
 Experimental configurations are testing configurations that have been
 recently added and are not yet completely passing. These configurations are not
@@ -42,18 +43,17 @@ robustly passing.
 Configurations:
 * Windows AMD GPU DirectX
 * Windows AMD GPU Vulkan
-* Windows NVIDIA GPU DirectX
 * Windows NVIDIA GPU Vulkan
 * Windows QC GPU DirectX
 * Windows QC GPU Vulkan
 
 ## Build Hardware
 
-### Apple M1
+### Apple M4 Pro
 
-* CPU: Apple M1
-* GPU: Apple M1
-* RAM: 16 GiB
+* CPU: Apple M4 Pro
+* GPU: Apple M4 Pro
+* RAM: 24 GiB
 * Configurations:
   * macOS Metal
 
@@ -68,8 +68,8 @@ Configurations:
 
 ### Windows Intel GPU
 
-* CPU: Intel Core i9-10900
-* GPU: Intel UHD Graphics 630
+* CPU: AMD Ryzen Threadripper 3970X
+* GPU: Intel Arc Pro B50 Graphics
 * RAM: 64 GiB
 * Configurations:
   * Windows Intel GPU DirectX

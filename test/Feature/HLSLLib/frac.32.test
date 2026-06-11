@@ -20,7 +20,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float32
@@ -60,6 +59,11 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/682
+# XFAIL: Vulkan && KosmicKrisp
+# Expected: [ nan, nan, 0, 0, 0, 0.5, nan, 0, 0.71828, 0.599976, 0.611, nan ]
+# Result:   [ nan,   0, 0, 0, 0, 0.5,   0, 0, 0.71828, 0.599976, 0.611, nan ]
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

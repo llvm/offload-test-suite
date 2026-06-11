@@ -16,6 +16,6 @@ namespace offloadtest {
 
 enum class GPUAPI { Unknown, DirectX, Vulkan, Metal };
 
-}
+} // namespace offloadtest
 
 #endif // OFFLOADTEST_API_API_H

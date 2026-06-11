@@ -20,7 +20,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float16
@@ -62,7 +61,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2507
-# XFAIL: Vulkan && Darwin
+# XFAIL: Vulkan && MoltenVK
 
 # REQUIRES: Half
 # RUN: split-file %s %t

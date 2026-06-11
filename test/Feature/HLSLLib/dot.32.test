@@ -58,7 +58,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: X0
     Format: Float32
@@ -188,6 +187,9 @@ DescriptorSets:
       VulkanBinding:
         Binding: 8
 #--- end
+
+# Bug https://github.com/llvm/offload-test-suite/issues/571
+# XFAIL: QC && Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target  -T cs_6_5 -Fo %t.o %t/source.hlsl

@@ -45,7 +45,8 @@ void main(uint3 TID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [4, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [4, 1, 1]
 Buffers:
   - Name: InInt
     Format: Int32
@@ -172,9 +173,6 @@ DescriptorSets:
         Binding: 7
 ...
 #--- end
-# Bug https://github.com/llvm/offload-test-suite/issues/351
-# XFAIL: Metal
-
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl

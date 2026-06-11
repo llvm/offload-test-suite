@@ -17,7 +17,6 @@ void main(uint3 TID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Nans
     Format: Float32
@@ -87,7 +86,8 @@ DescriptorSets:
 # DirectX driver implementations seem to match SPIR-V, except WARP, which does
 # not treat -INF as an identity.
 
-# XFAIL: DirectX && WARP
+# XFAIL: arm64 && DirectX && WARP
+
 
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32

@@ -44,7 +44,6 @@ void main(uint3 tid : SV_GroupThreadID)
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float32
@@ -304,11 +303,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/156775
-# XFAIL: Clang
-
-# Bug https://github.com/llvm/offload-test-suite/issues/393
-# XFAIL: Metal
+# Bug https://github.com/llvm/llvm-project/issues/172577
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

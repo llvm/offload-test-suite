@@ -2,13 +2,19 @@ name: Windows D3D12 Warp Preview DXC
 
 permissions:
   contents: read
-  checks: write
 
 on:
   workflow_dispatch:
+  ## Note: This workflow is intentionally made to NOT run on schedule or when
+  ## modified by a PR due to a known issue where this workflow causes the
+  ## machine to stall indefinitely.
+  ## Issue link: https://github.com/llvm/offload-test-suite/issues/772
 
 jobs:
   Windows-D3D12-Warp-DXC:
+    permissions:
+      contents: read
+      checks: write
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
@@ -16,4 +22,5 @@ jobs:
       BuildType: Debug
       TestTarget: check-hlsl-warp-d3d12
       OffloadTest-branch: ${{ github.ref }}
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWARP_VERSION=1.0.15-preview
+      SplitBuild: true
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DWARP_VERSION=1.0.19-preview
