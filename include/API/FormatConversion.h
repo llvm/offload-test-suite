@@ -88,6 +88,7 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::D32Float;
     break;
   case DataFormat::UInt64:
+    // Only 1 and 2 channels of 64-bit integers are supported.
     switch (Channels) {
     case 1:
       return Format::R64Uint;
@@ -96,6 +97,7 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
     }
     break;
   case DataFormat::Int64:
+    // Only 1 and 2 channels of 64-bit integers are supported.
     switch (Channels) {
     case 1:
       return Format::R64Sint;
