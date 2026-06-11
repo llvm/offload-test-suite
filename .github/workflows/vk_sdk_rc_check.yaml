@@ -1,0 +1,141 @@
+name: "DXC RC — Vulkan (all GPUs)"
+
+permissions:
+  contents: read
+  checks: write
+
+on:
+  repository_dispatch:
+    types: [dxc-rc]
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: "Source DXC repository (owner/name) that produced the RC."
+        required: true
+      run_id:
+        description: "Run id of the RC pipeline whose artifact to test."
+        required: true
+      version:
+        description: "SDK version (used to name the artifact: dxc_rc_<version>)."
+        required: true
+
+jobs:
+  offload-vk:
+    strategy:
+      fail-fast: false
+      matrix:
+        sku: [windows-amd, windows-intel, windows-nvidia, windows-qc]
+    runs-on: ["self-hosted", "hlsl-${{ matrix.sku }}"]
+    steps:
+      - name: Resolve RC reference
+        id: rc
+        shell: bash
+        run: |
+          repo="${{ github.event.client_payload.repo || inputs.repo }}"
+          run_id="${{ github.event.client_payload.run_id || inputs.run_id }}"
+          version="${{ github.event.client_payload.version || inputs.version }}"
+          artifact="${{ github.event.client_payload.artifact }}"
+          : "${artifact:=dxc_rc_$version}"
+          {
+            echo "repo=$repo"
+            echo "run_id=$run_id"
+            echo "version=$version"
+            echo "artifact=$artifact"
+          } >> "$GITHUB_OUTPUT"
+          echo "Testing $artifact from $repo run $run_id"
+
+      # Cross-repo download: the RC artifact lives in a run in the DXC repo, so we
+      # need its repository + run-id and a token that can read it (DXC_RC_TOKEN).
+      - name: Download the DXC RC binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ steps.rc.outputs.artifact }}
+          repository: ${{ steps.rc.outputs.repo }}
+          run-id: ${{ steps.rc.outputs.run_id }}
+          github-token: ${{ secrets.DXC_RC_TOKEN }}
+          path: dxc-rc
+
+      - name: Locate DXC_DIR
+        id: dxc
+        shell: pwsh
+        run: |
+          $dxc = Get-ChildItem dxc-rc -Recurse -Filter dxc.exe | Select-Object -First 1
+          if (-not $dxc) { throw "dxc.exe not found in the RC artifact" }
+          foreach ($f in 'dxcompiler.dll','dxv.exe') {
+            if (-not (Test-Path (Join-Path $dxc.Directory $f))) {
+              throw "$f missing next to dxc.exe -- the RC artifact must include dxc.exe, dxv.exe and dxcompiler.dll"
+            }
+          }
+          "dir=$($dxc.Directory.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Checkout OffloadTest
+        uses: actions/checkout@v4
+        with:
+          path: OffloadTest
+          fetch-depth: 1
+
+      - name: Checkout LLVM
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/llvm-project
+          path: llvm-project
+          fetch-depth: 1
+
+      - name: Checkout golden images
+        uses: actions/checkout@v4
+        with:
+          repository: llvm/offload-golden-images
+          path: golden-images
+          fetch-depth: 1
+
+      - name: Setup Windows x64
+        if: runner.arch != 'ARM64'
+        uses: llvm/actions/setup-windows@main
+        with:
+          arch: amd64
+      - name: Setup Windows ARM64
+        if: runner.arch == 'ARM64'
+        uses: llvm/actions/setup-windows@main
+        with:
+          arch: arm64
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install OffloadTest python deps
+        run: python -m pip install -r OffloadTest/test/requirements.txt
+
+      # Configure LLVM with OffloadTest as an external project, pointing DXC_DIR at
+      # the RC binaries rather than building DXC.
+      - name: Configure LLVM + OffloadTest against the RC's DXC
+        run: >-
+          cmake -G Ninja -B llvm-project/build
+          -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_ASSERTIONS=On
+          -DLLVM_EXTERNAL_PROJECTS=OffloadTest
+          -C llvm-project/clang/cmake/caches/HLSL.cmake
+          -DDXC_DIR="${{ steps.dxc.outputs.dir }}"
+          -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest
+          -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images
+          -DOFFLOADTEST_TEST_CLANG=Off
+          -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v"
+          llvm-project/llvm
+
+      - name: Build test dependencies
+        run: cmake --build llvm-project/build --target hlsl-test-depends
+
+      - name: Dump GPU info
+        run: ./llvm-project/build/bin/api-query
+
+      - name: Run DXC + Vulkan offload tests
+        run: |
+          cmake --build llvm-project/build --target check-hlsl-unit
+          cmake --build llvm-project/build --target check-hlsl-vk
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: offload-vk-${{ matrix.sku }}-${{ steps.rc.outputs.version }}
+          path: llvm-project/build/**/testresults.xunit.xml
+          if-no-files-found: warn
