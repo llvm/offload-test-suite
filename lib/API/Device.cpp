@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "API/Encoder.h"
 #include "API/FormatConversion.h"
+#include "API/ShaderBindingTable.h"
 
 #include "Config.h"
 
@@ -38,6 +39,56 @@ Texture::~Texture() {}
 RenderPass::~RenderPass() {}
 
 AccelerationStructure::~AccelerationStructure() {}
+
+ShaderBindingTable::~ShaderBindingTable() {}
+
+static uint32_t alignUp(uint32_t Value, uint32_t Alignment) {
+  return (Value + Alignment - 1) & ~(Alignment - 1);
+}
+
+SBTLayout offloadtest::computeSBTLayout(uint32_t IdentifierSize,
+                                        uint32_t RecordAlign,
+                                        uint32_t BaseAlign,
+                                        const ShaderBindingTableDesc &Desc) {
+  auto StrideFor = [&](llvm::ArrayRef<SBTEntry> Entries) {
+    size_t MaxLocal = 0;
+    for (const auto &E : Entries)
+      MaxLocal = std::max<size_t>(MaxLocal, E.LocalRootData.size());
+    return alignUp(IdentifierSize + static_cast<uint32_t>(MaxLocal),
+                   RecordAlign);
+  };
+  auto RegionSize = [&](uint32_t Count, uint32_t Stride) {
+    return Count == 0 ? 0u : alignUp(Count * Stride, BaseAlign);
+  };
+
+  // Vulkan dispatches exactly one raygen per vkCmdTraceRaysKHR and D3D12's
+  // RayGenerationShaderRecord field is a single record; the descriptor only
+  // carries one raygen entry.
+  const llvm::ArrayRef<SBTEntry> RGEntries(&Desc.RayGen, 1);
+
+  SBTLayout L;
+  L.RayGen.Stride = StrideFor(RGEntries);
+  L.RayGen.Size = RegionSize(1, L.RayGen.Stride);
+  L.RayGen.Offset = 0;
+
+  L.Miss.Stride = StrideFor(Desc.Miss);
+  L.Miss.Size =
+      RegionSize(static_cast<uint32_t>(Desc.Miss.size()), L.Miss.Stride);
+  L.Miss.Offset = L.RayGen.Offset + L.RayGen.Size;
+
+  L.HitGroup.Stride = StrideFor(Desc.HitGroup);
+  L.HitGroup.Size = RegionSize(static_cast<uint32_t>(Desc.HitGroup.size()),
+                               L.HitGroup.Stride);
+  L.HitGroup.Offset = L.Miss.Offset + L.Miss.Size;
+
+  L.Callable.Stride = StrideFor(Desc.Callable);
+  L.Callable.Size = RegionSize(static_cast<uint32_t>(Desc.Callable.size()),
+                               L.Callable.Stride);
+  L.Callable.Offset = L.HitGroup.Offset + L.HitGroup.Size;
+
+  L.TotalSize = L.Callable.Offset + L.Callable.Size;
+  return L;
+}
 
 Device::~Device() {}
 
@@ -97,7 +148,9 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
 
 llvm::Error offloadtest::buildPipelineAccelerationStructures(
     Device &Dev, ComputeEncoder &Enc, Pipeline &P,
-    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
+    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+        &PreallocatedTLASes,
     llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
   if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
     return llvm::Error::success();
@@ -113,7 +166,7 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   // them through pointers stored in ASBuildItem.
   llvm::SmallVector<BLASBuildRequest> BLASRequests;
   BLASRequests.reserve(P.AccelStructs.BLAS.size());
-  llvm::StringMap<size_t> BLASIndex;
+  llvm::StringMap<AccelerationStructure *> BLASesByName;
 
   for (const auto &BD : P.AccelStructs.BLAS) {
     llvm::SmallVector<TriangleGeometryDesc> Triangles;
@@ -161,8 +214,8 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
     Req.AS = ASOrErr->get();
     Req.Geometry = std::move(Triangles);
 
-    BLASIndex[BD.Name] = OutAS.size();
-    OutAS.push_back(std::move(*ASOrErr));
+    BLASesByName[BD.Name] = ASOrErr->get();
+    OutBLAS.push_back(std::move(*ASOrErr));
     BLASRequests.push_back(std::move(Req));
   }
 
@@ -174,16 +227,20 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
     if (auto Err = Enc.batchBuildAS(BLASBatch))
       return Err;
 
-  // TLAS pass — references BLASes built in the previous batch.
+  // Separate `batchBuildAS()` from the BLAS batch so the BLAS-write →
+  // TLAS-read barrier between them is implicit.
   llvm::SmallVector<TLASBuildRequest> TLASRequests;
-  TLASRequests.reserve(P.AccelStructs.TLAS.size());
-
-  for (const auto &TD : P.AccelStructs.TLAS) {
+  TLASRequests.reserve(PreallocatedTLASes.size());
+  for (const TLASDesc &TD : P.AccelStructs.TLAS) {
+    auto ASIt = PreallocatedTLASes.find(TD.Name);
+    if (ASIt == PreallocatedTLASes.end())
+      continue; // TLAS declared but not bound to any resource.
     TLASBuildRequest Req;
+    Req.AS = ASIt->second.get();
     Req.Instances.reserve(TD.Instances.size());
     for (const auto &I : TD.Instances) {
-      auto It = BLASIndex.find(I.BLAS);
-      if (It == BLASIndex.end())
+      auto It = BLASesByName.find(I.BLAS);
+      if (It == BLASesByName.end())
         return llvm::createStringError(std::errc::invalid_argument,
                                        "TLAS '%s' references unknown BLAS '%s'",
                                        TD.Name.c_str(), I.BLAS.c_str());
@@ -194,21 +251,11 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
       memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
       Inst.InstanceID = I.InstanceID;
       Inst.InstanceMask = I.InstanceMask;
-      Inst.BLAS = OutAS[It->second].get();
+      Inst.BLAS = It->second;
       Req.Instances.push_back(Inst);
     }
     if (auto Err = validateTLASBuildRequest(Req))
       return Err;
-    auto SizesOrErr =
-        Dev.getTLASBuildSizes(static_cast<uint32_t>(Req.Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    auto ASOrErr = Dev.createTLAS(*SizesOrErr);
-    if (!ASOrErr)
-      return ASOrErr.takeError();
-
-    Req.AS = ASOrErr->get();
-    OutAS.push_back(std::move(*ASOrErr));
     TLASRequests.push_back(std::move(Req));
   }
 
