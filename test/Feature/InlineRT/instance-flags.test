@@ -3,17 +3,23 @@
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
 
-[numthreads(1,1,1)]
-void main() {
+[numthreads(2,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  // The triangle vertices wind CW from +z under the DX / VK / MTL ray-
+  // traversal convention. Two instances tiled along x: instance 0 has no
+  // flags (front-facing), instance 1 has TriangleFrontCounterclockwise
+  // (winding interpretation flips → back-facing).
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, 1);
+  Ray.Origin = float3((float(tid.x) - 0.5) * 4.0, 0, 1);
   Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
   RayQuery<RAY_FLAG_NONE> Q;
   Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
   Q.Proceed();
-  Output[0] = Q.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 1 : 0;
+  Output[tid.x] = Q.CommittedStatus() == COMMITTED_TRIANGLE_HIT
+                      ? (uint)Q.CommittedTriangleFrontFace()
+                      : 0xFFFFFFFF;
 }
 //--- pipeline.yaml
 ---
@@ -21,41 +27,36 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  # Vertex 0 sits far above the ray's plane (z=10) so the triangle formed by
-  # the first three vertices misses the ray entirely. Only the index buffer
-  # selects the at-z=0 triangle (v1, v2, v3) that the ray actually hits — if a
-  # backend silently consumed VertexBuffer[0..2] instead of going through the
-  # index buffer, RayQuery would return no hit and the test would fail.
   - Name: Vertices
     Format: Float32
     Stride: 12
-    Data: [ 0.0, 0.0, 10.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
-  - Name: Indices
-    Format: UInt32
-    Data: [ 1, 2, 3 ]
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
   - Name: Output
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 8
   - Name: Expected
     Format: UInt32
     Stride: 4
-    Data: [ 1 ]
+    # Instance 0: default winding → front face (1)
+    # Instance 1: TriangleFrontCounterclockwise flips → back face (0)
+    Data: [ 1, 0 ]
 AccelerationStructures:
   BLAS:
-    - Name: IndexedBLAS
+    - Name: TriangleBLAS
       Triangles:
         - VertexBuffer: Vertices
           VertexFormat: RGB32Float
           VertexStride: 12
-          VertexCount: 4
-          IndexBuffer: Indices
-          IndexFormat: Uint32
-          IndexCount: 3
+          VertexCount: 3
   TLAS:
     - Name: Scene
       Instances:
-        - BLAS: IndexedBLAS
+        - BLAS: TriangleBLAS
+          Transform: [1, 0, 0, -2,  0, 1, 0, 0,  0, 0, 1, 0]
+        - BLAS: TriangleBLAS
+          Transform: [1, 0, 0, 2,  0, 1, 0, 0,  0, 0, 1, 0]
+          InstanceFlags: [TriangleFrontCounterclockwise]
 DescriptorSets:
   - Resources:
     - Name: Scene
@@ -73,7 +74,7 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 Results:
-  - Result: IndexedTriangleSetup
+  - Result: InstanceFlags
     Rule: BufferExact
     Actual: Output
     Expected: Expected
