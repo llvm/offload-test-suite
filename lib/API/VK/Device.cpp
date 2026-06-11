@@ -735,7 +735,9 @@ public:
       Barrier.dstAccessMask = PendingDstAccess;
       vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
                            &Barrier, 0, nullptr, PendingImageTransitions.size(),
-                           PendingImageTransitions.data());
+                           PendingImageTransitions.size() == 0
+                               ? nullptr
+                               : PendingImageTransitions.data());
 
       PendingImageTransitions.clear();
     }
