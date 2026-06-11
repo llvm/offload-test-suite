@@ -706,8 +706,7 @@ public:
 
   void addImageTransition(VkAccessFlags SrcAccessMask,
                           VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
-                          VkImageLayout NewLayout, VkImage Image,
-                          VkImageSubresourceRange SubresourceRange) {
+                          VkImageLayout NewLayout, VulkanTexture &Texture) {
     PendingImageTransitions.push_back(VkImageMemoryBarrier{
         VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
         nullptr,                                /*pNext*/
@@ -717,9 +716,11 @@ public:
         NewLayout,
         0, /*srcQueueFamilyIndex*/
         0, /*dstQueueFamilyIndex*/
-        Image,
-        SubresourceRange,
+        Texture.Image,
+        Texture.FullRange,
     });
+
+    Texture.IsInUndefinedLayout = false;
   }
 
   void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
@@ -1048,7 +1049,7 @@ public:
           CB.PendingSrcAccess,                      /*DstAccessMask*/
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*OldLayout*/
           Tex.PreferredLayout,                      /*NewLayout*/
-          Tex.Image, Tex.FullRange);
+          Tex);
     }
 
     if (Desc.DepthStencil) {
@@ -1059,7 +1060,7 @@ public:
           CB.PendingSrcAccess,                              /*DstAccessMask*/
           VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*OldLayout*/
           Tex.PreferredLayout,                              /*NewLayout*/
-          Tex.Image, Tex.FullRange);
+          Tex);
     }
 
     popDebugGroup();
@@ -1157,9 +1158,7 @@ VulkanCommandBuffer::createRenderEncoder(
               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
           Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
           VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
-          Tex.Image, Tex.FullRange);
-
-      Tex.IsInUndefinedLayout = false;
+          Tex);
     }
   }
 
@@ -1174,9 +1173,7 @@ VulkanCommandBuffer::createRenderEncoder(
               VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
           Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
           VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
-          Tex.Image, Tex.FullRange);
-
-      Tex.IsInUndefinedLayout = false;
+          Tex);
     }
   }
 
