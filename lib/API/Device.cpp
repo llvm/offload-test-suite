@@ -97,7 +97,9 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
 
 llvm::Error offloadtest::buildPipelineAccelerationStructures(
     Device &Dev, ComputeEncoder &Enc, Pipeline &P,
-    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
+    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+        &PreallocatedTLASes,
     llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
   if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
     return llvm::Error::success();
@@ -113,7 +115,7 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   // them through pointers stored in ASBuildItem.
   llvm::SmallVector<BLASBuildRequest> BLASRequests;
   BLASRequests.reserve(P.AccelStructs.BLAS.size());
-  llvm::StringMap<size_t> BLASIndex;
+  llvm::StringMap<AccelerationStructure *> BLASesByName;
 
   for (const auto &BD : P.AccelStructs.BLAS) {
     llvm::SmallVector<TriangleGeometryDesc> Triangles;
@@ -161,8 +163,8 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
     Req.AS = ASOrErr->get();
     Req.Geometry = std::move(Triangles);
 
-    BLASIndex[BD.Name] = OutAS.size();
-    OutAS.push_back(std::move(*ASOrErr));
+    BLASesByName[BD.Name] = ASOrErr->get();
+    OutBLAS.push_back(std::move(*ASOrErr));
     BLASRequests.push_back(std::move(Req));
   }
 
@@ -174,16 +176,20 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
     if (auto Err = Enc.batchBuildAS(BLASBatch))
       return Err;
 
-  // TLAS pass — references BLASes built in the previous batch.
+  // Separate `batchBuildAS()` from the BLAS batch so the BLAS-write →
+  // TLAS-read barrier between them is implicit.
   llvm::SmallVector<TLASBuildRequest> TLASRequests;
-  TLASRequests.reserve(P.AccelStructs.TLAS.size());
-
-  for (const auto &TD : P.AccelStructs.TLAS) {
+  TLASRequests.reserve(PreallocatedTLASes.size());
+  for (const TLASDesc &TD : P.AccelStructs.TLAS) {
+    auto ASIt = PreallocatedTLASes.find(TD.Name);
+    if (ASIt == PreallocatedTLASes.end())
+      continue; // TLAS declared but not bound to any resource.
     TLASBuildRequest Req;
+    Req.AS = ASIt->second.get();
     Req.Instances.reserve(TD.Instances.size());
     for (const auto &I : TD.Instances) {
-      auto It = BLASIndex.find(I.BLAS);
-      if (It == BLASIndex.end())
+      auto It = BLASesByName.find(I.BLAS);
+      if (It == BLASesByName.end())
         return llvm::createStringError(std::errc::invalid_argument,
                                        "TLAS '%s' references unknown BLAS '%s'",
                                        TD.Name.c_str(), I.BLAS.c_str());
@@ -194,21 +200,11 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
       memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
       Inst.InstanceID = I.InstanceID;
       Inst.InstanceMask = I.InstanceMask;
-      Inst.BLAS = OutAS[It->second].get();
+      Inst.BLAS = It->second;
       Req.Instances.push_back(Inst);
     }
     if (auto Err = validateTLASBuildRequest(Req))
       return Err;
-    auto SizesOrErr =
-        Dev.getTLASBuildSizes(static_cast<uint32_t>(Req.Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    auto ASOrErr = Dev.createTLAS(*SizesOrErr);
-    if (!ASOrErr)
-      return ASOrErr.takeError();
-
-    Req.AS = ASOrErr->get();
-    OutAS.push_back(std::move(*ASOrErr));
     TLASRequests.push_back(std::move(Req));
   }
 

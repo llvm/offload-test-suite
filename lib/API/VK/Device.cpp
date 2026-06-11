@@ -838,8 +838,11 @@ public:
                        uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ) override {
     const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    // Include AS_READ so dispatches that issue RayQuery against a TLAS get a
+    // proper hand-off from the prior AS-build's AS_WRITE.
     addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                  VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT);
+                  VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT |
+                      VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
     insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
                                       GroupCountY, GroupCountZ)
                             .str());
@@ -1199,12 +1202,15 @@ private:
   };
 
   struct ResourceRef {
-    ResourceRef(BufferRef H, BufferRef D) : Host(H), Device(D) {}
-    ResourceRef(BufferRef H, ImageRef I) : Host(H), Image(I) {}
+    explicit ResourceRef(BufferRef H, BufferRef D) : Host(H), Device(D) {}
+    explicit ResourceRef(BufferRef H, ImageRef I) : Host(H), Image(I) {}
+    explicit ResourceRef(VulkanAccelerationStructure *AS) : AS(AS) {}
 
-    BufferRef Host;
-    BufferRef Device;
-    ImageRef Image;
+    BufferRef Host{};
+    BufferRef Device{};
+    ImageRef Image{};
+    // AS-only; mutually exclusive with the buffer/image fields above.
+    VulkanAccelerationStructure *AS = nullptr;
   };
 
   struct ResourceBundle {
@@ -1220,6 +1226,10 @@ private:
 
     bool isSampler() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER;
+    }
+
+    bool isAccelerationStructure() const {
+      return DescriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     }
 
     bool isBuffer() const {
@@ -1266,9 +1276,11 @@ private:
     llvm::SmallVector<VkBufferView> BufferViews;
     llvm::SmallVector<VkImageView> ImageViews;
 
-    // Built acceleration structures, kept alive for the pipeline lifetime.
+    // Parallel-indexed to `P.AccelStructs.BLAS`.
     llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
-        AccelStructs;
+        BLASes;
+    // Keyed by `TLASDesc::Name`.
+    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
     // Vertex/index buffers consumed during AS builds; must outlive submission.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
@@ -1391,12 +1403,16 @@ public:
         (HasVulkan12 ||
          isExtensionSupported(AvailableDeviceExtensions,
                               VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME));
+    const bool HasRayQueryExt =
+        HasASExts && isExtensionSupported(AvailableDeviceExtensions,
+                                          VK_KHR_RAY_QUERY_EXTENSION_NAME);
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR ASFeatures{};
     // On Vulkan 1.1 we need a separate BDA features struct; on 1.2+
     // bufferDeviceAddress lives in VkPhysicalDeviceVulkan12Features which is
     // already in the chain, and adding a duplicate is a validation error.
     VkPhysicalDeviceBufferDeviceAddressFeatures BDAFeatures{};
+    VkPhysicalDeviceRayQueryFeaturesKHR RayQueryFeatures{};
     if (HasASExts) {
       ASFeatures.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -1407,6 +1423,12 @@ public:
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
         BDAFeatures.pNext = Features.pNext;
         Features.pNext = &BDAFeatures;
+      }
+      if (HasRayQueryExt) {
+        RayQueryFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+        RayQueryFeatures.pNext = Features.pNext;
+        Features.pNext = &RayQueryFeatures;
       }
     }
 
@@ -1480,6 +1502,14 @@ public:
       if (!HasVulkan12)
         EnabledDeviceExtensions.push_back(
             VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+      if (HasRayQueryExt) {
+        if (!RayQueryFeatures.rayQuery)
+          return llvm::createStringError(
+              std::errc::not_supported,
+              "Device advertises %s but reports rayQuery=0",
+              VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        EnabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+      }
     }
 
     DeviceInfo.enabledExtensionCount =
@@ -2755,7 +2785,6 @@ private:
       vkFreeMemory(Device, BufOrErr->Memory, nullptr);
       return Err;
     }
-
     VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
     AddrInfo.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
@@ -2958,6 +2987,16 @@ public:
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
 
+  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
+    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+    auto SizesOrErr =
+        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    return createTLAS(*SizesOrErr);
+  }
+
   llvm::Error createResource(Resource &R, InvocationState &IS) {
     // Samplers don't have backing data buffers, so handle them separately
     if (R.isSampler()) {
@@ -3074,6 +3113,20 @@ public:
   llvm::Error createResources(Pipeline &P, InvocationState &IS) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
+        if (R.isAccelerationStructure()) {
+          auto ASOrErr = createAS(R);
+          if (!ASOrErr)
+            return ASOrErr.takeError();
+          auto *VkAS = llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
+          ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
+          Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+          IS.Resources.push_back(std::move(Bundle));
+          auto Inserted =
+              IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+          assert(Inserted.second && "TLAS bound to multiple resources NYI");
+          (void)Inserted;
+          continue;
+        }
         if (auto Err = createResource(R, IS))
           return Err;
       }
@@ -3120,8 +3173,15 @@ public:
     constexpr size_t DescriptorTypesSize =
         sizeof(DescriptorTypes) / sizeof(VkDescriptorType);
     uint32_t DescriptorCounts[DescriptorTypesSize] = {0};
+    // VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR has an out-of-range enum
+    // value (1000150000), so it can't share the indexed array above.
+    uint32_t ASDescriptorCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
+        if (R.isAccelerationStructure()) {
+          ASDescriptorCount += R.getArraySize();
+          continue;
+        }
         DescriptorCounts[getDescriptorType(R.Kind)] += R.getArraySize();
         if (R.HasCounter)
           DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
@@ -3138,6 +3198,12 @@ public:
         PoolSize.descriptorCount = DescriptorCounts[Type];
         PoolSizes.push_back(PoolSize);
       }
+    }
+    if (ASDescriptorCount > 0) {
+      llvm::outs() << "Descriptors: { type = ACCELERATION_STRUCTURE_KHR"
+                   << ", count = " << ASDescriptorCount << " }\n";
+      PoolSizes.push_back(
+          {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, ASDescriptorCount});
     }
 
     if (P.Sets.size() > 0) {
@@ -3182,8 +3248,15 @@ public:
     uint32_t ImageInfoCount = 0;
     uint32_t BufferInfoCount = 0;
     uint32_t BufferViewCount = 0;
+    uint32_t ASInfoCount = 0;
+    uint32_t ASHandleCount = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
+        if (R.isAccelerationStructure()) {
+          ASInfoCount += 1;
+          ASHandleCount += R.getArraySize();
+          continue;
+        }
         if (R.isSampler()) {
           ImageInfoCount += 1;
           continue;
@@ -3205,13 +3278,17 @@ public:
     llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
     llvm::SmallVector<VkDescriptorBufferInfo> BufferInfos;
     llvm::SmallVector<VkBufferView> BufferViews;
+    llvm::SmallVector<VkWriteDescriptorSetAccelerationStructureKHR> ASInfos;
+    llvm::SmallVector<VkAccelerationStructureKHR> ASHandles;
     ImageInfos.reserve(ImageInfoCount);
     BufferInfos.reserve(BufferInfoCount);
     BufferViews.reserve(BufferViewCount);
+    ASInfos.reserve(ASInfoCount);
+    ASHandles.reserve(ASHandleCount);
 
     llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
     WriteDescriptors.reserve(ImageInfoCount + BufferInfoCount +
-                             BufferViewCount);
+                             BufferViewCount + ASInfoCount);
     assert(IS.BufferViews.empty());
 
     uint32_t OverallResIdx = 0;
@@ -3219,6 +3296,29 @@ public:
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
+        if (VulkanAccelerationStructure *VkAS =
+                IS.Resources[OverallResIdx].ResourceRefs[0].AS) {
+          const size_t HandleStart = ASHandles.size();
+          ASHandles.push_back(VkAS->AccelStruct);
+          VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
+          ASWrite.sType =
+              VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+          ASWrite.accelerationStructureCount = 1;
+          ASWrite.pAccelerationStructures = &ASHandles[HandleStart];
+          ASInfos.push_back(ASWrite);
+
+          VkWriteDescriptorSet WDS = {};
+          WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+          WDS.pNext = &ASInfos.back();
+          WDS.dstSet = IS.DescriptorSets[SetIdx];
+          WDS.dstBinding = R.VKBinding->Binding;
+          WDS.descriptorCount = 1;
+          WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+          llvm::outs() << "Updating AS Descriptor [" << OverallResIdx << "] { "
+                       << SetIdx << ", " << RIdx << " }\n";
+          WriteDescriptors.push_back(WDS);
+          continue;
+        }
         uint32_t IndexOfFirstBufferDataInArray;
         if (R.isSampler()) {
           IndexOfFirstBufferDataInArray = ImageInfos.size();
@@ -3492,7 +3592,7 @@ public:
   }
 
   void copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
-    if (R.isSampler())
+    if (R.isSampler() || R.isAccelerationStructure())
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
@@ -3923,6 +4023,9 @@ public:
       vkDestroyImageView(Device, V, nullptr);
 
     for (auto &R : IS.Resources) {
+      // AS resources are owned by `IS.TLASes`; ResourceRef.AS is non-owning.
+      if (R.isAccelerationStructure())
+        continue;
       for (auto &ResRef : R.ResourceRefs) {
         if (R.isBuffer()) {
           vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
@@ -3973,18 +4076,19 @@ public:
     State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
 
+    if (auto Err = createResources(P, State))
+      return Err;
+
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
       auto EncOrErr = State.CB->createComputeEncoder();
       if (!EncOrErr)
         return EncOrErr.takeError();
       if (auto Err = offloadtest::buildPipelineAccelerationStructures(
-              *this, **EncOrErr, P, State.AccelStructs, State.ASInputBuffers))
+              *this, **EncOrErr, P, State.BLASes, State.TLASes,
+              State.ASInputBuffers))
         return Err;
       (*EncOrErr)->endEncoding();
     }
-
-    if (auto Err = createResources(P, State))
-      return Err;
 
     BindingsDesc BindingsDesc = {};
     for (auto &S : P.Sets) {

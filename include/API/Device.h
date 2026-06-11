@@ -25,6 +25,7 @@
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Error.h"
@@ -323,23 +324,21 @@ createBufferWithData(Device &Dev, std::string Name,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
-// Builds all BLAS / TLAS objects defined in `P.AccelStructs` using the
-// supplied compute encoder. Uploads each BLAS's vertex/index data, queries
-// sizes via `Dev.getBLASBuildSizes` / `Dev.getTLASBuildSizes`, allocates
-// the handles via `Dev.createBLAS` / `Dev.createTLAS`, and records the GPU
-// builds via two `Enc.batchBuildAS` calls (BLAS batch then TLAS batch — so
-// the AS-build-write barrier between BLAS and TLAS is automatic).
-//
-// Built AS objects are pushed to `OutAS` (in declaration order: BLASes first,
-// then TLASes). Vertex/index buffers used as build inputs are pushed to
-// `OutInputBuffers`; both must outlive command-buffer submission.
+// TLAS handles come in pre-allocated because the caller's binding loop
+// stamps the AS pointer into descriptor bundles before this helper runs;
+// BLAS handles are allocated inline since BLASes aren't user-bindable.
+// BLAS and TLAS builds get separate `Enc.batchBuildAS()` calls so the
+// implicit BLAS-write → TLAS-read barrier sits between them. Outputs
+// (`OutBLAS`, `OutInputBuffers`) must outlive command-buffer submission.
 //
 // TODO: `Pipeline` belongs to the test framework, not the rendering backend
 // API. This helper lives here only because `executeProgram` is still on
 // `Device` — once that moves out, this helper should follow.
 llvm::Error buildPipelineAccelerationStructures(
     Device &Dev, ComputeEncoder &Enc, Pipeline &P,
-    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutAS,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
+    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+        &PreallocatedTLASes,
     llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers);
 
 } // namespace offloadtest
