@@ -3,11 +3,6 @@
 #   * SV_DomainLocation - DS input (the tessellator's (u, v) for this vertex)
 #   * SV_Position       - DS output -> rasterizer -> PS input (pixel center)
 #
-# SV_PrimitiveID: https://github.com/llvm/wg-hlsl/issues/160
-# SV_DomainLocation / SV_Position (DS): https://github.com/llvm/wg-hlsl/issues/141
-# Clang's HLSL -> DXIL lowering does not yet implement the tessellation stages,
-# so this is XFAIL on Clang. Metal has no Hull/Domain stages (see note below).
-#
 # Geometry: two independent quad patches drawn back-to-back (8 control points,
 # PatchControlPoints = 4). The input-assembler hands each patch a distinct
 # SV_PrimitiveID (0, 1). Each patch covers one half of a 4x2 render target:
@@ -119,7 +114,7 @@ struct PSInput {
 };
 
 struct Record {
-  uint  PrimID;
+  uint PrimID;
   float DomU;
   float DomV;
   float PosX;
@@ -131,17 +126,16 @@ struct Record {
 RWStructuredBuffer<Record> Output : register(u0);
 
 float4 main(PSInput input) : SV_TARGET {
-  // 4x2 target, top-left origin, row-major.
   uint idx = (uint)input.position.y * 4u + (uint)input.position.x;
 
   Record r;
   r.PrimID = input.primID;
-  r.DomU   = input.uv.x;
-  r.DomV   = input.uv.y;
-  r.PosX   = input.position.x;
-  r.PosY   = input.position.y;
-  r.PosZ   = input.position.z;
-  r.PosW   = input.position.w;
+  r.DomU = input.uv.x;
+  r.DomV = input.uv.y;
+  r.PosX = input.position.x;
+  r.PosY = input.position.y;
+  r.PosZ = input.position.z;
+  r.PosW = input.position.w;
   Output[idx] = r;
 
   return float4(1.0, 0.0, 0.0, 1.0);
@@ -239,9 +233,6 @@ Results:
 ...
 #--- end
 
-# Metal has tessellation but no Hull/Domain stages: HS is a compute kernel
-# writing per-patch factors, DS is a post-tessellation vertex function tagged
-# [[patch(...)]]. Mapping HLSL HS/DS onto that isn't wired up, so skip Metal.
 # UNSUPPORTED: Metal
 
 # XFAIL: Clang
