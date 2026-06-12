@@ -378,14 +378,6 @@ public:
     return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   }
 
-  llvm::Expected<void *> map() override {
-    return llvm::createStringError(
-        std::errc::not_supported,
-        "Mapping textures is not supported on the Metal backend.");
-  }
-
-  void unmap() override {}
-
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Metal;
   }

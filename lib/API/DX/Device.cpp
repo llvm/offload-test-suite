@@ -280,19 +280,6 @@ public:
         PreferredState(PreferredState), SRVHandle(SRVHandle),
         UAVHandle(UAVHandle), Name(Name), Desc(Desc) {}
 
-  llvm::Expected<void *> map() override {
-    if (Desc.Location == MemoryLocation::GpuOnly)
-      return llvm::createStringError(std::errc::invalid_argument,
-                                     "Cannot map a GpuOnly texture.");
-    void *Ptr = nullptr;
-    if (auto Err = HR::toError(Resource->Map(0, nullptr, &Ptr),
-                               "Failed to map texture."))
-      return std::move(Err);
-    return Ptr;
-  }
-
-  void unmap() override { Resource->Unmap(0, nullptr); }
-
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
   llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
