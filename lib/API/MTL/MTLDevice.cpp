@@ -587,6 +587,33 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToTexture(offloadtest::Buffer &Src,
+                                  offloadtest::Texture &Dst) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLSrc = static_cast<MTLBuffer &>(Src);
+    auto &MTLDst = static_cast<MTLTexture &>(Dst);
+
+    // The upload buffer is laid out with a tightly packed row stride matching
+    // getTextureUploadRowStrideInBytes(), so the source bytes-per-row is the
+    // texture width times the element size.
+    const size_t ElemSize = getFormatSizeInBytes(MTLDst.Desc.Fmt);
+    const size_t RowBytes = MTLDst.Desc.Width * ElemSize;
+    const size_t ImageBytes = RowBytes * MTLDst.Desc.Height;
+    const MTL::Size CopySize(MTLDst.Desc.Width, MTLDst.Desc.Height, 1);
+
+    insertDebugSignpost(llvm::formatv("copyBufferToTexture {0} -> {1}",
+                                      MTLSrc.Name, MTLDst.Name)
+                            .str());
+    BlitEnc->copyFromBuffer(MTLSrc.Buf, /*sourceOffset=*/0, RowBytes,
+                            ImageBytes, CopySize, MTLDst.Tex,
+                            /*destinationSlice=*/0, /*destinationLevel=*/0,
+                            MTL::Origin(0, 0, 0));
+    addBarrierScope(MTL::BarrierScopeTextures);
+
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs MTLDevice's full type for access to the
   // MTL::Device handle (used to allocate scratch and instance buffers).
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -1704,6 +1731,11 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
     return std::make_unique<MTLTexture>(Tex, Name, Desc);
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
