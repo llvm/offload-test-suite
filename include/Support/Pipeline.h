@@ -41,15 +41,53 @@ enum class Stages {
 
   // Mesh Shader Raster
   Amplification,
-  Mesh
+  Mesh,
+
+  // Ray Tracing
+  RayGeneration,
+  Miss,
+  ClosestHit,
+  AnyHit,
+  Intersection,
+  Callable
 };
 inline constexpr std::array AllStages = {
-    Stages::Compute,  Stages::Vertex, Stages::Hull,          Stages::Domain,
-    Stages::Geometry, Stages::Pixel,  Stages::Amplification, Stages::Mesh,
+    Stages::Compute,       Stages::Vertex,     Stages::Hull,
+    Stages::Domain,        Stages::Geometry,   Stages::Pixel,
+    Stages::Amplification, Stages::Mesh,       Stages::RayGeneration,
+    Stages::Miss,          Stages::ClosestHit, Stages::AnyHit,
+    Stages::Intersection,  Stages::Callable,
 };
 inline constexpr size_t NumStages = AllStages.size();
 
-enum class ShaderPipelineKind { Compute, TraditionalRaster, MeshShaderRaster };
+inline constexpr bool isRayTracingStage(Stages S) {
+  switch (S) {
+  case Stages::RayGeneration:
+  case Stages::Miss:
+  case Stages::ClosestHit:
+  case Stages::AnyHit:
+  case Stages::Intersection:
+  case Stages::Callable:
+    return true;
+  case Stages::Compute:
+  case Stages::Vertex:
+  case Stages::Hull:
+  case Stages::Domain:
+  case Stages::Geometry:
+  case Stages::Pixel:
+  case Stages::Amplification:
+  case Stages::Mesh:
+    return false;
+  }
+  llvm_unreachable("All stages handled");
+}
+
+enum class ShaderPipelineKind {
+  Compute,
+  TraditionalRaster,
+  MeshShaderRaster,
+  RayTracing
+};
 
 enum class Rule { BufferExact, BufferFloatULP, BufferFloatEpsilon };
 
@@ -527,6 +565,40 @@ struct AccelerationStructureDescs {
   llvm::SmallVector<TLASDesc, 1> TLAS;
 };
 
+enum class HitGroupType { Triangles, Procedural };
+
+struct HitGroup {
+  std::string Name;
+  HitGroupType Type = HitGroupType::Triangles;
+  std::string ClosestHit;
+  std::optional<std::string> AnyHit;
+  std::optional<std::string> Intersection;
+};
+
+struct RayTracingPipelineConfig {
+  uint32_t MaxTraceRecursionDepth = 1;
+  uint32_t MaxPayloadSizeInBytes = 0;
+  uint32_t MaxAttributeSizeInBytes = 8;
+  std::optional<uint32_t> PipelineFlags;
+};
+
+struct SBTEntry {
+  // For RayGen / Miss / Callable entries: the shader's Entry name.
+  // For HitGroup entries: the HitGroup's Name.
+  std::string ShaderName;
+  // Optional per-record local-root data, laid out as the local root signature
+  // describes. Not used during PR1 bring-up; reserved here so the schema is
+  // stable when local root signatures land.
+  llvm::SmallVector<uint8_t> LocalRootData;
+};
+
+struct ShaderBindingTable {
+  SBTEntry RayGen;
+  llvm::SmallVector<SBTEntry> Miss;
+  llvm::SmallVector<SBTEntry> HitGroup;
+  llvm::SmallVector<SBTEntry> Callable;
+};
+
 struct Pipeline {
   ShaderPipelineKind Kind;
   llvm::SmallVector<Shader> Shaders;
@@ -540,6 +612,9 @@ struct Pipeline {
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
   AccelerationStructureDescs AccelStructs;
+  std::optional<RayTracingPipelineConfig> RTConfig;
+  llvm::SmallVector<HitGroup> HitGroups;
+  std::optional<ShaderBindingTable> SBT;
 
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)
@@ -607,6 +682,7 @@ struct Pipeline {
   bool isRaster() const {
     return isTraditionalRaster() || isMeshShaderRaster();
   }
+  bool isRayTracing() const { return Kind == ShaderPipelineKind::RayTracing; }
 };
 } // namespace offloadtest
 
@@ -627,6 +703,8 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::AABBGeometry)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::BLASDesc)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::InstanceDesc)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::TLASDesc)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::HitGroup)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SBTEntry)
 
 namespace llvm {
 namespace yaml {
@@ -733,6 +811,22 @@ template <> struct MappingTraits<offloadtest::TLASDesc> {
 
 template <> struct MappingTraits<offloadtest::AccelerationStructureDescs> {
   static void mapping(IO &I, offloadtest::AccelerationStructureDescs &D);
+};
+
+template <> struct MappingTraits<offloadtest::HitGroup> {
+  static void mapping(IO &I, offloadtest::HitGroup &G);
+};
+
+template <> struct MappingTraits<offloadtest::RayTracingPipelineConfig> {
+  static void mapping(IO &I, offloadtest::RayTracingPipelineConfig &C);
+};
+
+template <> struct MappingTraits<offloadtest::SBTEntry> {
+  static void mapping(IO &I, offloadtest::SBTEntry &E);
+};
+
+template <> struct MappingTraits<offloadtest::ShaderBindingTable> {
+  static void mapping(IO &I, offloadtest::ShaderBindingTable &S);
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
@@ -886,6 +980,21 @@ template <> struct ScalarEnumerationTraits<offloadtest::Stages> {
     ENUM_CASE(Pixel);
     ENUM_CASE(Amplification);
     ENUM_CASE(Mesh);
+    ENUM_CASE(RayGeneration);
+    ENUM_CASE(Miss);
+    ENUM_CASE(ClosestHit);
+    ENUM_CASE(AnyHit);
+    ENUM_CASE(Intersection);
+    ENUM_CASE(Callable);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::HitGroupType> {
+  static void enumeration(IO &I, offloadtest::HitGroupType &V) {
+#define ENUM_CASE(Val) I.enumCase(V, #Val, offloadtest::HitGroupType::Val)
+    ENUM_CASE(Triangles);
+    ENUM_CASE(Procedural);
 #undef ENUM_CASE
   }
 };
