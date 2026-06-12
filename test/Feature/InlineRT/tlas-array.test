@@ -1,0 +1,92 @@
+#--- source.hlsl
+
+// Verifies binding an array of `RaytracingAccelerationStructure`s.
+// `Scenes[0]` and `Scenes[1]` each carry a single triangle instance with a
+// distinct `InstanceID`; the shader queries each in turn and writes the hit's
+// `CommittedInstanceID()` into the corresponding slot of `Output`.
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scenes[2] : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  for (uint i = 0; i < 2; ++i) {
+    RayQuery<RAY_FLAG_NONE> Q;
+    Q.TraceRayInline(Scenes[i], RAY_FLAG_NONE, 0xFF, Ray);
+    Q.Proceed();
+    Output[i] = Q.CommittedStatus() == COMMITTED_TRIANGLE_HIT
+                    ? Q.CommittedInstanceID()
+                    : 0xFFFFFFFF;
+  }
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 10, 20 ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scenes
+      ArraySize: 2
+      Instances:
+        - - BLAS: TriangleBLAS
+            InstanceID: 10
+            Transform: [1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0]
+        - - BLAS: TriangleBLAS
+            InstanceID: 20
+            Transform: [1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0]
+DescriptorSets:
+  - Resources:
+    - Name: Scenes
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: TLASArray
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

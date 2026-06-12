@@ -1129,8 +1129,11 @@ private:
     // Parallel-indexed to `P.AccelStructs.BLAS`.
     llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
         BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
+    // Keyed by `TLASDesc::Name`; each value holds `TLASDesc::ArraySize`
+    // handles (one per descriptor-array element).
+    llvm::StringMap<
+        llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>>
+        TLASes;
     // Vertex/index buffers consumed during AS builds; must outlive submission.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
@@ -2254,11 +2257,9 @@ public:
     return HeapIdx;
   }
 
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+  llvm::Expected<std::unique_ptr<AccelerationStructure>>
+  createAS(uint32_t InstanceCount) {
+    auto SizesOrErr = getTLASBuildSizes(InstanceCount);
     if (!SizesOrErr)
       return SizesOrErr.takeError();
     return createTLAS(*SizesOrErr);
@@ -2266,18 +2267,25 @@ public:
 
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto CreateBuffer =
-        [&IS,
+        [&P, &IS,
          this](Resource &R,
                llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
       if (R.isAccelerationStructure()) {
-        auto ASOrErr = createAS(R);
-        if (!ASOrErr)
-          return ASOrErr.takeError();
+        assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+        const TLASDesc &TD = *R.TLASPtr;
         ResourceBundle Bundle;
-        Bundle.emplace_back(
-            llvm::cast<DXAccelerationStructure>(ASOrErr->get()));
-        auto Inserted =
-            IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+        llvm::SmallVector<std::unique_ptr<AccelerationStructure>> Handles;
+        Handles.reserve(TD.ArraySize);
+        for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+          auto ASOrErr =
+              createAS(static_cast<uint32_t>(TD.Instances[Elt].size()));
+          if (!ASOrErr)
+            return ASOrErr.takeError();
+          Bundle.emplace_back(
+              llvm::cast<DXAccelerationStructure>(ASOrErr->get()));
+          Handles.push_back(std::move(*ASOrErr));
+        }
+        auto Inserted = IS.TLASes.try_emplace(TD.Name, std::move(Handles));
         assert(Inserted.second && "TLAS bound to multiple resources NYI");
         (void)Inserted;
         Resources.push_back(std::make_pair(&R, std::move(Bundle)));
