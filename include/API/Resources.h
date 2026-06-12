@@ -33,7 +33,7 @@ enum class MemoryBacking {
   // DX: CreateReservedResource + UpdateTileMappings.
   // VK: VK_IMAGE_CREATE_SPARSE_BINDING_BIT + vkQueueBindSparse.
   // Metal: MTLTextureDescriptor.sparseLevel + heap tile mapping
-  // (requires Apple Silicon).
+  //        (requires Apple Silicon).
   Sparse,
 };
 
