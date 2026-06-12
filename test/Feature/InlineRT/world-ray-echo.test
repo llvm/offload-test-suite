@@ -1,0 +1,95 @@
+#--- source.hlsl
+
+struct RayEcho {
+  float3 Origin;
+  float3 Direction;
+  float TMin;
+  uint Flags;
+};
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<RayEcho> Output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // Ray-side query methods are valid right after TraceRayInline regardless of
+  // whether anything is hit, so this test just echoes them back into Output.
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_NONE> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+
+  RayEcho E;
+  E.Origin = Q.WorldRayOrigin();
+  E.Direction = Q.WorldRayDirection();
+  E.TMin = Q.RayTMin();
+  E.Flags = Q.RayFlags();
+  Output[0] = E;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 32
+    FillSize: 32
+  - Name: Expected
+    Format: UInt32
+    Stride: 32
+    # Origin (0,0,1), Direction (0,0,-1), TMin 0, Flags RAY_FLAG_NONE=0.
+    Data: [ 0x00000000, 0x00000000, 0x3f800000,
+            0x00000000, 0x00000000, 0xbf800000,
+            0x00000000,
+            0x00000000 ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: WorldRayEcho
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

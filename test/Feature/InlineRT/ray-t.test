@@ -1,0 +1,79 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // Triangle sits at z=0 and the ray starts at z=1 heading along -z, so
+  // CommittedRayT() must equal 1.0 exactly.
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_NONE> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  Q.Proceed();
+  Output[0] = asuint(Q.CommittedRayT());
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 0x3f800000 ]  # asuint(1.0)
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: CommittedRayT
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
