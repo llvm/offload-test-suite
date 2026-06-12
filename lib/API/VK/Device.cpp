@@ -4502,7 +4502,8 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         memcpy(&NI.transform.matrix, Inst.Transform, sizeof(Inst.Transform));
         NI.instanceCustomIndex = Inst.InstanceID & 0xFFFFFFu;
         NI.mask = Inst.InstanceMask;
-        NI.instanceShaderBindingTableRecordOffset = 0;
+        NI.instanceShaderBindingTableRecordOffset =
+            Inst.InstanceContributionToHitGroupIndex & 0xFFFFFFu;
         NI.flags = 0;
         auto *BLASPtr = llvm::cast<VulkanAccelerationStructure>(Inst.BLAS);
         NI.accelerationStructureReference = BLASPtr->getDeviceAddress();

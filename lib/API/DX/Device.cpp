@@ -3065,7 +3065,8 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         // silent narrowing.
         NI.InstanceID = Inst.InstanceID & 0xFFFFFFu;
         NI.InstanceMask = Inst.InstanceMask;
-        NI.InstanceContributionToHitGroupIndex = 0;
+        NI.InstanceContributionToHitGroupIndex =
+            Inst.InstanceContributionToHitGroupIndex & 0xFFFFFFu;
         NI.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
         auto *BLASPtr = llvm::cast<DXAccelerationStructure>(Inst.BLAS);
         NI.AccelerationStructure = BLASPtr->getGPUVirtualAddress();
