@@ -25,6 +25,18 @@ enum class MemoryLocation {
   GpuToCpu,
 };
 
+enum class MemoryBacking {
+  // Allocates all memory for this resource.
+  Automatic,
+
+  // No memory allocated; physical pages mapped manually on demand.
+  // DX: CreateReservedResource + UpdateTileMappings.
+  // VK: VK_IMAGE_CREATE_SPARSE_BINDING_BIT + vkQueueBindSparse.
+  // Metal: MTLTextureDescriptor.sparseLevel + heap tile mapping
+  //        (requires Apple Silicon).
+  Sparse,
+};
+
 enum class IndexFormat { Uint16, Uint32 };
 
 // TODO: Add Unorm types (e.g. R8Unorm, RGBA8Unorm) which can be sampled as

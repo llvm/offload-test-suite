@@ -427,17 +427,19 @@ class VulkanBuffer : public offloadtest::Buffer {
 public:
   VkDevice Dev; // Needed for clean-up
   VkBuffer Buffer;
+  VkBuffer CounterBuffer;
   VkDeviceMemory Memory;
   VkDeviceAddress DeviceAddress;
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
-               VkDeviceAddress DeviceAddress, llvm::StringRef Name,
-               BufferCreateDesc Desc, size_t SizeInBytes)
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkBuffer CounterBuffer,
+               VkDeviceMemory Memory, VkDeviceAddress DeviceAddress,
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Vulkan), Dev(Dev), Buffer(Buffer),
-        Memory(Memory), DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
+        CounterBuffer(CounterBuffer), Memory(Memory),
+        DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
@@ -2379,15 +2381,30 @@ public:
     BufInfo.size = SizeInBytes;
     BufInfo.usage =
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
     switch (Desc.Usage) {
     case BufferUsage::Storage:
       BufInfo.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::ConstantBuffer:
+      BufInfo.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::IndexBuffer:
+      BufInfo.usage |=
+          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       break;
     case BufferUsage::VertexBuffer:
       BufInfo.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       break;
+    case BufferUsage::IndirectArgs:
+      BufInfo.usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
     }
+
     // When ray tracing is supported, every buffer is eligible to act as an
     // acceleration-structure build input and to expose a device address. The
     // shared AS build helper assumes Storage buffers carry these flags.
@@ -2397,14 +2414,14 @@ public:
           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
     BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer DeviceBuffer;
+    VkBuffer BufferObject;
     if (auto Err = VK::toError(
-            vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer),
+            vkCreateBuffer(Device, &BufInfo, nullptr, &BufferObject),
             "Failed to create device buffer."))
       return Err;
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, BufferObject, &MemReqs);
 
     VkMemoryAllocateFlagsInfo AllocFlagsInfo = {};
     AllocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -2417,30 +2434,84 @@ public:
     AllocInfo.allocationSize = MemReqs.size;
     auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
                                  getVulkanMemoryFlags(Desc.Location));
-    if (!MemIdx)
+    if (!MemIdx) {
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return MemIdx.takeError();
+    }
     AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkBuffer CounterBuffer = nullptr;
+    VkMemoryRequirements CounterMemReqs = {};
+    VkDeviceSize CounterOffsetInBytes = 0;
+    if (Desc.HasCounter) {
+      VkBuffer CounterBuffer;
+      VkBufferCreateInfo CounterBufferInfo = {};
+      CounterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      CounterBufferInfo.size = sizeof(uint32_t);
+      CounterBufferInfo.usage = BufInfo.usage;
+      CounterBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      if (auto Err = VK::toError(vkCreateBuffer(Device, &CounterBufferInfo,
+                                                nullptr, &CounterBuffer),
+                                 "Could not create counter buffer.")) {
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        return Err;
+      }
+
+      vkGetBufferMemoryRequirements(Device, CounterBuffer, &CounterMemReqs);
+
+      CounterOffsetInBytes =
+          llvm::alignTo(AllocInfo.allocationSize, CounterMemReqs.alignment);
+      AllocInfo.allocationSize = CounterOffsetInBytes + CounterMemReqs.size;
+
+      assert(MemReqs.memoryTypeBits == CounterMemReqs.memoryTypeBits &&
+             "We are expecting the main resource and counter resource to have "
+             "the same memory type.");
+    }
 
     VkDeviceMemory DeviceMemory;
     if (auto Err = VK::toError(
             vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
-            "Failed to allocate device memory."))
+            "Failed to allocate device memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return Err;
+    }
+
     if (auto Err = VK::toError(
-            vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0),
-            "Failed to bind device buffer memory."))
+            vkBindBufferMemory(Device, BufferObject, DeviceMemory, 0),
+            "Failed to bind device buffer memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
       return Err;
+    }
+
+    if (CounterBuffer != nullptr) {
+      if (auto Err = VK::toError(vkBindBufferMemory(Device, CounterBuffer,
+                                                    DeviceMemory,
+                                                    CounterOffsetInBytes),
+                                 "Failed to bind counter buffer memory.")) {
+        if (CounterBuffer)
+          vkDestroyBuffer(Device, CounterBuffer, nullptr);
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        vkFreeMemory(Device, DeviceMemory, nullptr);
+        return Err;
+      }
+    }
 
     VkDeviceAddress DevAddr = 0;
     if (HasRayTracingSupport) {
       VkBufferDeviceAddressInfo AddrInfo = {};
       AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-      AddrInfo.buffer = DeviceBuffer;
+      AddrInfo.buffer = BufferObject;
       DevAddr = vkGetBufferDeviceAddress(Device, &AddrInfo);
     }
 
-    return std::make_unique<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
-                                          DevAddr, Name, Desc, SizeInBytes);
+    return std::make_unique<VulkanBuffer>(Device, BufferObject, CounterBuffer,
+                                          DeviceMemory, DevAddr, Name, Desc,
+                                          SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -4513,8 +4584,7 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 
       // Upload the instance array. Storage + CpuToGpu now carries device
       // address and AS-build-input flags (because RT is supported).
-      const BufferCreateDesc Desc{MemoryLocation::CpuToGpu,
-                                  BufferUsage::Storage};
+      const BufferCreateDesc Desc = BufferCreateDesc::uploadBuffer();
       auto InstBufOrErr = offloadtest::createBufferWithData(
           *Dev, "TLAS-Instances", Desc, Native.data(), Bytes, nullptr, nullptr);
       if (!InstBufOrErr)
@@ -4543,12 +4613,7 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       CB.KeepAliveOwned.push_back(std::move(*InstBufOrErr));
     }
 
-    // Allocate scratch (one per item; non-overlapping ranges as required).
-    // createBuffer() applies SHADER_DEVICE_ADDRESS + storage usage when ray
-    // tracing is supported, so we can re-use the same Buffer wrapper as the
-    // TLAS instance allocation and drop the raw-handle keep-alive bookkeeping.
-    const BufferCreateDesc ScratchDesc{MemoryLocation::GpuOnly,
-                                       BufferUsage::Storage};
+    const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
     auto ScratchOrErr =
         Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
     if (!ScratchOrErr)
