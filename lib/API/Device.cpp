@@ -329,7 +329,7 @@ offloadtest::createTextureWithData(
 
   // Create Upload buffer
   const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
-  std::string UploadBufferName = Name + " (Upload Buffer)";
+  const std::string UploadBufferName = Name + " (Upload Buffer)";
   auto UploadBufferOrErr =
       Dev.createBuffer(UploadBufferName, UploadDesc, UploadBufferSizeInBytes);
   if (!UploadBufferOrErr)
