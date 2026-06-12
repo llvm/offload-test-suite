@@ -901,6 +901,38 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToTexture(offloadtest::Buffer &Src,
+                                  offloadtest::Texture &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst);
+    VKDst.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst);
+
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs VulkanDevice's full type for access to
   // the device-loaded ray-tracing entry points and helpers.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -2545,6 +2577,14 @@ public:
     }
 
     return Tex;
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    const uint64_t TightRow =
+        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
+    return static_cast<uint32_t>(llvm::alignTo(
+        TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
   }
 
   const Capabilities &getCapabilities() override {

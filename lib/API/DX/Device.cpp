@@ -791,6 +791,42 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) override {
+    auto &DXSrc = llvm::cast<DXBuffer>(Src);
+    auto &DXDst = llvm::cast<DXTexture>(Dst);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_SOURCE);
+
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(DXDst.Resource.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_COPY_DEST);
+    CB.flushBarrier();
+
+    const uint32_t ElementSize = getFormatSizeInBytes(DXDst.Desc.Fmt);
+    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+        0,
+        CD3DX12_SUBRESOURCE_FOOTPRINT(
+            getDXGIFormat(DXDst.Desc.Fmt), DXDst.Desc.Width, DXDst.Desc.Height,
+            1, getAlignedTexturePitch(DXDst.Desc.Width, ElementSize))};
+    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), 0);
+    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(), Footprint);
+    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(DXSrc.Buffer.Get(),
+                               D3D12_RESOURCE_STATE_COPY_SOURCE,
+                               DXSrc.PreferredState);
+
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
+      CB.addResourceTransition(DXDst.Resource.Get(),
+                               D3D12_RESOURCE_STATE_COPY_DEST,
+                               DXDst.PreferredState);
+
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs DXDevice's full type for access to the
   // ID3D12Device5 entry point and helper allocators.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -1597,6 +1633,11 @@ public:
     }
 
     return Tex;
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    return getAlignedTexturePitch(Desc.Width, getFormatSizeInBytes(Desc.Fmt));
   }
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
