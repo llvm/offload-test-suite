@@ -31,8 +31,8 @@ inline D3D12_HEAP_TYPE getDXHeapType(MemoryLocation Location) {
   llvm_unreachable("All MemoryLocation cases handled");
 }
 
-inline DXGI_FORMAT getDXGIFormat(Format Format) {
-  switch (Format) {
+inline DXGI_FORMAT getDXGIFormat(Format Fmt) {
+  switch (Fmt) {
   case Format::R16Sint:
     return DXGI_FORMAT_R16_SINT;
   case Format::R16Uint:
@@ -65,6 +65,16 @@ inline DXGI_FORMAT getDXGIFormat(Format Format) {
     return DXGI_FORMAT_R32G32B32A32_UINT;
   case Format::RGBA32Float:
     return DXGI_FORMAT_R32G32B32A32_FLOAT;
+  case Format::R64Uint:
+    return DXGI_FORMAT_R32G32_UINT; // DXGI has no R64, DX12 expects R32G32
+  case Format::R64Sint:
+    return DXGI_FORMAT_R32G32_SINT; // DXGI has no R64, DX12 expects R32G32
+  case Format::RG64Uint:
+    return DXGI_FORMAT_R32G32B32A32_UINT; // DXGI has no R64G64, DX12 expects
+                                          // R32G32G32B32
+  case Format::RG64Sint:
+    return DXGI_FORMAT_R32G32B32A32_SINT; // DXGI has no R64G64, DX12 expects
+                                          // R32G32G32B32
   case Format::D32Float:
     return DXGI_FORMAT_D32_FLOAT;
   case Format::D32FloatS8Uint:
