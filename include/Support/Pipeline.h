@@ -20,6 +20,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
+#include <array>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -493,6 +494,7 @@ struct TriangleGeometry {
   IndexFormat IdxFormat = IndexFormat::Uint32;
   uint32_t IndexCount = 0;
   bool Opaque = true;
+  std::optional<std::array<float, 12>> Transform;
 };
 
 struct AABBGeometry {

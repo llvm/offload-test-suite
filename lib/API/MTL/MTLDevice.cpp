@@ -2446,6 +2446,18 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
             TD->setIndexType(getMetalIndexType(T.IdxFormat));
           }
           TD->setOpaque(T.Opaque);
+          if (T.Transform) {
+            MTL::Buffer *XformBuf = MTLDev->newBuffer(
+                T.Transform->data(), T.Transform->size() * sizeof(float),
+                MTL::ResourceStorageModeShared);
+            if (!XformBuf)
+              return llvm::createStringError(
+                  std::errc::not_enough_memory,
+                  "Failed to allocate BLAS transform buffer.");
+            TD->setTransformationMatrixBuffer(XformBuf);
+            TD->setTransformationMatrixLayout(MTL::MatrixLayoutRowMajor);
+            CB->KeepAliveMTLBuffers.push_back(XformBuf);
+          }
           Geoms.push_back(TD);
         }
       } else {

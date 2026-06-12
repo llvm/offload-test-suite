@@ -134,6 +134,7 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
       TGD.VertexStride = T.VertexStride;
       TGD.VertexFormat = T.VertexFormat;
       TGD.Opaque = T.Opaque;
+      TGD.Transform = T.Transform;
 
       OutInputBuffers.push_back(std::move(*VBOrErr));
 
