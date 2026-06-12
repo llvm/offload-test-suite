@@ -707,6 +707,10 @@ public:
   void addImageTransition(VkAccessFlags SrcAccessMask,
                           VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
                           VkImageLayout NewLayout, VulkanTexture &Texture) {
+    assert(
+        NewLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+        "There should be no reason to ever transition to an undefined layout.");
+
     PendingImageTransitions.push_back(VkImageMemoryBarrier{
         VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
         nullptr,                                /*pNext*/
