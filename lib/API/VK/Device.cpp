@@ -1354,6 +1354,11 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
+    // Optional CPU-readable readback buffer for the depth target. Only
+    // created when a test binds Bindings.DepthBuffer; the depth target
+    // contents are copied here after the draw so the test can verify
+    // SV_Depth* writes.
+    std::unique_ptr<offloadtest::Buffer> DSReadback;
     std::unique_ptr<offloadtest::Buffer> VB;
 
     uint32_t ShaderStageMask = 0;
@@ -3206,6 +3211,27 @@ public:
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    // If the test bound a CPU-readable depth buffer, create the depth target
+    // from it and allocate a readback buffer. Otherwise fall back to the
+    // default depth target (which is not read back).
+    if (P.Bindings.DepthBuffer.Ptr) {
+      const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
+      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(
+          *this, DSBuf, P.Bindings.DepthBuffer.Fmt);
+      if (!TexOrErr)
+        return TexOrErr.takeError();
+      IS.DepthStencil = std::move(*TexOrErr);
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::GpuToCpu;
+      BufDesc.Usage = BufferUsage::Storage;
+      auto BufOrErr = createBuffer("DSReadback", BufDesc, DSBuf.size());
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.DSReadback = std::move(*BufOrErr);
+      return llvm::Error::success();
+    }
+
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
@@ -4046,6 +4072,15 @@ public:
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+      if (IS.DSReadback) {
+        copyTextureToReadback(IS.CB->CmdBuffer,
+                              llvm::cast<VulkanTexture>(*IS.DepthStencil),
+                              llvm::cast<VulkanBuffer>(*IS.DSReadback),
+                              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                              VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
+      }
     }
 
     for (auto &R : IS.Resources)
@@ -4111,6 +4146,24 @@ public:
       auto *RT = P.Bindings.RTargetBufferPtr;
       RT->copyFromTexture(Mapped, RT->getImageRowBytes());
       vkUnmapMemory(Device, Readback.Memory);
+
+      if (IS.DSReadback) {
+        auto &DSReadback = llvm::cast<VulkanBuffer>(*IS.DSReadback);
+
+        VkMappedMemoryRange DSRange = {};
+        DSRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        DSRange.offset = 0;
+        DSRange.size = VK_WHOLE_SIZE;
+        DSRange.memory = DSReadback.Memory;
+
+        void *DSMapped = nullptr; // NOLINT(misc-const-correctness)
+        vkMapMemory(Device, DSReadback.Memory, 0, VK_WHOLE_SIZE, 0, &DSMapped);
+        vkInvalidateMappedMemoryRanges(Device, 1, &DSRange);
+
+        auto *DSBuf = P.Bindings.DepthBuffer.Ptr;
+        DSBuf->copyFromTexture(DSMapped, DSBuf->getImageRowBytes());
+        vkUnmapMemory(Device, DSReadback.Memory);
+      }
     }
     return llvm::Error::success();
   }

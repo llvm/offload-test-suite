@@ -172,6 +172,44 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
   return llvm::Error::success();
 }
 
+// Validates that a TextureCreateDesc's dimensions and texel-byte footprint
+// match the CPUBuffer it will be read back into. Unlike
+// validateTextureDescMatchesCPUBuffer, this does not assert that Desc.Fmt is
+// equivalent to (Buf.Format + Buf.Channels) via toFormat -- callers that source
+// Desc.Fmt directly from the YAML (e.g. the depth-buffer binding) use the
+// CPUBuffer purely as readback storage and may use formats that don't have a
+// DataFormat equivalent (such as D32FloatS8Uint).
+inline llvm::Error
+validateTextureDimsMatchCPUBuffer(const TextureCreateDesc &Desc,
+                                  const CPUBuffer &Buf) {
+  if (Desc.Width != static_cast<uint32_t>(Buf.OutputProps.Width))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc width %u does not match CPUBuffer width %d.",
+        Desc.Width, Buf.OutputProps.Width);
+  if (Desc.Height != static_cast<uint32_t>(Buf.OutputProps.Height))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc height %u does not match CPUBuffer height %d.",
+        Desc.Height, Buf.OutputProps.Height);
+  if (Desc.MipLevels != static_cast<uint32_t>(Buf.OutputProps.MipLevels))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
+        "levels %d.",
+        Desc.MipLevels, Buf.OutputProps.MipLevels);
+  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Fmt);
+  const uint64_t ExpectedSize =
+      static_cast<uint64_t>(Desc.Width) * Desc.Height * TexelSize;
+  if (static_cast<uint64_t>(Buf.size()) != ExpectedSize)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "CPUBuffer size %u does not match expected size %llu "
+        "(width %u * height %u * element size %u).",
+        Buf.size(), ExpectedSize, Desc.Width, Desc.Height, TexelSize);
+  return llvm::Error::success();
+}
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_FORMATCONVERSION_H
