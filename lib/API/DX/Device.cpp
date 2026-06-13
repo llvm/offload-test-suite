@@ -226,7 +226,9 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::AccelerationStructure:
     return D3D12_RESOURCE_DIMENSION_BUFFER;
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   case ResourceKind::Sampler:
     return D3D12_RESOURCE_DIMENSION_UNKNOWN;
@@ -246,11 +248,27 @@ getResourceDescription(const Resource &R) {
                                    "Multiple mip levels are not yet supported "
                                    "for DirectX textures.");
 
+  if (B.OutputProps.ArraySize < 1)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "OutputProps.ArraySize must be >= 1.");
+
+  if (B.OutputProps.ArraySize > 1 && R.Kind != ResourceKind::Texture2DArray &&
+      R.Kind != ResourceKind::RWTexture2DArray)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "OutputProps.ArraySize > 1 is only supported for Texture2DArray and "
+        "RWTexture2DArray.");
+
   const DXGI_FORMAT Format =
       R.isTexture() ? getDXFormat(B.Format, B.Channels) : DXGI_FORMAT_UNKNOWN;
   const uint32_t Width =
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
+  const uint16_t DepthOrArraySize =
+      (R.Kind == ResourceKind::Texture2DArray ||
+       R.Kind == ResourceKind::RWTexture2DArray)
+          ? static_cast<uint16_t>(B.OutputProps.ArraySize)
+          : 1;
   D3D12_TEXTURE_LAYOUT Layout;
 
   if (R.isTexture())
@@ -265,8 +283,9 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_FLAGS Flags =
       R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                       : D3D12_RESOURCE_FLAG_NONE;
-  const D3D12_RESOURCE_DESC ResDesc = {Dimension, 0,      Width,  Height, 1, 1,
-                                       Format,    {1, 0}, Layout, Flags};
+  const D3D12_RESOURCE_DESC ResDesc = {Dimension,        0,    Width,  Height,
+                                       DepthOrArraySize, 1,    Format, {1, 0},
+                                       Layout,           Flags};
   return ResDesc;
 }
 
@@ -296,10 +315,16 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     Desc.Texture2D = D3D12_TEX2D_SRV{0, 1, 0, 0};
     break;
+  case ResourceKind::Texture2DArray:
+    Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    Desc.Texture2DArray = D3D12_TEX2D_ARRAY_SRV{
+        0, 1, 0, static_cast<UINT>(R.BufferPtr->OutputProps.ArraySize), 0, 0};
+    break;
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
     llvm_unreachable("Not an SRV type!");
@@ -337,10 +362,16 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
     Desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     Desc.Texture2D = D3D12_TEX2D_UAV{0, 0};
     break;
+  case ResourceKind::RWTexture2DArray:
+    Desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+    Desc.Texture2DArray = D3D12_TEX2D_ARRAY_UAV{
+        0, 0, static_cast<UINT>(R.BufferPtr->OutputProps.ArraySize), 0};
+    break;
   case ResourceKind::StructuredBuffer:
   case ResourceKind::Buffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
     llvm_unreachable("Not a UAV type!");
@@ -1853,15 +1884,22 @@ public:
     addUploadBeginBarrier(IS, Destination);
     if (R.isTexture()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-          0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                 getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                 B.OutputProps.Height, 1,
-                 B.OutputProps.Width * B.getElementSize())};
-      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
-      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
-
-      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      const DXGI_FORMAT DXFormat = getDXFormat(B.Format, B.Channels);
+      const uint32_t RowPitch = B.OutputProps.Width * B.getElementSize();
+      const uint32_t SliceBytes = RowPitch * B.OutputProps.Height;
+      const uint32_t NumSlices = (R.Kind == ResourceKind::Texture2DArray ||
+                                  R.Kind == ResourceKind::RWTexture2DArray)
+                                     ? B.OutputProps.ArraySize
+                                     : 1;
+      for (uint32_t Slice = 0; Slice < NumSlices; ++Slice) {
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+            Slice * SliceBytes,
+            CD3DX12_SUBRESOURCE_FOOTPRINT(DXFormat, B.OutputProps.Width,
+                                          B.OutputProps.Height, 1, RowPitch)};
+        const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), Slice);
+        const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
+        IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      }
     } else
       IS.CB->CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
                                        R.size());
@@ -2498,20 +2536,30 @@ public:
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
         const offloadtest::CPUBuffer &B = *R.first->BufferPtr;
-        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+        const uint32_t RowPitch = B.OutputProps.Width * B.getElementSize();
+        const uint32_t SliceBytes = RowPitch * B.OutputProps.Height;
+        const uint32_t NumSlices =
+            R.first->Kind == ResourceKind::RWTexture2DArray
+                ? B.OutputProps.ArraySize
+                : 1;
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT BaseFootprint{
             0, CD3DX12_SUBRESOURCE_FOOTPRINT(
                    getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                   B.OutputProps.Height, 1,
-                   B.OutputProps.Width * B.getElementSize())};
+                   B.OutputProps.Height, 1, RowPitch)};
         for (const ResourceSet &RS : R.second) {
           if (RS.Readback == nullptr)
             continue;
           const DXBuffer &ReadbackDX = llvm::cast<DXBuffer>(*RS.Readback);
           addReadbackBeginBarrier(IS, RS.Buffer);
-          const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
-                                                     Footprint);
-          const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), 0);
-          IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+          for (uint32_t Slice = 0; Slice < NumSlices; ++Slice) {
+            D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint = BaseFootprint;
+            Footprint.Offset = Slice * SliceBytes;
+            const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(ReadbackDX.Buffer.Get(),
+                                                       Footprint);
+            const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RS.Buffer.Get(), Slice);
+            IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc,
+                                              nullptr);
+          }
           addReadbackEndBarrier(IS, RS.Buffer);
         }
         return;
