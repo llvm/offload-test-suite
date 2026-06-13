@@ -1884,12 +1884,36 @@ public:
     return Ret;
   }
 
+  // Returns the total number of standard 64KB tiles backing a sparse texture
+  // resource (mip 0 only -- packed mips share a single tile and are not part
+  // of the standard tile count). For textures `ResDesc.Width` is in pixels,
+  // so the byte-count math used by `getNumTiles` would underestimate, hence
+  // this overload uses the runtime's tiling info instead.
+  UINT getNumTilesForTexture(std::optional<uint32_t> NumTiles,
+                             ID3D12Resource *Resource) {
+    if (NumTiles.has_value())
+      return static_cast<UINT>(*NumTiles);
+    UINT TotalTiles = 0;
+    D3D12_PACKED_MIP_INFO PackedMipInfo = {};
+    D3D12_TILE_SHAPE TileShape = {};
+    UINT NumSubresourceTilings = 0;
+    Device->GetResourceTiling(Resource, &TotalTiles, &PackedMipInfo, &TileShape,
+                              &NumSubresourceTilings, 0, nullptr);
+    return TotalTiles;
+  }
+
   llvm::Error setupReservedResource(Resource &R,
                                     const D3D12_RESOURCE_DESC ResDesc,
                                     ComPtr<ID3D12Heap> &Heap,
                                     ComPtr<ID3D12Resource> &Buffer) {
-    // Tile mapping setup (only skipped when TilesMapped is set to 0)
-    const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
+    // Tile mapping setup (only skipped when TilesMapped is set to 0).
+    // Textures and buffers compute the default "map all" tile count
+    // differently: textures must query GetResourceTiling because
+    // ResDesc.Width is in pixels and the tile shape depends on format.
+    const UINT NumTiles =
+        ResDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER
+            ? getNumTiles(R.TilesMapped, static_cast<uint32_t>(ResDesc.Width))
+            : getNumTilesForTexture(R.TilesMapped, Buffer.Get());
 
     if (NumTiles == 0)
       return llvm::Error::success();

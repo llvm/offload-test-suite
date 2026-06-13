@@ -1137,6 +1137,17 @@ class MTLDevice : public offloadtest::Device {
   // specified array index.
   llvm::Expected<MTL::Resource *>
   createResource(Resource &R, size_t ResourceArrayIndex = 0) {
+    // Reserved (a.k.a. tiled / sparse) resources are not yet implemented on
+    // Metal. Tests that need them should mark themselves `UNSUPPORTED: Metal`
+    // so this guard never fires in CI; it exists to keep the shared YAML
+    // `IsReserved` contract honest across backends (see #1050).
+    if (R.IsReserved)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Reserved/sparse resources are not yet implemented on Metal "
+          "(resource '%s')",
+          R.Name.c_str());
+
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
 
     if (R.isRaw()) {

@@ -3103,6 +3103,18 @@ public:
   }
 
   llvm::Error createResource(Resource &R, InvocationState &IS) {
+    // Reserved (a.k.a. tiled / sparse) resources are not yet implemented on
+    // Vulkan. Tests that need them should mark themselves
+    // `UNSUPPORTED: Vulkan` so this guard never fires in CI; it exists to
+    // keep the shared YAML `IsReserved` contract honest across backends
+    // (see #1050).
+    if (R.IsReserved)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Reserved/sparse resources are not yet implemented on Vulkan "
+          "(resource '%s')",
+          R.Name.c_str());
+
     // Samplers don't have backing data buffers, so handle them separately
     if (R.isSampler()) {
       ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
