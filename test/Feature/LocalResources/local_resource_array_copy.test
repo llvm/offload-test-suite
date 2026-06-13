@@ -1,0 +1,77 @@
+#--- source.hlsl
+
+// Test that a local resource array can be copied to another local array.
+
+RWByteAddressBuffer Out : register(u0);
+RWByteAddressBuffer Aux : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+    RWByteAddressBuffer src[2];
+    src[0] = Out;
+    src[1] = Aux;
+    RWByteAddressBuffer dst[2] = src;
+    dst[0].Store(0, 42);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: Out
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: Aux
+    Format: Int32
+    Stride: 4
+    Data: [0]
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 4
+    Data: [42]
+  - Name: ExpectedAux
+    Format: Int32
+    Stride: 4
+    Data: [0]
+Results:
+  - Result: OutCheck
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: AuxCheck
+    Rule: BufferExact
+    Actual: Aux
+    Expected: ExpectedAux
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Aux
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192562
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8379
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
