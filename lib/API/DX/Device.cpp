@@ -236,6 +236,87 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+static D3D12_TEXTURE_ADDRESS_MODE getDXAddressMode(AddressMode Mode) {
+  switch (Mode) {
+  case AddressMode::Clamp:
+    return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+  case AddressMode::Repeat:
+    return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+  case AddressMode::Mirror:
+    return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+  case AddressMode::Border:
+    return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+  case AddressMode::MirrorOnce:
+    return D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE;
+  }
+  llvm_unreachable("All AddressMode cases handled");
+}
+
+static D3D12_COMPARISON_FUNC getDXComparisonFunc(CompareFunction Func) {
+  switch (Func) {
+  case CompareFunction::Never:
+    return D3D12_COMPARISON_FUNC_NEVER;
+  case CompareFunction::Less:
+    return D3D12_COMPARISON_FUNC_LESS;
+  case CompareFunction::Equal:
+    return D3D12_COMPARISON_FUNC_EQUAL;
+  case CompareFunction::LessEqual:
+    return D3D12_COMPARISON_FUNC_LESS_EQUAL;
+  case CompareFunction::Greater:
+    return D3D12_COMPARISON_FUNC_GREATER;
+  case CompareFunction::NotEqual:
+    return D3D12_COMPARISON_FUNC_NOT_EQUAL;
+  case CompareFunction::GreaterEqual:
+    return D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+  case CompareFunction::Always:
+    return D3D12_COMPARISON_FUNC_ALWAYS;
+  }
+  llvm_unreachable("All CompareFunction cases handled");
+}
+
+// Compose a D3D12_FILTER from kind + min/mag (mip is Nearest to match VK).
+static D3D12_FILTER getDXFilter(SamplerKind Kind, FilterMode MinFilter,
+                                FilterMode MagFilter) {
+  const bool IsComparison = (Kind == SamplerKind::SamplerComparison);
+  const bool MinLinear = (MinFilter == FilterMode::Linear);
+  const bool MagLinear = (MagFilter == FilterMode::Linear);
+  D3D12_FILTER F;
+  if (!MinLinear && !MagLinear)
+    F = D3D12_FILTER_MIN_MAG_MIP_POINT;
+  else if (!MinLinear && MagLinear)
+    F = D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+  else if (MinLinear && !MagLinear)
+    F = D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT;
+  else
+    F = D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+  if (IsComparison) {
+    F = static_cast<D3D12_FILTER>(static_cast<unsigned>(F) |
+                                  D3D12_FILTER_REDUCTION_TYPE_COMPARISON
+                                      << D3D12_FILTER_REDUCTION_TYPE_SHIFT);
+  }
+  return F;
+}
+
+static D3D12_SAMPLER_DESC getDXSamplerDesc(const Sampler &S) {
+  D3D12_SAMPLER_DESC Desc = {};
+  Desc.Filter = getDXFilter(S.Kind, S.MinFilter, S.MagFilter);
+  Desc.AddressU = getDXAddressMode(S.Address);
+  Desc.AddressV = getDXAddressMode(S.Address);
+  Desc.AddressW = getDXAddressMode(S.Address);
+  Desc.MipLODBias = S.MipLODBias;
+  Desc.MaxAnisotropy = 1;
+  Desc.ComparisonFunc = (S.Kind == SamplerKind::SamplerComparison)
+                            ? getDXComparisonFunc(S.ComparisonOp)
+                            : D3D12_COMPARISON_FUNC_NEVER;
+  Desc.BorderColor[0] = 0.0f;
+  Desc.BorderColor[1] = 0.0f;
+  Desc.BorderColor[2] = 0.0f;
+  Desc.BorderColor[3] = 0.0f;
+  Desc.MinLOD = S.MinLOD;
+  Desc.MaxLOD = S.MaxLOD;
+  return Desc;
+}
+
 static llvm::Expected<D3D12_RESOURCE_DESC>
 getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_DIMENSION Dimension = getDXDimension(R.Kind);
@@ -1113,6 +1194,7 @@ private:
 
   struct InvocationState {
     ComPtr<ID3D12DescriptorHeap> DescHeap;
+    ComPtr<ID3D12DescriptorHeap> SamplerHeap;
     std::unique_ptr<DXCommandBuffer> CB;
     std::unique_ptr<PipelineState> Pipeline;
 
@@ -1218,36 +1300,65 @@ public:
         new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
     uint32_t RangeIdx = 0;
     for (const auto &Set : BndDesc.DescriptorSetDescs) {
-      uint32_t DescriptorIdx = 0;
-      const uint32_t StartRangeIdx = RangeIdx;
+      // Split CBV/SRV/UAV and SAMPLER into separate D3D12 descriptor tables
+      // (different heap types). Walk twice so Ranges stays contiguous per
+      // root parameter.
+      uint32_t ResourceCount = 0;
+      uint32_t SamplerCount = 0;
+      const uint32_t ResourceStart = RangeIdx;
       for (const auto &Binding : Set.ResourceBindings) {
+        if (getDescriptorKind(Binding.Kind) == DescriptorKind::SAMPLER)
+          continue;
+        D3D12_DESCRIPTOR_RANGE_TYPE RangeType;
         switch (getDescriptorKind(Binding.Kind)) {
         case DescriptorKind::SRV:
-          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+          RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
           break;
         case DescriptorKind::UAV:
-          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+          RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
           break;
         case DescriptorKind::CBV:
-          Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
+          RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
         case DescriptorKind::SAMPLER:
-          llvm_unreachable("Not implemented yet."); // Requires a separate heap
+          llvm_unreachable("SAMPLER handled in the sampler pass below");
         }
+        Ranges.get()[RangeIdx].RangeType = RangeType;
         Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
         Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
         Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
-            DescriptorIdx;
-        RangeIdx++;
-        DescriptorIdx += Binding.DescriptorCount;
+            ResourceCount;
+        ResourceCount += Binding.DescriptorCount;
+        ++RangeIdx;
       }
-      RootParams.push_back(D3D12_ROOT_PARAMETER{
-          D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-          {D3D12_ROOT_DESCRIPTOR_TABLE{
-              static_cast<uint32_t>(Set.ResourceBindings.size()),
-              &Ranges.get()[StartRangeIdx]}},
-          D3D12_SHADER_VISIBILITY_ALL});
+      if (ResourceCount > 0) {
+        RootParams.push_back(D3D12_ROOT_PARAMETER{
+            D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            {D3D12_ROOT_DESCRIPTOR_TABLE{RangeIdx - ResourceStart,
+                                         &Ranges.get()[ResourceStart]}},
+            D3D12_SHADER_VISIBILITY_ALL});
+      }
+
+      const uint32_t SamplerStart = RangeIdx;
+      for (const auto &Binding : Set.ResourceBindings) {
+        if (getDescriptorKind(Binding.Kind) != DescriptorKind::SAMPLER)
+          continue;
+        Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
+        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
+        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
+        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart = SamplerCount;
+        SamplerCount += Binding.DescriptorCount;
+        ++RangeIdx;
+      }
+      if (SamplerCount > 0) {
+        RootParams.push_back(D3D12_ROOT_PARAMETER{
+            D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            {D3D12_ROOT_DESCRIPTOR_TABLE{RangeIdx - SamplerStart,
+                                         &Ranges.get()[SamplerStart]}},
+            D3D12_SHADER_VISIBILITY_ALL});
+      }
     }
 
     CD3DX12_ROOT_SIGNATURE_DESC Desc;
@@ -1707,14 +1818,37 @@ public:
   llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
-    const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        P.getDescriptorCountWithFlattenedArrays(),
-        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &HeapDesc, IID_PPV_ARGS(&State.DescHeap)),
-                               "Failed to create descriptor heap."))
-      return Err;
+    // Count CBV/SRV/UAV bindings separately; samplers live in their own heap.
+    uint32_t ResourceCount = 0;
+    uint32_t SamplerCount = 0;
+    for (const auto &Set : P.Sets)
+      for (const auto &R : Set.Resources) {
+        if (getDescriptorKind(R.Kind) == DescriptorKind::SAMPLER)
+          SamplerCount += R.getArraySize();
+        else
+          ResourceCount += R.getArraySize();
+      }
+
+    if (ResourceCount > 0) {
+      const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, ResourceCount,
+          D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+      if (auto Err = HR::toError(Device->CreateDescriptorHeap(
+                                     &HeapDesc, IID_PPV_ARGS(&State.DescHeap)),
+                                 "Failed to create descriptor heap."))
+        return Err;
+    }
+
+    if (SamplerCount > 0) {
+      const D3D12_DESCRIPTOR_HEAP_DESC SamplerHeapDesc = {
+          D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, SamplerCount,
+          D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+      if (auto Err = HR::toError(
+              Device->CreateDescriptorHeap(&SamplerHeapDesc,
+                                           IID_PPV_ARGS(&State.SamplerHeap)),
+              "Failed to create sampler descriptor heap."))
+        return Err;
+    }
     return llvm::Error::success();
   }
 
@@ -2306,9 +2440,10 @@ public:
         break;
       }
       case DescriptorKind::SAMPLER:
-        return llvm::createStringError(
-            std::errc::not_supported,
-            "Samplers are not yet implemented for DirectX.");
+        // Samplers have no backing GPU buffer; placeholder bundle keeps
+        // DescTables aligned with P.Sets[i].Resources.
+        Resources.push_back(std::make_pair(&R, ResourceBundle{}));
+        break;
       }
       return llvm::Error::success();
     };
@@ -2321,8 +2456,11 @@ public:
           return Err;
     }
 
-    // Bind descriptors in descriptor tables.
+    // CBV/SRV/UAV descriptors live in IS.DescHeap; samplers in IS.SamplerHeap.
     uint32_t HeapIndex = 0;
+    uint32_t SamplerHeapIndex = 0;
+    const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
     for (auto &T : IS.DescTables) {
       for (auto &R : T.Resources) {
         switch (getDescriptorKind(R.first->Kind)) {
@@ -2335,8 +2473,18 @@ public:
         case DescriptorKind::CBV:
           HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
           break;
-        case DescriptorKind::SAMPLER:
-          llvm_unreachable("Not implemented yet.");
+        case DescriptorKind::SAMPLER: {
+          assert(IS.SamplerHeap && "missing sampler heap");
+          assert(R.first->SamplerPtr && "missing Sampler description");
+          D3D12_CPU_DESCRIPTOR_HANDLE Handle =
+              IS.SamplerHeap->GetCPUDescriptorHandleForHeapStart();
+          Handle.ptr += SamplerHeapIndex * SamplerInc;
+          const D3D12_SAMPLER_DESC Desc =
+              getDXSamplerDesc(*R.first->SamplerPtr);
+          Device->CreateSampler(&Desc, Handle);
+          ++SamplerHeapIndex;
+          break;
+        }
         }
       }
     }
@@ -2405,10 +2553,16 @@ public:
 
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
-      Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
+    if (IS.DescHeap || IS.SamplerHeap) {
+      llvm::SmallVector<ID3D12DescriptorHeap *, 2> Heaps;
+      if (IS.DescHeap)
+        Heaps.push_back(IS.DescHeap.Get());
+      if (IS.SamplerHeap)
+        Heaps.push_back(IS.SamplerHeap.Get());
+      IS.CB->CmdList->SetDescriptorHeaps(static_cast<UINT>(Heaps.size()),
+                                         Heaps.data());
+      if (IS.DescHeap)
+        Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
@@ -2416,6 +2570,8 @@ public:
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0u;
@@ -2438,11 +2594,18 @@ public:
           ConstantOffset += NumValues;
           break;
         }
-        case dx::RootParamKind::DescriptorTable:
+        case dx::RootParamKind::DescriptorTable: {
           IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
                                                         Handle);
-          Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
+          // Samplers live in a separate heap and don't contribute to the
+          // CBV/SRV/UAV handle offset.
+          uint32_t ResourceCount = 0;
+          for (const auto &R : P.Sets[DescriptorTableIndex++].Resources)
+            if (getDescriptorKind(R.Kind) != DescriptorKind::SAMPLER)
+              ResourceCount += R.getArraySize();
+          Handle.Offset(ResourceCount, Inc);
           break;
+        }
         case dx::RootParamKind::RootDescriptor:
           assert(RootDescIt != IS.RootResources.end());
           if (RootDescIt->first->getArraySize() != 1)
@@ -2466,19 +2629,41 @@ public:
                 RootDescIt->second.back().Buffer->GetGPUVirtualAddress());
             break;
           case DescriptorKind::SAMPLER:
-            llvm_unreachable("Not implemented yet.");
+            llvm_unreachable("Samplers cannot be bound as root descriptors.");
           }
           ++RootDescIt;
           break;
         }
       }
     } else {
-      // If no explicit root parameters are provided, fall back to using the
-      // descriptor set layout. This is to make it easier to write tests that
-      // don't need complicated root signatures.
+      // If no explicit root parameters are provided, fall back to the
+      // descriptor set layout. Each set with mixed CBV/SRV/UAV and SAMPLER
+      // resources contributes two root parameters: one for the resource table,
+      // then one for the sampler table (matching the order produced by
+      // createRootSignatureFromBindingsDesc).
+      CD3DX12_GPU_DESCRIPTOR_HANDLE SamplerHandle;
+      if (IS.SamplerHeap)
+        SamplerHandle = IS.SamplerHeap->GetGPUDescriptorHandleForHeapStart();
+      uint32_t RootParamIndex = 0u;
       for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-        IS.CB->CmdList->SetComputeRootDescriptorTable(Idx, Handle);
-        Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
+        uint32_t ResourceCount = 0;
+        uint32_t SamplerCount = 0;
+        for (const auto &R : P.Sets[Idx].Resources) {
+          if (getDescriptorKind(R.Kind) == DescriptorKind::SAMPLER)
+            SamplerCount += R.getArraySize();
+          else
+            ResourceCount += R.getArraySize();
+        }
+        if (ResourceCount > 0) {
+          IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
+                                                        Handle);
+          Handle.Offset(ResourceCount, Inc);
+        }
+        if (SamplerCount > 0) {
+          IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
+                                                        SamplerHandle);
+          SamplerHandle.Offset(SamplerCount, SamplerInc);
+        }
       }
     }
 
@@ -2650,11 +2835,46 @@ public:
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
     IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
-      IS.CB->CmdList->SetGraphicsRootDescriptorTable(
-          0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
+    if (IS.DescHeap || IS.SamplerHeap) {
+      llvm::SmallVector<ID3D12DescriptorHeap *, 2> Heaps;
+      if (IS.DescHeap)
+        Heaps.push_back(IS.DescHeap.Get());
+      if (IS.SamplerHeap)
+        Heaps.push_back(IS.SamplerHeap.Get());
+      IS.CB->CmdList->SetDescriptorHeaps(static_cast<UINT>(Heaps.size()),
+                                         Heaps.data());
+
+      const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+      CD3DX12_GPU_DESCRIPTOR_HANDLE ResHandle;
+      if (IS.DescHeap)
+        ResHandle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
+      CD3DX12_GPU_DESCRIPTOR_HANDLE SamplerHandle;
+      if (IS.SamplerHeap)
+        SamplerHandle = IS.SamplerHeap->GetGPUDescriptorHandleForHeapStart();
+      uint32_t RootParamIndex = 0u;
+      for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
+        uint32_t ResourceCount = 0;
+        uint32_t SamplerCount = 0;
+        for (const auto &R : P.Sets[Idx].Resources) {
+          if (getDescriptorKind(R.Kind) == DescriptorKind::SAMPLER)
+            SamplerCount += R.getArraySize();
+          else
+            ResourceCount += R.getArraySize();
+        }
+        if (ResourceCount > 0) {
+          IS.CB->CmdList->SetGraphicsRootDescriptorTable(RootParamIndex++,
+                                                         ResHandle);
+          ResHandle.Offset(ResourceCount, Inc);
+        }
+        if (SamplerCount > 0) {
+          IS.CB->CmdList->SetGraphicsRootDescriptorTable(RootParamIndex++,
+                                                         SamplerHandle);
+          SamplerHandle.Offset(SamplerCount, SamplerInc);
+        }
+      }
     }
 
     RenderPassBeginDesc BeginDesc = {};
