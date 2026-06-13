@@ -193,12 +193,25 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
-static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
+static uint64_t getAlignedSliceSize(const CPUBuffer &B) {
   const uint64_t AlignedPitch =
       getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
   const uint64_t LastRowSize =
       uint64_t(B.OutputProps.Width) * B.getElementSize();
   return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
+}
+
+static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
+  const uint32_t ArraySize = std::max(1, B.OutputProps.ArraySize);
+  const uint64_t SliceSize = getAlignedSliceSize(B);
+  if (ArraySize == 1)
+    return SliceSize;
+  // Each slice has to start at D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
+  // (512-byte) boundary in the destination readback buffer for
+  // CopyTextureRegion's placed footprint to be legal.
+  const uint64_t SlicePitch =
+      llvm::alignTo(SliceSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+  return SlicePitch * (ArraySize - 1) + SliceSize;
 }
 
 static uint32_t getUAVBufferSize(const Resource &R) {
@@ -226,6 +239,7 @@ static D3D12_RESOURCE_DIMENSION getDXDimension(ResourceKind RK) {
   case ResourceKind::AccelerationStructure:
     return D3D12_RESOURCE_DIMENSION_BUFFER;
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
   case ResourceKind::Sampler:
@@ -246,11 +260,24 @@ getResourceDescription(const Resource &R) {
                                    "Multiple mip levels are not yet supported "
                                    "for DirectX textures.");
 
+  if (B.OutputProps.ArraySize < 1)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "OutputProps.ArraySize must be >= 1.");
+
+  if (B.OutputProps.ArraySize > 1 && R.Kind != ResourceKind::Texture2DArray)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "OutputProps.ArraySize > 1 is only supported for Texture2DArray.");
+
   const DXGI_FORMAT Format =
       R.isTexture() ? getDXFormat(B.Format, B.Channels) : DXGI_FORMAT_UNKNOWN;
   const uint32_t Width =
       R.isTexture() ? B.OutputProps.Width : getUAVBufferSize(R);
   const uint32_t Height = R.isTexture() ? B.OutputProps.Height : 1;
+  const uint16_t DepthOrArraySize =
+      R.Kind == ResourceKind::Texture2DArray
+          ? static_cast<uint16_t>(B.OutputProps.ArraySize)
+          : 1;
   D3D12_TEXTURE_LAYOUT Layout;
 
   if (R.isTexture())
@@ -265,8 +292,9 @@ getResourceDescription(const Resource &R) {
   const D3D12_RESOURCE_FLAGS Flags =
       R.isReadWrite() ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS
                       : D3D12_RESOURCE_FLAG_NONE;
-  const D3D12_RESOURCE_DESC ResDesc = {Dimension, 0,      Width,  Height, 1, 1,
-                                       Format,    {1, 0}, Layout, Flags};
+  const D3D12_RESOURCE_DESC ResDesc = {Dimension,        0,    Width,  Height,
+                                       DepthOrArraySize, 1,    Format, {1, 0},
+                                       Layout,           Flags};
   return ResDesc;
 }
 
@@ -295,6 +323,11 @@ static D3D12_SHADER_RESOURCE_VIEW_DESC getSRVDescription(const Resource &R) {
   case ResourceKind::Texture2D:
     Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     Desc.Texture2D = D3D12_TEX2D_SRV{0, 1, 0, 0};
+    break;
+  case ResourceKind::Texture2DArray:
+    Desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+    Desc.Texture2DArray = D3D12_TEX2D_ARRAY_SRV{
+        0, 1, 0, static_cast<UINT>(R.BufferPtr->OutputProps.ArraySize), 0, 0};
     break;
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
@@ -341,6 +374,7 @@ static D3D12_UNORDERED_ACCESS_VIEW_DESC getUAVDescription(const Resource &R) {
   case ResourceKind::Buffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
     llvm_unreachable("Not a UAV type!");
@@ -1392,10 +1426,33 @@ public:
     PSODesc.SampleDesc.Count = 1;
 
     ComPtr<ID3D12PipelineState> PSO;
-    if (auto Err = HR::toError(
-            Device->CreateGraphicsPipelineState(&PSODesc, IID_PPV_ARGS(&PSO)),
-            "Failed to create graphics PSO."))
+    if (Desc.ViewInstanceCount > 1) {
+      // View-instanced pipelines can't be created from the legacy
+      // D3D12_GRAPHICS_PIPELINE_STATE_DESC; switch to the stream-desc API
+      // and attach a view-instancing subobject that routes view N to the
+      // matching render/depth target array slice.
+      llvm::SmallVector<D3D12_VIEW_INSTANCE_LOCATION, 4> ViewLocations;
+      ViewLocations.reserve(Desc.ViewInstanceCount);
+      for (uint32_t I = 0; I < Desc.ViewInstanceCount; ++I)
+        ViewLocations.push_back({/*ViewportArrayIndex=*/0,
+                                 /*RenderTargetArrayIndex=*/I});
+
+      CD3DX12_PIPELINE_STATE_STREAM2 Stream(PSODesc);
+      Stream.ViewInstancingDesc = CD3DX12_VIEW_INSTANCING_DESC(
+          static_cast<UINT>(Desc.ViewInstanceCount), ViewLocations.data(),
+          D3D12_VIEW_INSTANCING_FLAG_NONE);
+
+      const D3D12_PIPELINE_STATE_STREAM_DESC StreamDesc = {sizeof(Stream),
+                                                           &Stream};
+      if (auto Err = HR::toError(
+              Device->CreatePipelineState(&StreamDesc, IID_PPV_ARGS(&PSO)),
+              "Failed to create view-instanced graphics PSO."))
+        return Err;
+    } else if (auto Err = HR::toError(Device->CreateGraphicsPipelineState(
+                                          &PSODesc, IID_PPV_ARGS(&PSO)),
+                                      "Failed to create graphics PSO.")) {
       return Err;
+    }
 
     return std::make_unique<DXPipelineState>(
         Name, RootSig, PSO,
@@ -1531,7 +1588,8 @@ public:
     TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
     TexDesc.Width = Desc.Width;
     TexDesc.Height = Desc.Height;
-    TexDesc.DepthOrArraySize = 1;
+    TexDesc.DepthOrArraySize =
+        static_cast<UINT16>(std::max(1u, Desc.ArraySize));
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
     TexDesc.Format = getDXGIFormat(Desc.Fmt);
     TexDesc.SampleDesc.Count = 1;
@@ -1853,15 +1911,20 @@ public:
     addUploadBeginBarrier(IS, Destination);
     if (R.isTexture()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-          0, CD3DX12_SUBRESOURCE_FOOTPRINT(
-                 getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-                 B.OutputProps.Height, 1,
-                 B.OutputProps.Width * B.getElementSize())};
-      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), 0);
-      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
-
-      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      const DXGI_FORMAT DXFormat = getDXFormat(B.Format, B.Channels);
+      const uint32_t RowPitch = B.OutputProps.Width * B.getElementSize();
+      const uint32_t SliceBytes = RowPitch * B.OutputProps.Height;
+      const uint32_t NumSlices =
+          R.Kind == ResourceKind::Texture2DArray ? B.OutputProps.ArraySize : 1;
+      for (uint32_t Slice = 0; Slice < NumSlices; ++Slice) {
+        const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+            Slice * SliceBytes,
+            CD3DX12_SUBRESOURCE_FOOTPRINT(DXFormat, B.OutputProps.Width,
+                                          B.OutputProps.Height, 1, RowPitch)};
+        const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(Destination.Get(), Slice);
+        const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(Source.Get(), Footprint);
+        IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+      }
     } else
       IS.CB->CmdList->CopyBufferRegion(Destination.Get(), 0, Source.Get(), 0,
                                        R.size());
@@ -2597,8 +2660,32 @@ public:
     Device->GetCopyableFootprints(&RTDesc, 0u, 1u, 0u, &Placed, &NumRows,
                                   &RowSizeInBytes, &TotalBytes);
 
-    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped,
-                                                 Placed.Footprint.RowPitch);
+    CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+    const uint32_t ArraySize = std::max(1, OutBuf.OutputProps.ArraySize);
+    if (ArraySize == 1) {
+      OutBuf.copyFromTexture(Mapped, Placed.Footprint.RowPitch);
+    } else {
+      // Slices were placed in the readback buffer at 512-byte-aligned
+      // offsets by createGraphicsCommands(); pull them back out into the
+      // CPUBuffer's tight slice-major layout.
+      const uint64_t SliceSize = getAlignedSliceSize(OutBuf);
+      const uint64_t SlicePitch =
+          llvm::alignTo(SliceSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+      const uint64_t TightSliceBytes = uint64_t(OutBuf.OutputProps.Width) *
+                                       OutBuf.OutputProps.Height *
+                                       OutBuf.getElementSize();
+      const uint32_t RowBytes = OutBuf.getImageRowBytes();
+      uint8_t *Dst = reinterpret_cast<uint8_t *>(OutBuf.Data[0].get());
+      const uint8_t *SrcBase = reinterpret_cast<const uint8_t *>(Mapped);
+      const uint32_t Height = static_cast<uint32_t>(OutBuf.OutputProps.Height);
+      for (uint32_t Slice = 0; Slice < ArraySize; ++Slice) {
+        const uint8_t *SliceSrc = SrcBase + Slice * SlicePitch;
+        uint8_t *SliceDst = Dst + Slice * TightSliceBytes;
+        for (uint32_t Y = 0; Y < Height; ++Y)
+          memcpy(SliceDst + size_t(Y) * RowBytes,
+                 SliceSrc + size_t(Y) * Placed.Footprint.RowPitch, RowBytes);
+      }
+    }
     Readback.Buffer->Unmap(0, nullptr);
     return llvm::Error::success();
   }
@@ -2635,7 +2722,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height,
+        std::max(1, P.Bindings.RTargetBufferPtr->OutputProps.ArraySize));
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -2699,24 +2787,33 @@ public:
     Encoder.endEncoding();
 
     // Transition the render target to copy source and copy to the readback
-    // buffer.
+    // buffer. For view-instanced (Texture2DArray) render targets, copy each
+    // slice at its 512-byte-aligned offset; readBack() reads them out
+    // slice-major.
     const D3D12_RESOURCE_BARRIER Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         RT.Resource.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET,
         D3D12_RESOURCE_STATE_COPY_SOURCE);
     IS.CB->CmdList->ResourceBarrier(1, &Barrier);
 
     const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
-            B.OutputProps.Height, 1,
-            getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
-                                               Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), 0);
-
-    IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    const uint32_t ArraySize = std::max(1, B.OutputProps.ArraySize);
+    const uint64_t SliceSize = getAlignedSliceSize(B);
+    const uint64_t SlicePitch =
+        ArraySize == 1
+            ? SliceSize
+            : llvm::alignTo(SliceSize, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+    const CD3DX12_SUBRESOURCE_FOOTPRINT FootprintDesc(
+        getDXFormat(B.Format, B.Channels), B.OutputProps.Width,
+        B.OutputProps.Height, 1,
+        getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize()));
+    for (uint32_t Slice = 0; Slice < ArraySize; ++Slice) {
+      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
+          /*Offset=*/Slice * SlicePitch, FootprintDesc};
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(RTReadback.Buffer.Get(),
+                                                 Footprint);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(RT.Resource.Get(), Slice);
+      IS.CB->CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
 
     auto CopyBackResource = [&IS, this](ResourcePair &R) {
       if (R.first->isTexture()) {
@@ -2881,6 +2978,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewInstanceCount = P.ViewInstanceCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
