@@ -1,0 +1,245 @@
+# Bundled domain-shader (DS) system-value test. Exercises:
+#   * SV_PrimitiveID    - DS input (patch index; new coverage)
+#   * SV_DomainLocation - DS input (the tessellator's (u, v) for this vertex)
+#   * SV_Position       - DS output -> rasterizer -> PS input (pixel center)
+#
+# Geometry: two independent quad patches drawn back-to-back (8 control points,
+# PatchControlPoints = 4). The input-assembler hands each patch a distinct
+# SV_PrimitiveID (0, 1). Each patch covers one half of a 4x2 render target:
+#
+#     patch 0  -> NDC x in [-1, 0]  -> columns 0,1
+#     patch 1  -> NDC x in [ 0, 1]  -> columns 2,3
+#
+# With integer partitioning and all tess factors = 2, each patch is subdivided
+# into a 2x2 grid of sub-quads. The sub-quad seams fall at domain (u, v) = 0.5,
+# i.e. exactly on a pixel *boundary*, so every pixel center maps to a clean
+# domain coordinate of 0.25 or 0.75 on each axis -- identical to the mapping
+# proven in test/Graphics/QuadDomainTessellation.test, and exact across
+# backends (the readback never lands on a triangle diagonal).
+#
+# Per patch the four pixel centers map to:
+#     (u, v) = (0.25, 0.75) (0.75, 0.75)   <- top row    (NDC +y)
+#              (0.25, 0.25) (0.75, 0.25)   <- bottom row (NDC -y)
+
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : POSITION;
+};
+
+// Pass-through: control points travel unchanged into the Hull stage. The vertex
+// attribute supplies only xy; z=0, w=1 are filled by the input assembler.
+VSOutput main(float4 position : POSITION) {
+  VSOutput o;
+  o.position = position;
+  return o;
+}
+
+#--- hull.hlsl
+struct HSInput {
+  float4 position : POSITION;
+};
+
+struct HSOutput {
+  float4 position : POSITION;
+};
+
+struct HSPatchConstants {
+  float Edges[4] : SV_TessFactor;
+  float Inside[2] : SV_InsideTessFactor;
+};
+
+HSPatchConstants PatchConstants(InputPatch<HSInput, 4> patch,
+                                uint patchID : SV_PrimitiveID) {
+  HSPatchConstants c;
+  c.Edges[0] = 2.0;
+  c.Edges[1] = 2.0;
+  c.Edges[2] = 2.0;
+  c.Edges[3] = 2.0;
+  c.Inside[0] = 2.0;
+  c.Inside[1] = 2.0;
+  return c;
+}
+
+[domain("quad")]
+[partitioning("integer")]
+[outputtopology("triangle_ccw")]
+[outputcontrolpoints(4)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 4> patch, uint i : SV_OutputControlPointID) {
+  HSOutput o;
+  o.position = patch[i].position;
+  return o;
+}
+
+#--- domain.hlsl
+struct DSInput {
+  float4 position : POSITION;
+};
+
+struct DSPatchConstants {
+  float Edges[4] : SV_TessFactor;
+  float Inside[2] : SV_InsideTessFactor;
+};
+
+struct DSOutput {
+  float4 position : SV_POSITION;
+  // SV_DomainLocation forwarded for per-pixel capture (interpolated), and the
+  // DS-stage SV_PrimitiveID forwarded flat (constant over the patch).
+  float2 uv : TEXCOORD0;
+  nointerpolation uint primID : PRIMID;
+};
+
+// Bilinearly interpolate the four corner control points by the (u, v) location.
+// The generated triangles tile the input quad, so each patch fully covers its
+// half of the viewport.
+[domain("quad")]
+DSOutput main(DSPatchConstants constants, float2 uv : SV_DomainLocation,
+              const OutputPatch<DSInput, 4> patch,
+              uint primID : SV_PrimitiveID) {
+  float4 bottom = lerp(patch[0].position, patch[1].position, uv.x);
+  float4 top = lerp(patch[3].position, patch[2].position, uv.x);
+
+  DSOutput o;
+  o.position = lerp(bottom, top, uv.y);
+  o.uv = uv;
+  o.primID = primID;
+  return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+  float2 uv : TEXCOORD0;
+  nointerpolation uint primID : PRIMID;
+};
+
+struct Record {
+  uint PrimID;
+  float DomU;
+  float DomV;
+  float PosX;
+  float PosY;
+  float PosZ;
+  float PosW;
+};
+
+RWStructuredBuffer<Record> Output : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+  uint idx = (uint)input.position.y * 4u + (uint)input.position.x;
+
+  Record r;
+  r.PrimID = input.primID;
+  r.DomU = input.uv.x;
+  r.DomV = input.uv.y;
+  r.PosX = input.position.x;
+  r.PosY = input.position.y;
+  r.PosZ = input.position.z;
+  r.PosW = input.position.w;
+  Output[idx] = r;
+
+  return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Two quad patches (cp order: BL, BR, TR, TL), each covering half the viewport.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8 # float2 position
+    Data: [ # patch 0: NDC x in [-1, 0]
+            -1.0, -1.0,   # cp0 bottom-left
+             0.0, -1.0,   # cp1 bottom-right
+             0.0,  1.0,   # cp2 top-right
+            -1.0,  1.0,   # cp3 top-left
+            # patch 1: NDC x in [0, 1]
+             0.0, -1.0,   # cp0 bottom-left
+             1.0, -1.0,   # cp1 bottom-right
+             1.0,  1.0,   # cp2 top-right
+             0.0,  1.0 ]  # cp3 top-left
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 128 # 4x2 @ 16 bytes per pixel
+    OutputProps:
+      Height: 2
+      Width: 4
+      Depth: 1
+  - Name: ResultBuffer
+    Format: Hex32
+    Stride: 28 # sizeof(Record): 1 uint + 6 float
+    FillSize: 224 # 8 records * 28 bytes
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Hex32
+    Stride: 28
+    # Per-pixel expected records: PrimID, DomU, DomV, PosX, PosY, PosZ, PosW
+    # Float bits: 0.0->0x0  0.25->0x3E800000  0.5->0x3F000000  0.75->0x3F400000
+    #             1.0->0x3F800000  1.5->0x3FC00000  2.5->0x40200000  3.5->0x40600000
+    Data: [
+      # --- row 0 (top, NDC +y, DomV = 0.75) ---
+      # idx0: col0 -> patch0, (u,v)=(0.25,0.75), pos=(0.5,0.5,0,1)
+      0x0, 0x3E800000, 0x3F400000, 0x3F000000, 0x3F000000, 0x0, 0x3F800000,
+      # idx1: col1 -> patch0, (u,v)=(0.75,0.75), pos=(1.5,0.5,0,1)
+      0x0, 0x3F400000, 0x3F400000, 0x3FC00000, 0x3F000000, 0x0, 0x3F800000,
+      # idx2: col2 -> patch1, (u,v)=(0.25,0.75), pos=(2.5,0.5,0,1)
+      0x1, 0x3E800000, 0x3F400000, 0x40200000, 0x3F000000, 0x0, 0x3F800000,
+      # idx3: col3 -> patch1, (u,v)=(0.75,0.75), pos=(3.5,0.5,0,1)
+      0x1, 0x3F400000, 0x3F400000, 0x40600000, 0x3F000000, 0x0, 0x3F800000,
+      # --- row 1 (bottom, NDC -y, DomV = 0.25) ---
+      # idx4: col0 -> patch0, (u,v)=(0.25,0.25), pos=(0.5,1.5,0,1)
+      0x0, 0x3E800000, 0x3E800000, 0x3F000000, 0x3FC00000, 0x0, 0x3F800000,
+      # idx5: col1 -> patch0, (u,v)=(0.75,0.25), pos=(1.5,1.5,0,1)
+      0x0, 0x3F400000, 0x3E800000, 0x3FC00000, 0x3FC00000, 0x0, 0x3F800000,
+      # idx6: col2 -> patch1, (u,v)=(0.25,0.25), pos=(2.5,1.5,0,1)
+      0x1, 0x3E800000, 0x3E800000, 0x40200000, 0x3FC00000, 0x0, 0x3F800000,
+      # idx7: col3 -> patch1, (u,v)=(0.75,0.25), pos=(3.5,1.5,0,1)
+      0x1, 0x3F400000, 0x3E800000, 0x40600000, 0x3FC00000, 0x0, 0x3F800000,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  Topology: PatchList
+  PatchControlPoints: 4
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: SystemValues
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# UNSUPPORTED: Metal
+
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o   %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o %t/domain.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o

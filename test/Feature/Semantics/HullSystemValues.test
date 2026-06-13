@@ -1,0 +1,250 @@
+# Bundled hull-shader (HS) system-value test. Exercises:
+#   * SV_PrimitiveID         - HS input, in BOTH the patch-constant function and
+#                              the main control-point function (must agree).
+#   * SV_OutputControlPointID - HS main input; each of the 3 invocations must see
+#                              its own index 0,1,2.
+#   * SV_TessFactor / SV_InsideTessFactor - set in HS, read back in DS (round-trip).
+#
+# SV_PrimitiveID: https://github.com/llvm/wg-hlsl/issues/160
+# SV_OutputControlPointID / SV_TessFactor: https://github.com/llvm/wg-hlsl/issues/141
+#
+# The HS system values cannot be read back directly, so they are smuggled
+# downstream: HS main stashes (SV_PrimitiveID, SV_OutputControlPointID) into each
+# output control point; the patch-constant function stashes its SV_PrimitiveID
+# into a user patch-constant field. The DS reads the whole OutputPatch plus the
+# patch constants and forwards everything (flat) to the PS, which records it.
+#
+# Geometry: two independent triangle patches (6 control points,
+# PatchControlPoints = 3), tess factor 1 (no subdivision -> each patch emits its
+# original triangle). The input assembler hands each patch a distinct
+# SV_PrimitiveID (0, 1). Each triangle is a tall sliver that covers exactly one
+# pixel center of a 2x1 render target:
+#
+#     patch 0 -> pixel 0 (NDC x center -0.5) -> idx 0
+#     patch 1 -> pixel 1 (NDC x center +0.5) -> idx 1
+
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : POSITION;
+};
+
+VSOutput main(float4 position : POSITION) {
+  VSOutput o;
+  o.position = position;
+  return o;
+}
+
+#--- hull.hlsl
+struct HSInput {
+  float4 position : POSITION;
+};
+
+struct HSOutput {
+  float4 position : POSITION;
+  uint hsPrimID : HSPRIMID;
+  uint hsCpid : HSCPID;
+};
+
+struct HSPatchConstants {
+  float Edges[3] : SV_TessFactor;
+  float Inside : SV_InsideTessFactor;
+  // SV_PrimitiveID observed in the patch-constant function
+  uint pcPrimID : PCPRIMID;
+};
+
+HSPatchConstants PatchConstants(InputPatch<HSInput, 3> patch,
+                                uint patchID : SV_PrimitiveID) {
+  HSPatchConstants c;
+  c.Edges[0] = 1.0;
+  c.Edges[1] = 1.0;
+  c.Edges[2] = 1.0;
+  c.Inside = 1.0;
+  c.pcPrimID = patchID;
+  return c;
+}
+
+[domain("tri")]
+[partitioning("integer")]
+[outputtopology("triangle_cw")]
+[outputcontrolpoints(3)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 3> patch, uint i : SV_OutputControlPointID,
+              uint patchID : SV_PrimitiveID) {
+  HSOutput o;
+  o.position = patch[i].position;
+  o.hsPrimID = patchID;
+  o.hsCpid = i;
+  return o;
+}
+
+#--- domain.hlsl
+struct DSInput {
+  float4 position : POSITION;
+  uint hsPrimID : HSPRIMID;
+  uint hsCpid : HSCPID;
+};
+
+struct DSPatchConstants {
+  float Edges[3] : SV_TessFactor;
+  float Inside : SV_InsideTessFactor;
+  uint pcPrimID : PCPRIMID;
+};
+
+struct DSOutput {
+  float4 position : SV_POSITION;
+  nointerpolation uint pcPrimID : PCPRIMID;
+  nointerpolation uint hsMainPrimID : HSPRIMID;
+  nointerpolation uint cpid0 : CPID0;
+  nointerpolation uint cpid1 : CPID1;
+  nointerpolation uint cpid2 : CPID2;
+  nointerpolation float edgeFactor : EDGEF;
+  nointerpolation float insideFactor : INSIDEF;
+};
+
+// Factor-1 tri tessellation reproduces the control triangle exactly (the three
+// generated vertices sit at barycentric (1,0,0),(0,1,0),(0,0,1)).
+[domain("tri")]
+DSOutput main(DSPatchConstants constants, float3 bary : SV_DomainLocation,
+              const OutputPatch<DSInput, 3> patch) {
+  DSOutput o;
+  o.position = bary.x * patch[0].position + bary.y * patch[1].position +
+               bary.z * patch[2].position;
+  o.pcPrimID = constants.pcPrimID;
+  o.hsMainPrimID = patch[0].hsPrimID;
+  o.cpid0 = patch[0].hsCpid;
+  o.cpid1 = patch[1].hsCpid;
+  o.cpid2 = patch[2].hsCpid;
+  o.edgeFactor = constants.Edges[0];
+  o.insideFactor = constants.Inside;
+  return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+  nointerpolation uint pcPrimID : PCPRIMID;
+  nointerpolation uint hsMainPrimID : HSPRIMID;
+  nointerpolation uint cpid0 : CPID0;
+  nointerpolation uint cpid1 : CPID1;
+  nointerpolation uint cpid2 : CPID2;
+  nointerpolation float edgeFactor : EDGEF;
+  nointerpolation float insideFactor : INSIDEF;
+};
+
+struct Record {
+  uint PCPrimID;
+  uint HSMainPrimID;
+  uint Cpid0;
+  uint Cpid1;
+  uint Cpid2;
+  float EdgeFactor;
+  float InsideFactor;
+};
+
+RWStructuredBuffer<Record> Output : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+  uint idx = (uint)input.position.x;
+
+  Record r;
+  r.PCPrimID = input.pcPrimID;
+  r.HSMainPrimID = input.hsMainPrimID;
+  r.Cpid0 = input.cpid0;
+  r.Cpid1 = input.cpid1;
+  r.Cpid2 = input.cpid2;
+  r.EdgeFactor = input.edgeFactor;
+  r.InsideFactor = input.insideFactor;
+  Output[idx] = r;
+
+  return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Two triangle patches; each a tall sliver around one pixel center.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8 # float2 position
+    Data: [ # patch 0 -> pixel 0 (center NDC x = -0.5)
+            -0.9, -0.9,
+            -0.1, -0.9,
+            -0.5,  0.9,
+            # patch 1 -> pixel 1 (center NDC x = +0.5)
+             0.1, -0.9,
+             0.9, -0.9,
+             0.5,  0.9 ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 32 # 2x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+  - Name: ResultBuffer
+    Format: Hex32
+    Stride: 28 # sizeof(Record): 5 uint + 2 float
+    FillSize: 56 # 2 records * 28 bytes
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Hex32
+    Stride: 28
+    # Per-pixel expected records:
+    #   PCPrimID, HSMainPrimID, Cpid0, Cpid1, Cpid2, EdgeFactor, InsideFactor
+    # 1.0 -> 0x3F800000
+    Data: [
+      # idx0: patch 0
+      0x0, 0x0, 0x0, 0x1, 0x2, 0x3F800000, 0x3F800000,
+      # idx1: patch 1
+      0x1, 0x1, 0x0, 0x1, 0x2, 0x3F800000, 0x3F800000,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  Topology: PatchList
+  PatchControlPoints: 3
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: SystemValues
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# Metal has tessellation but no Hull/Domain stages: HS is a compute kernel
+# writing per-patch factors, DS is a post-tessellation vertex function tagged
+# [[patch(...)]]. Mapping HLSL HS/DS onto that isn't wired up, so skip Metal.
+# UNSUPPORTED: Metal
+
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o   %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o %t/domain.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o
