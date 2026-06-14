@@ -1509,9 +1509,7 @@ class MTLDevice : public offloadtest::Device {
     IS.RenderTarget = std::move(*TexOrErr);
 
     // Create a readback buffer for copying render target data to the CPU.
-    BufferCreateDesc BufDesc = {};
-    BufDesc.Location = MemoryLocation::GpuToCpu;
-    BufDesc.Usage = BufferUsage::Storage;
+    BufferCreateDesc BufDesc = BufferCreateDesc::readbackBuffer();
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -2522,8 +2520,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
           Native.size() *
           sizeof(MTL::AccelerationStructureUserIDInstanceDescriptor);
 
-      const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
-                                        BufferUsage::Storage};
+      const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
       auto InstBufOrErr = offloadtest::createBufferWithData(
           *CB->Dev, "TLAS-Instances", UploadDesc, Native.data(), InstByteSize,
           nullptr, nullptr);
@@ -2545,8 +2542,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       ScratchSize = TLAS->AS->getSizes().ScratchDataSizeInBytes;
     }
 
-    const BufferCreateDesc ScratchDesc{MemoryLocation::GpuOnly,
-                                       BufferUsage::Storage};
+    const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
     auto ScratchOrErr =
         CB->Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
     if (!ScratchOrErr) {

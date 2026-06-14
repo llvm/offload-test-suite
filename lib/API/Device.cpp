@@ -104,12 +104,7 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
     return llvm::Error::success();
 
-  // `BufferUsage::Storage` is the usage to pick for acceleration structure
-  // build inputs. Backends widen it with the native AS-input flags
-  // (e.g. Vulkan `SHADER_DEVICE_ADDRESS` + `ACCEL_BUILD_INPUT_READ_ONLY`)
-  // implicitly when ray tracing is supported.
-  const BufferCreateDesc UploadDesc{MemoryLocation::CpuToGpu,
-                                    BufferUsage::Storage};
+  const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
 
   // Stash the request structs while we build them up — the encoder reads
   // them through pointers stored in ASBuildItem.
