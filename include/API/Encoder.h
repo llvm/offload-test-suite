@@ -98,6 +98,9 @@ public:
                                          Buffer &Dst, size_t DstOffset,
                                          size_t Size) = 0;
 
+  /// Copy a buffer into a texture. The caller is expected to set up correct
+  /// striding using the stride acquired from
+  /// `Device::getTextureUploadRowStrideInBytes`.
   virtual llvm::Error copyBufferToTexture(Buffer &Src, Texture &Dst) = 0;
 
   /// Build a batch of acceleration structures in a single barrier slot. All
