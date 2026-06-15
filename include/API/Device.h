@@ -257,6 +257,11 @@ public:
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
 
+  // The row stride required when uploading data to (or reading back from) a
+  // texture created with the given description, via an upload buffer.
+  virtual uint32_t
+  getTextureUploadRowStrideInBytes(const TextureCreateDesc &Desc) const = 0;
+
   virtual llvm::Expected<std::unique_ptr<RenderPass>>
   createRenderPass(const RenderPassDesc &Desc) = 0;
 
@@ -323,6 +328,12 @@ createBufferWithData(Device &Dev, std::string Name,
                      const BufferCreateDesc &Desc, const void *Data,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
+
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
+createTextureWithData(Device &Dev, std::string Name,
+                      const TextureCreateDesc &Desc, const void *Data,
+                      size_t SizeInBytes, ComputeEncoder *Encoder,
+                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
 // TLAS handles come in pre-allocated because the caller's binding loop
 // stamps the AS pointer into descriptor bundles before this helper runs;
