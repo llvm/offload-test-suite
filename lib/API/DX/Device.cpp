@@ -2406,20 +2406,16 @@ public:
                 std::errc::value_too_large,
                 "Root descriptor cannot refer to resource arrays.");
 
-          D3D12_GPU_VIRTUAL_ADDRESS VirtualAddress = {};
-          if (RootDescIt->second.back().Buffer) {
-            const auto &BufferDX =
-                llvm::cast<DXBuffer>(*RootDescIt->second.back().Buffer);
-            VirtualAddress = BufferDX.Buffer->GetGPUVirtualAddress();
-          } else if (RootDescIt->second.back().Texture) {
-            const auto &TextureDX =
-                llvm::cast<DXTexture>(*RootDescIt->second.back().Texture);
-            VirtualAddress = TextureDX.Resource->GetGPUVirtualAddress();
-          } else {
-            assert(false &&
-                   "Resource is a buffer nor texture. Must be one of the two.");
+          if (!RootDescIt->second.back().Buffer) {
+            return llvm::createStringError(
+                std::errc::value_too_large,
+                "Root descriptor can only refer to buffers.");
           }
 
+          const auto &BufferDX =
+              llvm::cast<DXBuffer>(*RootDescIt->second.back().Buffer);
+          const D3D12_GPU_VIRTUAL_ADDRESS VirtualAddress =
+              BufferDX.Buffer->GetGPUVirtualAddress();
           switch (getDescriptorKind(RootDescIt->first->Kind)) {
           case DescriptorKind::SRV:
             IS.CB->CmdList->SetComputeRootShaderResourceView(RootParamIndex++,
