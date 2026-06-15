@@ -3068,16 +3068,17 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
           }
           TD->setOpaque(T.Opaque);
           if (T.Transform) {
-            MTL::Buffer *XformBuf = MTLDev->newBuffer(
-                T.Transform->data(), T.Transform->size() * sizeof(float),
-                MTL::ResourceStorageModeShared);
-            if (!XformBuf)
-              return llvm::createStringError(
-                  std::errc::not_enough_memory,
-                  "Failed to allocate BLAS transform buffer.");
-            TD->setTransformationMatrixBuffer(XformBuf);
+            const BufferCreateDesc XformDesc{MemoryLocation::CpuToGpu,
+                                             BufferUsage::Storage};
+            auto XformBufOrErr = offloadtest::createBufferWithData(
+                *CB->Dev, "BLAS-Transform", XformDesc, T.Transform->data(),
+                T.Transform->size() * sizeof(float), nullptr, nullptr);
+            if (!XformBufOrErr)
+              return XformBufOrErr.takeError();
+            auto *MTLXform = llvm::cast<MTLBuffer>(XformBufOrErr->get());
+            TD->setTransformationMatrixBuffer(MTLXform->Buf);
             TD->setTransformationMatrixLayout(MTL::MatrixLayoutRowMajor);
-            CB->KeepAliveMTLBuffers.push_back(XformBuf);
+            CB->KeepAliveOwned.push_back(std::move(*XformBufOrErr));
           }
           Geoms.push_back(TD);
         }
