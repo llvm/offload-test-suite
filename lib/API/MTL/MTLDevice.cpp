@@ -1381,7 +1381,11 @@ class MTLDevice : public offloadtest::Device {
           // `InstanceContributionToHitGroupIndex`).
           const uint32_t InstCount =
               static_cast<uint32_t>(R.first->TLASPtr->Instances.size());
-          llvm::SmallVector<uint32_t> Contributions(InstCount, 0);
+          llvm::SmallVector<uint32_t> Contributions;
+          Contributions.reserve(InstCount);
+          for (const auto &Inst : R.first->TLASPtr->Instances)
+            Contributions.push_back(Inst.InstanceContributionToHitGroupIndex &
+                                    0xFFFFFFu);
           const BufferCreateDesc Desc{MemoryLocation::GpuToCpu,
                                       BufferUsage::Storage};
           auto ContribBufOrErr = createBufferWithData(

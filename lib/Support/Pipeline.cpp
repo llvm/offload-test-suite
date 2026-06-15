@@ -668,6 +668,8 @@ void MappingTraits<offloadtest::InstanceDesc>::mapping(
   uint32_t Mask = D.InstanceMask;
   I.mapOptional("InstanceMask", Mask, 255u);
   D.InstanceMask = static_cast<uint8_t>(Mask);
+  I.mapOptional("InstanceContributionToHitGroupIndex",
+                D.InstanceContributionToHitGroupIndex, 0u);
 }
 
 void MappingTraits<offloadtest::TLASDesc>::mapping(IO &I,
