@@ -437,8 +437,8 @@ class Hashes(object):
                 f'offload_hash={self.offload_hash})')
 
     def __str__(self):
-        return ', '.join([f'{self.project}: {self.project_hash or '-'}',
-                          f'test-suite: {self.offload_hash or '-'}'])
+        return ', '.join([f"{self.project}: {self.project_hash or '-'}",
+                          f"test-suite: {self.offload_hash or '-'}"])
 
 
 def get_test_result(databaseId, project, test_path):
@@ -485,7 +485,7 @@ class ResultPrinter:
         print(f' - {info}')
 
     def print_commit(self, project, commit):
-        print(f' - {project}: {commit or 'unknown'}')
+        print(f" - {project}: {commit or 'unknown'}")
 
     def print_commit_range(self, project, success_hash, failed_hash):
         print(f' - {project} range: {success_hash[:12]}..{failed_hash[:12]}')
