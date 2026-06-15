@@ -1875,10 +1875,8 @@ public:
   }
 
   llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
-    if (P.getDescriptorCount() == 0) {
-      printf("P.getDescriptorCount() == 0\n");
+    if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
-    }
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         P.getDescriptorCountWithFlattenedArrays(),
