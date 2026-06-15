@@ -333,6 +333,7 @@ public:
 class DXAccelerationStructure : public offloadtest::AccelerationStructure {
 public:
   ComPtr<ID3D12Resource> Resource;
+  D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle;
 
   DXAccelerationStructure(ComPtr<ID3D12Resource> Resource,
                           const AccelerationStructureSizes &Sizes)
@@ -723,7 +724,6 @@ public:
 
     return llvm::Error::success();
   }
-
 
   llvm::Error copyCounterToBuffer(offloadtest::Buffer &Src,
                                   offloadtest::Buffer &Dst) override {
@@ -2041,7 +2041,31 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
   createTLAS(const AccelerationStructureSizes &Sizes) override {
-    return allocateAS(Sizes, "TLAS");
+    auto TLASOrErr = allocateAS(Sizes, "TLAS");
+    if (!TLASOrErr)
+      return TLASOrErr.takeError();
+    auto TLAS = std::move(*TLASOrErr);
+    DXAccelerationStructure &TLASDX =
+        llvm::cast<DXAccelerationStructure>(*TLAS.get());
+
+    auto SRVHandleOrErr = CSUAllocator.allocate();
+    if (!SRVHandleOrErr)
+      return SRVHandleOrErr.takeError();
+    TLASDX.SRVHandle = *SRVHandleOrErr;
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+    SRVDesc.Format = DXGI_FORMAT_UNKNOWN;
+    SRVDesc.ViewDimension =
+        D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+    SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    SRVDesc.RaytracingAccelerationStructure.Location =
+        TLASDX.getGPUVirtualAddress();
+
+    // AS SRVs are created with a null resource; the AS lives in the
+    // buffer referenced by Location.
+    Device->CreateShaderResourceView(nullptr, &SRVDesc, TLASDX.SRVHandle);
+
+    return TLAS;
   }
 
   static UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
@@ -2287,7 +2311,6 @@ public:
                 DescriptorHandle = BufferDX.CBVHandle;
                 break;
               default:
-                assert(false && "Invalid DescriptorKind for a Buffer.");
                 llvm_unreachable("Invalid DescriptorKind for a Buffer.");
                 break;
               }
@@ -2306,13 +2329,14 @@ public:
                 DescriptorHandle = TextureDX.UAVHandle;
                 break;
               default:
-                assert(false && "Invalid DescriptorKind for a Texture.");
                 llvm_unreachable("Invalid DescriptorKind for a Texture.");
                 break;
               }
+            } else if (Set.AS != nullptr) {
+              const DXAccelerationStructure &AccelerationStructureDX =
+                  llvm::cast<DXAccelerationStructure>(*Set.AS);
+              DescriptorHandle = AccelerationStructureDX.SRVHandle;
             } else {
-              assert(false && "Resource was a texture nor buffer. Samplers are "
-                              "unsupported");
               llvm_unreachable("Resource was a texture nor buffer. Samplers "
                                "are unsupported");
             }
