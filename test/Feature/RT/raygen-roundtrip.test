@@ -50,7 +50,7 @@ Buffers:
   - Name: Expected
     Format: UInt32
     Stride: 4
-    Data: [ 48879 ]
+    Data: [ 0xBEEF ]
 AccelerationStructures:
   BLAS:
     - Name: TriangleBLAS
