@@ -10,7 +10,7 @@
 #     patch 0  -> NDC x in [-1, 0]  -> columns 0,1
 #     patch 1  -> NDC x in [ 0, 1]  -> columns 2,3
 #
-# With integer partitioning and all tess factors = 2, each patch is subdivided
+# With integer partitioning and all tessellation factors = 2, each patch is subdivided
 # into a 2x2 grid of sub-quads. The sub-quad seams fall at domain (u, v) = 0.5,
 # i.e. exactly on a pixel *boundary*, so every pixel center maps to a clean
 # domain coordinate of 0.25 or 0.75 on each axis -- identical to the mapping
@@ -182,6 +182,8 @@ Buffers:
     FillValue: 0
   - Name: ResultBuffer_Expected
     Format: Hex32
+    # Each record mixes a uint (PrimID) with floats, and the YAML buffer format
+    # is uniform per buffer, so the values are written as raw 32-bit hex.
     Stride: 28
     # Per-pixel expected records: PrimID, DomU, DomV, PosX, PosY, PosZ, PosW
     # Float bits: 0.0->0x0  0.25->0x3E800000  0.5->0x3F000000  0.75->0x3F400000
@@ -233,6 +235,9 @@ Results:
 ...
 #--- end
 
+# Metal has tessellation but no Hull/Domain stages: HS is a compute kernel
+# writing per-patch factors, DS is a post-tessellation vertex function tagged
+# [[patch(...)]]. Mapping HLSL HS/DS onto that isn't wired up, so skip Metal.
 # UNSUPPORTED: Metal
 
 # XFAIL: Clang

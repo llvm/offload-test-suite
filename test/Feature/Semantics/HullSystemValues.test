@@ -15,7 +15,7 @@
 # patch constants and forwards everything (flat) to the PS, which records it.
 #
 # Geometry: two independent triangle patches (6 control points,
-# PatchControlPoints = 3), tess factor 1 (no subdivision -> each patch emits its
+# PatchControlPoints = 3), tessellation factor 1 (no subdivision -> each patch emits its
 # original triangle). The input assembler hands each patch a distinct
 # SV_PrimitiveID (0, 1). Each triangle is a tall sliver that covers exactly one
 # pixel center of a 2x1 render target:
