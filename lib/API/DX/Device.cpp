@@ -1081,14 +1081,13 @@ private:
   struct ResourceSet {
     std::unique_ptr<Buffer> UploadBuffer; // Keep-alive
 
-    // TODO(manon): use std::variant instead?
     std::unique_ptr<Buffer> Buffer;
     std::unique_ptr<Texture> Texture;
     std::unique_ptr<offloadtest::Buffer> Readback;
     std::unique_ptr<offloadtest::Buffer> CounterReadback;
 
     // AS-only; mutually exclusive with the buffer/texture fields above.
-    DXAccelerationStructure *AS = nullptr;
+    AccelerationStructure *AS = nullptr;
 
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Buffer> Buffer,
@@ -1102,7 +1101,7 @@ private:
                 std::unique_ptr<offloadtest::Buffer> Readback)
         : UploadBuffer(std::move(UploadBuffer)), Texture(std::move(Texture)),
           Readback(std::move(Readback)) {}
-    explicit ResourceSet(DXAccelerationStructure *AS) : AS(AS) {}
+    explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
 
     ResourceSet(const ResourceSet &) = delete;
     ResourceSet &operator=(const ResourceSet &) = delete;
@@ -2253,8 +2252,7 @@ public:
         auto ASOrErr = createAS(R);
         if (!ASOrErr)
           return ASOrErr.takeError();
-        ResBundle.emplace_back(
-            llvm::cast<DXAccelerationStructure>(ASOrErr->get()));
+        ResBundle.emplace_back(ASOrErr->get());
         auto Inserted =
             IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
         assert(Inserted.second && "TLAS bound to multiple resources NYI");
