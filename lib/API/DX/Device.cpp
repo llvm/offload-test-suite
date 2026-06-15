@@ -1173,9 +1173,7 @@ public:
   DescriptorAllocator CSUAllocator;
 
   struct ResourceSet {
-    std::unique_ptr<Buffer> UploadBuffer; // Keep-alive
     std::unique_ptr<MemoryHeap> BackingMemory;
-
     std::unique_ptr<Buffer> Buffer;
     std::unique_ptr<Texture> Texture;
     std::unique_ptr<offloadtest::Buffer> Readback;
@@ -1184,23 +1182,17 @@ public:
     // AS-only; mutually exclusive with the buffer/texture fields above.
     AccelerationStructure *AS = nullptr;
 
-    ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
-                std::unique_ptr<offloadtest::Buffer> Buffer,
+    ResourceSet(std::unique_ptr<offloadtest::Buffer> Buffer,
                 std::unique_ptr<MemoryHeap> BackingMemory,
                 std::unique_ptr<offloadtest::Buffer> Readback,
                 std::unique_ptr<offloadtest::Buffer> CounterReadback)
-        : UploadBuffer(std::move(UploadBuffer)),
-          BackingMemory(std::move(BackingMemory)), Buffer(std::move(Buffer)),
-
+        : BackingMemory(std::move(BackingMemory)), Buffer(std::move(Buffer)),
           Readback(std::move(Readback)),
           CounterReadback(std::move(CounterReadback)) {}
-    ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
-                std::unique_ptr<offloadtest::Texture> Texture,
+    ResourceSet(std::unique_ptr<offloadtest::Texture> Texture,
                 std::unique_ptr<MemoryHeap> BackingMemory,
                 std::unique_ptr<offloadtest::Buffer> Readback)
-        : UploadBuffer(std::move(UploadBuffer)),
-          BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
-
+        : BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
           Readback(std::move(Readback)) {}
     explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
 
@@ -1208,14 +1200,11 @@ public:
     ResourceSet &operator=(const ResourceSet &) = delete;
 
     ResourceSet(ResourceSet &&A)
-        : UploadBuffer(std::move(A.UploadBuffer)),
-          BackingMemory(std::move(A.BackingMemory)),
-          Buffer(std::move(A.Buffer)),
-
-          Texture(std::move(A.Texture)), Readback(std::move(A.Readback)),
+        : BackingMemory(std::move(A.BackingMemory)),
+          Buffer(std::move(A.Buffer)), Texture(std::move(A.Texture)),
+          Readback(std::move(A.Readback)),
           CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
     ResourceSet &operator=(ResourceSet &&A) {
-      UploadBuffer = std::move(A.UploadBuffer);
       BackingMemory = std::move(A.BackingMemory);
       Buffer = std::move(A.Buffer);
       Texture = std::move(A.Texture);
@@ -1246,6 +1235,8 @@ public:
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
+
+    llvm::SmallVector<std::unique_ptr<Buffer>> KeepAliveBuffers;
 
     llvm::SmallVector<DescriptorTable> DescTables;
     llvm::SmallVector<ResourcePair> RootResources;
@@ -2282,8 +2273,8 @@ public:
             }
           }
 
-          ResourceSet RSet(std::move(UploadBuffer), std::move(Buffer),
-                           std::move(BackingMemoryHeap),
+          IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
+          ResourceSet RSet(std::move(Buffer), std::move(BackingMemoryHeap),
                            std::move(ReadbackBuffer),
                            std::move(CounterReadbackBuffer));
           ResBundle.push_back(std::move(RSet));
@@ -2347,8 +2338,8 @@ public:
             ReadbackBuffer = std::move(*ReadbackOrErr);
           }
 
-          ResourceSet RSet(std::move(UploadBuffer), std::move(Texture),
-                           std::move(BackingMemoryHeap),
+          IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
+          ResourceSet RSet(std::move(Texture), std::move(BackingMemoryHeap),
                            std::move(ReadbackBuffer));
           ResBundle.push_back(std::move(RSet));
         }
