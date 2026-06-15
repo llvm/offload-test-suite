@@ -1414,7 +1414,11 @@ class MTLDevice : public offloadtest::Device {
             Contributions.push_back(Inst.InstanceContributionToHitGroupIndex &
                                     0xFFFFFFu);
           const BufferCreateDesc Desc{MemoryLocation::GpuToCpu,
-                                      BufferUsage::Storage};
+                                      MemoryBacking::Automatic,
+                                      BufferUsage::Storage,
+                                      BufferShaderAccessType::Raw,
+                                      {},
+                                      false};
           auto ContribBufOrErr = createBufferWithData(
               *IS.CB->Dev, "AS-Contributions", Desc, Contributions.data(),
               InstCount * sizeof(uint32_t), nullptr, nullptr);
