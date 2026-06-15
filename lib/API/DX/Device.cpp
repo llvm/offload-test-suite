@@ -282,30 +282,6 @@ public:
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
-  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
-    if (Desc.Location == MemoryLocation::GpuOnly)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Cannot query mapped row pitch of a GpuOnly texture.");
-
-    const D3D12_RESOURCE_DESC ResourceDesc = Resource->GetDesc();
-    if (ResourceDesc.Layout != D3D12_TEXTURE_LAYOUT_ROW_MAJOR)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Mapped row pitch is only defined for row-major textures.");
-
-    ComPtr<ID3D12Device> Device;
-    if (auto Err = HR::toError(Resource->GetDevice(IID_PPV_ARGS(&Device)),
-                               "Failed to get device from texture resource."))
-      return std::move(Err);
-
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint = {};
-    Device->GetCopyableFootprints(&ResourceDesc, /*FirstSubresource*/ 0,
-                                  /*NumSubresources*/ 1, /*BaseOffset*/ 0,
-                                  &Footprint, nullptr, nullptr, nullptr);
-    return Footprint.Footprint.RowPitch;
-  }
-
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::DirectX;
   }

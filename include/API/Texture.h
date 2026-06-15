@@ -159,12 +159,6 @@ public:
   GPUAPI getAPI() const { return API; }
   virtual const TextureCreateDesc &getDesc() const = 0;
 
-  // The byte stride between consecutive rows when the texture is mapped for
-  // direct host access. Errors if the texture is not host-visible, or if its
-  // memory layout is not linear (the mapped bytes have no well-defined row
-  // stride otherwise).
-  virtual llvm::Expected<uint32_t> getMappedRowPitchInBytes() const = 0;
-
 protected:
   explicit Texture(GPUAPI API) : API(API) {}
 };

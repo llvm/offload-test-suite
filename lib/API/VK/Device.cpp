@@ -546,25 +546,6 @@ public:
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
-  llvm::Expected<uint32_t> getMappedRowPitchInBytes() const override {
-    if (Desc.Location == MemoryLocation::GpuOnly)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Cannot query mapped row pitch of a GpuOnly texture.");
-    if (Tiling != VK_IMAGE_TILING_LINEAR)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Mapped row pitch is only defined for linear-tiled textures.");
-
-    VkImageSubresource Sub = {};
-    Sub.aspectMask = FullRange.aspectMask;
-    Sub.mipLevel = 0;
-    Sub.arrayLayer = 0;
-    VkSubresourceLayout Layout = {};
-    vkGetImageSubresourceLayout(Dev, Image, &Sub, &Layout);
-    return static_cast<uint32_t>(Layout.rowPitch);
-  }
-
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Vulkan;
   }
