@@ -45,7 +45,7 @@ enum class StoreAction {
   DontCare, ///< Contents may be discarded after the pass.
 };
 
-enum class PrimitiveTopology { TriangleList, PointList, PatchList };
+enum class PrimitiveTopology { TriangleList, PointList, PatchList, LineList };
 
 } // namespace offloadtest
 

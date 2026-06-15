@@ -112,6 +112,8 @@ getDXPrimitiveTopologyType(PrimitiveTopology Topology) {
     return D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT;
   case PrimitiveTopology::PatchList:
     return D3D12_PRIMITIVE_TOPOLOGY_TYPE_PATCH;
+  case PrimitiveTopology::LineList:
+    return D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
@@ -131,6 +133,8 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
     return static_cast<D3D_PRIMITIVE_TOPOLOGY>(
         D3D_PRIMITIVE_TOPOLOGY_1_CONTROL_POINT_PATCHLIST +
         (*PatchControlPoints - 1));
+  case PrimitiveTopology::LineList:
+    return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }

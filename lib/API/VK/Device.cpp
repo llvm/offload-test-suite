@@ -248,6 +248,8 @@ static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
   case PrimitiveTopology::PatchList:
     return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+  case PrimitiveTopology::LineList:
+    return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }

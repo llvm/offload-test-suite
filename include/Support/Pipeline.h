@@ -1026,6 +1026,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
     ENUM_CASE(TriangleList);
     ENUM_CASE(PointList);
     ENUM_CASE(PatchList);
+    ENUM_CASE(LineList);
 #undef ENUM_CASE
   }
 };
