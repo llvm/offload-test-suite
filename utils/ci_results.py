@@ -111,10 +111,10 @@ def get_argument_parser(prog_name):
         help='"new" state results, separated by `|` (default: %(default)s)',
     )
     parser_range.add_argument(
-        "--old-runid", type=int, help="Run ID to start searching from"
+        "--old-runid", type=int, help="Run ID to start the bisection range"
     )
     parser_range.add_argument(
-        "--new-runid", type=int, help="Run ID to search up to"
+        "--new-runid", type=int, help="Run ID to end the bisection range"
     )
     parser_range.set_defaults(
         func=lambda args: find_failure_range(
@@ -389,9 +389,7 @@ def find_failure_range(
             new_hash = git_hash
             start_index = current_index
         else:
-            raise CIResultsError(
-                f"Unhandled result in run {run}: {result}"
-            )
+            raise CIResultsError(f"Unhandled result in run {run}: {result}")
 
     if end_index != start_index + 1:
         raise CIResultsError(
