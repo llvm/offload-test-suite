@@ -9,7 +9,7 @@
 //   * RWTexture2D<uint>[coord]             (free function on typed UAV)
 //   * RWByteAddressBuffer::InterlockedMax  (method, 2-arg and 3-arg)
 //
-// For each destination, 256 threads of a single threadgroup atomically take
+// For each destination, a set of 256 threads atomically take
 // the maximum of their per-thread proposal and a single accumulator slot.
 
 RWStructuredBuffer<uint> SBufU : register(u0);

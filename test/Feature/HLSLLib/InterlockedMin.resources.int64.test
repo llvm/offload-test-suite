@@ -12,7 +12,7 @@
 // "AtomicInt64OnTypedResource" capability and are intentionally not
 // covered here, to keep this test portable across implementations.
 //
-// For each destination, 256 threads of a single threadgroup atomically take
+// For each destination, a set of 256 threads atomically take
 // the minimum of their per-thread proposal and a single accumulator slot.
 
 RWStructuredBuffer<uint64_t> SBufU : register(u0);

@@ -17,7 +17,7 @@
 //   * RWBuffer<uint64_t>[i]  (free function, 2-arg)
 //   * RWBuffer<int64_t>[i]   (free function, 3-arg, signed)
 //
-// 256 threads of a single threadgroup atomically take the minimum of their
+// A set of 256 threads atomically take the minimum of their
 // per-thread proposal and a single accumulator slot.
 
 RWBuffer<uint64_t> TBufU : register(u0);

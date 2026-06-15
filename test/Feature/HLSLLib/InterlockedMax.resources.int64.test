@@ -12,7 +12,7 @@
 // "AtomicInt64OnTypedResource" capability and are intentionally not
 // covered here, to keep this test portable across implementations.
 //
-// For each destination, 256 threads of a single threadgroup atomically take
+// For each destination, a set of 256 threads atomically take
 // the maximum of their per-thread proposal and a single accumulator slot.
 // Every proposal sets bits in the upper 32 bits (0x100000000 + tid), so the
 // operation genuinely exercises all 64 bits rather than degenerating to a
