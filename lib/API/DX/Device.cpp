@@ -143,7 +143,7 @@ static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
   return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
 }
 
-static BufferUsage BufferUsageFromResourceKind(ResourceKind Kind) {
+static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   // Determine Buffer Usage
   switch (Kind) {
   case ResourceKind::Buffer:
@@ -162,7 +162,7 @@ static BufferUsage BufferUsageFromResourceKind(ResourceKind Kind) {
   }
 }
 
-static BufferShaderAccessType BufferShaderAccessTypeFromResourceKind(
+static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
     const Resource &Resource, BufferShaderAccessTypeParams &OutParams) {
   // Determine Buffer Access Type
   switch (Resource.Kind) {
@@ -2070,8 +2070,8 @@ public:
         BufferCreateDesc CreateDesc = {};
         CreateDesc.Location = MemoryLocation::GpuOnly;
         CreateDesc.Backing = MemoryBacking::Automatic;
-        CreateDesc.Usage = BufferUsageFromResourceKind(R.Kind);
-        CreateDesc.AccessType = BufferShaderAccessTypeFromResourceKind(
+        CreateDesc.Usage = bufferUsageFromResourceKind(R.Kind);
+        CreateDesc.AccessType = bufferShaderAccessTypeFromResourceKind(
             R, CreateDesc.AccessTypeParams);
         CreateDesc.HasCounter = R.HasCounter;
 
