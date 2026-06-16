@@ -119,10 +119,6 @@ static DXGI_FORMAT getDXFormat(DataFormat Format, int Channels) {
     if (Channels == 2)
       return DXGI_FORMAT_R32G32B32A32_UINT;
     llvm_unreachable("Unsupported channel count for 64-bit format");
-  case DataFormat::Depth32:
-    if (Channels != 1)
-      llvm_unreachable("Depth32 format only supports a single channel.");
-    return DXGI_FORMAT_R32_FLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -982,7 +978,6 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
-    // Populated when Bindings.DepthBuffer is set, for SV_Depth verification.
     std::unique_ptr<offloadtest::Buffer> DSReadback;
     std::unique_ptr<offloadtest::Buffer> VB;
 
@@ -2333,7 +2328,7 @@ public:
     if (P.Bindings.DepthBuffer.Ptr) {
       const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
       auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(
-          *this, DSBuf, P.Bindings.DepthBuffer.Fmt);
+          *this, DSBuf);
       if (!TexOrErr)
         return TexOrErr.takeError();
       IS.DepthStencil = std::move(*TexOrErr);

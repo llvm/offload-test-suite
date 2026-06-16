@@ -80,13 +80,6 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::RGBA32Float;
     }
     break;
-  case DataFormat::Depth32:
-    // D32FloatS8Uint is not expressible as DataFormat + Channels because the
-    // stencil component is uint8, not a second Depth32 channel. Once the
-    // pipeline uses Format directly, this limitation goes away.
-    if (Channels == 1)
-      return Format::D32Float;
-    break;
   // No Format mapping for these DataFormats.
   case DataFormat::Hex8:
   case DataFormat::Hex16:
@@ -156,13 +149,11 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
   return llvm::Error::success();
 }
 
-// Validates that a TextureCreateDesc's dimensions and texel-byte footprint
-// match the CPUBuffer it will be read back into. Unlike
-// validateTextureDescMatchesCPUBuffer, this does not assert that Desc.Fmt is
-// equivalent to (Buf.Format + Buf.Channels) via toFormat -- callers that source
-// Desc.Fmt directly from the YAML (e.g. the depth-buffer binding) use the
-// CPUBuffer purely as readback storage and may use formats that don't have a
-// DataFormat equivalent (such as D32FloatS8Uint).
+// Validates that a TextureCreateDesc's dimensions and footprint are consistent
+// with the CPUBuffer used for readback storage. Call this when format
+// equivalence is not derived from DataFormat and Channels.
+// This helper intentionally skips the toFormat-based format check.
+// In that path, Desc.Fmt is set directly from GpuFormat.
 inline llvm::Error
 validateTextureDimsMatchCPUBuffer(const TextureCreateDesc &Desc,
                                   const CPUBuffer &Buf) {

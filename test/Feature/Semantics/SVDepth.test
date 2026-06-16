@@ -86,7 +86,8 @@ Buffers:
       Width: 4
       Depth: 1
   - Name: DepthTarget
-    Format: Depth32
+    Format: Float32
+    GpuFormat: D32Float
     Channels: 1
     FillSize: 16 # 4x1 @ 4 bytes per pixel; contents are overwritten on clear
     OutputProps:
@@ -94,7 +95,7 @@ Buffers:
       Width: 4
       Depth: 1
   - Name: DepthTarget_Expected
-    Format: Depth32
+    Format: Float32
     Channels: 1
     Data: [ 0.125, 0.250, 0.375, 0.5 ]
 Bindings:
@@ -107,7 +108,6 @@ Bindings:
   RenderTarget: RenderTarget
   DepthBuffer:
     Name: DepthTarget
-    Format: D32Float
 DescriptorSets: []
 Results:
   - Result: DepthValues

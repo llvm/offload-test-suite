@@ -59,10 +59,6 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
     VKFormats(UINT, 64) break;
   case DataFormat::Float64:
     VKFormats(SFLOAT, 64) break;
-  case DataFormat::Depth32:
-    if (Channels != 1)
-      llvm_unreachable("Depth32 format only supports a single channel.");
-    return VK_FORMAT_D32_SFLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -1186,10 +1182,6 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
-    // Optional CPU-readable readback buffer for the depth target. Only
-    // created when a test binds Bindings.DepthBuffer; the depth target
-    // contents are copied here after the draw so the test can verify
-    // SV_Depth* writes.
     std::unique_ptr<offloadtest::Buffer> DSReadback;
     std::unique_ptr<offloadtest::Buffer> VB;
 
@@ -2470,13 +2462,16 @@ public:
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
-    if (B.Format == DataFormat::Depth32 && R.isReadWrite())
+    const bool IsDepth =
+        B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
+    if (IsDepth && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
-    ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
+    ImageCreateInfo.format = B.GpuFormat ? getVulkanFormat(*B.GpuFormat)
+                                         : getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -2662,7 +2657,7 @@ public:
     if (P.Bindings.DepthBuffer.Ptr) {
       const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
       auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(
-          *this, DSBuf, P.Bindings.DepthBuffer.Fmt);
+          *this, DSBuf);
       if (!TexOrErr)
         return TexOrErr.takeError();
       IS.DepthStencil = std::move(*TexOrErr);
@@ -2848,12 +2843,15 @@ public:
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
           ViewCreateInfo.format =
-              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+              R.BufferPtr->GpuFormat
+                  ? getVulkanFormat(*R.BufferPtr->GpuFormat)
+                  : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
           ViewCreateInfo.components = {
               VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
           ViewCreateInfo.subresourceRange.aspectMask =
-              R.BufferPtr->Format == DataFormat::Depth32
+              (R.BufferPtr->GpuFormat &&
+               isDepthFormat(*R.BufferPtr->GpuFormat))
                   ? VK_IMAGE_ASPECT_DEPTH_BIT
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
@@ -3111,11 +3109,13 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const bool IsDepth =
+          B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
         VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
+        Region.imageSubresource.aspectMask = IsDepth
                                                  ? VK_IMAGE_ASPECT_DEPTH_BIT
                                                  : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
@@ -3135,9 +3135,8 @@ public:
       }
 
       VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
+      SubRange.aspectMask = IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                    : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
@@ -3257,10 +3256,11 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const bool IsDepth =
+          B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
       VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
+      SubRange.aspectMask = IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                    : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
@@ -3287,7 +3287,7 @@ public:
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
         VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
+        Region.imageSubresource.aspectMask = IsDepth
                                                  ? VK_IMAGE_ASPECT_DEPTH_BIT
                                                  : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;

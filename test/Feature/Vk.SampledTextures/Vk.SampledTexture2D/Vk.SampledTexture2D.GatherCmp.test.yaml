@@ -49,7 +49,8 @@ Shaders:
 
 Buffers:
   - Name: SampledTexLess
-    Format: Depth32
+    Format: Float32
+    GpuFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,  # (0,0) R=0.2
@@ -58,7 +59,8 @@ Buffers:
             0.8 ] # (1,1) R=0.8
 
   - Name: SampledTexGreater
-    Format: Depth32
+    Format: Float32
+    GpuFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,
@@ -67,7 +69,8 @@ Buffers:
             0.8 ]
 
   - Name: SampledTexRepeat
-    Format: Depth32
+    Format: Float32
+    GpuFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,

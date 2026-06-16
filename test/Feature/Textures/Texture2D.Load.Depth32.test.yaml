@@ -1,8 +1,8 @@
 #--- source.hlsl
 // Verifies that a Texture2D<float> bound with a depth-compatible format
-// (Depth32 in the YAML; VK_FORMAT_D32_SFLOAT on Vulkan, DXGI_FORMAT_R32_FLOAT
-// SRV on DirectX) can be Load()ed by a compute shader and round-trip the
-// expected single-channel float values.
+// (GpuFormat: D32Float in the YAML; VK_FORMAT_D32_SFLOAT on Vulkan,
+// DXGI_FORMAT_R32_FLOAT SRV on DirectX) can be Load()ed by a compute shader
+// and round-trip the expected single-channel float values.
 //
 // Tracking: https://github.com/llvm/offload-test-suite/issues/1046
 
@@ -28,7 +28,8 @@ DispatchParameters:
 
 Buffers:
   - Name: Tex
-    Format: Depth32
+    Format: Float32
+    GpuFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,

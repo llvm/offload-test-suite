@@ -255,13 +255,9 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 llvm::Expected<std::unique_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
 
-// Creates a depth texture from a CPUBuffer description; does not upload data.
-// Fmt names the GPU texture format directly (sourced from the YAML
-// Bindings.DepthBuffer block) so the depth path doesn't have to round-trip
-// through DataFormat + Channels and can name depth-stencil formats like
-// D32FloatS8Uint that aren't expressible in DataFormat.
+// Creates a depth texture from a CPUBuffer whose GpuFormat is a depth format.
 llvm::Expected<std::unique_ptr<Texture>>
-createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf, Format Fmt);
+createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 createBufferWithData(Device &Dev, std::string Name,
