@@ -15,6 +15,7 @@
 
 #include "Config.h"
 
+#include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -35,6 +36,8 @@ Queue::~Queue() {}
 Texture::~Texture() {}
 
 RenderPass::~RenderPass() {}
+
+AccelerationStructure::~AccelerationStructure() {}
 
 Device::~Device() {}
 
@@ -90,6 +93,127 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
     return Err;
 
   return Dev.createTexture("RenderTarget", Desc);
+}
+
+llvm::Error offloadtest::buildPipelineAccelerationStructures(
+    Device &Dev, ComputeEncoder &Enc, Pipeline &P,
+    llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
+    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+        &PreallocatedTLASes,
+    llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
+  if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
+    return llvm::Error::success();
+
+  const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+
+  // Stash the request structs while we build them up — the encoder reads
+  // them through pointers stored in ASBuildItem.
+  llvm::SmallVector<BLASBuildRequest> BLASRequests;
+  BLASRequests.reserve(P.AccelStructs.BLAS.size());
+  llvm::StringMap<AccelerationStructure *> BLASesByName;
+
+  for (const auto &BD : P.AccelStructs.BLAS) {
+    llvm::SmallVector<TriangleGeometryDesc> Triangles;
+    Triangles.reserve(BD.Triangles.size());
+    for (const auto &T : BD.Triangles) {
+      assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
+      auto VBOrErr = createBufferWithData(
+          Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
+          T.VertexBufferPtr->size(), nullptr, nullptr);
+      if (!VBOrErr)
+        return VBOrErr.takeError();
+
+      TriangleGeometryDesc TGD;
+      TGD.VertexBuffer = VBOrErr->get();
+      TGD.VertexCount = T.VertexCount;
+      TGD.VertexStride = T.VertexStride;
+      TGD.VertexFormat = T.VertexFormat;
+      TGD.Opaque = T.Opaque;
+
+      OutInputBuffers.push_back(std::move(*VBOrErr));
+
+      if (T.IndexBufferPtr) {
+        auto IBOrErr = createBufferWithData(
+            Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
+            T.IndexBufferPtr->size(), nullptr, nullptr);
+        if (!IBOrErr)
+          return IBOrErr.takeError();
+        TGD.IndexBuffer = IBOrErr->get();
+        TGD.IndexCount = T.IndexCount;
+        TGD.IdxFormat = T.IdxFormat;
+        OutInputBuffers.push_back(std::move(*IBOrErr));
+      }
+      Triangles.push_back(TGD);
+    }
+    // TODO: AABB geometry support (would mirror the triangle path).
+
+    auto SizesOrErr = Dev.getBLASBuildSizes(Triangles);
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    auto ASOrErr = Dev.createBLAS(*SizesOrErr);
+    if (!ASOrErr)
+      return ASOrErr.takeError();
+
+    BLASBuildRequest Req;
+    Req.AS = ASOrErr->get();
+    Req.Geometry = std::move(Triangles);
+
+    BLASesByName[BD.Name] = ASOrErr->get();
+    OutBLAS.push_back(std::move(*ASOrErr));
+    BLASRequests.push_back(std::move(Req));
+  }
+
+  llvm::SmallVector<ASBuildItem> BLASBatch;
+  BLASBatch.reserve(BLASRequests.size());
+  for (const auto &Req : BLASRequests)
+    BLASBatch.push_back(&Req);
+  if (!BLASBatch.empty())
+    if (auto Err = Enc.batchBuildAS(BLASBatch))
+      return Err;
+
+  // Separate `batchBuildAS()` from the BLAS batch so the BLAS-write →
+  // TLAS-read barrier between them is implicit.
+  llvm::SmallVector<TLASBuildRequest> TLASRequests;
+  TLASRequests.reserve(PreallocatedTLASes.size());
+  for (const TLASDesc &TD : P.AccelStructs.TLAS) {
+    auto ASIt = PreallocatedTLASes.find(TD.Name);
+    if (ASIt == PreallocatedTLASes.end())
+      continue; // TLAS declared but not bound to any resource.
+    TLASBuildRequest Req;
+    Req.AS = ASIt->second.get();
+    Req.Instances.reserve(TD.Instances.size());
+    for (const auto &I : TD.Instances) {
+      auto It = BLASesByName.find(I.BLAS);
+      if (It == BLASesByName.end())
+        return llvm::createStringError(std::errc::invalid_argument,
+                                       "TLAS '%s' references unknown BLAS '%s'",
+                                       TD.Name.c_str(), I.BLAS.c_str());
+
+      AccelerationStructureInstance Inst;
+      static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
+                    "Transform layout mismatch");
+      memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
+      Inst.InstanceID = I.InstanceID;
+      Inst.InstanceMask = I.InstanceMask;
+      Inst.InstanceContributionToHitGroupIndex =
+          I.InstanceContributionToHitGroupIndex;
+      Inst.BLAS = It->second;
+      Req.Instances.push_back(Inst);
+    }
+    if (auto Err = validateTLASBuildRequest(Req))
+      return Err;
+    TLASRequests.push_back(std::move(Req));
+  }
+
+  llvm::SmallVector<ASBuildItem> TLASBatch;
+  TLASBatch.reserve(TLASRequests.size());
+  for (const auto &Req : TLASRequests)
+    TLASBatch.push_back(&Req);
+  if (!TLASBatch.empty())
+    if (auto Err = Enc.batchBuildAS(TLASBatch))
+      return Err;
+
+  return llvm::Error::success();
 }
 
 llvm::Expected<std::unique_ptr<Texture>>
@@ -197,4 +321,60 @@ offloadtest::createBufferWithData(
   }
 
   return Buffer;
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
+offloadtest::createTextureWithData(
+    Device &Dev, std::string Name, const TextureCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
+    std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
+
+  const uint64_t PackedRowStrideInBytes =
+      Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
+    return llvm::createStringError(
+        "Data upload is not enough for texture size.");
+
+  auto TextureOrErr = Dev.createTexture(Name, Desc);
+  if (!TextureOrErr)
+    return TextureOrErr.takeError();
+  auto Texture = std::move(*TextureOrErr);
+
+  if (OutUploadBuffer == nullptr)
+    return llvm::createStringError("An upload buffer is required to create a "
+                                   "GpuOnly texture with data.");
+
+  const uint64_t TexRowStrideInBytes =
+      Dev.getTextureUploadRowStrideInBytes(Desc);
+  const uint64_t UploadBufferSizeInBytes =
+      (Desc.Height - 1) * TexRowStrideInBytes + PackedRowStrideInBytes;
+
+  // Create Upload buffer
+  const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+  const std::string UploadBufferName = Name + " (Upload Buffer)";
+  auto UploadBufferOrErr =
+      Dev.createBuffer(UploadBufferName, UploadDesc, UploadBufferSizeInBytes);
+  if (!UploadBufferOrErr)
+    return UploadBufferOrErr.takeError();
+  *OutUploadBuffer = std::move(*UploadBufferOrErr);
+
+  auto MappedPtrOrErr = (*OutUploadBuffer)->map();
+  if (!MappedPtrOrErr)
+    return MappedPtrOrErr.takeError();
+
+  uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
+  const uint8_t *SrcPtr = (const uint8_t *)Data;
+
+  for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
+    memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
+    DstPtr += TexRowStrideInBytes;
+    SrcPtr += PackedRowStrideInBytes;
+  }
+  (*OutUploadBuffer)->unmap();
+
+  // Copy Buffer to Texture
+  if (auto Err = Encoder->copyBufferToTexture(**OutUploadBuffer, *Texture))
+    return Err;
+
+  return Texture;
 }

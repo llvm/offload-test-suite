@@ -9,15 +9,16 @@
 #ifndef OFFLOADTEST_SUPPORT_VKERROR_H
 #define OFFLOADTEST_SUPPORT_VKERROR_H
 
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Error.h"
 
 #include <vulkan/vulkan.h>
 
 namespace VK {
-inline llvm::Error toError(VkResult Result, llvm::StringRef Msg) {
+inline llvm::Error toError(VkResult Result, const llvm::Twine &Msg) {
   if (Result != VK_SUCCESS)
-    return llvm::createStringError("%s (VkResult = %d)", Msg.data(),
-                                   static_cast<int>(Result));
+    return llvm::createStringError(
+        Msg + " (VkResult = " + llvm::Twine(static_cast<int>(Result)) + ")");
   return llvm::Error::success();
 }
 } // namespace VK

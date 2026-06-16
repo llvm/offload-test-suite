@@ -1,0 +1,112 @@
+// Test that has a really simple passthrough amplification shader that sets a
+// color in the payload to verify that the amplification shader is running and
+// the payload is passed correctly to the mesh shader.
+
+#--- amplification.hlsl
+struct Payload {
+    float3 color;
+};
+
+groupshared Payload gs_payload;
+
+[numthreads(1, 1, 1)]
+void main()
+{
+    gs_payload.color = float3(1.0, 0.5, 1.0);
+    DispatchMesh(1, 1, 1, gs_payload);
+}
+
+#--- mesh.hlsl
+struct Payload {
+    float3 color;
+};
+
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+[outputtopology("triangle")]
+[numthreads(3, 1, 1)]
+void main(
+    uint groupThreadID: SV_GroupThreadID,
+    in payload Payload payload,
+    out vertices PSInput verts[3],
+    out indices uint3 tris[1]) {
+
+    SetMeshOutputCounts(3, 1);
+
+    float4 position;
+    float4 color = float4(payload.color, 1.0);
+    if (groupThreadID == 0) {
+        position = float4(0.0, 0.25, 0.0, 1.0);
+        color *= float4(1.0, 0.0, 0.0, 1.0);
+    } else if (groupThreadID == 1) {
+        position = float4(0.25, -0.25, 0.0, 1.0);
+        color *= float4(0.0, 2.0, 0.0, 1.0); // Note 2.0 on the green component.
+    } else /*if (groupThreadID == 2)*/ {
+        position = float4(-0.25, -0.25, 0.0, 1.0);
+        color *= float4(0.0, 0.0, 1.0, 1.0);
+    }
+
+    verts[groupThreadID].position = position;
+    verts[groupThreadID].color = color;
+
+    if (groupThreadID == 0) {
+        tris[0] = uint3(0, 1, 2);
+    }
+}
+
+#--- pixel.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return input.color;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Amplification
+    Entry: main
+  - Stage: Mesh
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 1
+Bindings:
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+REQUIRES: MeshShader
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/136966
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T as_6_5 -Fo %t-amplification.o %t/amplification.hlsl
+# RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
+# RUN: %dxc_target -T ps_6_5 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-amplification.o %t-mesh.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/SimpleTriangle.png -rules %t/rules.yaml

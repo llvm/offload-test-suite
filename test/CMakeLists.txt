@@ -229,6 +229,13 @@ install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/utils/configure-test-suite.py
   DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}
   COMPONENT offload-test-suite)
 
+# Install requirements.txt so the standalone test runner can pip install
+# its dependencies (lit, pyyaml) without needing a source checkout. This
+# keeps a single source of truth for pinned versions.
+install(FILES ${OFFLOADTEST_SOURCE_DIR}/test/requirements.txt
+  DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}
+  COMPONENT offload-test-suite)
+
 # If golden images were available at configure time, ship them inside the
 # distribution so the test runner doesn't need to re-checkout the repo.
 if (GOLDENIMAGE_DIR AND EXISTS "${GOLDENIMAGE_DIR}")

@@ -180,7 +180,10 @@ DescriptorSets:
 ...
 #--- end
 
-# Task: https://github.com/llvm/llvm-project/issues/192262
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
+# XFAIL: Vulkan && DXC
+
+# Task: https://github.com/llvm/wg-hlsl/issues/305
 # XFAIL: Clang
 
 # RUN: split-file %s %t

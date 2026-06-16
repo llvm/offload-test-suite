@@ -1,0 +1,89 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  // The triangle sits at z=0 and the ray starts at z=1 along -z, so the hit
+  // is at t=1.0. Probe two queries that each push the [TMin, TMax] window
+  // off that hit — one starts above it, the other ends below it. Both must
+  // return COMMITTED_NOTHING.
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+
+  Ray.TMin = 2.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_NONE> QFar;
+  QFar.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  QFar.Proceed();
+  Output[0] = (uint)QFar.CommittedStatus();
+
+  Ray.TMin = 0.0;
+  Ray.TMax = 0.5;
+  RayQuery<RAY_FLAG_NONE> QNear;
+  QNear.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  QNear.Proceed();
+  Output[1] = (uint)QNear.CommittedStatus();
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 0, 0 ]  # Both queries miss → COMMITTED_NOTHING
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: TMinTMaxClip
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

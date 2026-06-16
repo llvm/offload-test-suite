@@ -20,10 +20,11 @@
 #undef max
 #undef min
 
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Error.h"
 
 namespace HR {
-inline llvm::Error toError(HRESULT HR, llvm::StringRef Msg) {
+inline llvm::Error toError(HRESULT HR, const llvm::Twine &Msg) {
   if (FAILED(HR)) {
     const std::error_code EC =
         std::error_code(static_cast<int>(HR), std::system_category());

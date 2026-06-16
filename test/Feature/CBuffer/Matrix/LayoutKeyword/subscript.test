@@ -101,8 +101,8 @@ DescriptorSets:
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
 # XFAIL: Vulkan && DXC
 
-# Task: https://github.com/llvm/llvm-project/issues/192262
-# XFAIL: Clang
+# Task: https://github.com/llvm/llvm-project/issues/201712
+# XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl

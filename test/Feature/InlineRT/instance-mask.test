@@ -1,0 +1,95 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(3,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  // Three instances live at x = -5, 0, +5 with InstanceMasks
+  // 0x01 / 0x02 / 0x04 and InstanceIDs 0 / 1 / 2 respectively. Each lane
+  // fires a ray at its own instance's column but with
+  // InstanceInclusionMask = 0x02, so only the middle instance survives
+  // the mask test: lane 1 must hit InstanceID 1, lanes 0 and 2 must miss.
+  RayDesc Ray;
+  Ray.Origin = float3((float(tid.x) - 1.0) * 5.0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_NONE> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0x02, Ray);
+  Q.Proceed();
+  Output[tid.x] = Q.CommittedStatus() == COMMITTED_TRIANGLE_HIT
+                      ? Q.CommittedInstanceID()
+                      : 0xFFFFFFFF;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 12
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 0xFFFFFFFF, 1, 0xFFFFFFFF ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+          InstanceID: 0
+          InstanceMask: 0x01
+          Transform: [1, 0, 0, -5,  0, 1, 0, 0,  0, 0, 1, 0]
+        - BLAS: TriangleBLAS
+          InstanceID: 1
+          InstanceMask: 0x02
+          Transform: [1, 0, 0, 0,  0, 1, 0, 0,  0, 0, 1, 0]
+        - BLAS: TriangleBLAS
+          InstanceID: 2
+          InstanceMask: 0x04
+          Transform: [1, 0, 0, 5,  0, 1, 0, 0,  0, 0, 1, 0]
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: InstanceMaskFilter
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

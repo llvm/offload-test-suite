@@ -178,10 +178,16 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64
+      # When SplitBuild is enabled, force clang into the build set even if
+      # the TestTarget doesn't use it. Reason: install-distribution depends
+      # on clang (it ships in the install prefix), so if clang isn't part
+      # of hlsl-test-depends, the Install step ends up doing a from-scratch
+      # clang compile that dwarfs Build LLVM. Including it here keeps all
+      # compile work inside Build LLVM and reduces Install to seconds.
       - name: Detect Clang
         id: Test-Clang
         shell: bash
-        if: contains(inputs.TestTarget, 'clang')
+        if: contains(inputs.TestTarget, 'clang') || inputs.SplitBuild == true
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -201,6 +207,14 @@ jobs:
             cd build
             cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ${{ github.workspace }}/llvm-project/llvm/
             ninja hlsl-test-depends
+      # Surface sccache cache state after the heavy compile work so we can
+      # track hit rate / cache size across runs and diagnose cold-cache
+      # blowups on new builders. Always-runs so we still get stats on
+      # build failure.
+      - name: Dump sccache Stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
       - name: Dump GPU Info (build runner)
         if: inputs.SplitBuild != true
         run: |
@@ -362,11 +376,38 @@ jobs:
           arch: arm64
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          # The test runner needs only lit + pyyaml; no source checkout is
-          # available so we can't pip install -r requirements.txt. Keep
-          # this list in sync with OffloadTest/test/requirements.txt.
-          pip-install: lit pyyaml
+      - name: Install lit and pyyaml
+        # The test runner needs only lit + pyyaml. We install from the
+        # requirements.txt that the build job ships inside the install
+        # prefix (test/CMakeLists.txt installs it under the
+        # offload-test-suite component). That keeps a single source of
+        # truth for pinned versions and avoids drift between this step
+        # and OffloadTest/test/requirements.txt.
+        #
+        # We invoke pip explicitly here instead of relying on
+        # setup-python's `pip-install:` input, which was observed to
+        # silently no-op on our self-hosted Windows runners.
+        #
+        # When pip can't write to the interpreter's system site-packages
+        # (e.g. on self-hosted Windows runners running as NetworkService,
+        # which can't write under C:\Program Files\Python313; or on a
+        # POSIX host where the system Python is owned by root), pip
+        # falls back to a --user install. The console script wrappers
+        # (e.g. lit.exe on Windows, lit on POSIX) then land in the
+        # user-scheme scripts dir, which is NOT on PATH by default:
+        #   - Windows: %APPDATA%\Python\PythonXY\Scripts
+        #   - Linux:   ~/.local/bin
+        #   - macOS:   ~/Library/Python/X.Y/bin
+        # We compute that dir from sysconfig (portable across all three
+        # platforms) and prepend it to PATH for all subsequent steps so
+        # `lit` resolves correctly regardless of where pip put it.
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
+          user_scripts=$(python -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
+          echo "User scripts dir: $user_scripts"
+          echo "$user_scripts" >> "$GITHUB_PATH"
       - name: Dump GPU Info (test runner)
         shell: bash
         run: |

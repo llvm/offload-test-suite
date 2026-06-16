@@ -85,6 +85,12 @@ inline MTL::PixelFormat getMetalPixelFormat(Format Format) {
     return MTL::PixelFormatRGBA32Uint;
   case Format::RGBA32Float:
     return MTL::PixelFormatRGBA32Float;
+  // Metal has no 64-bit-per-channel pixel formats.
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
+    llvm_unreachable("64-bit formats have no Metal pixel format equivalent");
   case Format::D32Float:
     return MTL::PixelFormatDepth32Float;
   case Format::D32FloatS8Uint:
@@ -140,12 +146,41 @@ inline MTL::VertexFormat getMetalVertexFormat(Format Fmt) {
     return MTL::VertexFormatUInt4;
   case Format::RGBA32Float:
     return MTL::VertexFormatFloat4;
+  // Metal has no 64-bit-per-channel vertex formats.
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
+    llvm_unreachable("64-bit formats have no Metal vertex format equivalent");
   // Depth formats cannot be used as vertex attributes.
   case Format::D32Float:
   case Format::D32FloatS8Uint:
     llvm_unreachable("Depth formats are not valid vertex formats");
   }
   llvm_unreachable("All Format cases handled");
+}
+
+inline MTL::AttributeFormat getMetalPositionFormat(Format Fmt) {
+  switch (Fmt) {
+  case Format::RG32Float:
+    return MTL::AttributeFormatFloat2;
+  case Format::RGB32Float:
+    return MTL::AttributeFormatFloat3;
+  case Format::RGBA32Float:
+    return MTL::AttributeFormatFloat4;
+  default:
+    llvm_unreachable("Format is not position-compatible");
+  }
+}
+
+inline MTL::IndexType getMetalIndexType(IndexFormat Fmt) {
+  switch (Fmt) {
+  case IndexFormat::Uint16:
+    return MTL::IndexTypeUInt16;
+  case IndexFormat::Uint32:
+    return MTL::IndexTypeUInt32;
+  }
+  llvm_unreachable("All IndexFormat cases handled");
 }
 
 } // namespace offloadtest

@@ -1,0 +1,207 @@
+# Tessellates one isoline into four segments and captures each generated vertex's
+# along-line coordinate from the domain shader into a UAV; the five evenly spaced
+# values prove the isoline domain ran and subdivided the line as expected.
+
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : POSITION;
+};
+
+VSOutput main(float4 position : POSITION) {
+  VSOutput o;
+  o.position = position;
+  return o;
+}
+
+#--- hull.hlsl
+struct HSInput {
+  float4 position : POSITION;
+};
+
+struct HSOutput {
+  float4 position : POSITION;
+};
+
+struct HSPatchConstants {
+  // isoline: two factors, no SV_InsideTessFactor
+  float Edges[2] : SV_TessFactor;
+};
+
+HSPatchConstants PatchConstants(InputPatch<HSInput, 2> patch,
+                                uint patchID : SV_PrimitiveID) {
+  HSPatchConstants c;
+  c.Edges[0] = 1.0; // number of lines
+  c.Edges[1] = 4.0; // segments per line
+  return c;
+}
+
+[domain("isoline")]
+[partitioning("integer")]
+[outputtopology("line")]
+[outputcontrolpoints(2)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 2> patch, uint i : SV_OutputControlPointID) {
+  HSOutput o;
+  o.position = patch[i].position;
+  return o;
+}
+
+#--- domain.hlsl
+struct DSInput {
+  float4 position : POSITION;
+};
+
+struct DSPatchConstants {
+  float Edges[2] : SV_TessFactor;
+};
+
+struct DSOutput {
+  float4 position : SV_POSITION;
+};
+
+// Record each generated vertex's along-line (u) and across-line (v) domain
+// coordinates into two UAVs, each keyed by that coordinate (* 4). Writing is
+// idempotent (overwrite, not add), so the result does not depend on how many
+// times the domain shader runs -- the per-vertex invocation count is
+// implementation-defined.
+//
+// With the Vulkan factor order (Edges[0] = lines, Edges[1] = segments) this is
+// one line of four segments: u = {0, 0.25, 0.5, 0.75, 1} and v = 0 everywhere,
+// so CapturedU = [0, 0.25, 0.5, 0.75, 1] and CapturedV = [0, 0, 0, 0, 0]. A
+// backend that uses the opposite order instead produces four one-segment lines,
+// which mirrors the two buffers: CapturedU = [0, 0, 0, 0, 1] and
+// CapturedV = [0, 0.25, 0.5, 0.75, 0].
+RWStructuredBuffer<float> CapturedU : register(u0);
+RWStructuredBuffer<float> CapturedV : register(u1);
+
+[domain("isoline")]
+DSOutput main(DSPatchConstants constants, float2 uv : SV_DomainLocation,
+              const OutputPatch<DSInput, 2> patch) {
+  CapturedU[(uint)round(uv.x * 4.0)] = uv.x;
+  CapturedV[(uint)round(uv.y * 4.0)] = uv.y;
+
+  DSOutput o;
+  o.position = lerp(patch[0].position, patch[1].position, uv.x);
+  return o;
+}
+
+#--- pixel.hlsl
+float4 main(float4 position : SV_POSITION) : SV_TARGET {
+  return float4(1.0, 1.0, 1.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 8 # float2 position
+    Data: [ -1.0, 0.0,
+             1.0, 0.0 ]
+  # One float per along-line (u) and across-line (v) position; 5 slots each.
+  - Name: CapturedU
+    Format: Float32
+    Stride: 4
+    FillSize: 20 # 5 floats
+  - Name: CapturedV
+    Format: Float32
+    Stride: 4
+    FillSize: 20 # 5 floats
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 render target (required for a raster pipeline)
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  Topology: PatchList
+  PatchControlPoints: 2
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: CapturedU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: CapturedV
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# UNSUPPORTED: Metal
+
+# Clang's HLSL frontend does not support tessellation.
+# Tracked upstream: https://github.com/llvm/llvm-project/issues/136964
+# XFAIL: Clang
+
+# Why this uses Edges[0] = lines and Edges[1] = segments, and why two backends
+# are XFAILed below:
+#
+# Direct3D names the two isoline factors but does not define which is which.
+# https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/sv-tessfactor
+#   "For an isoline, the first value in SV_TessFactor is the line-density
+#    tessellation factor, the second value is the line-detail tessellation
+#    factor."
+#
+# The Vulkan spec is explicit.
+# https://github.com/KhronosGroup/Vulkan-Docs/blob/main/chapters/tessellation.adoc#isoline-tessellation
+#   "The number of isolines generated is derived from the first outer
+#    tessellation level; the number of segments in each isoline is derived from
+#    the second outer tessellation level."
+#   "Each of the n isolines is then subdivided according to the second outer
+#    tessellation level and the tessellation spacing, resulting in m line
+#    segments."
+#
+# So for Vulkan, outer[0] = number of lines and outer[1] = segments per line is
+# documented verbatim. DXC maps SV_TessFactor[0]/[1] -> the first/second outer
+# level positionally, which is why Edges[0] = 1 (lines) and Edges[1] = 4
+# (segments) yields 4 segments on every Vulkan backend and on NVIDIA's D3D12.
+# WARP and the Intel D3D12 driver use the opposite order, reading this as a
+# one-segment line and failing the segments==4 check. If a backend changes its
+# order, the XPASS will flag that its XFAIL should be removed.
+
+# WARP (the software rasterizer) uses the opposite isoline tess-factor order.
+# XFAIL: WARP
+
+# The Intel D3D12 driver uses the opposite isoline tess-factor order. (Intel's
+# own Vulkan driver uses the order above and passes.)
+# XFAIL: Intel && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o   %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o %t/domain.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o | FileCheck %s
+
+# One isoline of four segments: CapturedU holds the five along-line coordinates,
+# and CapturedV is flat (a single line at v = 0).
+# CHECK: Name: CapturedU
+# CHECK: Data: [ 0, 0.25, 0.5, 0.75, 1 ]
+# CHECK: Name: CapturedV
+# CHECK: Data: [ 0, 0, 0, 0, 0 ]

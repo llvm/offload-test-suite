@@ -1,0 +1,138 @@
+#--- source.hlsl
+
+// This test exercises InterlockedAnd on 64-bit typed RWBuffer resources.
+// 64-bit atomics on typed UAVs are an optional Shader Model 6.6 capability:
+//
+//   * DirectX:  cap AtomicInt64OnTypedResourceSupported
+//   * Vulkan:   shaderImageInt64Atomics, from the (non-core) extension
+//               VK_EXT_shader_image_atomic_int64. RWBuffer<T> in HLSL maps
+//               to a SPIR-V image (not an SSBO), so RWBuffer atomics on
+//               Vulkan require this image-atomics extension, not
+//               shaderBufferInt64Atomics. The same Vulkan feature also
+//               covers RWTexture<int64_t> typed-image atomics; this test
+//               only exercises RWBuffer.
+//
+// Both are surfaced to lit as `Int64TypedResourceAtomics`.
+//
+//   * RWBuffer<uint64_t>[i]  (free function, 2-arg)
+//   * RWBuffer<int64_t>[i]   (free function, 3-arg, signed)
+//
+// 64 threads of a single threadgroup atomically AND their own unique bit
+// mask ~(1ull << tid) into a single accumulator slot that starts with 
+// all bits set. With correct atomic semantics, every bit must be set 
+// back to 0, so each accumulator must end at
+// exactly 0x0000000000000000. If any read-modify-write were lost, the
+// corresponding bit would remain clear.
+//
+// Per-thread sanity for the 3-argument form: the returned "original"
+// value must have *this* thread's bit clear, since no other thread ever
+// sets that bit.
+
+RWBuffer<uint64_t> TBufU : register(u0);
+RWBuffer<int64_t>  TBufI : register(u1);
+
+RWStructuredBuffer<uint> OutOrigBitSet : register(u2);
+
+[numthreads(64, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    TBufU[0] = 0xFFFFFFFFFFFFFFFFull;
+    TBufI[0] = (int64_t)-1;
+  }
+  OutOrigBitSet[GTID.x] = 0u;
+  DeviceMemoryBarrierWithGroupSync();
+
+  uint64_t ThreadBit  = 1ull << GTID.x;
+  uint64_t ThreadMask = ~ThreadBit;
+
+  // RWBuffer<uint64_t>: 2-argument free function.
+  InterlockedAnd(TBufU[0], ThreadMask);
+
+  // RWBuffer<int64_t>: 3-argument free function (signed).
+  int64_t OrigI;
+  InterlockedAnd(TBufI[0], (int64_t)ThreadMask, OrigI);
+  OutOrigBitSet[GTID.x] = (((uint64_t)OrigI & ThreadBit) != 0ull) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: TBufU
+    Format: UInt64
+    Channels: 1
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedTBufU
+    Format: UInt64
+    Channels: 1
+    Data: [ 0 ]
+  - Name: TBufI
+    Format: Int64
+    Channels: 1
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedTBufI
+    Format: Int64
+    Channels: 1
+    Data: [ 0 ]
+  - Name: OutOrigBitSet
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: ExpectedOrigBitSet
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: TestTBufU
+    Rule: BufferExact
+    Actual: TBufU
+    Expected: ExpectedTBufU
+  - Result: TestTBufI
+    Rule: BufferExact
+    Actual: TBufI
+    Expected: ExpectedTBufI
+  - Result: TestOrigBitSet
+    Rule: BufferExact
+    Actual: OutOrigBitSet
+    Expected: ExpectedOrigBitSet
+DescriptorSets:
+  - Resources:
+    - Name: TBufU
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TBufI
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutOrigBitSet
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99125
+# XFAIL: Clang
+
+# REQUIRES: Int64TypedResourceAtomics && SM_6_6
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

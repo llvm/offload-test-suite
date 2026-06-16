@@ -1,0 +1,213 @@
+# A perspective-projected, rotated cube whose vertex shader sources all of its
+# transforms from bound resources: the camera from a constant buffer, and the
+# local-to-world matrix from a StructuredBuffer (first three faces) and a
+# ByteAddressBuffer (last three faces). Both buffers carry identical bytes, so a
+# correct render is a single coherent cube; a broken buffer-read path splits it.
+# Exercises: CBuffer read in VS, StructuredBuffer read in VS, ByteAddressBuffer
+# read in VS, SV_Position with W != 1 (perspective divide), and mixed
+# integer/float varyings (nointerpolation uint + interpolated float3).
+
+#--- vertex.hlsl
+// The vertex shader reads every per-draw transform from a bound resource, to
+// exercise vertex-stage resource access:
+//   * the camera view-projection from a constant buffer (b0)
+//   * the local-to-world matrix from a StructuredBuffer (t0), faces 0..2
+//   * the same matrix from a ByteAddressBuffer (t1), faces 3..5
+//
+// Both buffers hold identical bytes, so the two halves of the cube line up
+// exactly -- a built-in self check: if either buffer-read path is wrong, that
+// half is transformed differently and the silhouette splits.
+
+[[vk::binding(0, 0)]] cbuffer Camera : register(b0) {
+  row_major float4x4 worldToClip;
+};
+
+struct WorldMat {
+  row_major float4x4 m;
+};
+[[vk::binding(1, 0)]] StructuredBuffer<WorldMat> WorldSB : register(t0);
+[[vk::binding(2, 0)]] ByteAddressBuffer WorldBAB : register(t1);
+
+struct VSOutput {
+  float4 position : SV_Position;
+  float3 normal : NORMAL;               // float varying (interpolated)
+  nointerpolation uint faceID : FACEID; // integer varying (flat)
+};
+
+static const float3 FaceNormals[6] = {
+    float3(1.0, 0.0, 0.0),  float3(-1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0),
+    float3(0.0, -1.0, 0.0), float3(0.0, 0.0, 1.0),  float3(0.0, 0.0, -1.0),
+};
+
+VSOutput main(float3 localPos : POSITION, uint vid : SV_VertexID) {
+  uint face = vid / 6; // 6 vertices (two triangles) per cube face
+
+  float4x4 localToWorld;
+  if (vid < 18) {
+    localToWorld = WorldSB[0].m; // faces 0..2 via StructuredBuffer
+  } else {
+    float4 r0 = asfloat(WorldBAB.Load4(0)); // faces 3..5 via ByteAddressBuffer
+    float4 r1 = asfloat(WorldBAB.Load4(16));
+    float4 r2 = asfloat(WorldBAB.Load4(32));
+    float4 r3 = asfloat(WorldBAB.Load4(48));
+    localToWorld = float4x4(r0, r1, r2, r3);
+  }
+
+  float4 worldPos = mul(localToWorld, float4(localPos, 1.0));
+
+  VSOutput o;
+  o.position = mul(worldToClip, worldPos); // perspective -> SV_Position.w != 1
+  o.normal = mul((float3x3)localToWorld, FaceNormals[face]);
+  o.faceID = face;
+  return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_Position;
+  float3 normal : NORMAL;
+  nointerpolation uint faceID : FACEID;
+};
+
+static const float3 Palette[6] = {
+    float3(1.0, 0.0, 0.0), float3(0.0, 1.0, 0.0), float3(0.0, 0.0, 1.0),
+    float3(1.0, 1.0, 0.0), float3(1.0, 0.0, 1.0), float3(0.0, 1.0, 1.0),
+};
+
+float4 main(PSInput input) : SV_Target {
+  float3 N = normalize(input.normal);
+  float3 L = normalize(float3(0.0, 1.0, 0.0));
+  float ndl = saturate(dot(N, L));
+  float3 base = Palette[input.faceID];
+  return float4(base * (0.30 + 0.70 * ndl), 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # 36 vertices (12 triangles), local positions on a +/-0.5 cube.
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ 0.5, -0.5, -0.5,
+            0.5, 0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, -0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, -0.5, 0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, -0.5, -0.5,
+            -0.5, 0.5, -0.5,
+            -0.5, 0.5, 0.5,
+            0.5, 0.5, 0.5,
+            -0.5, 0.5, -0.5,
+            0.5, 0.5, 0.5,
+            0.5, 0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, -0.5, -0.5,
+            0.5, -0.5, -0.5,
+            -0.5, -0.5, 0.5,
+            0.5, -0.5, -0.5,
+            0.5, -0.5, 0.5,
+            0.5, -0.5, 0.5,
+            0.5, 0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            0.5, -0.5, 0.5,
+            -0.5, 0.5, 0.5,
+            -0.5, -0.5, 0.5,
+            -0.5, -0.5, -0.5,
+            -0.5, 0.5, -0.5,
+            0.5, 0.5, -0.5,
+            -0.5, -0.5, -0.5,
+            0.5, 0.5, -0.5,
+            0.5, -0.5, -0.5 ]
+  # Camera view-projection (LH, z in [0,1]), row-major. Read in the VS as a cbuffer.
+  - Name: Camera
+    Format: Float32
+    Data: [ 1.7320508, 0, 0, 0,
+            0, 1.7320508, 0, 0,
+            0, 0, 1.0434783, 2.1913043,
+            0, 0, 1, 2.6 ]
+  # Local-to-world (rotate + translate), row-major. Same bytes in both buffers.
+  - Name: WorldSB
+    Format: Float32
+    Stride: 64
+    Data: [ 0.8660254, 0.21130913, 0.45315389, 0.15,
+            0, 0.90630779, -0.42261826, -0.1,
+            -0.5, 0.36599815, 0.78488557, 0,
+            0, 0, 0, 1 ]
+  - Name: WorldBAB
+    Format: Float32
+    Data: [ 0.8660254, 0.21130913, 0.45315389, 0.15,
+            0, 0.90630779, -0.42261826, -0.1,
+            -0.5, 0.36599815, 0.78488557, 0,
+            0, 0, 0, 1 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets:
+  - Resources:
+    - Name: Camera
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: WorldSB
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: WorldBAB
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+# The Metal backend (MoltenVK) reports "Metal does not support buffer robustness"
+# and fails to render this vertex-stage resource-read test (no output is
+# produced), so skip it there.
+# UNSUPPORTED: Metal
+
+# XFAIL: Clang
+# REQUIRES: goldenimage
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/VertexShaderResourceCube.png -rules %t/rules.yaml
