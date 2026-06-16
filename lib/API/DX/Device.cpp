@@ -2846,8 +2846,7 @@ public:
     // default depth target (which is not read back).
     if (P.Bindings.DepthBuffer.Ptr) {
       const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
-      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(
-          *this, DSBuf);
+      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
       if (!TexOrErr)
         return TexOrErr.takeError();
       IS.DepthStencil = std::move(*TexOrErr);

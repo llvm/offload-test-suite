@@ -178,7 +178,8 @@ struct CPUBuffer {
   uint32_t ArraySize;
   // When set, names the GPU texture format directly (e.g. D32Float) instead of
   // inferring it from DataFormat + Channels via toFormat(). This lets depth
-  // buffers and other special formats be expressed without extending DataFormat.
+  // buffers and other special formats be expressed without extending
+  // DataFormat.
   std::optional<offloadtest::Format> GpuFormat;
   // Data can contain one block of data for a singular resource
   // or multiple blocks for a resource array.
