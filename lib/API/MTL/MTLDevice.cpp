@@ -246,6 +246,22 @@ public:
   llvm::Expected<offloadtest::SubmitResult>
   submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Buffer & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal backend does not yet support tile mappings.");
+  }
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Texture & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal backend does not yet support tile mappings.");
+  }
 };
 
 class MTLPipelineState : public offloadtest::PipelineState {
@@ -309,21 +325,26 @@ public:
 
 class MTLBuffer : public offloadtest::Buffer {
 public:
+  MTL::Device *Device; // Not owned; used to query device-wide properties.
   MTL::Buffer *Buf;
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
-            size_t SizeInBytes)
-      : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
-        SizeInBytes(SizeInBytes) {}
+  MTLBuffer(MTL::Device *Device, MTL::Buffer *Buf, llvm::StringRef Name,
+            BufferCreateDesc Desc, size_t SizeInBytes)
+      : offloadtest::Buffer(GPUAPI::Metal), Device(Device), Buf(Buf),
+        Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
   MTLBuffer(const MTLBuffer &) = delete;
   MTLBuffer(MTLBuffer &&) = delete;
   MTLBuffer &operator=(const MTLBuffer &) = delete;
   MTLBuffer &operator=(MTLBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  size_t querySparseTileSizeInBytes() const override {
+    return Device->sparseTileSizeInBytes();
+  }
 
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
@@ -1748,6 +1769,13 @@ public:
     return MTLFence::create(Device, Name);
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::MemoryHeap>>
+  createMemoryHeap(std::string /*Name*/, size_t /*SizeInBytes*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal backend does not yet support memory heaps.");
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
@@ -1766,7 +1794,7 @@ public:
     if (!Buf)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");
-    return std::make_unique<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+    return std::make_unique<MTLBuffer>(Device, Buf, Name, Desc, SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>

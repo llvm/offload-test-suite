@@ -85,6 +85,12 @@ public:
   virtual ~Buffer();
   virtual size_t getSizeInBytes() const = 0;
 
+  // The granularity, in bytes, of a single sparse tile for this buffer. Tile
+  // counts are computed as ceil(sizeInBytes / granularity). Only meaningful for
+  // buffers created with MemoryBacking::Sparse. The value is backend-defined
+  // (e.g. 64 KiB on DX12/Vulkan, commonly 16 KiB on Metal/Apple Silicon).
+  virtual size_t querySparseTileSizeInBytes() const = 0;
+
   // Maps the buffer's memory for host access. Only valid for CpuToGpu and
   // GpuToCpu buffers; returns an error for GpuOnly. Each successful map() must
   // be paired with a call to unmap() before the buffer is used on the GPU.

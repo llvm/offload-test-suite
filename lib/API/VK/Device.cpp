@@ -462,6 +462,12 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
+  size_t querySparseTileSizeInBytes() const override {
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Dev, Buffer, &MemReqs);
+    return MemReqs.alignment;
+  }
+
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
       return llvm::createStringError(std::errc::invalid_argument,
@@ -668,6 +674,22 @@ public:
   llvm::Expected<offloadtest::SubmitResult>
   submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Buffer & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support tile mappings.");
+  }
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Texture & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support tile mappings.");
+  }
 };
 
 class VulkanDevice; // forward decl — defined below in this same anon ns
@@ -2484,6 +2506,13 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return VulkanFence::create(Device, Name);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::MemoryHeap>>
+  createMemoryHeap(std::string /*Name*/, size_t /*SizeInBytes*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support memory heaps.");
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>

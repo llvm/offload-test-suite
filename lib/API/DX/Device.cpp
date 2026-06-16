@@ -231,6 +231,10 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
+  size_t querySparseTileSizeInBytes() const override {
+    return D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES;
+  }
+
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
       return llvm::createStringError(std::errc::invalid_argument,
@@ -401,6 +405,42 @@ public:
   }
 };
 
+class DXMemoryHeap : public offloadtest::MemoryHeap {
+public:
+  DXMemoryHeap(ComPtr<ID3D12Heap> Heap, llvm::StringRef Name)
+      : offloadtest::MemoryHeap(GPUAPI::DirectX), Name(Name), Heap(Heap) {}
+
+  std::string Name;
+  ComPtr<ID3D12Heap> Heap;
+
+  static bool classof(const offloadtest::MemoryHeap *H) {
+    return H->getAPI() == GPUAPI::DirectX;
+  }
+
+  static llvm::Expected<std::unique_ptr<DXMemoryHeap>>
+  create(ID3D12DeviceX *Device, llvm::StringRef Name, size_t SizeInBytes) {
+    D3D12_HEAP_DESC HeapDesc = {};
+    HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    // Heap sizes must be a multiple of the placement alignment (64KB), which
+    // is also the tiled-resource tile size.
+    HeapDesc.SizeInBytes =
+        llvm::alignTo(SizeInBytes, D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT);
+    HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+
+    ComPtr<ID3D12Heap> Heap;
+    if (auto Err =
+            HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
+                        "Failed to create memory heap."))
+      return Err;
+
+    const std::wstring WStr(Name.begin(), Name.end());
+    Heap->SetName(WStr.c_str());
+
+    return std::make_unique<DXMemoryHeap>(Heap, Name);
+  }
+};
+
 class DXQueue : public offloadtest::Queue {
 public:
   using Queue::submit;
@@ -443,6 +483,70 @@ public:
   llvm::Expected<offloadtest::SubmitResult>
   submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Buffer &Resource,
+                     llvm::ArrayRef<TileMapping> Mappings) override {
+    return updateTileMappingsImpl(llvm::cast<DXBuffer>(Resource).Buffer.Get(),
+                                  Mappings);
+  }
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Texture &Resource,
+                     llvm::ArrayRef<TileMapping> Mappings) override {
+    return updateTileMappingsImpl(
+        llvm::cast<DXTexture>(Resource).Resource.Get(), Mappings);
+  }
+
+private:
+  // Shared tile-mapping path for buffers and textures: they differ only in how
+  // a TileRegion maps onto the underlying ID3D12Resource, so both variants
+  // resolve to a native resource and funnel through here.
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappingsImpl(ID3D12Resource *Resource,
+                         llvm::ArrayRef<TileMapping> Mappings) {
+    for (const TileMapping &M : Mappings) {
+      const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {
+          M.Region.TileOffsetX, M.Region.TileOffsetY, M.Region.TileOffsetZ,
+          M.Region.Subresource};
+
+      D3D12_TILE_REGION_SIZE RegionSize = {};
+      RegionSize.Width = M.Region.NumTilesX;
+      RegionSize.Height = static_cast<UINT16>(M.Region.NumTilesY);
+      RegionSize.Depth = static_cast<UINT16>(M.Region.NumTilesZ);
+      // A box is only needed for multi-dimensional (texture) regions; a buffer
+      // is always a single linear run of tiles along X.
+      RegionSize.UseBox = M.Region.NumTilesY > 1 || M.Region.NumTilesZ > 1;
+      RegionSize.NumTiles =
+          M.Region.NumTilesX * M.Region.NumTilesY * M.Region.NumTilesZ;
+
+      // A null heap unbinds the region (reads return zero); otherwise bind it
+      // to the heap starting at BackingTileOffset.
+      ID3D12Heap *Heap = nullptr;
+      D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NULL;
+      UINT HeapRangeStartOffset = 0;
+      if (M.Backing) {
+        Heap = llvm::cast<DXMemoryHeap>(M.Backing)->Heap.Get();
+        RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+        HeapRangeStartOffset = static_cast<UINT>(M.BackingTileOffset);
+      }
+      const UINT RangeTileCount = RegionSize.NumTiles;
+
+      Queue->UpdateTileMappings(Resource, 1, &StartCoord, &RegionSize, Heap, 1,
+                                &RangeFlag, &HeapRangeStartOffset,
+                                &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
+    }
+
+    // UpdateTileMappings runs on the queue timeline (not a command list), so
+    // signal the submit fence afterwards exactly like submit() does.
+    const uint64_t CurrentCounter = ++FenceCounter;
+    if (auto Err =
+            HR::toError(Queue->Signal(SubmitFence->Fence.Get(), CurrentCounter),
+                        "Failed to signal after tile mapping update."))
+      return Err;
+
+    return offloadtest::SubmitResult{SubmitFence.get(), CurrentCounter};
+  }
 };
 
 class DXDevice; // forward decl — defined below in this same anon ns
@@ -1056,6 +1160,7 @@ private:
 
   struct ResourceSet {
     std::unique_ptr<Buffer> UploadBuffer; // Keep-alive
+    std::unique_ptr<MemoryHeap> BackingMemory;
 
     std::unique_ptr<Buffer> Buffer;
     std::unique_ptr<Texture> Texture;
@@ -1067,9 +1172,11 @@ private:
 
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Buffer> Buffer,
+                std::unique_ptr<MemoryHeap> BackingMemory,
                 std::unique_ptr<offloadtest::Buffer> Readback,
                 std::unique_ptr<offloadtest::Buffer> CounterReadback)
         : UploadBuffer(std::move(UploadBuffer)), Buffer(std::move(Buffer)),
+          BackingMemory(std::move(BackingMemory)),
           Readback(std::move(Readback)),
           CounterReadback(std::move(CounterReadback)) {}
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
@@ -1084,12 +1191,15 @@ private:
 
     ResourceSet(ResourceSet &&A)
         : UploadBuffer(std::move(A.UploadBuffer)), Buffer(std::move(A.Buffer)),
-          Texture(std::move(A.Texture)), Readback(std::move(A.Readback)),
+          Texture(std::move(A.Texture)),
+          BackingMemory(std::move(A.BackingMemory)),
+          Readback(std::move(A.Readback)),
           CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
     ResourceSet &operator=(ResourceSet &&A) {
       UploadBuffer = std::move(A.UploadBuffer);
       Buffer = std::move(A.Buffer);
       Texture = std::move(A.Texture);
+      BackingMemory = std::move(A.BackingMemory);
       Readback = std::move(A.Readback);
       CounterReadback = std::move(A.CounterReadback);
       AS = A.AS;
@@ -1478,6 +1588,11 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return DXFence::create(Device.Get(), Name);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::MemoryHeap>>
+  createMemoryHeap(std::string Name, size_t SizeInBytes) override {
+    return DXMemoryHeap::create(Device.Get(), Name, SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
@@ -2055,6 +2170,72 @@ public:
     return createTLAS(*SizesOrErr);
   }
 
+  static UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
+    UINT Ret;
+    if (NumTiles.has_value())
+      Ret = static_cast<UINT>(*NumTiles);
+    else {
+      // Map the entire buffer by computing how many 64KB tiles cover it
+      Ret = static_cast<UINT>(
+          (Width + D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1) /
+          D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
+      // check for overflow
+      assert(Width < std::numeric_limits<UINT>::max() -
+                         D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1);
+    }
+    return Ret;
+  }
+
+  llvm::Error setupReservedResource(Resource &R,
+                                    const D3D12_RESOURCE_DESC ResDesc,
+                                    ComPtr<ID3D12Heap> &Heap,
+                                    ComPtr<ID3D12Resource> &Buffer) {
+    // Tile mapping setup (only skipped when TilesMapped is set to 0)
+    const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
+
+    if (NumTiles == 0)
+      return llvm::Error::success();
+
+    // Create a Heap large enough for the mapped tiles
+    D3D12_HEAP_DESC HeapDesc = {};
+    HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
+                           D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
+
+    if (auto Err =
+            HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
+                        "Failed to create heap for tiled SRV resource."))
+      return Err;
+
+    // Define one contiguous mapping region
+    const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
+    D3D12_TILE_REGION_SIZE RegionSize = {};
+    RegionSize.NumTiles = NumTiles;
+    RegionSize.UseBox = FALSE;
+
+    const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
+    const UINT HeapRangeStartOffset = 0;
+    const UINT RangeTileCount = NumTiles;
+
+    ID3D12CommandQueue *CommandQueue = GraphicsQueue.Queue.Get();
+    CommandQueue->UpdateTileMappings(
+        Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
+        &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
+
+    // Synchronize after UpdateTileMappings, which is a queue operation (not
+    // recorded into a command list).
+    const uint64_t CurrentCounter = ++GraphicsQueue.FenceCounter;
+    if (auto Err = HR::toError(
+            CommandQueue->Signal(GraphicsQueue.SubmitFence->Fence.Get(),
+                                 CurrentCounter),
+            "Failed to add signal."))
+      return Err;
+
+    return GraphicsQueue.SubmitFence->waitForCompletion(CurrentCounter);
+  }
+
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto EncOrErr = IS.CB->createComputeEncoder();
     if (!EncOrErr)
@@ -2069,7 +2250,7 @@ public:
       if (R.isBuffer()) {
         BufferCreateDesc CreateDesc = {};
         CreateDesc.Location = MemoryLocation::GpuOnly;
-        CreateDesc.Backing = MemoryBacking::Automatic;
+        CreateDesc.Backing = R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
         CreateDesc.Usage = bufferUsageFromResourceKind(R.Kind);
         CreateDesc.AccessType = bufferShaderAccessTypeFromResourceKind(
             R, CreateDesc.AccessTypeParams);
@@ -2077,12 +2258,26 @@ public:
 
         for (auto &Data : R.BufferPtr->Data) {
           std::unique_ptr<offloadtest::Buffer> UploadBuffer;
-          auto BufferOrErr =
-              createBufferWithData(*this, "Buffer", CreateDesc, Data.get(),
-                                   R.size(), Enc.get(), &UploadBuffer);
-          if (!BufferOrErr)
-            return BufferOrErr.takeError();
-          auto Buffer = std::move(*BufferOrErr);
+          std::unique_ptr<offloadtest::MemoryHeap> BackingMemoryHeap;
+
+          std::unique_ptr<offloadtest::Buffer> Buffer;
+          if (R.IsReserved) {
+            auto BufferOrErr = createSparseBufferWithData(
+                *this, GraphicsQueue, "Sparse Buffer", CreateDesc, Data.get(),
+                R.size(), *Enc.get(), UploadBuffer, BackingMemoryHeap);
+            if (!BufferOrErr)
+              return BufferOrErr.takeError();
+
+            Buffer = std::move(*BufferOrErr);
+          } else {
+            auto BufferOrErr =
+                createBufferWithData(*this, "Buffer", CreateDesc, Data.get(),
+                                     R.size(), Enc.get(), &UploadBuffer);
+            if (!BufferOrErr)
+              return BufferOrErr.takeError();
+
+            Buffer = std::move(*BufferOrErr);
+          }
 
           std::unique_ptr<offloadtest::Buffer> ReadbackBuffer;
           std::unique_ptr<offloadtest::Buffer> CounterReadbackBuffer;
@@ -2105,6 +2300,7 @@ public:
           }
 
           ResourceSet RSet(std::move(UploadBuffer), std::move(Buffer),
+                           std::move(BackingMemoryHeap),
                            std::move(ReadbackBuffer),
                            std::move(CounterReadbackBuffer));
           ResBundle.push_back(std::move(RSet));

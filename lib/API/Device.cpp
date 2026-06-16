@@ -35,6 +35,8 @@ Queue::~Queue() {}
 
 Texture::~Texture() {}
 
+MemoryHeap::~MemoryHeap() {}
+
 RenderPass::~RenderPass() {}
 
 AccelerationStructure::~AccelerationStructure() {}
@@ -256,6 +258,64 @@ createUploadBufferWithData(Device &Dev, std::string Name, const void *Data,
   UploadBuffer->unmap();
 
   return std::move(UploadBuffer);
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+offloadtest::createSparseBufferWithData(
+    Device &Dev, Queue &Q, std::string Name, const BufferCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder &Encoder,
+    std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
+    std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap) {
+
+  if (Desc.Backing != MemoryBacking::Sparse)
+    return llvm::createStringError("createSparseBufferWithData can only create "
+                                   "buffers with a sparse memory backing.");
+
+  auto BufferOrErr = Dev.createBuffer(Name, Desc, SizeInBytes);
+  if (!BufferOrErr)
+    return BufferOrErr.takeError();
+  auto Buffer = std::move(*BufferOrErr);
+
+  // Create Upload buffer
+  auto UploadBufferOrErr =
+      createUploadBufferWithData(Dev, Name, Data, SizeInBytes);
+  if (!UploadBufferOrErr)
+    return UploadBufferOrErr.takeError();
+  OutUploadBuffer = std::move(*UploadBufferOrErr);
+
+  const size_t Granularity = Buffer->querySparseTileSizeInBytes();
+  const size_t TileCount = llvm::divideCeil(SizeInBytes, Granularity);
+
+  // Create backing memory heap
+  const std::string HeapName = Name + " (Backing Heap)";
+  auto HeapOrErr = Dev.createMemoryHeap(HeapName, TileCount * Granularity);
+  if (!HeapOrErr)
+    return HeapOrErr.takeError();
+  OutBackingMemoryHeap = std::move(*HeapOrErr);
+
+  TileMapping Tile = {};
+  Tile.Region.NumTilesX = static_cast<uint32_t>(TileCount);
+  Tile.Backing = OutBackingMemoryHeap.get();
+  Tile.BackingTileOffset = 0;
+
+  llvm::SmallVector<TileMapping> Mappings;
+  Mappings.push_back(Tile);
+
+  auto SubmitResultOrErr = Q.updateTileMappings(*Buffer, Mappings);
+  if (!SubmitResultOrErr)
+    return SubmitResultOrErr.takeError();
+  auto SubmitResult = std::move(*SubmitResultOrErr);
+
+  // Wait for the tile mapping to be updated
+  if (auto Err = SubmitResult.waitForCompletion())
+    return Err;
+
+  // Copy Buffer to Buffer
+  if (auto Err = Encoder.copyBufferToBuffer(*OutUploadBuffer, 0, *Buffer, 0,
+                                            SizeInBytes))
+    return Err;
+
+  return Buffer;
 }
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
