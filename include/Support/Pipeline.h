@@ -81,6 +81,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::AccelerationStructure:
     return DescriptorKind::SRV;
 
@@ -145,6 +146,7 @@ struct OutputProperties {
   int Width;
   int Depth;
   int MipLevels = 1;
+  int ArraySize = 1;
 };
 
 static inline uint32_t getFormatSize(DataFormat Format) {
@@ -246,6 +248,7 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -273,6 +276,7 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
@@ -294,6 +298,7 @@ struct Resource {
     case ResourceKind::AccelerationStructure:
       return false;
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
       return true;
@@ -356,6 +361,7 @@ struct Resource {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -541,6 +547,12 @@ struct Pipeline {
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
   AccelerationStructureDescs AccelStructs;
+
+  // Number of view instances to render in a single draw (D3D12 view
+  // instancing). Default 1 = no view instancing. When > 1 the render target
+  // must be a Texture2DArray whose ArraySize is at least this value, and the
+  // backend routes view N to array slice N of the render/depth target.
+  uint32_t ViewInstanceCount = 1;
 
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)
@@ -830,6 +842,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
     ENUM_CASE(Texture2D);
+    ENUM_CASE(Texture2DArray);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
     ENUM_CASE(RWByteAddressBuffer);

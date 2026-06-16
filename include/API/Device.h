@@ -100,6 +100,10 @@ struct TraditionalRasterPipelineCreateDesc {
   std::optional<ShaderContainer> DS;
   std::optional<ShaderContainer> GS;
   ShaderContainer PS;
+  // View-instancing fan-out (1 == no view instancing). When > 1, backends
+  // that implement view instancing should route view N to render-target
+  // array slice N.
+  uint32_t ViewInstanceCount = 1;
 
   void setShader(Stages Stage, ShaderContainer &&SC) {
     switch (Stage) {
@@ -321,7 +325,8 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 
 // Creates a depth/stencil texture matching the dimensions of a render target.
 llvm::Expected<std::unique_ptr<Texture>>
-createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
+createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height,
+                                uint32_t ArraySize = 1);
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 createBufferWithData(Device &Dev, std::string Name,

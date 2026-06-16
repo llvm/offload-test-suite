@@ -77,6 +77,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
   case ResourceKind::RWTexture2D:
@@ -163,6 +164,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
@@ -179,6 +181,8 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
+  case ResourceKind::Texture2DArray:
+    return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
@@ -196,6 +200,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_TYPE_2D;

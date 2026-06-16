@@ -77,6 +77,8 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   if (auto Err = P.validateDispatchParameters())
     I.setError(llvm::toString(std::move(Err)));
 
+  I.mapOptional("ViewInstanceCount", P.ViewInstanceCount, 1u);
+
   if (!I.outputting()) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
@@ -429,6 +431,7 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
       H = std::max(1u, H / 2);
       D = std::max(1u, D / 2);
     }
+    ExpectedSize *= static_cast<uint32_t>(std::max(1, B.OutputProps.ArraySize));
 
     if (B.Size != ExpectedSize)
       I.setError(Twine("Buffer '") + B.Name + "' size (" + Twine(B.Size) +
@@ -546,6 +549,7 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
   I.mapOptional("MipLevels", P.MipLevels, 1);
+  I.mapOptional("ArraySize", P.ArraySize, 1);
 }
 
 void MappingTraits<offloadtest::dx::RootResource>::mapping(
