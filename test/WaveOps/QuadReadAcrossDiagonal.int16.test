@@ -232,10 +232,6 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
-# Unsupported in Clang, I have a working branch for QuadReadAcrossDiagonal intrinsic support
-# waiting on https://github.com/llvm/llvm-project/pull/187440 to be merged, so I can open a PR for it
-# XFAIL: Clang
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
