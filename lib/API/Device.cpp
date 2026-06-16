@@ -239,7 +239,7 @@ offloadtest::createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf) {
         "Depth buffer requires a CPUBuffer with a depth GpuFormat; got '%s'.",
         Buf.GpuFormat ? getFormatName(*Buf.GpuFormat).data() : "<none>");
 
-  Format Fmt = *Buf.GpuFormat;
+  const Format Fmt = *Buf.GpuFormat;
 
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
