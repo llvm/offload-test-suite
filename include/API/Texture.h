@@ -68,12 +68,13 @@ using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 // cube, or array textures, add a TextureType enum and validation between usage
 // and type (e.g. 3D textures cannot be used as DepthStencil).
 struct TextureCreateDesc {
-  MemoryLocation Location;
-  TextureUsage Usage;
-  Format Fmt;
-  uint32_t Width;
-  uint32_t Height;
-  uint32_t MipLevels;
+  MemoryLocation Location = MemoryLocation::GpuOnly;
+  MemoryBacking Backing = MemoryBacking::Automatic;
+  TextureUsage Usage = {};
+  Format Fmt = Format::RGBA32Float;
+  uint32_t Width = 1;
+  uint32_t Height = 1;
+  uint32_t MipLevels = 1;
   // Clear value for render target or depth/stencil textures.
   // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time
@@ -144,6 +145,15 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
   return llvm::Error::success();
 }
 
+// The texel dimensions of a single sparse tile. A tile is a fixed byte size
+// (~64 KiB) laid out as this WxHxD box of texels; Depth is 1 for 2D textures.
+// Tile counts are computed per dimension as ceil(extent / tileExtent).
+struct TileShape {
+  uint32_t Width = 1;
+  uint32_t Height = 1;
+  uint32_t Depth = 1;
+};
+
 class Texture {
   GPUAPI API;
 
@@ -154,7 +164,12 @@ public:
 
   // Calculate the size in bytes of the texture data given a linear layout
   // Useful for calculating the size for an upload or readback buffer.
-  size_t calculateLinearSizeInBytes(Device &Dev) const;
+  size_t calculateLinearSizeInBytes(const Device &Dev) const;
+
+  // The texel dimensions of a single sparse tile for this texture. The shape
+  // varies by format, dimensionality, and sample count. Only meaningful for a
+  // texture created with MemoryBacking::Sparse.
+  virtual TileShape querySparseTileShape(const Device &Dev) const = 0;
 
   GPUAPI getAPI() const { return API; }
   virtual const TextureCreateDesc &getDesc() const = 0;

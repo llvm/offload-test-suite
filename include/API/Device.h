@@ -407,6 +407,13 @@ llvm::Expected<std::unique_ptr<offloadtest::Buffer>> createSparseBufferWithData(
     std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
     std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap);
 
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
+createSparseTextureWithData(
+    Device &Dev, Queue &Q, std::string Name, const TextureCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder &Encoder,
+    std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
+    std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap);
+
 // TLAS handles come in pre-allocated because the caller's binding loop
 // stamps the AS pointer into descriptor bundles before this helper runs;
 // BLAS handles are allocated inline since BLASes aren't user-bindable.

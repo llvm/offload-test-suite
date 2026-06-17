@@ -193,6 +193,7 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
 }
 
 namespace {
+class DXDevice;
 
 class DXBuffer : public offloadtest::Buffer {
 public:
@@ -231,7 +232,7 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
-  size_t querySparseTileSizeInBytes() const override {
+  size_t querySparseTileSizeInBytes(const Device & /*Dev*/) const override {
     return D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES;
   }
 
@@ -283,6 +284,8 @@ public:
       : offloadtest::Texture(GPUAPI::DirectX), Resource(Resource),
         PreferredState(PreferredState), SRVHandle(SRVHandle),
         UAVHandle(UAVHandle), Name(Name), Desc(Desc) {}
+
+  TileShape querySparseTileShape(const Device &Dev) const override;
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
@@ -1149,7 +1152,7 @@ class DXDevice : public offloadtest::Device {
   // raw ID3D12Device for scratch buffer allocation.
   friend class DXComputeEncoder;
 
-private:
+public:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12DeviceX> Device;
   DXQueue GraphicsQueue;
@@ -1175,14 +1178,18 @@ private:
                 std::unique_ptr<MemoryHeap> BackingMemory,
                 std::unique_ptr<offloadtest::Buffer> Readback,
                 std::unique_ptr<offloadtest::Buffer> CounterReadback)
-        : UploadBuffer(std::move(UploadBuffer)), Buffer(std::move(Buffer)),
-          BackingMemory(std::move(BackingMemory)),
+        : UploadBuffer(std::move(UploadBuffer)),
+          BackingMemory(std::move(BackingMemory)), Buffer(std::move(Buffer)),
+
           Readback(std::move(Readback)),
           CounterReadback(std::move(CounterReadback)) {}
     ResourceSet(std::unique_ptr<offloadtest::Buffer> UploadBuffer,
                 std::unique_ptr<offloadtest::Texture> Texture,
+                std::unique_ptr<MemoryHeap> BackingMemory,
                 std::unique_ptr<offloadtest::Buffer> Readback)
-        : UploadBuffer(std::move(UploadBuffer)), Texture(std::move(Texture)),
+        : UploadBuffer(std::move(UploadBuffer)),
+          BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
+
           Readback(std::move(Readback)) {}
     explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
 
@@ -1190,16 +1197,17 @@ private:
     ResourceSet &operator=(const ResourceSet &) = delete;
 
     ResourceSet(ResourceSet &&A)
-        : UploadBuffer(std::move(A.UploadBuffer)), Buffer(std::move(A.Buffer)),
-          Texture(std::move(A.Texture)),
+        : UploadBuffer(std::move(A.UploadBuffer)),
           BackingMemory(std::move(A.BackingMemory)),
-          Readback(std::move(A.Readback)),
+          Buffer(std::move(A.Buffer)),
+
+          Texture(std::move(A.Texture)), Readback(std::move(A.Readback)),
           CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
     ResourceSet &operator=(ResourceSet &&A) {
       UploadBuffer = std::move(A.UploadBuffer);
+      BackingMemory = std::move(A.BackingMemory);
       Buffer = std::move(A.Buffer);
       Texture = std::move(A.Texture);
-      BackingMemory = std::move(A.BackingMemory);
       Readback = std::move(A.Readback);
       CounterReadback = std::move(A.CounterReadback);
       AS = A.AS;
@@ -1283,6 +1291,10 @@ public:
 
   llvm::StringRef getAPIName() const override { return "DirectX"; }
   GPUAPI getAPI() const override { return GPUAPI::DirectX; }
+
+  static bool classof(const offloadtest::Device *D) {
+    return D->getAPI() == GPUAPI::DirectX;
+  }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
@@ -1770,9 +1782,14 @@ public:
     TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
     TexDesc.Format = getDXGIFormat(Desc.Fmt);
     TexDesc.SampleDesc.Count = 1;
-    TexDesc.Layout = Desc.Location == MemoryLocation::GpuOnly
-                         ? D3D12_TEXTURE_LAYOUT_UNKNOWN
-                         : D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    if (Desc.Location == MemoryLocation::GpuOnly) {
+      if (Desc.Backing == MemoryBacking::Sparse)
+        TexDesc.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
+      else
+        TexDesc.Layout = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+    } else {
+      TexDesc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    }
     TexDesc.Flags = getDXResourceFlags(Desc.Usage);
 
     const D3D12_CLEAR_VALUE *ClearValuePtr = nullptr;
@@ -1803,12 +1820,20 @@ public:
       InitialState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
 
     ComPtr<ID3D12Resource> TextureObject;
-    if (auto Err = HR::toError(Device->CreateCommittedResource(
-                                   &HeapProps, D3D12_HEAP_FLAG_NONE, &TexDesc,
-                                   InitialState, ClearValuePtr,
-                                   IID_PPV_ARGS(&TextureObject)),
-                               "Failed to create texture."))
-      return Err;
+    if (Desc.Backing == MemoryBacking::Sparse) {
+      if (auto Err = HR::toError(Device->CreateReservedResource(
+                                     &TexDesc, InitialState, ClearValuePtr,
+                                     IID_PPV_ARGS(&TextureObject)),
+                                 "Failed to create reserved texture."))
+        return Err;
+    } else {
+      if (auto Err = HR::toError(Device->CreateCommittedResource(
+                                     &HeapProps, D3D12_HEAP_FLAG_NONE, &TexDesc,
+                                     InitialState, ClearValuePtr,
+                                     IID_PPV_ARGS(&TextureObject)),
+                                 "Failed to create texture."))
+        return Err;
+    }
 
     D3D12_CPU_DESCRIPTOR_HANDLE SRVHandle = {};
     {
@@ -2250,7 +2275,8 @@ public:
       if (R.isBuffer()) {
         BufferCreateDesc CreateDesc = {};
         CreateDesc.Location = MemoryLocation::GpuOnly;
-        CreateDesc.Backing = R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
+        CreateDesc.Backing =
+            R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
         CreateDesc.Usage = bufferUsageFromResourceKind(R.Kind);
         CreateDesc.AccessType = bufferShaderAccessTypeFromResourceKind(
             R, CreateDesc.AccessTypeParams);
@@ -2319,6 +2345,8 @@ public:
 
         TextureCreateDesc CreateDesc = {};
         CreateDesc.Location = MemoryLocation::GpuOnly;
+        CreateDesc.Backing =
+            R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
         CreateDesc.Usage = TextureUsage::Sampled;
         if (R.Kind == ResourceKind::RWTexture2D)
           CreateDesc.Usage |= TextureUsage::Storage;
@@ -2329,12 +2357,26 @@ public:
 
         for (auto &Data : R.BufferPtr->Data) {
           std::unique_ptr<offloadtest::Buffer> UploadBuffer;
-          auto TextureOrErr =
-              createTextureWithData(*this, "Texture", CreateDesc, Data.get(),
-                                    R.size(), Enc.get(), &UploadBuffer);
-          if (!TextureOrErr)
-            return TextureOrErr.takeError();
-          auto Texture = std::move(*TextureOrErr);
+          std::unique_ptr<offloadtest::MemoryHeap> BackingMemoryHeap;
+
+          std::unique_ptr<offloadtest::Texture> Texture;
+          if (R.IsReserved) {
+            auto TextureOrErr = createSparseTextureWithData(
+                *this, GraphicsQueue, "Sparse Texture", CreateDesc, Data.get(),
+                R.size(), *Enc.get(), UploadBuffer, BackingMemoryHeap);
+            if (!TextureOrErr)
+              return TextureOrErr.takeError();
+
+            Texture = std::move(*TextureOrErr);
+          } else {
+            auto TextureOrErr =
+                createTextureWithData(*this, "Texture", CreateDesc, Data.get(),
+                                      R.size(), Enc.get(), &UploadBuffer);
+            if (!TextureOrErr)
+              return TextureOrErr.takeError();
+
+            Texture = std::move(*TextureOrErr);
+          }
 
           std::unique_ptr<Buffer> ReadbackBuffer;
           if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
@@ -2349,6 +2391,7 @@ public:
           }
 
           ResourceSet RSet(std::move(UploadBuffer), std::move(Texture),
+                           std::move(BackingMemoryHeap),
                            std::move(ReadbackBuffer));
           ResBundle.push_back(std::move(RSet));
         }
@@ -3050,6 +3093,18 @@ public:
     return llvm::Error::success();
   }
 };
+
+TileShape DXTexture::querySparseTileShape(const Device &Dev) const {
+  const DXDevice &DeviceDX = llvm::cast<DXDevice>(Dev);
+
+  D3D12_TILE_SHAPE Shape = {};
+  UINT NumTiles = 0;
+  UINT NumSubresourceTilings = 0;
+  DeviceDX.Device->GetResourceTiling(Resource.Get(), &NumTiles, nullptr, &Shape,
+                                     &NumSubresourceTilings, 0, nullptr);
+  return TileShape{Shape.WidthInTexels, Shape.HeightInTexels,
+                   Shape.DepthInTexels};
+}
 
 llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
   if (Items.empty())

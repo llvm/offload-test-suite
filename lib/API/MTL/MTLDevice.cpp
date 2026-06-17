@@ -325,16 +325,15 @@ public:
 
 class MTLBuffer : public offloadtest::Buffer {
 public:
-  MTL::Device *Device; // Not owned; used to query device-wide properties.
   MTL::Buffer *Buf;
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  MTLBuffer(MTL::Device *Device, MTL::Buffer *Buf, llvm::StringRef Name,
-            BufferCreateDesc Desc, size_t SizeInBytes)
-      : offloadtest::Buffer(GPUAPI::Metal), Device(Device), Buf(Buf),
-        Name(Name), Desc(Desc), SizeInBytes(SizeInBytes) {}
+  MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
+            size_t SizeInBytes)
+      : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
+        SizeInBytes(SizeInBytes) {}
   MTLBuffer(const MTLBuffer &) = delete;
   MTLBuffer(MTLBuffer &&) = delete;
   MTLBuffer &operator=(const MTLBuffer &) = delete;
@@ -342,9 +341,7 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
-  size_t querySparseTileSizeInBytes() const override {
-    return Device->sparseTileSizeInBytes();
-  }
+  size_t querySparseTileSizeInBytes(const Device &Dev) const override;
 
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
@@ -386,6 +383,8 @@ public:
     if (Tex)
       Tex->release();
   }
+
+  TileShape querySparseTileShape(const Device &Dev) const override;
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
@@ -1762,6 +1761,10 @@ public:
   llvm::StringRef getAPIName() const override { return "Metal"; };
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
+  static bool classof(const offloadtest::Device *D) {
+    return D->getAPI() == GPUAPI::Metal;
+  }
+
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -2517,6 +2520,19 @@ private:
                                             Device->supportsRaytracing())));
   }
 };
+
+size_t MTLBuffer::querySparseTileSizeInBytes(const Device &Dev) const {
+  return llvm::cast<MTLDevice>(Dev).Device->sparseTileSizeInBytes();
+}
+
+TileShape MTLTexture::querySparseTileShape(const Device &Dev) const {
+  // The owning device is recovered from the texture so it needn't store it.
+  const MTL::Size S = llvm::cast<MTLDevice>(Dev).Device->sparseTileSize(
+      Tex->textureType(), Tex->pixelFormat(), Tex->sampleCount());
+  return TileShape{static_cast<uint32_t>(S.width),
+                   static_cast<uint32_t>(S.height),
+                   static_cast<uint32_t>(S.depth)};
+}
 
 llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
   if (Items.empty())

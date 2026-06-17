@@ -462,7 +462,7 @@ public:
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
 
-  size_t querySparseTileSizeInBytes() const override {
+  size_t querySparseTileSizeInBytes(const Device & /*Dev*/) const override {
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Dev, Buffer, &MemReqs);
     return MemReqs.alignment;
@@ -548,6 +548,17 @@ public:
 
   VkImageLayout preferredLayoutOrUndefined() {
     return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
+  }
+
+  TileShape querySparseTileShape(const Device & /*Dev*/) const override {
+    uint32_t Count = 0;
+    vkGetImageSparseMemoryRequirements(Dev, Image, &Count, nullptr);
+    if (Count == 0)
+      return TileShape{};
+    llvm::SmallVector<VkSparseImageMemoryRequirements> Reqs(Count);
+    vkGetImageSparseMemoryRequirements(Dev, Image, &Count, Reqs.data());
+    const VkExtent3D G = Reqs[0].formatProperties.imageGranularity;
+    return TileShape{G.width, G.height, G.depth};
   }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
@@ -1865,6 +1876,10 @@ public:
 
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+
+  static bool classof(const offloadtest::Device *D) {
+    return D->getAPI() == GPUAPI::Vulkan;
+  }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
