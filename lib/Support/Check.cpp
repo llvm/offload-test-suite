@@ -191,8 +191,8 @@ static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
         ExpStr << "0x" << std::hex << Arr2[I];
       }
       llvm::errs() << "  Mismatch at element " << I
-                    << ": expected=" << ExpStr.str()
-                    << ", actual=" << ActStr.str() << "\n";
+                   << ": expected=" << ExpStr.str()
+                   << ", actual=" << ActStr.str() << "\n";
       Passed = false;
     }
   }
