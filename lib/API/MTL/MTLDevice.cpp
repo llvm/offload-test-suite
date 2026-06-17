@@ -1012,6 +1012,7 @@ class MTLDevice : public offloadtest::Device {
   // and instance buffer allocation.
   friend class MTLComputeEncoder;
 
+public:
   Capabilities Caps;
   MTL::Device *Device;
   MTLQueue GraphicsQueue;
@@ -1797,7 +1798,7 @@ public:
     if (!Buf)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal buffer.");
-    return std::make_unique<MTLBuffer>(Device, Buf, Name, Desc, SizeInBytes);
+    return std::make_unique<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
