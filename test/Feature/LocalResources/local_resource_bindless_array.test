@@ -16,7 +16,6 @@ void main(uint3 tid : SV_DispatchThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: gBufArray
     Format: Int32
