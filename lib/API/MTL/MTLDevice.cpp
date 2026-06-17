@@ -1114,7 +1114,7 @@ class MTLDevice : public offloadtest::Device {
   llvm::Expected<MetalIR> convertToMetalIR(Stages Stage, bool IsGraphics,
                                            IRRootSignature *RootSig,
                                            const ShaderContainer &SC) {
-    IRCompilerPtr Compiler(IRCompilerCreate());
+    const IRCompilerPtr Compiler(IRCompilerCreate());
     if (!Compiler)
       return llvm::createStringError(std::errc::not_supported,
                                      "Failed to create IR compiler instance.");
@@ -1140,7 +1140,7 @@ class MTLDevice : public offloadtest::Device {
 
     // Compile DXIL to Metal IR
     IRError *Err = nullptr;
-    IRObjectPtr ResultIR(
+    const IRObjectPtr ResultIR(
         IRCompilerAllocCompileAndLink(Compiler.get(), nullptr, DXIL, &Err));
     if (Err)
       return toError(IRErrorPtr(Err).get(),
@@ -1179,49 +1179,48 @@ class MTLDevice : public offloadtest::Device {
                             MTL::ResourceStorageModeManaged);
       Buf->didModifyRange(NS::Range::Make(0, Buf->length()));
       return Buf;
-    } else {
-      const uint64_t Width =
-          R.isTexture() ? B.OutputProps.Width : R.size() / R.getElementSize();
-      const uint64_t Height = R.isTexture() ? B.OutputProps.Height : 1;
-      MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
-      if (R.isReadWrite())
-        UsageFlags |= MTL::ResourceUsageWrite;
-      MTL::TextureDescriptor *Desc = nullptr;
-      const MTL::PixelFormat Format = getMTLFormat(B.Format, B.Channels);
-      switch (R.Kind) {
-      case ResourceKind::Buffer:
-      case ResourceKind::RWBuffer:
-        Desc = MTL::TextureDescriptor::textureBufferDescriptor(
-            Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
-        break;
-      case ResourceKind::Texture2D:
-      case ResourceKind::RWTexture2D:
-        Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width,
-                                                           Height, false);
-        break;
-      case ResourceKind::Sampler:
-        llvm_unreachable("Not implemented yet.");
-      case ResourceKind::SampledTexture2D:
-        llvm_unreachable("SampledTextures aren't supported in Metal.");
-      case ResourceKind::StructuredBuffer:
-      case ResourceKind::RWStructuredBuffer:
-      case ResourceKind::ByteAddressBuffer:
-      case ResourceKind::RWByteAddressBuffer:
-      case ResourceKind::ConstantBuffer:
-        llvm_unreachable("Raw is checked above");
-      case ResourceKind::AccelerationStructure:
-        llvm_unreachable("Acceleration structures use a separate path!");
-      }
-
-      MTL::Texture *NewTex = Device->newTexture(Desc);
-      NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
-                            B.Data[ResourceArrayIndex].get(),
-                            Width * R.getElementSize());
-      return NewTex;
     }
+    const uint64_t Width =
+        R.isTexture() ? B.OutputProps.Width : R.size() / R.getElementSize();
+    const uint64_t Height = R.isTexture() ? B.OutputProps.Height : 1;
+    MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
+    if (R.isReadWrite())
+      UsageFlags |= MTL::ResourceUsageWrite;
+    MTL::TextureDescriptor *Desc = nullptr;
+    const MTL::PixelFormat Format = getMTLFormat(B.Format, B.Channels);
+    switch (R.Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+      Desc = MTL::TextureDescriptor::textureBufferDescriptor(
+          Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
+      break;
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+      Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width, Height,
+                                                         false);
+      break;
+    case ResourceKind::Sampler:
+      llvm_unreachable("Not implemented yet.");
+    case ResourceKind::SampledTexture2D:
+      llvm_unreachable("SampledTextures aren't supported in Metal.");
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+      llvm_unreachable("Raw is checked above");
+    case ResourceKind::AccelerationStructure:
+      llvm_unreachable("Acceleration structures use a separate path!");
+    }
+
+    MTL::Texture *NewTex = Device->newTexture(Desc);
+    NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
+                          B.Data[ResourceArrayIndex].get(),
+                          Width * R.getElementSize());
+    return NewTex;
   }
 
-  llvm::Expected<ResourceBundle> createSRV(Resource &R, InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createSRV(Resource &R) {
     ResourceBundle Bundle;
 
     for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
@@ -1241,7 +1240,7 @@ class MTLDevice : public offloadtest::Device {
   }
 
   // TODO: counter buffer via IRRuntimeCreateAppendBufferView?
-  llvm::Expected<ResourceBundle> createUAV(Resource &R, InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createUAV(Resource &R) {
     ResourceBundle Bundle;
 
     for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
@@ -1261,7 +1260,7 @@ class MTLDevice : public offloadtest::Device {
     return Bundle;
   }
 
-  llvm::Expected<ResourceBundle> createCBV(Resource &R, InvocationState &IS) {
+  llvm::Expected<ResourceBundle> createCBV(Resource &R) {
     ResourceBundle Bundle;
 
     for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
@@ -1367,21 +1366,21 @@ class MTLDevice : public offloadtest::Device {
       }
       switch (getDescriptorKind(R.Kind)) {
       case DescriptorKind::SRV: {
-        auto ExRes = createSRV(R, IS);
+        auto ExRes = createSRV(R);
         if (!ExRes)
           return ExRes.takeError();
         Resources.emplace_back(&R, std::move(*ExRes));
         break;
       }
       case DescriptorKind::UAV: {
-        auto ExRes = createUAV(R, IS);
+        auto ExRes = createUAV(R);
         if (!ExRes)
           return ExRes.takeError();
         Resources.emplace_back(&R, std::move(*ExRes));
         break;
       }
       case DescriptorKind::CBV: {
-        auto ExRes = createCBV(R, IS);
+        auto ExRes = createCBV(R);
         if (!ExRes)
           return ExRes.takeError();
         Resources.emplace_back(&R, std::move(*ExRes));
@@ -1551,7 +1550,7 @@ class MTLDevice : public offloadtest::Device {
     IS.RenderTarget = std::move(*TexOrErr);
 
     // Create a readback buffer for copying render target data to the CPU.
-    BufferCreateDesc BufDesc = BufferCreateDesc::readbackBuffer();
+    const BufferCreateDesc BufDesc = BufferCreateDesc::readbackBuffer();
     auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
@@ -2015,7 +2014,7 @@ public:
       return Err;
 
     NS::Error *Error = nullptr;
-    auto compileStage = [&](Stages Stage, const ShaderContainer &SC,
+    auto CompileStage = [&](Stages Stage, const ShaderContainer &SC,
                             llvm::StringRef RoleName, MetalIR &OutIR,
                             MTLPtr<MTL::Library> &OutLib,
                             MTLPtr<MTL::Function> &OutFn) -> llvm::Error {
@@ -2045,14 +2044,14 @@ public:
     MTLPtr<MTL::Library> MSLib;
     MTLPtr<MTL::Function> MSFn;
     if (auto Err =
-            compileStage(Stages::Mesh, Desc.MS, "mesh", MSIR, MSLib, MSFn))
+            CompileStage(Stages::Mesh, Desc.MS, "mesh", MSIR, MSLib, MSFn))
       return Err;
 
     MetalIR ASIR;
     MTLPtr<MTL::Library> ASLib;
     MTLPtr<MTL::Function> ASFn;
     if (Desc.AS) {
-      if (auto Err = compileStage(Stages::Amplification, *Desc.AS,
+      if (auto Err = CompileStage(Stages::Amplification, *Desc.AS,
                                   "amplification", ASIR, ASLib, ASFn))
         return Err;
     }
@@ -2061,7 +2060,7 @@ public:
     MTLPtr<MTL::Library> PSLib;
     MTLPtr<MTL::Function> PSFn;
     if (Desc.PS) {
-      if (auto Err = compileStage(Stages::Pixel, *Desc.PS, "fragment", PSIR,
+      if (auto Err = CompileStage(Stages::Pixel, *Desc.PS, "fragment", PSIR,
                                   PSLib, PSFn))
         return Err;
     }
@@ -2213,7 +2212,7 @@ private:
         MTL::PrimitiveAccelerationStructureDescriptor::alloc()->init();
     Descriptor->setGeometryDescriptors(GeomDescs);
 
-    MTL::AccelerationStructureSizes Sizes =
+    const MTL::AccelerationStructureSizes Sizes =
         Device->accelerationStructureSizes(Descriptor);
 
     Descriptor->release();
@@ -2255,7 +2254,7 @@ public:
     Descriptor->setInstanceDescriptorType(
         MTL::AccelerationStructureInstanceDescriptorTypeUserID);
 
-    MTL::AccelerationStructureSizes Sizes =
+    const MTL::AccelerationStructureSizes Sizes =
         Device->accelerationStructureSizes(Descriptor);
 
     Descriptor->release();
@@ -2534,8 +2533,8 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       InstanceASIdx.reserve(TLAS->Instances.size());
       for (const auto &Inst : TLAS->Instances) {
         auto *MTLBLAS = llvm::cast<MetalAccelerationStructure>(Inst.BLAS);
-        auto It = std::find(UniqueBLASes.begin(), UniqueBLASes.end(),
-                            MTLBLAS->AccelStruct);
+        auto *It = std::find(UniqueBLASes.begin(), UniqueBLASes.end(),
+                             MTLBLAS->AccelStruct);
         uint32_t Idx;
         if (It == UniqueBLASes.end()) {
           Idx = static_cast<uint32_t>(UniqueBLASes.size());
