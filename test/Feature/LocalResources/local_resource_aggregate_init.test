@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that aggregate (brace) initialization of a struct with a resource
 // member works correctly.
 

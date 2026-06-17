@@ -1,39 +1,46 @@
 #--- source.hlsl
-// Test that a conditionally initialized local resource works correctly.
-// DXC rejects this because it cannot prove the local resource maps to a
-// unique global resource through the conditional branch.
-RWByteAddressBuffer gBuf : register(u0);
+// Test that a `static` local resource initialized from a global binds
+// once and persists across calls. Single-lane dispatch stores 1 at
+// offset 0 of `gBuf0`.
+
+RWByteAddressBuffer gBuf0 : register(u0);
+
+uint Pass_StaticLocal(uint idx) {
+    static RWByteAddressBuffer buf = gBuf0;
+    buf.Store(idx * 4, 1);
+
+    return 1;
+}
 
 [numthreads(1,1,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
-    RWByteAddressBuffer buf;
-    if (tid.x == 0)
-        buf = gBuf;
-    buf.Store(0, 42);
+    Pass_StaticLocal(tid.x);
 }
+
 //--- pipeline.yaml
+
 ---
 Shaders:
   - Stage: Compute
     Entry: main
     DispatchSize: [1, 1, 1]
 Buffers:
-  - Name: gBuf
+  - Name: gBuf0
     Format: Int32
     Stride: 4
     Data: [0]
-  - Name: ExpectedGBuf
+  - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
-    Data: [42]
+    Data: [1]
 Results:
-  - Result: Test0
+  - Result: Buf0Check
     Rule: BufferExact
-    Actual: gBuf
-    Expected: ExpectedGBuf
+    Actual: gBuf0
+    Expected: ExpectedBuf0
 DescriptorSets:
   - Resources:
-    - Name: gBuf
+    - Name: gBuf0
       Kind: RWByteAddressBuffer
       DirectXBinding:
         Register: 0
@@ -43,14 +50,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/192542
-# XFAIL: DXC && Vulkan
-
-# Bug: TODO - DXC codegen error: local resource not guaranteed to map to unique global resource
-# XFAIL: DXC
-
 # Bug: https://github.com/llvm/llvm-project/issues/192523
 # XFAIL: Clang && Vulkan
+
+# DXC: ICE (`llvm::cast<X>()` argument of incompatible type).
+# XFAIL: DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

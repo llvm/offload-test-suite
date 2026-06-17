@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a chain of local resource aliases (a = global, b = a, c = b)
 // correctly propagates the binding through to the final store.
 

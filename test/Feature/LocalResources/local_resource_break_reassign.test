@@ -1,21 +1,24 @@
 #--- source.hlsl
-// Test that assigning a ternary expression to a static resource variable
-// produces valid output. The ternary always resolves to gBuf0 (true branch).
-// DXC: Clean with cs_6_0 (folds compile-time ternary). Errors only in lib_6_*
-//       with -exports ("non const static global resource use is disallowed
-//       in library exports").
+// Test that a `break` inside a loop short-circuits a reassignment of a
+// local resource. With numthreads(1,1,1) the break always fires on the
+// first iteration, so `buf` keeps its initial binding to `gBuf0` and
+// the post-loop Store reaches `gBuf0`.
 
 RWByteAddressBuffer gBuf0 : register(u0);
 RWByteAddressBuffer gBuf1 : register(u1);
 
-static RWByteAddressBuffer StaticOut;
-
 [numthreads(1,1,1)]
-void main() {
-    StaticOut = true ? gBuf0 : gBuf1;
-    StaticOut.Store(0, 42);
+void main(uint3 tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer buf = gBuf0;
+    for (uint i = 0; i < 4; i++) {
+        if (i == tid.x) break;
+        buf = gBuf1;
+    }
+    buf.Store(tid.x * 4, 42);
 }
+
 //--- pipeline.yaml
+
 ---
 Shaders:
   - Stage: Compute
@@ -30,11 +33,11 @@ Buffers:
     Format: Int32
     Stride: 4
     Data: [0]
-  - Name: ExpectedGBuf0
+  - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
     Data: [42]
-  - Name: ExpectedGBuf1
+  - Name: ExpectedBuf1
     Format: Int32
     Stride: 4
     Data: [0]
@@ -42,11 +45,11 @@ Results:
   - Result: Buf0Check
     Rule: BufferExact
     Actual: gBuf0
-    Expected: ExpectedGBuf0
+    Expected: ExpectedBuf0
   - Result: Buf1Check
     Rule: BufferExact
     Actual: gBuf1
-    Expected: ExpectedGBuf1
+    Expected: ExpectedBuf1
 DescriptorSets:
   - Resources:
     - Name: gBuf0
@@ -66,8 +69,13 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/192523
-# XFAIL: Clang && Vulkan
+# Clang: codegen error after warning ("Resource access is not guaranteed
+# to map to a unique global resource").
+# XFAIL: Clang
+
+# DXC: codegen error ("local resource not guaranteed to map to unique
+# global resource").
+# XFAIL: DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

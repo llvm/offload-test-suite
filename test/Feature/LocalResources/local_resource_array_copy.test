@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource array can be copied to another local array.
 
 RWByteAddressBuffer Out : register(u0);

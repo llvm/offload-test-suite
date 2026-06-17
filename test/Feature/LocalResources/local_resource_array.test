@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a basic local resource array works with constant indexing.
 
 RWByteAddressBuffer Out : register(u0);

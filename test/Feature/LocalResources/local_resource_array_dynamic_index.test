@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource array can be dynamically indexed at runtime.
 
 RWByteAddressBuffer gBufArray[4] : register(u0);

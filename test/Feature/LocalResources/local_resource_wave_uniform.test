@@ -1,16 +1,25 @@
 #--- source.hlsl
+// Test that a local resource reassigned inside a wave-uniform branch
+// reaches the per-path global at the post-branch Store. With
+// numthreads(1,1,1), `WaveActiveAllTrue(true)` is uniformly true on
+// the active lane, so `buf` becomes `gBuf1` and Store reaches
+// `gBuf1`.
+
 RWByteAddressBuffer gBuf0 : register(u0);
 RWByteAddressBuffer gBuf1 : register(u1);
 
+uint Fail_WaveUniform(uint offset, uint value) {
+    RWByteAddressBuffer buf = gBuf0;
+    if (WaveActiveAllTrue(true))
+        buf = gBuf1;
+    buf.Store(offset, value);
+
+    return value;
+}
+
 [numthreads(1,1,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
-    RWByteAddressBuffer buf = gBuf0;
-    if (tid.x > 0) {
-        buf.Store(0, 1);
-        return;
-    }
-    buf = gBuf1;
-    buf.Store(tid.x * 4, 42);
+    Fail_WaveUniform(tid.x * 4, 10);
 }
 
 //--- pipeline.yaml
@@ -25,27 +34,27 @@ Buffers:
     Format: Int32
     Stride: 4
     Data: [0]
-  - Name: ExpectedGBuf0
-    Format: Int32
-    Stride: 4
-    Data: [0]
   - Name: gBuf1
     Format: Int32
     Stride: 4
     Data: [0]
-  - Name: ExpectedGBuf1
+  - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
-    Data: [42]
+    Data: [0]
+  - Name: ExpectedBuf1
+    Format: Int32
+    Stride: 4
+    Data: [10]
 Results:
-  - Result: Test0
+  - Result: Buf0Check
     Rule: BufferExact
     Actual: gBuf0
-    Expected: ExpectedGBuf0
-  - Result: Test1
+    Expected: ExpectedBuf0
+  - Result: Buf1Check
     Rule: BufferExact
     Actual: gBuf1
-    Expected: ExpectedGBuf1
+    Expected: ExpectedBuf1
 DescriptorSets:
   - Resources:
     - Name: gBuf0
@@ -65,8 +74,13 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/192523
-# XFAIL: Clang && Vulkan
+# Clang: warning + codegen error ("Resource access is not guaranteed
+# to map to a unique global resource").
+# XFAIL: Clang
+
+# DXC: codegen error ("local resource not guaranteed to map to unique
+# global resource").
+# XFAIL: DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

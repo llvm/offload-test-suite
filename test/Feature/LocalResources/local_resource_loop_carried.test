@@ -1,16 +1,26 @@
 #--- source.hlsl
-// Test that loop-carried reassignment from global resource array elements works correctly.
 RWByteAddressBuffer gBuf0 : register(u0);
-RWByteAddressBuffer gBufArray[4] : register(u1);
+RWByteAddressBuffer gBufArray[4] : register(u10);
 
-[numthreads(1,1,1)]
-void main() {
+uint Pass_LoopCarried(int iterations, uint idx) {
     RWByteAddressBuffer buf = gBuf0;
-    for (uint i = 0; i < 3; i++)
-        buf = gBufArray[i];
-    buf.Store(0, 42);
+
+    for (int i=0;i<iterations;i++)
+        buf = gBufArray[i & 3];
+
+    buf.Store(idx * 4, 26);
+
+    return 26;
 }
+
+[numthreads(8,8,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    uint idx = tid.x + tid.y * 8;
+    Pass_LoopCarried(15, idx);
+}
+
 //--- pipeline.yaml
+
 ---
 Shaders:
   - Stage: Compute
@@ -20,38 +30,38 @@ Buffers:
   - Name: gBuf0
     Format: Int32
     Stride: 4
-    Data: [0]
-  - Name: ExpectedGBuf0
-    Format: Int32
-    Stride: 4
-    Data: [0]
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   - Name: gBufArray
     Format: Int32
     Stride: 4
     ArraySize: 4
     Data:
-      - [0]
-      - [0]
-      - [0]
-      - [0]
-  - Name: ExpectedGBufArray
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  - Name: ExpectedBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  - Name: ExpectedBufArray
     Format: Int32
     Stride: 4
     ArraySize: 4
     Data:
-      - [0]
-      - [0]
-      - [42]
-      - [0]
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      - [26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26, 26]
+      - [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 Results:
-  - Result: Test0
+  - Result: Buf0Check
     Rule: BufferExact
     Actual: gBuf0
-    Expected: ExpectedGBuf0
-  - Result: Test1
+    Expected: ExpectedBuf0
+  - Result: BufArrayCheck
     Rule: BufferExact
     Actual: gBufArray
-    Expected: ExpectedGBufArray
+    Expected: ExpectedBufArray
 DescriptorSets:
   - Resources:
     - Name: gBuf0
@@ -64,10 +74,10 @@ DescriptorSets:
     - Name: gBufArray
       Kind: RWByteAddressBuffer
       DirectXBinding:
-        Register: 1
+        Register: 10
         Space: 0
       VulkanBinding:
-        Binding: 1
+        Binding: 10
 ...
 #--- end
 

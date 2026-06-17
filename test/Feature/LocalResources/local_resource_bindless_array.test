@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource can be assigned from a dynamically-indexed
 // global resource array (bindless pattern).
 

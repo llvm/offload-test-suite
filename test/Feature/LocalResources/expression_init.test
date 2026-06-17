@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource variable can be initialized via a ternary
 // expression selecting between two global resources.
 

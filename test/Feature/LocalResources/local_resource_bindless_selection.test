@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource can be reassigned from different elements
 // of a global resource array (bindless selection pattern).
 
