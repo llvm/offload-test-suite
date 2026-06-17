@@ -17,7 +17,6 @@ void main(uint3 GTI : SV_GroupThreadID, uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Buf
     Format: Int32
@@ -60,9 +59,6 @@ DescriptorSets:
         Space: 0
 ...
 #--- end
-
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan

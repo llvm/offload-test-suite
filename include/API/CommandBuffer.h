@@ -6,6 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
+// Defines the CommandBuffer base class for recording and submitting GPU work.
+// Each backend (DirectX, Vulkan, Metal) provides a concrete subclass that
+// wraps the native command recording objects. LLVM-style RTTI is provided for
+// downcasting to the backend-specific type.
 //
 //===----------------------------------------------------------------------===//
 
@@ -13,30 +17,43 @@
 #define OFFLOADTEST_API_COMMANDBUFFER_H
 
 #include "API/API.h"
+#include "API/Encoder.h"
 
-#include <cassert>
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Error.h"
+
+#include <memory>
 
 namespace offloadtest {
 
+class RenderPass;
+class Texture;
+
+struct RenderPassBeginDesc {
+  RenderPass *Pass = nullptr;
+  llvm::SmallVector<Texture *, 8> ColorAttachments;
+  Texture *DepthStencil = nullptr;
+};
+
 class CommandBuffer {
-  GPUAPI API;
+  GPUAPI Kind;
 
 public:
-  explicit CommandBuffer(GPUAPI API) : API(API) {}
-  virtual ~CommandBuffer() = default;
+  explicit CommandBuffer(GPUAPI Kind) : Kind(Kind) {}
+  virtual ~CommandBuffer();
   CommandBuffer(const CommandBuffer &) = delete;
   CommandBuffer &operator=(const CommandBuffer &) = delete;
 
-  GPUAPI getAPI() const { return API; }
+  GPUAPI getKind() const { return Kind; }
 
-  template <typename T> T &as() {
-    assert(API == T::BackendAPI && "CommandBuffer backend mismatch");
-    return static_cast<T &>(*this);
-  }
-  template <typename T> const T &as() const {
-    assert(API == T::BackendAPI && "CommandBuffer backend mismatch");
-    return static_cast<const T &>(*this);
-  }
+  /// Create a compute command encoder for recording dispatch commands.
+  /// Barriers are automatically inserted between commands.
+  virtual llvm::Expected<std::unique_ptr<ComputeEncoder>>
+  createComputeEncoder() = 0;
+
+  /// Create a render command encoder for recording draw commands.
+  virtual llvm::Expected<std::unique_ptr<RenderEncoder>>
+  createRenderEncoder(const RenderPassBeginDesc &Desc) = 0;
 };
 
 } // namespace offloadtest

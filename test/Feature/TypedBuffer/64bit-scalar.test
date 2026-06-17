@@ -33,7 +33,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: U0
     Format: Int64
@@ -123,10 +122,8 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Metal
-
-# Bug https://github.com/llvm/offload-test-suite/issues/1030
-# XFAIL: Vulkan && !AMD
+# Bug https://github.com/llvm/offload-test-suite/issues/1110
+# XFAIL: Intel-Gen-10 && Vulkan
 
 # REQUIRES: Int64
 # RUN: split-file %s %t

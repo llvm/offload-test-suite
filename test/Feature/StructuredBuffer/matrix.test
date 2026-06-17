@@ -30,7 +30,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: InA
     Format: Float32
@@ -107,9 +106,6 @@ DescriptorSets:
         Binding: 3
 ...
 #--- end
-
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/1021
-# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl

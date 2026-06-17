@@ -21,7 +21,8 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [4, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [4, 1, 1]
 Buffers:
 - Name: cbuffer_f2x4
   Format: Float32
@@ -87,11 +88,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 3
 
-
-# Note: Metal and Vulkan KosmicKrisp and MoltenVK 
-# Are always empty
-# UNSUPPORTED: Darwin
-
 # BUG https://github.com/llvm/offload-test-suite/issues/931
 # XFAIL: Clang && DirectX && AMD
 
@@ -100,6 +96,8 @@ DescriptorSets:
 # Results: [ 1.1, 2.2, 0, 0, 5.5, 6.6, 0, 0 ]
 # XFAIL: Vulkan && QC && DXC
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/696
+# XFAIL:Intel-Gen-Current && DirectX && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

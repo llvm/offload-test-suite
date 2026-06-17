@@ -21,7 +21,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float32
@@ -74,7 +73,10 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/599
-# XFAIL: Intel && Vulkan && Clang
+# XFAIL: Intel-Gen-10 && Vulkan && Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/696
+# XFAIL:Intel-Gen-Current && DirectX && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

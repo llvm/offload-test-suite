@@ -7,7 +7,7 @@ import subprocess
 import lit.formats
 
 config.offloadtest_obj_root = path(r"@OFFLOADTEST_BINARY_DIR@")
-config.offloadtest_src_root = path(r"@OFFLOADTEST_SOURCE_DIR@")
+config.offloadtest_src_root = path(r"@OFFLOADTEST_TEST_ROOT@")
 config.llvm_build_mode = lit_config.substitute("@LLVM_BUILD_MODE@")
 config.gtest_run_under = lit_config.substitute(r"@LLVM_GTEST_RUN_UNDER@")
 

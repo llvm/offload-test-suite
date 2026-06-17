@@ -27,7 +27,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: CBArrays
     Format: Hex16
@@ -83,7 +82,7 @@ DescriptorSets:
 # REQUIRES: Half, Int16
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/933
-# XFAIL: Intel && DirectX
+# XFAIL:  Intel-Gen-10 && DirectX
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/159602
 # XFAIL: Clang && Vulkan

@@ -57,7 +57,6 @@ void main(uint3 TID : SV_GroupThreadID)
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:  
   - Name: In
     Format: Float64
@@ -147,8 +146,11 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1114
+# XFAIL: WARP && (x64 || x86) && !AVX512
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/944
-# XFAIL: Intel && DirectX
+# XFAIL: Intel-Gen-10 && DirectX
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang

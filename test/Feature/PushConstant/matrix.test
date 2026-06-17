@@ -19,7 +19,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: output
     Format: Float32
@@ -42,7 +41,6 @@ DescriptorSets:
 ...
 #--- end
 # UNSUPPORTED: Metal || DirectX
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl

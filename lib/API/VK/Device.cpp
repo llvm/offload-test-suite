@@ -10,18 +10,24 @@
 //===----------------------------------------------------------------------===//
 
 #include "API/Device.h"
+#include "API/Encoder.h"
+#include "API/FormatConversion.h"
 #include "Support/Pipeline.h"
+#include "Support/VkError.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/FormatVariadic.h"
+
+#include "../Util.h"
 
 #include <algorithm>
 #include <cmath>
+#include <map>
 #include <memory>
 #include <numeric>
 #include <system_error>
-#include <vulkan/vulkan.h>
 
 using namespace offloadtest;
 
@@ -66,23 +72,31 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
 static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
+    return VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
   case ResourceKind::RWBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+
   case ResourceKind::Texture2D:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+
   case ResourceKind::RWTexture2D:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::RWStructuredBuffer:
     return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+
   case ResourceKind::ConstantBuffer:
     return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+
   case ResourceKind::Sampler:
     return VK_DESCRIPTOR_TYPE_SAMPLER;
   case ResourceKind::SampledTexture2D:
     return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  case ResourceKind::AccelerationStructure:
+    return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   }
   llvm_unreachable("All cases handled");
 }
@@ -152,7 +166,9 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
-    llvm_unreachable("Textures and samplers don't have buffer usage bits!");
+  case ResourceKind::AccelerationStructure:
+    llvm_unreachable(
+        "Textures, samplers, and AS don't have buffer usage bits!");
   }
   llvm_unreachable("All cases handled");
 }
@@ -171,6 +187,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::ConstantBuffer:
   case ResourceKind::Sampler:
+  case ResourceKind::AccelerationStructure:
     llvm_unreachable("Not an image view!");
   }
   llvm_unreachable("All cases handled");
@@ -194,10 +211,44 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_COMPUTE_BIT;
   case Stages::Vertex:
     return VK_SHADER_STAGE_VERTEX_BIT;
+  case Stages::Hull:
+    return VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+  case Stages::Domain:
+    return VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+  case Stages::Geometry:
+    return VK_SHADER_STAGE_GEOMETRY_BIT;
   case Stages::Pixel:
     return VK_SHADER_STAGE_FRAGMENT_BIT;
+  case Stages::Amplification:
+    return VK_SHADER_STAGE_TASK_BIT_EXT;
+  case Stages::Mesh:
+    return VK_SHADER_STAGE_MESH_BIT_EXT;
+  case Stages::RayGeneration:
+    return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+  case Stages::Miss:
+    return VK_SHADER_STAGE_MISS_BIT_KHR;
+  case Stages::ClosestHit:
+    return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+  case Stages::AnyHit:
+    return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+  case Stages::Intersection:
+    return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+  case Stages::Callable:
+    return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
+  switch (Topology) {
+  case PrimitiveTopology::TriangleList:
+    return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  case PrimitiveTopology::PointList:
+    return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+  case PrimitiveTopology::PatchList:
+    return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+  }
+  llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
 static std::string getMessageSeverityString(
@@ -372,23 +423,73 @@ struct VulkanInstance {
 
 namespace {
 
+struct MeshShaderFunctions {
+  PFN_vkCmdDrawMeshTasksEXT VkCmdDrawMeshTasksEXT = nullptr;
+
+  static MeshShaderFunctions create(VkDevice Device) {
+    MeshShaderFunctions Result;
+    Result.VkCmdDrawMeshTasksEXT =
+        (PFN_vkCmdDrawMeshTasksEXT)vkGetDeviceProcAddr(Device,
+                                                       "vkCmdDrawMeshTasksEXT");
+    return Result;
+  }
+};
+
 class VulkanBuffer : public offloadtest::Buffer {
 public:
   VkDevice Dev; // Needed for clean-up
   VkBuffer Buffer;
+  VkBuffer CounterBuffer;
   VkDeviceMemory Memory;
+  VkDeviceAddress DeviceAddress;
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkBuffer CounterBuffer,
+               VkDeviceMemory Memory, VkDeviceAddress DeviceAddress,
                llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
-      : Dev(Dev), Buffer(Buffer), Memory(Memory), Name(Name), Desc(Desc),
+      : offloadtest::Buffer(GPUAPI::Vulkan), Dev(Dev), Buffer(Buffer),
+        CounterBuffer(CounterBuffer), Memory(Memory),
+        DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
+
+  size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  llvm::Expected<void *> map() override {
+    if (Desc.Location == MemoryLocation::GpuOnly)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Cannot map a GpuOnly buffer.");
+    void *Ptr = nullptr;
+    if (vkMapMemory(Dev, Memory, 0, SizeInBytes, 0, &Ptr) != VK_SUCCESS)
+      return llvm::createStringError(std::errc::io_error,
+                                     "Failed to map buffer.");
+    // HOST_CACHED memory that is *not* HOST_COHERENT (GpuToCpu) needs explicit
+    // invalidation so the CPU sees the GPU-side writes.
+    if (Desc.Location == MemoryLocation::GpuToCpu) {
+      VkMappedMemoryRange Range = {};
+      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+      Range.memory = Memory;
+      Range.offset = 0;
+      Range.size = VK_WHOLE_SIZE;
+      vkInvalidateMappedMemoryRanges(Dev, 1, &Range);
+    }
+    return Ptr;
+  }
+
+  void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   ~VulkanBuffer() override {
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  // Only valid when the buffer was created with VK_BUFFER_USAGE_SHADER_DEVICE_
+  // ADDRESS_BIT, which the device adds whenever ray tracing is supported.
+  VkDeviceAddress getDeviceAddress() const { return DeviceAddress; }
+
+  static bool classof(const offloadtest::Buffer *B) {
+    return B->getAPI() == GPUAPI::Vulkan;
   }
 };
 
@@ -406,15 +507,68 @@ public:
   std::string Name;
   TextureCreateDesc Desc;
 
+  VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+  VkImageSubresourceRange FullRange;
+  bool IsInUndefinedLayout = true;
+
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
-                llvm::StringRef Name, TextureCreateDesc Desc)
-      : Dev(Dev), Image(Image), Memory(Memory), Name(Name), Desc(Desc) {}
+                llvm::StringRef Name, TextureCreateDesc Desc,
+                VkImageLayout PreferredLayout,
+                VkImageSubresourceRange FullRange)
+      : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
+        Memory(Memory), Name(Name), Desc(Desc),
+        PreferredLayout(PreferredLayout), FullRange(FullRange) {}
 
   ~VulkanTexture() override {
     if (View)
       vkDestroyImageView(Dev, View, nullptr);
     vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  VkImageLayout preferredLayoutOrUndefined() {
+    return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
+  }
+
+  const TextureCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Texture *T) {
+    return T->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+class VulkanAccelerationStructure : public offloadtest::AccelerationStructure {
+public:
+  VkDevice Dev;
+  VkAccelerationStructureKHR AccelStruct;
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  VkDeviceAddress DeviceAddress;
+  PFN_vkDestroyAccelerationStructureKHR FnDestroyAS;
+
+  VulkanAccelerationStructure(VkDevice Dev,
+                              VkAccelerationStructureKHR AccelStruct,
+                              VkBuffer Buffer, VkDeviceMemory Memory,
+                              VkDeviceAddress DeviceAddress,
+                              PFN_vkDestroyAccelerationStructureKHR FnDestroyAS,
+                              const AccelerationStructureSizes &Sizes)
+      : offloadtest::AccelerationStructure(GPUAPI::Vulkan, Sizes), Dev(Dev),
+        AccelStruct(AccelStruct), Buffer(Buffer), Memory(Memory),
+        DeviceAddress(DeviceAddress), FnDestroyAS(FnDestroyAS) {}
+
+  ~VulkanAccelerationStructure() override {
+    if (AccelStruct != VK_NULL_HANDLE)
+      FnDestroyAS(Dev, AccelStruct, nullptr);
+    if (Buffer != VK_NULL_HANDLE)
+      vkDestroyBuffer(Dev, Buffer, nullptr);
+    if (Memory != VK_NULL_HANDLE)
+      vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  VkDeviceAddress getDeviceAddress() const { return DeviceAddress; }
+
+  static bool classof(const offloadtest::AccelerationStructure *AS) {
+    return AS->getAPI() == GPUAPI::Vulkan;
   }
 };
 
@@ -438,9 +592,10 @@ public:
     CreateInfo.pNext = &TypeCreateInfo;
 
     VkSemaphore Semaphore = VK_NULL_HANDLE;
-    if (vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create Semaphore.");
+    if (auto Err = VK::toError(
+            vkCreateSemaphore(Device, &CreateInfo, nullptr, &Semaphore),
+            "Failed to create Semaphore."))
+      return Err;
 
     return std::make_unique<VulkanFence>(Device, Semaphore, Name);
   }
@@ -462,9 +617,9 @@ public:
     WaitInfo.pSemaphores = &Semaphore;
     WaitInfo.pValues = &SignalValue;
 
-    if (vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to wait on Semaphore.");
+    if (auto Err = VK::toError(vkWaitSemaphores(Device, &WaitInfo, UINT64_MAX),
+                               "Failed to wait on Semaphore."))
+      return Err;
 
     return llvm::Error::success();
   }
@@ -472,25 +627,64 @@ public:
 
 class VulkanQueue : public offloadtest::Queue {
 public:
+  using Queue::submit;
+
   VkQueue Queue = VK_NULL_HANDLE;
   uint32_t QueueFamilyIdx = 0;
-  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx)
-      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx) {}
+  // TODO: Ensure device lifetime is managed (e.g. via shared_ptr).
+  VkDevice Device = VK_NULL_HANDLE;
+  std::unique_ptr<VulkanFence> SubmitFence;
+  uint64_t FenceCounter = 0;
+  // Batches of command buffers submitted to the GPU that may still be
+  // in-flight.  VulkanCommandBuffer's destructor destroys the VkCommandPool,
+  // which would invalidate any still-pending command buffers.  Each batch
+  // records the fence value it signals so we can non-blockingly query
+  // progress and release completed batches.
+  struct InFlightBatch {
+    uint64_t FenceValue;
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs;
+  };
+  llvm::SmallVector<InFlightBatch> InFlightBatches;
+
+  VulkanQueue(VkQueue Q, uint32_t QueueFamilyIdx, VkDevice Device,
+              std::unique_ptr<VulkanFence> SubmitFence)
+      : Queue(Q), QueueFamilyIdx(QueueFamilyIdx), Device(Device),
+        SubmitFence(std::move(SubmitFence)) {}
+
+  llvm::Expected<offloadtest::SubmitResult>
+  submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
+      override;
 };
+
+class VulkanDevice; // forward decl — defined below in this same anon ns
 
 class VulkanCommandBuffer : public offloadtest::CommandBuffer {
 public:
-  static constexpr GPUAPI BackendAPI = GPUAPI::Vulkan;
-
   VkDevice Device = VK_NULL_HANDLE;
+  MeshShaderFunctions MeshShaderFns;
+  // Back-pointer to the owning device. Used by encoders that need access to
+  // device-loaded function pointers (e.g. ray-tracing entry points) and
+  // helper allocators.
+  VulkanDevice *Dev = nullptr;
   // Owned per command buffer so that recording, submission, and lifetime
   // management of each command buffer are independently safe without external
   // synchronization.
   VkCommandPool CmdPool = VK_NULL_HANDLE;
   VkCommandBuffer CmdBuffer = VK_NULL_HANDLE;
 
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+
+  /// Keep-alive list for Framebuffers constructed by RencderEncoders.
+  llvm::SmallVector<VkFramebuffer, 4> OwnedFramebuffers;
+
   static llvm::Expected<std::unique_ptr<VulkanCommandBuffer>>
-  create(VkDevice Device, uint32_t QueueFamilyIdx) {
+  create(VkDevice Device, uint32_t QueueFamilyIdx,
+         PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel,
+         PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel,
+         PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel,
+         MeshShaderFunctions MeshShaderFns) {
     auto CB = std::unique_ptr<VulkanCommandBuffer>(new VulkanCommandBuffer());
     CB->Device = Device;
 
@@ -498,37 +692,606 @@ public:
     CmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     CmdPoolInfo.queueFamilyIndex = QueueFamilyIdx;
     CmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    if (vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &CB->CmdPool))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command pool.");
+    if (auto Err = VK::toError(
+            vkCreateCommandPool(Device, &CmdPoolInfo, nullptr, &CB->CmdPool),
+            "Could not create command pool."))
+      return Err;
 
     VkCommandBufferAllocateInfo CBufAllocInfo = {};
     CBufAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     CBufAllocInfo.commandPool = CB->CmdPool;
     CBufAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     CBufAllocInfo.commandBufferCount = 1;
-    if (vkAllocateCommandBuffers(Device, &CBufAllocInfo, &CB->CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not create command buffer.");
+    if (auto Err = VK::toError(
+            vkAllocateCommandBuffers(Device, &CBufAllocInfo, &CB->CmdBuffer),
+            "Could not create command buffer."))
+      return Err;
 
     VkCommandBufferBeginInfo BufferInfo = {};
     BufferInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    if (vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not begin command buffer.");
+    if (auto Err = VK::toError(vkBeginCommandBuffer(CB->CmdBuffer, &BufferInfo),
+                               "Could not begin command buffer."))
+      return Err;
+
+    CB->CmdBeginDebugUtilsLabel = CmdBeginDebugUtilsLabel;
+    CB->CmdEndDebugUtilsLabel = CmdEndDebugUtilsLabel;
+    CB->CmdInsertDebugUtilsLabel = CmdInsertDebugUtilsLabel;
+    CB->MeshShaderFns = MeshShaderFns;
+
     return CB;
   }
 
+  /// Pending pipeline barrier state accumulated by encoders. Lives on the
+  /// command buffer because in Vulkan all encoders record into the same
+  /// VkCommandBuffer.  Src tracks what prior commands produced; Dst tracks
+  /// what the next command will consume.
+  VkPipelineStageFlags PendingSrcStage = VK_PIPELINE_STAGE_HOST_BIT;
+  VkAccessFlags PendingSrcAccess = VK_ACCESS_HOST_WRITE_BIT;
+  VkPipelineStageFlags PendingDstStage = 0;
+  VkAccessFlags PendingDstAccess = 0;
+
+  llvm::SmallVector<VkImageMemoryBarrier> PendingImageTransitions;
+
+  void addImageTransition(VkAccessFlags SrcAccessMask,
+                          VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
+                          VkImageLayout NewLayout, VulkanTexture &Texture) {
+    assert(
+        NewLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+        "There should be no reason to ever transition to an undefined layout.");
+
+    PendingImageTransitions.push_back(VkImageMemoryBarrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
+        nullptr,                                /*pNext*/
+        SrcAccessMask,
+        DstAccessMask,
+        OldLayout,
+        NewLayout,
+        0, /*srcQueueFamilyIndex*/
+        0, /*dstQueueFamilyIndex*/
+        Texture.Image,
+        Texture.FullRange,
+    });
+
+    Texture.IsInUndefinedLayout = false;
+  }
+
+  void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
+    PendingDstStage |= Stage;
+    PendingDstAccess |= Access;
+  }
+
+  void flushBarrier() {
+    if (PendingSrcStage != 0 || !PendingImageTransitions.empty()) {
+      VkMemoryBarrier Barrier = {};
+      Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      Barrier.srcAccessMask = PendingSrcAccess;
+      Barrier.dstAccessMask = PendingDstAccess;
+      vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
+                           &Barrier, 0, nullptr, PendingImageTransitions.size(),
+                           PendingImageTransitions.size() == 0
+                               ? nullptr
+                               : PendingImageTransitions.data());
+
+      PendingImageTransitions.clear();
+    }
+
+    PendingSrcStage = PendingDstStage;
+    PendingSrcAccess = PendingDstAccess;
+    PendingDstStage = 0;
+    PendingDstAccess = 0;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) {
+    if (!CmdBeginDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CmdBeginDebugUtilsLabel(CmdBuffer, &LabelInfo);
+  }
+
+  void popDebugGroup() {
+    if (CmdEndDebugUtilsLabel)
+      CmdEndDebugUtilsLabel(CmdBuffer);
+  }
+
+  void insertDebugSignpost(llvm::StringRef Label) {
+    if (!CmdInsertDebugUtilsLabel)
+      return;
+    VkDebugUtilsLabelEXT LabelInfo = {};
+    LabelInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT;
+    LabelInfo.pLabelName = Label.data();
+    CmdInsertDebugUtilsLabel(CmdBuffer, &LabelInfo);
+  }
+
+  /// Abstract-API Buffer wrappers (e.g. AS scratch and TLAS instance array
+  /// buffers) that must outlive submission. Held as unique_ptr so the wrapper
+  /// destructor frees both the VkBuffer and VkDeviceMemory.
+  llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> KeepAliveOwned;
+
   ~VulkanCommandBuffer() override {
+    for (VkFramebuffer FB : OwnedFramebuffers)
+      vkDestroyFramebuffer(Device, FB, nullptr);
     if (CmdPool != VK_NULL_HANDLE)
       vkDestroyCommandPool(Device, CmdPool, nullptr);
   }
+
+  static bool classof(const CommandBuffer *CB) {
+    return CB->getKind() == GPUAPI::Vulkan;
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+  createComputeEncoder() override;
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+  createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
 
 private:
   VulkanCommandBuffer() : CommandBuffer(GPUAPI::Vulkan) {}
 };
 
+class VulkanPipelineState : public offloadtest::PipelineState {
+public:
+  std::string Name;
+  VkDevice Dev;
+  VkPipeline Pipeline;
+  VkPipelineLayout Layout;
+  llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+
+  VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
+                      VkPipelineLayout Layout,
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+      : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
+
+  ~VulkanPipelineState() override {
+    vkDestroyPipeline(Dev, Pipeline, nullptr);
+    vkDestroyPipelineLayout(Dev, Layout, nullptr);
+    for (VkDescriptorSetLayout L : SetLayouts)
+      vkDestroyDescriptorSetLayout(Dev, L, nullptr);
+  }
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    return B->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+class VKComputeEncoder : public offloadtest::ComputeEncoder {
+  VulkanCommandBuffer &CB;
+
+  void addDstBarrier(VkPipelineStageFlags DstStage, VkAccessFlags DstAccess) {
+    CB.addPendingBarrier(DstStage, DstAccess);
+    CB.flushBarrier();
+  }
+
+public:
+  VKComputeEncoder(VulkanCommandBuffer &CB)
+      : ComputeEncoder(GPUAPI::Vulkan), CB(CB) {}
+
+  ~VKComputeEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Vulkan;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    CB.pushDebugGroup(Label);
+  }
+  void popDebugGroup() override { CB.popDebugGroup(); }
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    CB.insertDebugSignpost(Label);
+  }
+
+  llvm::Error dispatch(const offloadtest::PipelineState &PSO,
+                       uint32_t GroupCountX, uint32_t GroupCountY,
+                       uint32_t GroupCountZ) override {
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    // Include AS_READ so dispatches that issue RayQuery against a TLAS get a
+    // proper hand-off from the prior AS-build's AS_WRITE.
+    addDstBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                  VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT |
+                      VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+    insertDebugSignpost(llvm::formatv("Dispatch [{0},{1},{2}]", GroupCountX,
+                                      GroupCountY, GroupCountZ)
+                            .str());
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE,
+                      VKPSO.Pipeline);
+    vkCmdDispatch(CB.CmdBuffer, GroupCountX, GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
+                                 offloadtest::Buffer &Dst, size_t DstOffset,
+                                 size_t Size) override {
+    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
+    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    VkBufferCopy Region = {};
+    Region.srcOffset = SrcOffset;
+    Region.dstOffset = DstOffset;
+    Region.size = Size;
+    addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.Buffer, VKDst.Buffer, 1, &Region);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyBufferToTexture(offloadtest::Buffer &Src,
+                                  offloadtest::Texture &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst);
+    VKDst.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst);
+
+    return llvm::Error::success();
+  }
+
+  // Defined out-of-line below — needs VulkanDevice's full type for access to
+  // the device-loaded ray-tracing entry points and helpers.
+  llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
+
+  void endEncodingImpl() override { popDebugGroup(); }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+VulkanCommandBuffer::createComputeEncoder() {
+  auto Enc = std::make_unique<VKComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
+}
+
+static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
+  switch (Action) {
+  case offloadtest::LoadAction::Load:
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+  case offloadtest::LoadAction::Clear:
+    return VK_ATTACHMENT_LOAD_OP_CLEAR;
+  case offloadtest::LoadAction::DontCare:
+    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  }
+  llvm_unreachable("All LoadAction cases handled");
+}
+
+static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
+  switch (Action) {
+  case offloadtest::StoreAction::Store:
+    return VK_ATTACHMENT_STORE_OP_STORE;
+  case offloadtest::StoreAction::DontCare:
+    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  }
+  llvm_unreachable("All StoreAction cases handled");
+}
+
+class VulkanRenderPass final : public offloadtest::RenderPass {
+public:
+  VkDevice Dev;
+  VkRenderPass Handle;
+  offloadtest::RenderPassDesc Desc;
+
+  VulkanRenderPass(VkDevice Dev, VkRenderPass Handle,
+                   offloadtest::RenderPassDesc Desc)
+      : RenderPass(GPUAPI::Vulkan), Dev(Dev), Handle(Handle),
+        Desc(std::move(Desc)) {}
+
+  ~VulkanRenderPass() override {
+    if (Handle != VK_NULL_HANDLE)
+      vkDestroyRenderPass(Dev, Handle, nullptr);
+  }
+
+  static bool classof(const offloadtest::RenderPass *RP) {
+    return RP->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+class VulkanRenderEncoder : public offloadtest::RenderEncoder {
+  VulkanCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
+
+  // Encoder contract: viewport and scissor must both be set before draw().
+  bool ViewportSet = false;
+  bool ScissorSet = false;
+
+public:
+  VulkanRenderEncoder(VulkanCommandBuffer &CB,
+                      const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB), Desc(Desc) {
+    pushDebugGroup("RenderEncoder");
+  }
+  VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
+  VulkanRenderEncoder(VulkanRenderEncoder &&CB) = delete;
+  VulkanRenderEncoder &operator=(VulkanRenderEncoder &CB) = delete;
+  VulkanRenderEncoder &operator=(const VulkanRenderEncoder &&CB) = delete;
+
+  ~VulkanRenderEncoder() override { endEncoding(); }
+
+  static bool classof(const CommandEncoder *E) {
+    return E->getAPI() == GPUAPI::Vulkan;
+  }
+
+  void pushDebugGroup(llvm::StringRef Label) override {
+    CB.pushDebugGroup(Label);
+  }
+  void popDebugGroup() override { CB.popDebugGroup(); }
+  void insertDebugSignpost(llvm::StringRef Label) override {
+    CB.insertDebugSignpost(Label);
+  }
+
+  void setViewport(const offloadtest::Viewport &VP) override {
+    // Negative viewport height (with Y origin at the bottom) flips clip->
+    // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
+    // triangle is front-facing on every backend.
+    VkViewport VKVP = {};
+    VKVP.x = VP.X;
+    VKVP.y = VP.Y + VP.Height;
+    VKVP.width = VP.Width;
+    VKVP.height = -VP.Height;
+    VKVP.minDepth = VP.MinDepth;
+    VKVP.maxDepth = VP.MaxDepth;
+    vkCmdSetViewport(CB.CmdBuffer, 0, 1, &VKVP);
+    ViewportSet = true;
+  }
+
+  void setScissor(const offloadtest::ScissorRect &Rect) override {
+    VkRect2D VKRect = {};
+    VKRect.offset.x = Rect.X;
+    VKRect.offset.y = Rect.Y;
+    VKRect.extent.width = Rect.Width;
+    VKRect.extent.height = Rect.Height;
+    vkCmdSetScissor(CB.CmdBuffer, 0, 1, &VKRect);
+    ScissorSet = true;
+  }
+
+  void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
+                       uint32_t /*Stride*/) override {
+    // Stride is needed in DX12 at binding time, ignore parameter here.
+    assert(Slot == 0 && "Pipeline vertex input only describes binding 0");
+    if (VB) {
+      VkBuffer Handle = llvm::cast<VulkanBuffer>(*VB).Buffer;
+      const VkDeviceSize VKOffset = Offset;
+      vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &Handle, &VKOffset);
+    } else {
+      VkBuffer NullBuf = VK_NULL_HANDLE;
+      const VkDeviceSize Zero = 0;
+      vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &NullBuf, &Zero);
+    }
+  }
+
+  llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
+                            uint32_t VertexCount, uint32_t InstanceCount,
+                            uint32_t FirstVertex,
+                            uint32_t FirstInstance) override {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VKPSO.Pipeline);
+    vkCmdDraw(CB.CmdBuffer, VertexCount, InstanceCount, FirstVertex,
+              FirstInstance);
+    return llvm::Error::success();
+  }
+
+  llvm::Error dispatchMesh(const offloadtest::PipelineState &PSO,
+                           uint32_t GroupCountX, uint32_t GroupCountY,
+                           uint32_t GroupCountZ) override {
+    if (!ViewportSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Viewport must be set before drawing.");
+    if (!ScissorSet)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "Scissor must be set before drawing.");
+
+    const auto &VKPSO = llvm::cast<VulkanPipelineState>(PSO);
+    vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      VKPSO.Pipeline);
+    CB.MeshShaderFns.VkCmdDrawMeshTasksEXT(CB.CmdBuffer, GroupCountX,
+                                           GroupCountY, GroupCountZ);
+    return llvm::Error::success();
+  }
+
+  void endEncodingImpl() override {
+    vkCmdEndRenderPass(CB.CmdBuffer);
+
+    for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+      CB.addImageTransition(
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                      /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                      /*NewLayout*/
+          Tex);
+    }
+
+    if (Desc.DepthStencil) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+      CB.addImageTransition(
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                              /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                              /*NewLayout*/
+          Tex);
+    }
+
+    popDebugGroup();
+  }
+};
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+VulkanCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries the VkRenderPass and the format / load / store policy.
+  // The begin desc supplies the textures that get bound for this encoder.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  uint32_t Width = 0, Height = 0;
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+    return Err;
+
+  llvm::SmallVector<VkImageView, 9> Views;
+  llvm::SmallVector<VkClearValue, 9> ClearValues;
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    if (!Desc.ColorAttachments[I])
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    VkClearValue CV = {};
+    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the render target to have been "
+            "created with an OptimizedClearValue.");
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
+      assert(ColorCV &&
+             "RenderTarget OptimizedClearValue must be a ClearColor");
+      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+    }
+    ClearValues.push_back(CV);
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    const auto &DS = *PassDesc.DepthStencil;
+    VkClearValue CV = {};
+    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
+        DS.StencilLoad == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *DepthCV =
+          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
+      assert(DepthCV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
+    }
+    ClearValues.push_back(CV);
+  }
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+
+    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
+        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  VkFramebufferCreateInfo FBCI = {};
+  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  FBCI.renderPass = VKPass.Handle;
+  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
+  FBCI.pAttachments = Views.data();
+  FBCI.width = Width;
+  FBCI.height = Height;
+  FBCI.layers = 1;
+
+  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
+                      "Failed to create framebuffer for RenderEncoder."))
+    return Err;
+
+  // The framebuffer must outlive this encoder and remain valid through GPU
+  // execution; the command buffer destroys it on teardown. The render pass
+  // is owned by the user-supplied VulkanRenderPass.
+  OwnedFramebuffers.push_back(Framebuffer);
+
+  VkRenderPassBeginInfo BeginInfo = {};
+  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  BeginInfo.renderPass = VKPass.Handle;
+  BeginInfo.framebuffer = Framebuffer;
+  BeginInfo.renderArea.extent.width = Width;
+  BeginInfo.renderArea.extent.height = Height;
+  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
+  BeginInfo.pClearValues = ClearValues.data();
+
+  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
+}
+
 class VulkanDevice : public offloadtest::Device {
+  // VKComputeEncoder needs access to the device's RT entry points and the
+  // raw VkDevice handle to record acceleration-structure build commands.
+  friend class VKComputeEncoder;
+
 private:
   std::shared_ptr<VulkanInstance> Instance;
   VkPhysicalDevice PhysicalDevice = VK_NULL_HANDLE;
@@ -544,6 +1307,22 @@ private:
   using ExtensionVector = llvm::SmallVector<VkExtensionProperties, 0>;
   ExtensionVector DeviceExtensions;
 
+  // Debug utils function pointers, resolved once per device.
+  PFN_vkCmdBeginDebugUtilsLabelEXT CmdBeginDebugUtilsLabel = nullptr;
+  PFN_vkCmdEndDebugUtilsLabelEXT CmdEndDebugUtilsLabel = nullptr;
+  PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
+  MeshShaderFunctions MeshShaderFns;
+
+  bool HasRayTracingSupport = false;
+  struct RaytracingFunctions {
+    PFN_vkCreateAccelerationStructureKHR CreateAS = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR DestroyAS = nullptr;
+    PFN_vkGetAccelerationStructureBuildSizesKHR GetBuildSizes = nullptr;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR GetDeviceAddress = nullptr;
+    PFN_vkCmdBuildAccelerationStructuresKHR CmdBuild = nullptr;
+  };
+  RaytracingFunctions RT;
+
   struct BufferRef {
     VkBuffer Buffer;
     VkDeviceMemory Memory;
@@ -556,12 +1335,15 @@ private:
   };
 
   struct ResourceRef {
-    ResourceRef(BufferRef H, BufferRef D) : Host(H), Device(D) {}
-    ResourceRef(BufferRef H, ImageRef I) : Host(H), Image(I) {}
+    explicit ResourceRef(BufferRef H, BufferRef D) : Host(H), Device(D) {}
+    explicit ResourceRef(BufferRef H, ImageRef I) : Host(H), Image(I) {}
+    explicit ResourceRef(VulkanAccelerationStructure *AS) : AS(AS) {}
 
-    BufferRef Host;
-    BufferRef Device;
-    ImageRef Image;
+    BufferRef Host{};
+    BufferRef Device{};
+    ImageRef Image{};
+    // AS-only; mutually exclusive with the buffer/image fields above.
+    VulkanAccelerationStructure *AS = nullptr;
   };
 
   struct ResourceBundle {
@@ -577,6 +1359,10 @@ private:
 
     bool isSampler() const {
       return DescriptorType == VK_DESCRIPTOR_TYPE_SAMPLER;
+    }
+
+    bool isAccelerationStructure() const {
+      return DescriptorType == VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
     }
 
     bool isBuffer() const {
@@ -602,45 +1388,34 @@ private:
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
   };
 
-  struct CompiledShader {
-    Stages Stage;
-    std::string Entry;
-    VkShaderModule Shader;
-  };
-
   struct InvocationState {
     std::unique_ptr<VulkanCommandBuffer> CB;
-    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
     VkDescriptorPool Pool = VK_NULL_HANDLE;
-    VkPipelineCache PipelineCache = VK_NULL_HANDLE;
-    VkPipeline Pipeline = VK_NULL_HANDLE;
 
-    std::unique_ptr<Fence> Fence;
+    std::unique_ptr<PipelineState> Pipeline;
 
     // FrameBuffer associated data for offscreen rendering.
     VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
-    std::shared_ptr<VulkanTexture> RenderTarget;
-    std::shared_ptr<VulkanBuffer> RTReadback;
-    std::shared_ptr<VulkanTexture> DepthStencil;
-    std::optional<ResourceRef> VertexBuffer = std::nullopt;
+    std::unique_ptr<offloadtest::RenderPass> RenderPass;
+    std::unique_ptr<offloadtest::Texture> RenderTarget;
+    std::unique_ptr<offloadtest::Buffer> RTReadback;
+    std::unique_ptr<offloadtest::Texture> DepthStencil;
+    std::unique_ptr<offloadtest::Buffer> VB;
 
-    VkRenderPass RenderPass = VK_NULL_HANDLE;
     uint32_t ShaderStageMask = 0;
 
-    llvm::SmallVector<CompiledShader> Shaders;
-    llvm::SmallVector<VkDescriptorSetLayout> DescriptorSetLayouts;
     llvm::SmallVector<ResourceBundle> Resources;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
     llvm::SmallVector<VkBufferView> BufferViews;
     llvm::SmallVector<VkImageView> ImageViews;
 
-    uint32_t getFullShaderStageMask() {
-      if (0 != ShaderStageMask)
-        return ShaderStageMask;
-      for (const auto &S : Shaders)
-        ShaderStageMask |= getShaderStageFlag(S.Stage);
-      return ShaderStageMask;
-    }
+    // Parallel-indexed to `P.AccelStructs.BLAS`.
+    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
+        BLASes;
+    // Keyed by `TLASDesc::Name`.
+    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
+    // Vertex/index buffers consumed during AS builds; must outlive submission.
+    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
 
 public:
@@ -692,6 +1467,17 @@ public:
     DeviceInfo.queueCreateInfoCount = 1;
     DeviceInfo.pQueueCreateInfos = &QueueInfo;
 
+    const VulkanDevice::ExtensionVector AvailableDeviceExtensions =
+        queryDeviceExtensions(PhysicalDevice);
+    const bool HasVulkan12 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0);
+    const bool HasVulkan13 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0);
+#ifdef VK_VERSION_1_4
+    const bool HasVulkan14 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0);
+#endif
+
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
     VkPhysicalDeviceVulkan11Features Features11{};
@@ -706,38 +1492,215 @@ public:
 #endif
 
     Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+    if (HasVulkan12)
       Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+    if (HasVulkan13)
       Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+    if (HasVulkan14)
       Features13.pNext = &Features14;
 #endif
+
+    llvm::SmallVector<const char *> EnabledDeviceExtensions;
+
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    const bool HasShaderImageAtomicInt64Ext =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    if (HasShaderImageAtomicInt64Ext) {
+      FeaturesImageAtomicInt64.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+      FeaturesImageAtomicInt64.pNext = Features.pNext;
+      Features.pNext = &FeaturesImageAtomicInt64;
+    }
+#endif
+
+    const bool HasMeshShader = isExtensionSupported(
+        AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
+    if (HasMeshShader) {
+      MeshFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
+      MeshFeatures.pNext = Features.pNext;
+      Features.pNext = &MeshFeatures;
+    }
+
+    const bool HasASExts =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) &&
+        // bufferDeviceAddress is core in Vulkan 1.2; on 1.1 we need the ext.
+        (HasVulkan12 ||
+         isExtensionSupported(AvailableDeviceExtensions,
+                              VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME));
+    const bool HasRayQueryExt =
+        HasASExts && isExtensionSupported(AvailableDeviceExtensions,
+                                          VK_KHR_RAY_QUERY_EXTENSION_NAME);
+
+    VkPhysicalDeviceAccelerationStructureFeaturesKHR ASFeatures{};
+    // On Vulkan 1.1 we need a separate BDA features struct; on 1.2+
+    // bufferDeviceAddress lives in VkPhysicalDeviceVulkan12Features which is
+    // already in the chain, and adding a duplicate is a validation error.
+    VkPhysicalDeviceBufferDeviceAddressFeatures BDAFeatures{};
+    VkPhysicalDeviceRayQueryFeaturesKHR RayQueryFeatures{};
+    if (HasASExts) {
+      ASFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
+      ASFeatures.pNext = Features.pNext;
+      Features.pNext = &ASFeatures;
+      if (!HasVulkan12) {
+        BDAFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+        BDAFeatures.pNext = Features.pNext;
+        Features.pNext = &BDAFeatures;
+      }
+      if (HasRayQueryExt) {
+        RayQueryFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
+        RayQueryFeatures.pNext = Features.pNext;
+        Features.pNext = &RayQueryFeatures;
+      }
+    }
+
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
+    // For every extension chained above we verify that its gating feature bool
+    // came back true; if it didn't, return a descriptive error rather than
+    // letting vkCreateDevice raise the generic VK_ERROR_FEATURE_NOT_PRESENT.
+    // If this ever fires on a real driver, make the check infallible: either
+    // splice the struct back out of pNext or treat the feature as unsupported
+    // down below (skip the matching extension push).
+    if (HasMeshShader) {
+      if (!MeshFeatures.taskShader)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports taskShader=0",
+            VK_EXT_MESH_SHADER_EXTENSION_NAME);
+      if (!MeshFeatures.meshShader)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports meshShader=0",
+            VK_EXT_MESH_SHADER_EXTENSION_NAME);
+      // primitiveFragmentShadingRateMeshShader depends on
+      // primitiveFragmentShadingRate (VUID-...-07033), which we don't enable.
+      MeshFeatures.multiviewMeshShader = 0;
+      MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
+      MeshFeatures.meshShaderQueries = 0;
+      EnabledDeviceExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    }
+
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    if (HasShaderImageAtomicInt64Ext) {
+      if (!FeaturesImageAtomicInt64.shaderImageInt64Atomics)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports shaderImageInt64Atomics=0",
+            VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+      FeaturesImageAtomicInt64.sparseImageInt64Atomics = 0;
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    }
+#endif
+
+    if (HasASExts) {
+      if (!ASFeatures.accelerationStructure)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports accelerationStructure=0",
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      const bool HasBDA = HasVulkan12 ? Features12.bufferDeviceAddress
+                                      : BDAFeatures.bufferDeviceAddress;
+      if (!HasBDA)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports bufferDeviceAddress=0",
+            VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      // Enable only the base feature; capture-replay / indirect-build /
+      // host-commands / updateAfterBind aren't used by these tests.
+      ASFeatures.accelerationStructureCaptureReplay = 0;
+      ASFeatures.accelerationStructureIndirectBuild = 0;
+      ASFeatures.accelerationStructureHostCommands = 0;
+      ASFeatures.descriptorBindingAccelerationStructureUpdateAfterBind = 0;
+      if (!HasVulkan12) {
+        BDAFeatures.bufferDeviceAddressCaptureReplay = 0;
+        BDAFeatures.bufferDeviceAddressMultiDevice = 0;
+      }
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+      if (!HasVulkan12)
+        EnabledDeviceExtensions.push_back(
+            VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME);
+      if (HasRayQueryExt) {
+        if (!RayQueryFeatures.rayQuery)
+          return llvm::createStringError(
+              std::errc::not_supported,
+              "Device advertises %s but reports rayQuery=0",
+              VK_KHR_RAY_QUERY_EXTENSION_NAME);
+        EnabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+      }
+    }
+
+    DeviceInfo.enabledExtensionCount =
+        static_cast<uint32_t>(EnabledDeviceExtensions.size());
+    DeviceInfo.ppEnabledExtensionNames = EnabledDeviceExtensions.data();
     DeviceInfo.pEnabledFeatures = &Features.features;
     DeviceInfo.pNext = Features.pNext;
 
     VkDevice Device = VK_NULL_HANDLE;
-    if (vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device))
-      return llvm::createStringError(std::errc::no_such_device,
-                                     "Could not create Vulkan logical device.");
+    if (auto Err = VK::toError(
+            vkCreateDevice(PhysicalDevice, &DeviceInfo, nullptr, &Device),
+            "Could not create Vulkan logical device."))
+      return Err;
     VkQueue DeviceQueue = VK_NULL_HANDLE;
     vkGetDeviceQueue(Device, QueueFamilyIdx, 0, &DeviceQueue);
 
-    const VulkanQueue GraphicsQueue = VulkanQueue(DeviceQueue, QueueFamilyIdx);
+    auto SubmitFenceOrErr = VulkanFence::create(Device, "QueueSubmitFence");
+    if (!SubmitFenceOrErr)
+      return SubmitFenceOrErr.takeError();
+    VulkanQueue GraphicsQueue(DeviceQueue, QueueFamilyIdx, Device,
+                              std::move(*SubmitFenceOrErr));
 
-    return std::make_unique<VulkanDevice>(Instance, PhysicalDevice, Props,
-                                          Device, std::move(GraphicsQueue),
-                                          std::move(InstanceLayers));
+    auto Dev = std::make_unique<VulkanDevice>(
+        Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
+        std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
+
+    // Load ray tracing function pointers after device creation.
+    if (HasASExts) {
+      Dev->HasRayTracingSupport = true;
+      Dev->RT.CreateAS = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+          vkGetDeviceProcAddr(Device, "vkCreateAccelerationStructureKHR"));
+      Dev->RT.DestroyAS =
+          reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+              vkGetDeviceProcAddr(Device, "vkDestroyAccelerationStructureKHR"));
+      Dev->RT.GetBuildSizes =
+          reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
+              vkGetDeviceProcAddr(Device,
+                                  "vkGetAccelerationStructureBuildSizesKHR"));
+      Dev->RT.GetDeviceAddress =
+          reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
+              vkGetDeviceProcAddr(
+                  Device, "vkGetAccelerationStructureDeviceAddressKHR"));
+      Dev->RT.CmdBuild =
+          reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
+              vkGetDeviceProcAddr(Device,
+                                  "vkCmdBuildAccelerationStructuresKHR"));
+    }
+
+    return Dev;
   }
 
   VulkanDevice(std::shared_ptr<VulkanInstance> I, VkPhysicalDevice P,
                VkPhysicalDeviceProperties Props, VkDevice D, VulkanQueue Q,
-               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers)
+               llvm::SmallVector<VkLayerProperties, 0> InstanceLayers,
+               ExtensionVector DeviceExtensions)
       : Instance(I), PhysicalDevice(P), Props(Props), Device(D),
-        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)) {
+        GraphicsQueue(std::move(Q)), InstanceLayers(std::move(InstanceLayers)),
+        DeviceExtensions(std::move(DeviceExtensions)) {
     const uint64_t DeviceNameSz =
         strnlen(Props.deviceName, VK_MAX_PHYSICAL_DEVICE_NAME_SIZE);
     Description = std::string(Props.deviceName, DeviceNameSz);
@@ -756,6 +1719,26 @@ public:
     const uint64_t DriverNameSz =
         strnlen(DriverProps.driverName, VK_MAX_DRIVER_NAME_SIZE);
     DriverName = std::string(DriverProps.driverName, DriverNameSz);
+
+    const uint64_t DriverInfoSz =
+        strnlen(DriverProps.driverInfo, VK_MAX_DRIVER_INFO_SIZE);
+    DriverVersion = std::string(DriverProps.driverInfo, DriverInfoSz);
+
+    // 0x8086 is the Vendor ID for Intel
+    if (Props.vendorID == 0x8086) {
+      FamilyPrefix = static_cast<uint16_t>(Props.deviceID) & 0xFF00;
+      const IntelGpuEra Era =
+          getIntelGpuEra(static_cast<uint16_t>(Props.deviceID));
+      if (Era == IntelGpuEra::Gen7_to_10)
+        GPUGeneration = "Intel Gen7-10";
+      else if (Era == IntelGpuEra::Gen11_to_14_and_Xe)
+        GPUGeneration = "Intel Gen11-14/Xe";
+      else
+        GPUGeneration = "Intel Unknown";
+    } else {
+      // We don't have a need yet to identify other GPU vendors.
+      GPUGeneration = "Unknown";
+    }
 #if defined(__APPLE__) && defined(__aarch64__)
     // Apple silicon Macs may have multiple Vulkan drivers sharing one device
     // name. Include the driver name in the description to enable
@@ -763,13 +1746,28 @@ public:
     Description += " (" + DriverName + ")";
 #endif
 
-    DeviceExtensions = queryDeviceExtensions(PhysicalDevice);
+    CmdBeginDebugUtilsLabel =
+        (PFN_vkCmdBeginDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdBeginDebugUtilsLabelEXT");
+    CmdEndDebugUtilsLabel = (PFN_vkCmdEndDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+        Device, "vkCmdEndDebugUtilsLabelEXT");
+    CmdInsertDebugUtilsLabel =
+        (PFN_vkCmdInsertDebugUtilsLabelEXT)vkGetDeviceProcAddr(
+            Device, "vkCmdInsertDebugUtilsLabelEXT");
+
+    MeshShaderFns = MeshShaderFunctions::create(Device);
   }
   VulkanDevice(const VulkanDevice &) = delete;
 
   ~VulkanDevice() override {
     if (Device != VK_NULL_HANDLE) {
       vkDeviceWaitIdle(Device);
+      // Release in-flight command buffers before destroying the device,
+      // since their destructors call vkDestroyCommandPool on the VkDevice.
+      GraphicsQueue.InFlightBatches.clear();
+      // Destroy the queue's fence before the device, since the fence
+      // references the VkDevice for vkDestroySemaphore.
+      GraphicsQueue.SubmitFence.reset();
       vkDestroyDevice(Device, nullptr);
     }
   }
@@ -779,60 +1777,796 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  llvm::Error
+  createPipelineLayout(const BindingsDesc &BindingsDesc,
+                       VkShaderStageFlags StageFlags,
+                       llvm::SmallVectorImpl<VkDescriptorSetLayout> &SetLayouts,
+                       VkPipelineLayout &PipelineLayout) {
+    assert(SetLayouts.empty() && "Output vector SetLayouts must be empty.");
+
+    // Build descriptor set layouts from BindingsDesc.
+    for (const DescriptorSetLayoutDesc &SetDesc :
+         BindingsDesc.DescriptorSetDescs) {
+      std::vector<VkDescriptorSetLayoutBinding> Binds;
+      for (const ResourceBindingDesc &RB : SetDesc.ResourceBindings) {
+        const VulkanBinding VKBinding = RB.VKBinding.value();
+
+        VkDescriptorSetLayoutBinding B = {};
+        B.binding = VKBinding.Binding;
+        B.descriptorType = getDescriptorType(RB.Kind);
+        B.descriptorCount = RB.DescriptorCount;
+        B.stageFlags = StageFlags;
+        Binds.push_back(B);
+
+        if (VKBinding.CounterBinding) {
+          VkDescriptorSetLayoutBinding CB = {};
+          CB.binding = *VKBinding.CounterBinding;
+          CB.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+          CB.descriptorCount = RB.DescriptorCount;
+          CB.stageFlags = StageFlags;
+          Binds.push_back(CB);
+        }
+      }
+      VkDescriptorSetLayoutCreateInfo SetCI = {};
+      SetCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      SetCI.bindingCount = static_cast<uint32_t>(Binds.size());
+      SetCI.pBindings = Binds.data();
+      VkDescriptorSetLayout SetLayout = VK_NULL_HANDLE;
+      if (auto Err = VK::toError(
+              vkCreateDescriptorSetLayout(Device, &SetCI, nullptr, &SetLayout),
+              "Failed to create descriptor set layout.")) {
+        for (auto *L : SetLayouts)
+          vkDestroyDescriptorSetLayout(Device, L, nullptr);
+        return Err;
+      }
+      SetLayouts.push_back(SetLayout);
+    }
+
+    llvm::SmallVector<VkPushConstantRange> Ranges;
+    for (const auto &PCR : BindingsDesc.PushConstantRanges) {
+      const VkPushConstantRange R = {
+          static_cast<VkShaderStageFlags>(StageFlags), PCR.OffsetInBytes,
+          PCR.SizeInBytes};
+      Ranges.emplace_back(std::move(R));
+    }
+
+    VkPipelineLayoutCreateInfo LayoutCI = {};
+    LayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    LayoutCI.setLayoutCount = static_cast<uint32_t>(SetLayouts.size());
+    LayoutCI.pSetLayouts = SetLayouts.empty() ? nullptr : SetLayouts.data();
+    LayoutCI.pushConstantRangeCount = static_cast<uint32_t>(Ranges.size());
+    LayoutCI.pPushConstantRanges = Ranges.empty() ? nullptr : Ranges.data();
+    if (auto Err = VK::toError(
+            vkCreatePipelineLayout(Device, &LayoutCI, nullptr, &PipelineLayout),
+            "Failed to create pipeline layout.")) {
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    return llvm::Error::success();
+  }
+
+  llvm::Expected<VkShaderModule>
+  createShaderModule(const llvm::MemoryBuffer *Shader, const char *Kind) {
+    const llvm::StringRef Bytecode = Shader->getBuffer();
+    VkShaderModuleCreateInfo ModuleCI = {};
+    ModuleCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    ModuleCI.codeSize = Bytecode.size();
+    ModuleCI.pCode = reinterpret_cast<const uint32_t *>(Bytecode.data());
+    VkShaderModule Module = VK_NULL_HANDLE;
+    if (vkCreateShaderModule(Device, &ModuleCI, nullptr, &Module))
+      return llvm::createStringError(
+          std::errc::not_supported, "Failed to create %s shader module.", Kind);
+    return Module;
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineCs(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   ShaderContainer CS) override {
+    auto CSModOrErr = createShaderModule(CS.Shader, "compute");
+    if (!CSModOrErr)
+      return CSModOrErr.takeError();
+
+    VkShaderModule CSModule = *CSModOrErr;
+    // No longer need shader modules after pipeline compilation.
+    auto ShaderModuleCleanUp = llvm::scope_exit(
+        [&] { vkDestroyShaderModule(Device, CSModule, nullptr); });
+
+    llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
+    llvm::SmallVector<char> SpecData;
+    VkSpecializationInfo SpecInfo = {};
+    if (auto Err = parseSpecializationConstants(
+            CS.SpecializationConstants, SpecEntries, SpecData, SpecInfo))
+      return Err;
+
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err =
+            createPipelineLayout(BindingsDesc, VK_SHADER_STAGE_COMPUTE_BIT,
+                                 SetLayouts, PipelineLayout))
+      return Err;
+
+    auto CleanupState = llvm::scope_exit([&]() {
+      for (auto &Layout : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, Layout, nullptr);
+    });
+
+    VkPipelineShaderStageCreateInfo StageCI = {};
+    StageCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    StageCI.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    StageCI.module = CSModule;
+    StageCI.pName = CS.EntryPoint.c_str();
+    StageCI.pSpecializationInfo =
+        CS.SpecializationConstants.empty() ? nullptr : &SpecInfo;
+
+    VkComputePipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    PipelineCI.stage = StageCI;
+    PipelineCI.layout = PipelineLayout;
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateComputePipelines(Device, VK_NULL_HANDLE,
+                                                        1, &PipelineCI, nullptr,
+                                                        &Pipeline),
+                               "Failed to create compute pipeline.")) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      return Err;
+    }
+
+    return std::make_unique<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createTraditionalRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const TraditionalRasterPipelineCreateDesc &Desc) override {
+    const ShaderContainer &VS = Desc.VS;
+    const ShaderContainer &PS = Desc.PS;
+    const std::optional<ShaderContainer> &HS = Desc.HS;
+    const std::optional<ShaderContainer> &DS = Desc.DS;
+    const std::optional<ShaderContainer> &GS = Desc.GS;
+    const llvm::ArrayRef<InputLayoutDesc> InputLayout = Desc.InputLayout;
+    const llvm::ArrayRef<Format> RTFormats = Desc.RTFormats;
+    const std::optional<Format> DSFormat = Desc.DSFormat;
+
+    VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 5> ShaderStages;
+    // No longer need shader modules after pipeline compilation.
+    auto ShaderModuleCleanUp = llvm::scope_exit([&] {
+      for (auto &Stage : ShaderStages)
+        vkDestroyShaderModule(Device, Stage.module, nullptr);
+    });
+
+    llvm::SmallVector<VkSpecializationMapEntry> VSSpecEntries;
+    llvm::SmallVector<char> VSSpecData;
+    VkSpecializationInfo VSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(VS.SpecializationConstants,
+                                                  VSSpecEntries, VSSpecData,
+                                                  VSSpecInfo))
+        return Err;
+
+      auto VSModOrErr = createShaderModule(VS.Shader, "vertex");
+      if (!VSModOrErr)
+        return VSModOrErr.takeError();
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+      ShaderStage.module = *VSModOrErr;
+      ShaderStage.pName = VS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          VS.SpecializationConstants.empty() ? nullptr : &VSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> HSSpecEntries;
+    llvm::SmallVector<char> HSSpecData;
+    VkSpecializationInfo HSSpecInfo = {};
+    if (HS) {
+      if (auto Err = parseSpecializationConstants(HS->SpecializationConstants,
+                                                  HSSpecEntries, HSSpecData,
+                                                  HSSpecInfo))
+        return Err;
+
+      auto HSModOrErr = createShaderModule(HS->Shader, "hull");
+      if (!HSModOrErr)
+        return HSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+      ShaderStage.module = *HSModOrErr;
+      ShaderStage.pName = HS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          HS->SpecializationConstants.empty() ? nullptr : &HSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> DSSpecEntries;
+    llvm::SmallVector<char> DSSpecData;
+    VkSpecializationInfo DSSpecInfo = {};
+    if (DS) {
+      if (auto Err = parseSpecializationConstants(DS->SpecializationConstants,
+                                                  DSSpecEntries, DSSpecData,
+                                                  DSSpecInfo))
+        return Err;
+
+      auto DSModOrErr = createShaderModule(DS->Shader, "domain");
+      if (!DSModOrErr)
+        return DSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+      ShaderStage.module = *DSModOrErr;
+      ShaderStage.pName = DS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          DS->SpecializationConstants.empty() ? nullptr : &DSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> GSSpecEntries;
+    llvm::SmallVector<char> GSSpecData;
+    VkSpecializationInfo GSSpecInfo = {};
+    if (GS) {
+      if (auto Err = parseSpecializationConstants(GS->SpecializationConstants,
+                                                  GSSpecEntries, GSSpecData,
+                                                  GSSpecInfo))
+        return Err;
+
+      auto GSModOrErr = createShaderModule(GS->Shader, "geometry");
+      if (!GSModOrErr)
+        return GSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_GEOMETRY_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+      ShaderStage.module = *GSModOrErr;
+      ShaderStage.pName = GS->EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          GS->SpecializationConstants.empty() ? nullptr : &GSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(PS.SpecializationConstants,
+                                                  PSSpecEntries, PSSpecData,
+                                                  PSSpecInfo))
+        return Err;
+
+      auto PSModOrErr = createShaderModule(PS.Shader, "pixel");
+      if (!PSModOrErr)
+        return PSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      ShaderStage.module = *PSModOrErr;
+      ShaderStage.pName = PS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          PS.SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    // Build a RenderPassDesc from the PSO's RT/DS formats.
+    RenderPassDesc PassDesc;
+    PassDesc.ColorAttachments.reserve(RTFormats.size());
+    for (const Format F : RTFormats) {
+      ColorAttachmentFormatDesc CA = {};
+      CA.Fmt = F;
+      CA.Load = LoadAction::DontCare;
+      CA.Store = StoreAction::DontCare;
+      PassDesc.ColorAttachments.push_back(CA);
+    }
+    if (DSFormat) {
+      DepthStencilAttachmentFormatDesc DS = {};
+      DS.Fmt = *DSFormat;
+      DS.DepthLoad = LoadAction::DontCare;
+      DS.DepthStore = StoreAction::DontCare;
+      DS.StencilLoad = LoadAction::DontCare;
+      DS.StencilStore = StoreAction::DontCare;
+      PassDesc.DepthStencil = DS;
+    }
+
+    // NOTE: After pipeline creation this render pass can be dropped. Later
+    // render passes just need to be compatible with this render pass, or in
+    // other words: the format, sample count and number of targets (rt and ds),
+    // need to match, but Load/Store ops (and initial/final layout) are ignored.
+    auto RenderPassOrErr = createRenderPass(PassDesc);
+    if (!RenderPassOrErr)
+      return RenderPassOrErr.takeError();
+    const std::unique_ptr<offloadtest::RenderPass> RenderPass =
+        std::move(*RenderPassOrErr);
+    VkRenderPass RenderPassHandle =
+        llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
+
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
+                                        PipelineLayout))
+      return Err;
+
+    // Build vertex input attribute and binding descriptions from InputLayout.
+    uint32_t Stride = 0;
+    std::vector<VkVertexInputAttributeDescription> Attributes;
+    Attributes.reserve(InputLayout.size());
+    for (uint32_t I = 0; I < static_cast<uint32_t>(InputLayout.size()); ++I) {
+      const InputLayoutDesc &Elem = InputLayout[I];
+      assert(!Elem.InstanceStepRate &&
+             "Instance step rate is currently not supported.");
+
+      const uint32_t ElemSize = getFormatSizeInBytes(Elem.Fmt);
+      VkVertexInputAttributeDescription Attr = {};
+      Attr.location = I;
+      Attr.binding = 0;
+      Attr.format = getVulkanFormat(Elem.Fmt);
+      Attr.offset = Elem.OffsetInBytes;
+      Attributes.push_back(Attr);
+      Stride = std::max(Stride, Elem.OffsetInBytes + ElemSize);
+    }
+
+    VkVertexInputBindingDescription BindingDesc = {};
+    BindingDesc.binding = 0;
+    BindingDesc.stride = Stride;
+    BindingDesc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkPipelineVertexInputStateCreateInfo VertexInputCI = {};
+    VertexInputCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    VertexInputCI.vertexBindingDescriptionCount = InputLayout.empty() ? 0 : 1;
+    VertexInputCI.pVertexBindingDescriptions =
+        InputLayout.empty() ? nullptr : &BindingDesc;
+    VertexInputCI.vertexAttributeDescriptionCount =
+        static_cast<uint32_t>(Attributes.size());
+    VertexInputCI.pVertexAttributeDescriptions =
+        Attributes.empty() ? nullptr : Attributes.data();
+
+    VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
+    InputAssemblyCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    InputAssemblyCI.topology = getVkPrimitiveTopology(Desc.Topology);
+
+    VkPipelineTessellationStateCreateInfo TessellationCI = {};
+    if (Desc.PatchControlPoints) {
+      TessellationCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+      TessellationCI.patchControlPoints = *Desc.PatchControlPoints;
+    }
+
+    VkPipelineViewportStateCreateInfo ViewportCI = {};
+    ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewportCI.viewportCount = 1;
+    ViewportCI.scissorCount = 1;
+
+    const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                        VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo DynamicCI = {};
+    DynamicCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicCI.dynamicStateCount = 2;
+    DynamicCI.pDynamicStates = DynStates;
+
+    VkPipelineRasterizationStateCreateInfo RastCI = {};
+    RastCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RastCI.polygonMode = VK_POLYGON_MODE_FILL;
+    RastCI.cullMode = VK_CULL_MODE_NONE;
+    RastCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RastCI.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
+    MultisampleCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
+    DepthStencilCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    DepthStencilCI.depthTestEnable = VK_TRUE;
+    DepthStencilCI.depthWriteEnable = VK_TRUE;
+    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    DepthStencilCI.front = DepthStencilCI.back;
+
+    llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
+        RTFormats.size());
+    for (auto &BA : BlendAttachments)
+      BA.colorWriteMask = 0xf;
+    VkPipelineColorBlendStateCreateInfo BlendCI = {};
+    BlendCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    BlendCI.attachmentCount = static_cast<uint32_t>(BlendAttachments.size());
+    BlendCI.pAttachments = BlendAttachments.data();
+
+    VkGraphicsPipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
+    PipelineCI.pStages = ShaderStages.data();
+    PipelineCI.pVertexInputState = &VertexInputCI;
+    PipelineCI.pInputAssemblyState = &InputAssemblyCI;
+    PipelineCI.pTessellationState =
+        Desc.PatchControlPoints ? &TessellationCI : nullptr;
+    PipelineCI.pViewportState = &ViewportCI;
+    PipelineCI.pRasterizationState = &RastCI;
+    PipelineCI.pMultisampleState = &MultisampleCI;
+    PipelineCI.pDepthStencilState = &DepthStencilCI;
+    PipelineCI.pColorBlendState = &BlendCI;
+    PipelineCI.pDynamicState = &DynamicCI;
+    PipelineCI.layout = PipelineLayout;
+    PipelineCI.renderPass = RenderPassHandle;
+
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
+                                                         1, &PipelineCI,
+                                                         nullptr, &Pipeline),
+                               "Failed to create graphics pipeline.")) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    return std::make_unique<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
+
+  llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
+      llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+      const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    assert(Desc.RTFormats.size() <= 8);
+
+    VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
+    llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> ShaderStages;
+    // No longer need shader modules after pipeline compilation.
+    auto ShaderModuleCleanUp = llvm::scope_exit([&] {
+      for (auto &Stage : ShaderStages)
+        vkDestroyShaderModule(Device, Stage.module, nullptr);
+    });
+
+    llvm::SmallVector<VkSpecializationMapEntry> MSSpecEntries;
+    llvm::SmallVector<char> MSSpecData;
+    VkSpecializationInfo MSSpecInfo = {};
+    {
+      if (auto Err = parseSpecializationConstants(
+              Desc.MS.SpecializationConstants, MSSpecEntries, MSSpecData,
+              MSSpecInfo))
+        return Err;
+
+      auto MSModOrErr = createShaderModule(Desc.MS.Shader, "mesh");
+      if (!MSModOrErr)
+        return MSModOrErr.takeError();
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_MESH_BIT_EXT;
+      ShaderStage.module = *MSModOrErr;
+      ShaderStage.pName = Desc.MS.EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          Desc.MS.SpecializationConstants.empty() ? nullptr : &MSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> ASSpecEntries;
+    llvm::SmallVector<char> ASSpecData;
+    VkSpecializationInfo ASSpecInfo = {};
+    if (Desc.AS) {
+      if (auto Err = parseSpecializationConstants(
+              (*Desc.AS).SpecializationConstants, ASSpecEntries, ASSpecData,
+              ASSpecInfo))
+        return Err;
+
+      auto ASModOrErr = createShaderModule((*Desc.AS).Shader, "task");
+      if (!ASModOrErr)
+        return ASModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_TASK_BIT_EXT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_TASK_BIT_EXT;
+      ShaderStage.module = *ASModOrErr;
+      ShaderStage.pName = (*Desc.AS).EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          (*Desc.AS).SpecializationConstants.empty() ? nullptr : &ASSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    llvm::SmallVector<VkSpecializationMapEntry> PSSpecEntries;
+    llvm::SmallVector<char> PSSpecData;
+    VkSpecializationInfo PSSpecInfo = {};
+    if (Desc.PS) {
+      if (auto Err = parseSpecializationConstants(
+              (*Desc.PS).SpecializationConstants, PSSpecEntries, PSSpecData,
+              PSSpecInfo))
+        return Err;
+
+      auto PSModOrErr = createShaderModule((*Desc.PS).Shader, "pixel");
+      if (!PSModOrErr)
+        return PSModOrErr.takeError();
+
+      GraphicsFlags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+
+      VkPipelineShaderStageCreateInfo ShaderStage = {};
+      ShaderStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      ShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      ShaderStage.module = *PSModOrErr;
+      ShaderStage.pName = (*Desc.PS).EntryPoint.c_str();
+      ShaderStage.pSpecializationInfo =
+          (*Desc.PS).SpecializationConstants.empty() ? nullptr : &PSSpecInfo;
+      ShaderStages.push_back(ShaderStage);
+    }
+
+    // Build a RenderPassDesc from the PSO's RT/DS formats.
+    RenderPassDesc PassDesc;
+    PassDesc.ColorAttachments.reserve(Desc.RTFormats.size());
+    for (const Format F : Desc.RTFormats) {
+      ColorAttachmentFormatDesc CA = {};
+      CA.Fmt = F;
+      PassDesc.ColorAttachments.push_back(CA);
+    }
+    if (Desc.DSFormat) {
+      DepthStencilAttachmentFormatDesc DS = {};
+      DS.Fmt = *Desc.DSFormat;
+      PassDesc.DepthStencil = DS;
+    }
+
+    // NOTE: After pipeline creation this render pass can be dropped. Later
+    // render passes just need to be compatible with this render pass, or in
+    // other words: the format, sample count and number of targets (rt and ds),
+    // need to match.
+    auto RenderPassOrErr = createRenderPass(PassDesc);
+    if (!RenderPassOrErr)
+      return RenderPassOrErr.takeError();
+    const std::unique_ptr<offloadtest::RenderPass> RenderPass =
+        std::move(*RenderPassOrErr);
+    VkRenderPass RenderPassHandle =
+        llvm::cast<VulkanRenderPass>(*RenderPass).Handle;
+
+    llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+    VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
+                                        PipelineLayout))
+      return Err;
+
+    VkPipelineViewportStateCreateInfo ViewportCI = {};
+    ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    ViewportCI.viewportCount = 1;
+    ViewportCI.scissorCount = 1;
+
+    const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
+                                        VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo DynamicCI = {};
+    DynamicCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    DynamicCI.dynamicStateCount = 2;
+    DynamicCI.pDynamicStates = DynStates;
+
+    VkPipelineRasterizationStateCreateInfo RastCI = {};
+    RastCI.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    RastCI.polygonMode = VK_POLYGON_MODE_FILL;
+    RastCI.cullMode = VK_CULL_MODE_NONE;
+    RastCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    RastCI.lineWidth = 1.0f;
+
+    VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
+    MultisampleCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
+    DepthStencilCI.sType =
+        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    DepthStencilCI.depthTestEnable = VK_TRUE;
+    DepthStencilCI.depthWriteEnable = VK_TRUE;
+    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
+    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
+    DepthStencilCI.front = DepthStencilCI.back;
+
+    llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
+        Desc.RTFormats.size());
+    for (auto &BA : BlendAttachments)
+      BA.colorWriteMask = 0xf;
+    VkPipelineColorBlendStateCreateInfo BlendCI = {};
+    BlendCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    BlendCI.attachmentCount = static_cast<uint32_t>(BlendAttachments.size());
+    BlendCI.pAttachments = BlendAttachments.data();
+
+    VkGraphicsPipelineCreateInfo PipelineCI = {};
+    PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
+    PipelineCI.pStages = ShaderStages.data();
+    PipelineCI.pViewportState = &ViewportCI;
+    PipelineCI.pRasterizationState = &RastCI;
+    PipelineCI.pMultisampleState = &MultisampleCI;
+    PipelineCI.pDepthStencilState = &DepthStencilCI;
+    PipelineCI.pColorBlendState = &BlendCI;
+    PipelineCI.pDynamicState = &DynamicCI;
+    PipelineCI.layout = PipelineLayout;
+    PipelineCI.renderPass = RenderPassHandle;
+
+    VkPipeline Pipeline = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(vkCreateGraphicsPipelines(Device, VK_NULL_HANDLE,
+                                                         1, &PipelineCI,
+                                                         nullptr, &Pipeline),
+                               "Failed to create mesh shader pipeline.")) {
+      vkDestroyPipelineLayout(Device, PipelineLayout, nullptr);
+      for (auto *L : SetLayouts)
+        vkDestroyDescriptorSetLayout(Device, L, nullptr);
+      return Err;
+    }
+
+    return std::make_unique<VulkanPipelineState>(
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return VulkanFence::create(Device, Name);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Buffer>>
-  createBuffer(std::string Name, BufferCreateDesc &Desc,
+  llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
+  createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
     VkBufferCreateInfo BufInfo = {};
     BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     BufInfo.size = SizeInBytes;
-    BufInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                    VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                    VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.usage =
+        VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer DeviceBuffer;
-    if (vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to create device buffer.");
+    switch (Desc.Usage) {
+    case BufferUsage::Storage:
+      BufInfo.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::ConstantBuffer:
+      BufInfo.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::IndexBuffer:
+      BufInfo.usage |=
+          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::VertexBuffer:
+      BufInfo.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::IndirectArgs:
+      BufInfo.usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    }
+
+    // When ray tracing is supported, every buffer is eligible to act as an
+    // acceleration-structure build input and to expose a device address. The
+    // shared AS build helper assumes Storage buffers carry these flags.
+    if (HasRayTracingSupport)
+      BufInfo.usage |=
+          VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+          VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer BufferObject;
+    if (auto Err = VK::toError(
+            vkCreateBuffer(Device, &BufInfo, nullptr, &BufferObject),
+            "Failed to create device buffer."))
+      return Err;
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, BufferObject, &MemReqs);
+
+    VkMemoryAllocateFlagsInfo AllocFlagsInfo = {};
+    AllocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    AllocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    if (HasRayTracingSupport)
+      AllocInfo.pNext = &AllocFlagsInfo;
     AllocInfo.allocationSize = MemReqs.size;
     auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
                                  getVulkanMemoryFlags(Desc.Location));
-    if (!MemIdx)
+    if (!MemIdx) {
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return MemIdx.takeError();
+    }
     AllocInfo.memoryTypeIndex = *MemIdx;
 
-    VkDeviceMemory DeviceMemory;
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to allocate device memory.");
-    if (vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0))
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to bind device buffer memory.");
+    VkBuffer CounterBuffer = nullptr;
+    VkMemoryRequirements CounterMemReqs = {};
+    VkDeviceSize CounterOffsetInBytes = 0;
+    if (Desc.HasCounter) {
+      VkBuffer CounterBuffer;
+      VkBufferCreateInfo CounterBufferInfo = {};
+      CounterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      CounterBufferInfo.size = sizeof(uint32_t);
+      CounterBufferInfo.usage = BufInfo.usage;
+      CounterBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      if (auto Err = VK::toError(vkCreateBuffer(Device, &CounterBufferInfo,
+                                                nullptr, &CounterBuffer),
+                                 "Could not create counter buffer.")) {
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        return Err;
+      }
 
-    return std::make_shared<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
-                                          Name, Desc, SizeInBytes);
+      vkGetBufferMemoryRequirements(Device, CounterBuffer, &CounterMemReqs);
+
+      CounterOffsetInBytes =
+          llvm::alignTo(AllocInfo.allocationSize, CounterMemReqs.alignment);
+      AllocInfo.allocationSize = CounterOffsetInBytes + CounterMemReqs.size;
+
+      assert(MemReqs.memoryTypeBits == CounterMemReqs.memoryTypeBits &&
+             "We are expecting the main resource and counter resource to have "
+             "the same memory type.");
+    }
+
+    VkDeviceMemory DeviceMemory;
+    if (auto Err = VK::toError(
+            vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
+            "Failed to allocate device memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
+      return Err;
+    }
+
+    if (auto Err = VK::toError(
+            vkBindBufferMemory(Device, BufferObject, DeviceMemory, 0),
+            "Failed to bind device buffer memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return Err;
+    }
+
+    if (CounterBuffer != nullptr) {
+      if (auto Err = VK::toError(vkBindBufferMemory(Device, CounterBuffer,
+                                                    DeviceMemory,
+                                                    CounterOffsetInBytes),
+                                 "Failed to bind counter buffer memory.")) {
+        if (CounterBuffer)
+          vkDestroyBuffer(Device, CounterBuffer, nullptr);
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        vkFreeMemory(Device, DeviceMemory, nullptr);
+        return Err;
+      }
+    }
+
+    VkDeviceAddress DevAddr = 0;
+    if (HasRayTracingSupport) {
+      VkBufferDeviceAddressInfo AddrInfo = {};
+      AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+      AddrInfo.buffer = BufferObject;
+      DevAddr = vkGetBufferDeviceAddress(Device, &AddrInfo);
+    }
+
+    return std::make_unique<VulkanBuffer>(Device, BufferObject, CounterBuffer,
+                                          DeviceMemory, DevAddr, Name, Desc,
+                                          SizeInBytes);
   }
 
-  llvm::Expected<std::shared_ptr<offloadtest::Texture>>
-  createTexture(std::string Name, TextureCreateDesc &Desc) override {
+  llvm::Expected<std::unique_ptr<offloadtest::Texture>>
+  createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 
     VkImageCreateInfo ImageInfo = {};
     ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    ImageInfo.format = getVulkanFormat(Desc.Format);
+    ImageInfo.format = getVulkanFormat(Desc.Fmt);
     ImageInfo.extent = {Desc.Width, Desc.Height, 1};
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = 1;
@@ -843,9 +2577,10 @@ public:
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     VkImage Image;
-    if (vkCreateImage(Device, &ImageInfo, nullptr, &Image))
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to create image.");
+    if (auto Err =
+            VK::toError(vkCreateImage(Device, &ImageInfo, nullptr, &Image),
+                        "Failed to create image."))
+      return Err;
 
     VkMemoryRequirements MemReqs;
     vkGetImageMemoryRequirements(Device, Image, &MemReqs);
@@ -862,20 +2597,40 @@ public:
     AllocInfo.memoryTypeIndex = *MemIdx;
 
     VkDeviceMemory DeviceMemory;
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory)) {
+    if (auto Err = VK::toError(
+            vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
+            "Failed to allocate image memory.")) {
       vkDestroyImage(Device, Image, nullptr);
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to allocate image memory.");
+      return Err;
     }
-    if (vkBindImageMemory(Device, Image, DeviceMemory, 0)) {
+    if (auto Err =
+            VK::toError(vkBindImageMemory(Device, Image, DeviceMemory, 0),
+                        "Failed to bind image memory.")) {
       vkDestroyImage(Device, Image, nullptr);
       vkFreeMemory(Device, DeviceMemory, nullptr);
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to bind image memory.");
+      return Err;
     }
 
-    auto Tex = std::make_shared<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc);
+    VkImageAspectFlags FullAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (isDepthFormat(Desc.Fmt)) {
+      FullAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+      if (isStencilFormat(Desc.Fmt))
+        FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    const VkImageSubresourceRange FullRange{
+        FullAspectMask,
+        0, /*baseMipLevel*/
+        Desc.MipLevels,
+        0, /*baseArrayLayer*/
+        1, /*layerCount*/
+    };
+
+    VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if ((Desc.Usage & TextureUsage::Storage))
+      PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    auto Tex = std::make_unique<VulkanTexture>(
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -883,7 +2638,7 @@ public:
       VkImageViewCreateInfo ViewCi = {};
       ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
       ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-      ViewCi.format = getVulkanFormat(Desc.Format);
+      ViewCi.format = getVulkanFormat(Desc.Fmt);
       ViewCi.subresourceRange.baseMipLevel = 0;
       ViewCi.subresourceRange.levelCount = 1;
       ViewCi.subresourceRange.baseArrayLayer = 0;
@@ -897,14 +2652,22 @@ public:
         ViewCi.subresourceRange.aspectMask =
             VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
       }
-      if (vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View)) {
-        // Tex destructor will clean up Image + Memory.
-        return llvm::createStringError(std::errc::device_or_resource_busy,
-                                       "Failed to create image view.");
-      }
+      // Tex destructor will clean up Image + Memory on failure.
+      if (auto Err = VK::toError(
+              vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View),
+              "Failed to create image view."))
+        return Err;
     }
 
     return Tex;
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    const uint64_t TightRow =
+        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
+    return static_cast<uint32_t>(llvm::alignTo(
+        TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
   }
 
   const Capabilities &getCapabilities() override {
@@ -935,6 +2698,14 @@ public:
 
 private:
   void queryCapabilities() {
+    const bool HasVulkan12 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0);
+    const bool HasVulkan13 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0);
+#ifdef VK_VERSION_1_4
+    const bool HasVulkan14 =
+        Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0);
+#endif
 
     VkPhysicalDeviceFeatures2 Features{};
     Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -948,15 +2719,44 @@ private:
     VkPhysicalDeviceVulkan14Features Features14{};
     Features14.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES;
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    VkPhysicalDeviceShaderImageAtomicInt64FeaturesEXT
+        FeaturesImageAtomicInt64{};
+    FeaturesImageAtomicInt64.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_IMAGE_ATOMIC_INT64_FEATURES_EXT;
+    const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
+        DeviceExtensions, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+#endif
 
     Features.pNext = &Features11;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 2, 0))
+    if (HasVulkan12)
       Features11.pNext = &Features12;
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 3, 0))
+    if (HasVulkan13)
       Features12.pNext = &Features13;
 #ifdef VK_VERSION_1_4
-    if (Props.apiVersion >= VK_MAKE_API_VERSION(0, 1, 4, 0))
+    if (HasVulkan14)
       Features13.pNext = &Features14;
+#endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+    // Append the VK_EXT_shader_image_atomic_int64 features struct to the
+    // pNext chain, but only if the device advertises the extension --
+    // otherwise drivers may reject the unknown sType. The chain above is
+    // built version-by-version (11 -> 12 -> 13 -> 14), so the correct
+    // attachment point is whichever Features1X struct is currently the
+    // tail for this device's apiVersion.
+    if (HasShaderImageAtomicInt64Ext) {
+#ifdef VK_VERSION_1_4
+      if (HasVulkan14)
+        Features14.pNext = &FeaturesImageAtomicInt64;
+      else
+#endif
+          if (HasVulkan13)
+        Features13.pNext = &FeaturesImageAtomicInt64;
+      else if (HasVulkan12)
+        Features12.pNext = &FeaturesImageAtomicInt64;
+      else
+        Features11.pNext = &FeaturesImageAtomicInt64;
+    }
 #endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
@@ -990,18 +2790,284 @@ private:
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features14.Name)));
 #endif
+#ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
+#define VULKAN_EXT_SHADER_IMAGE_ATOMIC_INT64_FEATURE_BOOL(Name)                \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, HasShaderImageAtomicInt64Ext &&       \
+                                             FeaturesImageAtomicInt64.Name)));
+#endif
 #include "VKFeatures.def"
   }
 
 public:
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
   createCommandBuffer() override {
-    return VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto CBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
+    if (!CBOrErr)
+      return CBOrErr.takeError();
+    (*CBOrErr)->Dev = this;
+    return std::unique_ptr<offloadtest::CommandBuffer>(std::move(*CBOrErr));
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
+  createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
+    llvm::SmallVector<VkAttachmentReference, 8> ColorRefs;
+
+    for (const ColorAttachmentFormatDesc &Color : Desc.ColorAttachments) {
+      VkAttachmentDescription AD = {};
+      AD.format = getVulkanFormat(Color.Fmt);
+      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.loadOp = getVkLoadOp(Color.Load);
+      AD.storeOp = getVkStoreOp(Color.Store);
+      AD.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      AD.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      // If we are loading, the layout MUST be defined and in color attachment
+      // optimal state.
+      // If we are NOT loading (clearing or don't care), we are discarding the
+      // original contents of the texture, and use an undefined layout. This
+      // allows us to receive a texture in _any_ layout including uninitialized
+      // textures.
+      AD.initialLayout = Color.Load == LoadAction::Load
+                             ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_UNDEFINED;
+      AD.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      VkAttachmentReference Ref = {};
+      Ref.attachment = static_cast<uint32_t>(Attachments.size());
+      Ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+      Attachments.push_back(AD);
+      ColorRefs.push_back(Ref);
+    }
+
+    VkAttachmentReference DepthReference = {};
+    if (Desc.DepthStencil) {
+      const auto &DS = *Desc.DepthStencil;
+      VkAttachmentDescription AD = {};
+      AD.format = getVulkanFormat(DS.Fmt);
+      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.loadOp = getVkLoadOp(DS.DepthLoad);
+      AD.storeOp = getVkStoreOp(DS.DepthStore);
+      AD.stencilLoadOp = getVkLoadOp(DS.StencilLoad);
+      AD.stencilStoreOp = getVkStoreOp(DS.StencilStore);
+      AD.initialLayout = (DS.DepthLoad == LoadAction::Load ||
+                          DS.StencilLoad == LoadAction::Load)
+                             ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                             : VK_IMAGE_LAYOUT_UNDEFINED;
+      AD.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+      DepthReference.attachment = static_cast<uint32_t>(Attachments.size());
+      DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+      Attachments.push_back(AD);
+    }
+
+    VkSubpassDescription Subpass = {};
+    Subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    Subpass.colorAttachmentCount = static_cast<uint32_t>(ColorRefs.size());
+    Subpass.pColorAttachments = ColorRefs.data();
+    Subpass.pDepthStencilAttachment =
+        Desc.DepthStencil ? &DepthReference : nullptr;
+
+    VkRenderPassCreateInfo RPCI = {};
+    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
+    RPCI.pAttachments = Attachments.data();
+    RPCI.subpassCount = 1;
+    RPCI.pSubpasses = &Subpass;
+
+    VkRenderPass Handle = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(vkCreateRenderPass(Device, &RPCI, nullptr, &Handle),
+                        "Failed to create render pass."))
+      return Err;
+    return std::make_unique<VulkanRenderPass>(Device, Handle, Desc);
+  }
+
+  // Helper: create a buffer with device address support.
+  llvm::Expected<BufferRef>
+  createBufferWithDeviceAddress(VkDeviceSize Size,
+                                VkBufferUsageFlags ExtraUsage) {
+    return createBuffer(ExtraUsage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+                        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, Size, nullptr,
+                        VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT);
+  }
+
+  llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<TriangleGeometryDesc> Triangles) override {
+    if (auto Err = validateBLASGeometry(Triangles))
+      return Err;
+
+    llvm::SmallVector<VkAccelerationStructureGeometryKHR> Geoms;
+    Geoms.reserve(Triangles.size());
+
+    llvm::SmallVector<uint32_t> MaxPrimCounts;
+    MaxPrimCounts.reserve(Triangles.size());
+
+    for (const auto &T : Triangles) {
+      VkAccelerationStructureGeometryKHR Geom = {};
+      Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+      Geom.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+      if (T.Opaque)
+        Geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+      auto &Tri = Geom.geometry.triangles;
+      Tri.sType =
+          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+      // Device addresses are not needed for the size query; they will be
+      // populated at build time.
+      Tri.vertexStride = T.VertexStride;
+      Tri.maxVertex = T.VertexCount - 1;
+      Tri.vertexFormat = getVulkanFormat(T.VertexFormat);
+      Tri.indexType = T.IndexBuffer ? getVulkanIndexType(T.IdxFormat)
+                                    : VK_INDEX_TYPE_NONE_KHR;
+
+      Geoms.push_back(Geom);
+      MaxPrimCounts.push_back(T.IndexBuffer ? T.IndexCount / 3
+                                            : T.VertexCount / 3);
+    }
+
+    return queryBLASPrebuildSize(Geoms, MaxPrimCounts);
+  }
+
+  llvm::Expected<AccelerationStructureSizes>
+  getBLASBuildSizes(llvm::ArrayRef<AABBGeometryDesc> AABBs) override {
+    if (auto Err = validateBLASGeometry(AABBs))
+      return Err;
+
+    llvm::SmallVector<VkAccelerationStructureGeometryKHR> Geoms;
+    Geoms.reserve(AABBs.size());
+
+    llvm::SmallVector<uint32_t> MaxPrimCounts;
+    MaxPrimCounts.reserve(AABBs.size());
+
+    for (const auto &A : AABBs) {
+      VkAccelerationStructureGeometryKHR Geom = {};
+      Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+      Geom.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+      if (A.Opaque)
+        Geom.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+      auto &Aabbs = Geom.geometry.aabbs;
+      Aabbs.sType =
+          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+      Aabbs.stride = A.AABBStride;
+
+      Geoms.push_back(Geom);
+      MaxPrimCounts.push_back(A.AABBCount);
+    }
+
+    return queryBLASPrebuildSize(Geoms, MaxPrimCounts);
+  }
+
+private:
+  AccelerationStructureSizes queryBLASPrebuildSize(
+      llvm::ArrayRef<VkAccelerationStructureGeometryKHR> Geoms,
+      llvm::ArrayRef<uint32_t> MaxPrimCounts) {
+    VkAccelerationStructureBuildGeometryInfoKHR BuildInfo = {};
+    BuildInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    BuildInfo.geometryCount = Geoms.size();
+    BuildInfo.pGeometries = Geoms.data();
+
+    VkAccelerationStructureBuildSizesInfoKHR SizesInfo = {};
+    SizesInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+    RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                     &BuildInfo, MaxPrimCounts.data(), &SizesInfo);
+
+    return {SizesInfo.accelerationStructureSize, SizesInfo.buildScratchSize,
+            SizesInfo.updateScratchSize};
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  allocateAS(const AccelerationStructureSizes &Sizes,
+             VkAccelerationStructureTypeKHR Type, const char *Kind) {
+    if (!HasRayTracingSupport)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    auto BufOrErr = createBufferWithDeviceAddress(
+        Sizes.ResultDataMaxSizeInBytes,
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
+    if (!BufOrErr)
+      return BufOrErr.takeError();
+
+    VkAccelerationStructureCreateInfoKHR CreateInfo = {};
+    CreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    CreateInfo.buffer = BufOrErr->Buffer;
+    CreateInfo.size = Sizes.ResultDataMaxSizeInBytes;
+    CreateInfo.type = Type;
+
+    VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
+                        "Failed to create " + llvm::Twine(Kind) + ".")) {
+      vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
+      vkFreeMemory(Device, BufOrErr->Memory, nullptr);
+      return Err;
+    }
+    VkAccelerationStructureDeviceAddressInfoKHR AddrInfo = {};
+    AddrInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
+    AddrInfo.accelerationStructure = AccelStruct;
+    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
+
+    return std::make_unique<VulkanAccelerationStructure>(
+        Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
+        RT.DestroyAS, Sizes);
+  }
+
+public:
+  llvm::Expected<AccelerationStructureSizes>
+  getTLASBuildSizes(uint32_t InstanceCount) override {
+    VkAccelerationStructureGeometryKHR Geom = {};
+    Geom.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    Geom.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    Geom.geometry.instances.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+
+    VkAccelerationStructureBuildGeometryInfoKHR BuildInfo = {};
+    BuildInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BuildInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    BuildInfo.geometryCount = 1;
+    BuildInfo.pGeometries = &Geom;
+
+    VkAccelerationStructureBuildSizesInfoKHR SizesInfo = {};
+    SizesInfo.sType =
+        VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+
+    RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+                     &BuildInfo, &InstanceCount, &SizesInfo);
+
+    return AccelerationStructureSizes{SizesInfo.accelerationStructureSize,
+                                      SizesInfo.buildScratchSize,
+                                      SizesInfo.updateScratchSize};
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  createBLAS(const AccelerationStructureSizes &Sizes) override {
+    return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR,
+                      "BLAS");
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
+  createTLAS(const AccelerationStructureSizes &Sizes) override {
+    return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
+                      "TLAS");
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
                                          VkMemoryPropertyFlags MemoryFlags,
-                                         size_t Size, void *Data = nullptr) {
+                                         size_t Size, void *Data = nullptr,
+                                         VkMemoryAllocateFlags AllocFlags = 0) {
     VkBuffer Buffer;
     VkDeviceMemory Memory;
     VkBufferCreateInfo BufferInfo = {};
@@ -1010,15 +3076,23 @@ public:
     BufferInfo.usage = Usage;
     BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    if (vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Could not create buffer.");
+    if (auto Err =
+            VK::toError(vkCreateBuffer(Device, &BufferInfo, nullptr, &Buffer),
+                        "Could not create buffer."))
+      return Err;
 
     VkMemoryRequirements MemReqs;
     vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
+
+    VkMemoryAllocateFlagsInfo FlagsInfo = {};
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
     AllocInfo.allocationSize = MemReqs.size;
+    if (AllocFlags) {
+      FlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+      FlagsInfo.flags = AllocFlags;
+      AllocInfo.pNext = &FlagsInfo;
+    }
 
     llvm::Expected<uint32_t> MemIdx =
         getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits, MemoryFlags);
@@ -1027,14 +3101,16 @@ public:
 
     AllocInfo.memoryTypeIndex = *MemIdx;
 
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Memory allocation failed.");
+    if (auto Err =
+            VK::toError(vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory),
+                        "Memory allocation failed."))
+      return Err;
     if (Data) {
       void *Dst = nullptr;
-      if (vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst))
-        return llvm::createStringError(std::errc::not_enough_memory,
-                                       "Failed to map memory.");
+      if (auto Err = VK::toError(
+              vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &Dst),
+              "Failed to map memory."))
+        return Err;
       memcpy(Dst, Data, Size);
 
       VkMappedMemoryRange Range = {};
@@ -1047,9 +3123,9 @@ public:
       vkUnmapMemory(Device, Memory);
     }
 
-    if (vkBindBufferMemory(Device, Buffer, Memory, 0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to bind buffer to memory.");
+    if (auto Err = VK::toError(vkBindBufferMemory(Device, Buffer, Memory, 0),
+                               "Failed to bind buffer to memory."))
+      return Err;
 
     return BufferRef{Buffer, Memory};
   }
@@ -1084,9 +3160,10 @@ public:
     }
 
     VkImage Image;
-    if (vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image))
-      return llvm::createStringError(std::errc::io_error,
-                                     "Failed to create image.");
+    if (auto Err = VK::toError(
+            vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image),
+            "Failed to create image."))
+      return Err;
 
     VkSampler Sampler = 0;
 
@@ -1097,12 +3174,13 @@ public:
     AllocInfo.allocationSize = MemReqs.size;
 
     VkDeviceMemory Memory;
-    if (vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Image memory allocation failed.");
-    if (vkBindImageMemory(Device, Image, Memory, 0))
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Image memory binding failed.");
+    if (auto Err =
+            VK::toError(vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory),
+                        "Image memory allocation failed."))
+      return Err;
+    if (auto Err = VK::toError(vkBindImageMemory(Device, Image, Memory, 0),
+                               "Image memory binding failed."))
+      return Err;
 
     return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
   }
@@ -1129,11 +3207,22 @@ public:
     SamplerInfo.unnormalizedCoordinates = VK_FALSE;
 
     VkSampler Sampler;
-    if (vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create sampler.");
+    if (auto Err = VK::toError(
+            vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler),
+            "Failed to create sampler."))
+      return Err;
 
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
+  }
+
+  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
+    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
+    auto SizesOrErr =
+        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+    if (!SizesOrErr)
+      return SizesOrErr.takeError();
+    return createTLAS(*SizesOrErr);
   }
 
   llvm::Error createResource(Resource &R, InvocationState &IS) {
@@ -1225,15 +3314,16 @@ public:
     if (!TexOrErr)
       return TexOrErr.takeError();
 
-    IS.RenderTarget = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+    IS.RenderTarget = std::move(*TexOrErr);
 
     // Create a host-visible staging buffer for readback.
     BufferCreateDesc BufDesc = {};
     BufDesc.Location = MemoryLocation::GpuToCpu;
+    BufDesc.Usage = BufferUsage::Storage;
     auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
     if (!BufOrErr)
       return BufOrErr.takeError();
-    IS.RTReadback = std::static_pointer_cast<VulkanBuffer>(*BufOrErr);
+    IS.RTReadback = std::move(*BufOrErr);
 
     return llvm::Error::success();
   }
@@ -1244,94 +3334,56 @@ public:
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
     if (!TexOrErr)
       return TexOrErr.takeError();
-    IS.DepthStencil = std::static_pointer_cast<VulkanTexture>(*TexOrErr);
+    IS.DepthStencil = std::move(*TexOrErr);
     return llvm::Error::success();
   }
 
   llvm::Error createResources(Pipeline &P, InvocationState &IS) {
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
+        if (R.isAccelerationStructure()) {
+          auto ASOrErr = createAS(R);
+          if (!ASOrErr)
+            return ASOrErr.takeError();
+          auto *VkAS = llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
+          ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
+          Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+          IS.Resources.push_back(std::move(Bundle));
+          auto Inserted =
+              IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+          assert(Inserted.second && "TLAS bound to multiple resources NYI");
+          (void)Inserted;
+          continue;
+        }
         if (auto Err = createResource(R, IS))
           return Err;
       }
     }
 
-    if (P.isGraphics()) {
+    if (P.isRaster()) {
       if (auto Err = createRenderTarget(P, IS))
         return Err;
       // TODO: Always created for graphics pipelines. Consider making this
       // conditional on the pipeline definition.
       if (auto Err = createDepthStencil(P, IS))
         return Err;
-
-      if (P.Bindings.VertexBufferPtr == nullptr)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "No Vertex buffer specified for graphics pipeline.");
-      const Resource VertexBuffer = {ResourceKind::StructuredBuffer,
-                                     "VertexBuffer",
-                                     {},
-                                     {},
-                                     P.Bindings.VertexBufferPtr,
-                                     nullptr,
-                                     false,
-                                     std::nullopt,
-                                     false};
-      auto ExVHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-          VertexBuffer.size(), VertexBuffer.BufferPtr->Data[0].get());
-      if (!ExVHostBuf)
-        return ExVHostBuf.takeError();
-      auto ExDeviceBuf = createBuffer(
-          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VertexBuffer.size());
-      if (!ExDeviceBuf)
-        return ExDeviceBuf.takeError();
-      VkBufferCopy Copy = {};
-      Copy.size = VertexBuffer.size();
-      vkCmdCopyBuffer(IS.CB->CmdBuffer, ExVHostBuf->Buffer, ExDeviceBuf->Buffer,
-                      1, &Copy);
-      IS.VertexBuffer = ResourceRef(*ExVHostBuf, *ExDeviceBuf);
     }
 
-    return llvm::Error::success();
-  }
+    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
+      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
 
-  llvm::Error executeCommandBuffer(InvocationState &IS) {
-    // This is a hack but it works since this is all single threaded code.
-    static uint64_t FenceCounter = 0;
-    const uint64_t CurrentCounter = FenceCounter + 1;
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::CpuToGpu;
+      BufDesc.Usage = BufferUsage::VertexBuffer;
+      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
+                                           VBuffer->Data[0].get(),
+                                           VBuffer->size(), nullptr, nullptr);
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.VB = std::move(*BufOrErr);
+      llvm::outs() << "Vertex buffer created.\n";
+    }
 
-    if (vkEndCommandBuffer(IS.CB->CmdBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Could not end command buffer.");
-
-    auto *F = static_cast<VulkanFence *>(IS.Fence.get());
-
-    VkTimelineSemaphoreSubmitInfo TimelineSubmitInfo = {};
-    TimelineSubmitInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
-    TimelineSubmitInfo.signalSemaphoreValueCount = 1;
-    TimelineSubmitInfo.pSignalSemaphoreValues = &CurrentCounter;
-
-    VkSubmitInfo SubmitInfo = {};
-    SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    SubmitInfo.pNext = &TimelineSubmitInfo;
-    SubmitInfo.commandBufferCount = 1;
-    SubmitInfo.pCommandBuffers = &IS.CB->CmdBuffer;
-    SubmitInfo.signalSemaphoreCount = 1;
-    SubmitInfo.pSignalSemaphores = &F->Semaphore;
-
-    // Submit to the queue
-    if (vkQueueSubmit(GraphicsQueue.Queue, 1, &SubmitInfo, VK_NULL_HANDLE))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to submit to queue.");
-
-    if (auto Err = IS.Fence->waitForCompletion(CurrentCounter))
-      return Err;
-
-    vkFreeCommandBuffers(Device, IS.CB->CmdPool, 1, &IS.CB->CmdBuffer);
-
-    FenceCounter = CurrentCounter;
     return llvm::Error::success();
   }
 
@@ -1349,8 +3401,15 @@ public:
     constexpr size_t DescriptorTypesSize =
         sizeof(DescriptorTypes) / sizeof(VkDescriptorType);
     uint32_t DescriptorCounts[DescriptorTypesSize] = {0};
+    // VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR has an out-of-range enum
+    // value (1000150000), so it can't share the indexed array above.
+    uint32_t ASDescriptorCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
+        if (R.isAccelerationStructure()) {
+          ASDescriptorCount += R.getArraySize();
+          continue;
+        }
         DescriptorCounts[getDescriptorType(R.Kind)] += R.getArraySize();
         if (R.HasCounter)
           DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
@@ -1368,6 +3427,12 @@ public:
         PoolSizes.push_back(PoolSize);
       }
     }
+    if (ASDescriptorCount > 0) {
+      llvm::outs() << "Descriptors: { type = ACCELERATION_STRUCTURE_KHR"
+                   << ", count = " << ASDescriptorCount << " }\n";
+      PoolSizes.push_back(
+          {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, ASDescriptorCount});
+    }
 
     if (P.Sets.size() > 0) {
       VkDescriptorPoolCreateInfo PoolCreateInfo = {};
@@ -1375,100 +3440,51 @@ public:
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
-      if (vkCreateDescriptorPool(Device, &PoolCreateInfo, nullptr, &IS.Pool))
-        return llvm::createStringError(std::errc::device_or_resource_busy,
-                                       "Failed to create descriptor pool.");
+      if (auto Err = VK::toError(vkCreateDescriptorPool(Device, &PoolCreateInfo,
+                                                        nullptr, &IS.Pool),
+                                 "Failed to create descriptor pool."))
+        return Err;
     }
     return llvm::Error::success();
   }
 
   llvm::Error createDescriptorSets(Pipeline &P, InvocationState &IS) {
-    for (const auto &S : P.Sets) {
-      std::vector<VkDescriptorSetLayoutBinding> Bindings;
-      for (const auto &R : S.Resources) {
-        VkDescriptorSetLayoutBinding Binding = {};
-        if (!R.VKBinding.has_value())
-          return llvm::createStringError(std::errc::invalid_argument,
-                                         "No VulkanBinding provided for '%s'",
-                                         R.Name.c_str());
-        if (R.HasCounter && !R.VKBinding->CounterBinding)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "No CounterBinding provided for resource '%s' with a counter",
-              R.Name.c_str());
-        Binding.binding = R.VKBinding->Binding;
-        Binding.descriptorType = getDescriptorType(R.Kind);
-        Binding.descriptorCount = R.getArraySize();
-        Binding.stageFlags = IS.getFullShaderStageMask();
-        Bindings.push_back(Binding);
-        if (R.HasCounter) {
-          VkDescriptorSetLayoutBinding CounterBinding = {};
-          CounterBinding.binding = *R.VKBinding->CounterBinding;
-          CounterBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterBinding.descriptorCount = R.getArraySize();
-          CounterBinding.stageFlags = IS.getFullShaderStageMask();
-          Bindings.push_back(CounterBinding);
-        }
-      }
-      VkDescriptorSetLayoutCreateInfo LayoutCreateInfo = {};
-      LayoutCreateInfo.sType =
-          VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-      LayoutCreateInfo.bindingCount = Bindings.size();
-      LayoutCreateInfo.pBindings = Bindings.data();
-      llvm::outs() << "Binding " << Bindings.size() << " descriptors.\n";
-      VkDescriptorSetLayout Layout;
-      if (vkCreateDescriptorSetLayout(Device, &LayoutCreateInfo, nullptr,
-                                      &Layout))
-        return llvm::createStringError(
-            std::errc::device_or_resource_busy,
-            "Failed to create descriptor set layout.");
-      IS.DescriptorSetLayouts.push_back(Layout);
-    }
-
-    VkPipelineLayoutCreateInfo PipelineCreateInfo = {};
-    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    PipelineCreateInfo.setLayoutCount = IS.DescriptorSetLayouts.size();
-    PipelineCreateInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
-
-    llvm::SmallVector<VkPushConstantRange, 1> Ranges;
-    for (const auto &PCB : P.PushConstants) {
-      const VkPushConstantRange R = {
-          static_cast<VkShaderStageFlags>(getShaderStageFlag(PCB.Stage)),
-          /* offset= */ 0, static_cast<uint32_t>(PCB.size())};
-      Ranges.emplace_back(std::move(R));
-    }
-    PipelineCreateInfo.pushConstantRangeCount = Ranges.size();
-    PipelineCreateInfo.pPushConstantRanges = Ranges.data();
-
-    if (vkCreatePipelineLayout(Device, &PipelineCreateInfo, nullptr,
-                               &IS.PipelineLayout))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create pipeline layout.");
-
     if (P.Sets.size() == 0)
       return llvm::Error::success();
+
+    const VulkanPipelineState &VulkanPipeline =
+        llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
 
     VkDescriptorSetAllocateInfo DSAllocInfo = {};
     DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     DSAllocInfo.descriptorPool = IS.Pool;
-    DSAllocInfo.descriptorSetCount = IS.DescriptorSetLayouts.size();
-    DSAllocInfo.pSetLayouts = IS.DescriptorSetLayouts.data();
+    DSAllocInfo.descriptorSetCount = VulkanPipeline.SetLayouts.size();
+    DSAllocInfo.pSetLayouts = VulkanPipeline.SetLayouts.data();
     assert(IS.DescriptorSets.empty());
     IS.DescriptorSets.insert(IS.DescriptorSets.begin(),
-                             IS.DescriptorSetLayouts.size(), VkDescriptorSet());
-    llvm::outs() << "Num Descriptor sets: " << IS.DescriptorSetLayouts.size()
+                             VulkanPipeline.SetLayouts.size(),
+                             VkDescriptorSet());
+    llvm::outs() << "Num Descriptor sets: " << VulkanPipeline.SetLayouts.size()
                  << "\n";
-    if (vkAllocateDescriptorSets(Device, &DSAllocInfo,
-                                 IS.DescriptorSets.data()))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to allocate descriptor sets.");
+    if (auto Err =
+            VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
+                                                 IS.DescriptorSets.data()),
+                        "Failed to allocate descriptor sets."))
+      return Err;
 
     // Calculate the number of infos/views we are going to need for each type
     uint32_t ImageInfoCount = 0;
     uint32_t BufferInfoCount = 0;
     uint32_t BufferViewCount = 0;
+    uint32_t ASInfoCount = 0;
+    uint32_t ASHandleCount = 0;
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
+        if (R.isAccelerationStructure()) {
+          ASInfoCount += 1;
+          ASHandleCount += R.getArraySize();
+          continue;
+        }
         if (R.isSampler()) {
           ImageInfoCount += 1;
           continue;
@@ -1490,13 +3506,17 @@ public:
     llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
     llvm::SmallVector<VkDescriptorBufferInfo> BufferInfos;
     llvm::SmallVector<VkBufferView> BufferViews;
+    llvm::SmallVector<VkWriteDescriptorSetAccelerationStructureKHR> ASInfos;
+    llvm::SmallVector<VkAccelerationStructureKHR> ASHandles;
     ImageInfos.reserve(ImageInfoCount);
     BufferInfos.reserve(BufferInfoCount);
     BufferViews.reserve(BufferViewCount);
+    ASInfos.reserve(ASInfoCount);
+    ASHandles.reserve(ASHandleCount);
 
     llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
     WriteDescriptors.reserve(ImageInfoCount + BufferInfoCount +
-                             BufferViewCount);
+                             BufferViewCount + ASInfoCount);
     assert(IS.BufferViews.empty());
 
     uint32_t OverallResIdx = 0;
@@ -1504,6 +3524,29 @@ public:
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
+        if (VulkanAccelerationStructure *VkAS =
+                IS.Resources[OverallResIdx].ResourceRefs[0].AS) {
+          const size_t HandleStart = ASHandles.size();
+          ASHandles.push_back(VkAS->AccelStruct);
+          VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
+          ASWrite.sType =
+              VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+          ASWrite.accelerationStructureCount = 1;
+          ASWrite.pAccelerationStructures = &ASHandles[HandleStart];
+          ASInfos.push_back(ASWrite);
+
+          VkWriteDescriptorSet WDS = {};
+          WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+          WDS.pNext = &ASInfos.back();
+          WDS.dstSet = IS.DescriptorSets[SetIdx];
+          WDS.dstBinding = R.VKBinding->Binding;
+          WDS.descriptorCount = 1;
+          WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+          llvm::outs() << "Updating AS Descriptor [" << OverallResIdx << "] { "
+                       << SetIdx << ", " << RIdx << " }\n";
+          WriteDescriptors.push_back(WDS);
+          continue;
+        }
         uint32_t IndexOfFirstBufferDataInArray;
         if (R.isSampler()) {
           IndexOfFirstBufferDataInArray = ImageInfos.size();
@@ -1535,9 +3578,10 @@ public:
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.image = ResRef.Image.Image;
             VkImageView View = {0};
-            if (vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View))
-              return llvm::createStringError(std::errc::device_or_resource_busy,
-                                             "Failed to create image view.");
+            if (auto Err = VK::toError(
+                    vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View),
+                    "Failed to create image view."))
+              return Err;
             const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
                                                      VK_IMAGE_LAYOUT_GENERAL};
             IS.ImageViews.push_back(View);
@@ -1561,9 +3605,10 @@ public:
           IndexOfFirstBufferDataInArray = BufferViews.size();
           for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
             ViewCreateInfo.buffer = ResRef.Device.Buffer;
-            if (vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View))
-              return llvm::createStringError(std::errc::device_or_resource_busy,
-                                             "Failed to create buffer view.");
+            if (auto Err = VK::toError(
+                    vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View),
+                    "Failed to create buffer view."))
+              return Err;
             IS.BufferViews.push_back(View);
             BufferViews.push_back(View);
           }
@@ -1618,128 +3663,33 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createShaderModules(Pipeline &P, InvocationState &IS) {
-    for (const auto &Shader : P.Shaders) {
-      const llvm::StringRef Program = Shader.Shader->getBuffer();
-      VkShaderModuleCreateInfo ShaderCreateInfo = {};
-      ShaderCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-      ShaderCreateInfo.codeSize = Program.size();
-      ShaderCreateInfo.pCode =
-          reinterpret_cast<const uint32_t *>(Program.data());
-      CompiledShader CS = {Shader.Stage, Shader.Entry, 0};
-      if (vkCreateShaderModule(Device, &ShaderCreateInfo, nullptr, &CS.Shader))
-        return llvm::createStringError(std::errc::not_supported,
-                                       "Failed to create shader module.");
-      IS.Shaders.emplace_back(CS);
-    }
-    return llvm::Error::success();
-  }
-
-  llvm::Error createRenderPass(InvocationState &IS) {
-    std::array<VkAttachmentDescription, 2> Attachments = {};
-
-    Attachments[0].format = getVulkanFormat(IS.RenderTarget->Desc.Format);
-    Attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-    Attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    Attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    Attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    Attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    Attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    Attachments[1].format = getVulkanFormat(IS.DepthStencil->Desc.Format);
-    Attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-    Attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    Attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    Attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    Attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    Attachments[1].finalLayout =
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference ColorReference = {};
-    ColorReference.attachment = 0;
-    ColorReference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference DepthReference = {};
-    DepthReference.attachment = 1;
-    DepthReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription SubpassDescription = {};
-    SubpassDescription.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    SubpassDescription.colorAttachmentCount = 1;
-    SubpassDescription.pColorAttachments = &ColorReference;
-    SubpassDescription.pDepthStencilAttachment = &DepthReference;
-    SubpassDescription.inputAttachmentCount = 0;
-    SubpassDescription.pInputAttachments = nullptr;
-    SubpassDescription.preserveAttachmentCount = 0;
-    SubpassDescription.pPreserveAttachments = nullptr;
-    SubpassDescription.pResolveAttachments = nullptr;
-
-    std::array<VkSubpassDependency, 2> Dependencies = {};
-
-    Dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
-    Dependencies[0].dstSubpass = 0;
-    Dependencies[0].srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    Dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
-                                   VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    Dependencies[0].srcAccessMask =
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    Dependencies[0].dstAccessMask =
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT |
-        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-    Dependencies[0].dependencyFlags = 0;
-
-    Dependencies[1].srcSubpass = VK_SUBPASS_EXTERNAL;
-    Dependencies[1].dstSubpass = 0;
-    Dependencies[1].srcStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    Dependencies[1].dstStageMask =
-        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    Dependencies[1].srcAccessMask = 0;
-    Dependencies[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
-                                    VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
-    Dependencies[1].dependencyFlags = 0;
-
-    VkRenderPassCreateInfo RPCI = {};
-    RPCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    RPCI.attachmentCount = static_cast<uint32_t>(Attachments.size());
-    RPCI.pAttachments = Attachments.data();
-    RPCI.subpassCount = 1;
-    RPCI.pSubpasses = &SubpassDescription;
-    RPCI.dependencyCount = static_cast<uint32_t>(Dependencies.size());
-    RPCI.pDependencies = Dependencies.data();
-
-    if (vkCreateRenderPass(Device, &RPCI, nullptr, &IS.RenderPass))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create render pass.");
-    return llvm::Error::success();
-  }
-
   llvm::Error createFrameBuffer(InvocationState &IS) {
-    std::array<VkImageView, 2> Views = {IS.RenderTarget->View,
-                                        IS.DepthStencil->View};
+    auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
+    auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
+
+    std::array<VkImageView, 2> Views = {RT.View, DS.View};
 
     VkFramebufferCreateInfo FbufCreateInfo = {};
     FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    FbufCreateInfo.renderPass = IS.RenderPass;
+    FbufCreateInfo.renderPass =
+        llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
     FbufCreateInfo.attachmentCount = Views.size();
     FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = IS.RenderTarget->Desc.Width;
-    FbufCreateInfo.height = IS.RenderTarget->Desc.Height;
+    FbufCreateInfo.width = RT.Desc.Width;
+    FbufCreateInfo.height = RT.Desc.Height;
     FbufCreateInfo.layers = 1;
 
-    if (vkCreateFramebuffer(Device, &FbufCreateInfo, nullptr, &IS.FrameBuffer))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create frame buffer.");
+    if (auto Err = VK::toError(vkCreateFramebuffer(Device, &FbufCreateInfo,
+                                                   nullptr, &IS.FrameBuffer),
+                               "Failed to create frame buffer."))
+      return Err;
     return llvm::Error::success();
   }
 
-  static llvm::Error
+  static llvm::Expected<VkSpecializationMapEntry>
   parseSpecializationConstant(const SpecializationConstant &SpecConst,
-                              VkSpecializationMapEntry &Entry,
-                              llvm::SmallVector<char> &SpecData) {
+                              llvm::SmallVectorImpl<char> &SpecData) {
+    VkSpecializationMapEntry Entry = {};
     Entry.constantID = SpecConst.ConstantID;
     Entry.offset = SpecData.size();
     switch (SpecConst.Type) {
@@ -1832,182 +3782,45 @@ public:
     default:
       llvm_unreachable("Unsupported specialization constant type");
     }
-    return llvm::Error::success();
+
+    return Entry;
   }
 
-  llvm::Error createPipeline(Pipeline &P, InvocationState &IS) {
-    VkPipelineCacheCreateInfo CacheCreateInfo = {};
-    CacheCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    if (vkCreatePipelineCache(Device, &CacheCreateInfo, nullptr,
-                              &IS.PipelineCache))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create pipeline cache.");
+  static llvm::Error parseSpecializationConstants(
+      llvm::ArrayRef<SpecializationConstant> SpecializationConstants,
+      llvm::SmallVectorImpl<VkSpecializationMapEntry> &SpecEntries,
+      llvm::SmallVectorImpl<char> &SpecData, VkSpecializationInfo &SpecInfo) {
 
-    if (P.isCompute()) {
-      const offloadtest::Shader &Shader = P.Shaders[0];
-      assert(IS.Shaders.size() == 1 &&
-             "Currently only support one compute shader");
-      const CompiledShader &S = IS.Shaders[0];
-      VkPipelineShaderStageCreateInfo StageInfo = {};
-      StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      StageInfo.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-      StageInfo.module = S.Shader;
-      StageInfo.pName = S.Entry.c_str();
-
-      llvm::SmallVector<VkSpecializationMapEntry> SpecEntries;
-      llvm::SmallVector<char> SpecData;
-      VkSpecializationInfo SpecInfo = {};
-      if (!Shader.SpecializationConstants.empty()) {
-        llvm::DenseSet<uint32_t> SeenConstantIDs;
-        for (const auto &SpecConst : Shader.SpecializationConstants) {
-          if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
-            return llvm::createStringError(
-                std::errc::invalid_argument,
-                "Test configuration contains multiple entries for "
-                "specialization constant ID %u.",
-                SpecConst.ConstantID);
-
-          VkSpecializationMapEntry Entry;
-          if (auto Err =
-                  parseSpecializationConstant(SpecConst, Entry, SpecData))
-            return Err;
-          SpecEntries.push_back(Entry);
-        }
-
-        SpecInfo.mapEntryCount = SpecEntries.size();
-        SpecInfo.pMapEntries = SpecEntries.data();
-        SpecInfo.dataSize = SpecData.size();
-        SpecInfo.pData = SpecData.data();
-        StageInfo.pSpecializationInfo = &SpecInfo;
-      }
-
-      VkComputePipelineCreateInfo PipelineCreateInfo = {};
-      PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-      PipelineCreateInfo.stage = StageInfo;
-      PipelineCreateInfo.layout = IS.PipelineLayout;
-      if (vkCreateComputePipelines(Device, IS.PipelineCache, 1,
-                                   &PipelineCreateInfo, nullptr, &IS.Pipeline))
-        return llvm::createStringError(std::errc::device_or_resource_busy,
-                                       "Failed to create pipeline.");
+    if (SpecializationConstants.empty()) {
+      SpecInfo = {};
       return llvm::Error::success();
     }
 
-    llvm::SmallVector<VkPipelineShaderStageCreateInfo> Stages;
-    for (const auto &S : IS.Shaders) {
-      VkPipelineShaderStageCreateInfo StageInfo = {};
-      StageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-      StageInfo.stage = getShaderStageFlag(S.Stage);
-      StageInfo.module = S.Shader;
-      StageInfo.pName = S.Entry.c_str();
-      Stages.emplace_back(StageInfo);
+    llvm::DenseSet<uint32_t> SeenConstantIDs;
+    for (const auto &SpecConst : SpecializationConstants) {
+      if (!SeenConstantIDs.insert(SpecConst.ConstantID).second)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Test configuration contains multiple entries for "
+            "specialization constant ID %u.",
+            SpecConst.ConstantID);
+
+      auto EntryOrErr = parseSpecializationConstant(SpecConst, SpecData);
+      if (!EntryOrErr)
+        return EntryOrErr.takeError();
+      SpecEntries.push_back(*EntryOrErr);
     }
 
-    VkPipelineInputAssemblyStateCreateInfo InputAssemblyCI = {};
-    InputAssemblyCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    InputAssemblyCI.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-    VkPipelineRasterizationStateCreateInfo RastStateCI = {};
-    RastStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    RastStateCI.polygonMode = VK_POLYGON_MODE_FILL;
-    RastStateCI.cullMode = VK_CULL_MODE_NONE;
-    RastStateCI.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    RastStateCI.depthClampEnable = VK_FALSE;
-    RastStateCI.rasterizerDiscardEnable = VK_FALSE;
-    RastStateCI.depthBiasEnable = VK_FALSE;
-    RastStateCI.lineWidth = 1.0f;
-
-    VkPipelineColorBlendAttachmentState BlendState = {};
-    BlendState.colorWriteMask = 0xf;
-    BlendState.blendEnable = VK_FALSE;
-    VkPipelineColorBlendStateCreateInfo BlendStateCI = {};
-    BlendStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    BlendStateCI.attachmentCount = 1;
-    BlendStateCI.pAttachments = &BlendState;
-
-    VkPipelineViewportStateCreateInfo ViewStateCI = {};
-    ViewStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    ViewStateCI.viewportCount = 1;
-    ViewStateCI.scissorCount = 1;
-
-    const VkDynamicState DynamicStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
-                                            VK_DYNAMIC_STATE_SCISSOR};
-    VkPipelineDynamicStateCreateInfo DynamicStateCI = {};
-    DynamicStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    DynamicStateCI.pDynamicStates = &DynamicStates[0];
-    DynamicStateCI.dynamicStateCount = 2;
-
-    VkPipelineDepthStencilStateCreateInfo DepthStencilStateCI = {};
-    DepthStencilStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    DepthStencilStateCI.depthTestEnable = VK_TRUE;
-    DepthStencilStateCI.depthWriteEnable = VK_TRUE;
-    DepthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    DepthStencilStateCI.depthBoundsTestEnable = VK_FALSE;
-    DepthStencilStateCI.back.failOp = VK_STENCIL_OP_KEEP;
-    DepthStencilStateCI.back.passOp = VK_STENCIL_OP_KEEP;
-    DepthStencilStateCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
-    DepthStencilStateCI.stencilTestEnable = VK_FALSE;
-    DepthStencilStateCI.front = DepthStencilStateCI.back;
-
-    VkPipelineMultisampleStateCreateInfo MultisampleStateCI = {};
-    MultisampleStateCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    const uint32_t Stride = P.Bindings.getVertexStride();
-
-    VkVertexInputBindingDescription VertexInputBinding{};
-    VertexInputBinding.binding = 0;
-    VertexInputBinding.stride = Stride;
-    VertexInputBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    llvm::SmallVector<VkVertexInputAttributeDescription> Attributes;
-    for (size_t I = 0; I < P.Bindings.VertexAttributes.size(); ++I) {
-      const VertexAttribute &VA = P.Bindings.VertexAttributes[I];
-      VkVertexInputAttributeDescription VkVA = {};
-      VkVA.location = I;
-      VkVA.binding = 0;
-      VkVA.format = getVKFormat(VA.Format, VA.Channels);
-      VkVA.offset = VA.Offset;
-      Attributes.push_back(VkVA);
-    }
-
-    VkPipelineVertexInputStateCreateInfo VertexInputStateCi = {};
-    VertexInputStateCi.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    VertexInputStateCi.vertexBindingDescriptionCount = 1;
-    VertexInputStateCi.pVertexBindingDescriptions = &VertexInputBinding;
-    VertexInputStateCi.vertexAttributeDescriptionCount = Attributes.size();
-    VertexInputStateCi.pVertexAttributeDescriptions = Attributes.data();
-
-    VkGraphicsPipelineCreateInfo PipelineCreateInfo = {};
-    PipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    PipelineCreateInfo.stageCount = Stages.size();
-    PipelineCreateInfo.pStages = Stages.data();
-    PipelineCreateInfo.pVertexInputState = &VertexInputStateCi;
-    PipelineCreateInfo.pInputAssemblyState = &InputAssemblyCI;
-    PipelineCreateInfo.pRasterizationState = &RastStateCI;
-    PipelineCreateInfo.pColorBlendState = &BlendStateCI;
-    PipelineCreateInfo.pMultisampleState = &MultisampleStateCI;
-    PipelineCreateInfo.pViewportState = &ViewStateCI;
-    PipelineCreateInfo.pDepthStencilState = &DepthStencilStateCI;
-    PipelineCreateInfo.pDynamicState = &DynamicStateCI;
-    PipelineCreateInfo.renderPass = IS.RenderPass;
-    PipelineCreateInfo.layout = IS.PipelineLayout;
-
-    if (vkCreateGraphicsPipelines(Device, IS.PipelineCache, 1,
-                                  &PipelineCreateInfo, nullptr, &IS.Pipeline))
-      return llvm::createStringError(std::errc::device_or_resource_busy,
-                                     "Failed to create graphics pipeline.");
+    SpecInfo.mapEntryCount = SpecEntries.size();
+    SpecInfo.pMapEntries = SpecEntries.data();
+    SpecInfo.dataSize = SpecData.size();
+    SpecInfo.pData = SpecData.data();
 
     return llvm::Error::success();
   }
 
   void copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
-    if (R.isSampler())
+    if (R.isSampler() || R.isAccelerationStructure())
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
@@ -2100,7 +3913,7 @@ public:
                              VkImageLayout OldLayout,
                              VkAccessFlags SrcAccessMask,
                              VkPipelineStageFlags SrcStageMask) {
-    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Format)
+    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Fmt)
                                               ? VK_IMAGE_ASPECT_DEPTH_BIT
                                               : VK_IMAGE_ASPECT_COLOR_BIT;
 
@@ -2136,7 +3949,9 @@ public:
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            Readback.Buffer, 1, &Region);
 
-    // Barrier to make the readback buffer visible to the host.
+    // Barrier to make the readback buffer visible to the host.  These
+    // explicit HOST barriers are not managed by the encoder's barrier
+    // tracking — they are recorded directly on the command buffer.
     VkBufferMemoryBarrier BufBarrier = {};
     BufBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
     BufBarrier.size = VK_WHOLE_SIZE;
@@ -2274,89 +4089,83 @@ public:
     for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
-    if (P.isGraphics()) {
-      const auto *ColorCV =
-          std::get_if<ClearColor>(&*IS.RenderTarget->Desc.OptimizedClearValue);
-      if (!ColorCV)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Render target clear value must be a ClearColor.");
-      const auto *DepthCV = std::get_if<ClearDepthStencil>(
-          &*IS.DepthStencil->Desc.OptimizedClearValue);
-      if (!DepthCV)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Depth/stencil clear value must be a ClearDepthStencil.");
-      VkClearValue ClearValues[2] = {};
-      ClearValues[0].color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
-      ClearValues[1].depthStencil = {DepthCV->Depth, DepthCV->Stencil};
-
-      VkRenderPassBeginInfo RenderPassBeginInfo = {};
-      RenderPassBeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      RenderPassBeginInfo.renderPass = IS.RenderPass;
-      RenderPassBeginInfo.framebuffer = IS.FrameBuffer;
-      RenderPassBeginInfo.renderArea.extent.width =
-          P.Bindings.RTargetBufferPtr->OutputProps.Width;
-      RenderPassBeginInfo.renderArea.extent.height =
-          P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      RenderPassBeginInfo.clearValueCount = 2;
-      RenderPassBeginInfo.pClearValues = ClearValues;
-
-      vkCmdBeginRenderPass(IS.CB->CmdBuffer, &RenderPassBeginInfo,
-                           VK_SUBPASS_CONTENTS_INLINE);
-
-      VkViewport Viewport = {};
-      Viewport.x = 0.0f;
-      Viewport.y = 0.0f;
-      Viewport.width =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
-      Viewport.height =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Viewport.minDepth = 0.0f;
-      Viewport.maxDepth = 1.0f;
-      vkCmdSetViewport(IS.CB->CmdBuffer, 0, 1, &Viewport);
-
-      VkRect2D Scissor = {};
-      Scissor.offset = {0, 0};
-      Scissor.extent.width = P.Bindings.RTargetBufferPtr->OutputProps.Width;
-      Scissor.extent.height = P.Bindings.RTargetBufferPtr->OutputProps.Height;
-      vkCmdSetScissor(IS.CB->CmdBuffer, 0, 1, &Scissor);
-    }
-
-    const VkPipelineBindPoint BindPoint = P.isGraphics()
+    const VkPipelineBindPoint BindPoint = P.isTraditionalRaster()
                                               ? VK_PIPELINE_BIND_POINT_GRAPHICS
                                               : VK_PIPELINE_BIND_POINT_COMPUTE;
-    vkCmdBindPipeline(IS.CB->CmdBuffer, BindPoint, IS.Pipeline);
+    const VulkanPipelineState &VulkanPipeline =
+        llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
     if (IS.DescriptorSets.size() > 0)
-      vkCmdBindDescriptorSets(IS.CB->CmdBuffer, BindPoint, IS.PipelineLayout, 0,
-                              IS.DescriptorSets.size(),
-                              IS.DescriptorSets.data(), 0, 0);
+      vkCmdBindDescriptorSets(
+          IS.CB->CmdBuffer, BindPoint, VulkanPipeline.Layout, 0,
+          IS.DescriptorSets.size(), IS.DescriptorSets.data(), 0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
-      vkCmdPushConstants(IS.CB->CmdBuffer, IS.PipelineLayout,
+      vkCmdPushConstants(IS.CB->CmdBuffer, VulkanPipeline.Layout,
                          getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }
 
     if (P.isCompute()) {
-      const llvm::ArrayRef<int> DispatchSize =
-          llvm::ArrayRef<int>(P.Shaders[0].DispatchSize);
-      vkCmdDispatch(IS.CB->CmdBuffer, DispatchSize[0], DispatchSize[1],
-                    DispatchSize[2]);
-      llvm::outs() << "Dispatched compute shader: { " << DispatchSize[0] << ", "
-                   << DispatchSize[1] << ", " << DispatchSize[2] << " }\n";
-    } else {
-      VkDeviceSize Offsets[1]{0};
-      assert(IS.VertexBuffer.has_value());
-      vkCmdBindVertexBuffers(IS.CB->CmdBuffer, 0, 1,
-                             &IS.VertexBuffer->Device.Buffer, Offsets);
-      // instanceCount must be >=1 to draw; previously was 0 which draws nothing
-      vkCmdDraw(IS.CB->CmdBuffer, P.Bindings.getVertexCount(), 1, 0, 0);
-      llvm::outs() << "Drew " << P.Bindings.getVertexCount() << " vertices.\n";
-      vkCmdEndRenderPass(IS.CB->CmdBuffer);
-      copyTextureToReadback(IS.CB->CmdBuffer, *IS.RenderTarget, *IS.RTReadback,
+      auto EncoderOrErr = IS.CB->createComputeEncoder();
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
+      if (auto Err = Encoder.dispatch(
+              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
+        return Err;
+      Encoder.endEncoding();
+      llvm::outs() << "Dispatched compute shader: { "
+                   << P.DispatchParameters.DispatchGroupCount[0] << ", "
+                   << P.DispatchParameters.DispatchGroupCount[1] << ", "
+                   << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
+    } else if (P.isRaster()) {
+      RenderPassBeginDesc BeginDesc = {};
+      BeginDesc.Pass = IS.RenderPass.get();
+      BeginDesc.ColorAttachments.push_back(IS.RenderTarget.get());
+      BeginDesc.DepthStencil = IS.DepthStencil.get();
+
+      auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      auto &Encoder = *EncOrErr.get();
+
+      Viewport VP;
+      VP.Width =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
+      VP.Height =
+          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
+      Encoder.setViewport(VP);
+
+      ScissorRect Scissor;
+      Scissor.Width = static_cast<uint32_t>(VP.Width);
+      Scissor.Height = static_cast<uint32_t>(VP.Height);
+      Encoder.setScissor(Scissor);
+
+      if (P.isTraditionalRaster()) {
+        if (IS.VB)
+          Encoder.setVertexBuffer(0, IS.VB.get(), 0,
+                                  P.Bindings.getVertexStride());
+
+        if (auto Err =
+                Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                      /*InstanceCount=*/1))
+          return Err;
+      } else if (P.isMeshShaderRaster()) {
+        if (auto Err = Encoder.dispatchMesh(
+                *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+                P.DispatchParameters.DispatchGroupCount[1],
+                P.DispatchParameters.DispatchGroupCount[2]))
+          return Err;
+      }
+      Encoder.endEncoding();
+
+      copyTextureToReadback(IS.CB->CmdBuffer,
+                            llvm::cast<VulkanTexture>(*IS.RenderTarget),
+                            llvm::cast<VulkanBuffer>(*IS.RTReadback),
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
@@ -2409,26 +4218,32 @@ public:
     }
 
     // Copy back the frame buffer data if this was a graphics pipeline.
-    if (P.isGraphics()) {
+    if (P.isRaster()) {
+      auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
+
       VkMappedMemoryRange Range = {};
       Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
       Range.offset = 0;
       Range.size = VK_WHOLE_SIZE;
-      Range.memory = IS.RTReadback->Memory;
+      Range.memory = Readback.Memory;
 
       void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(Device, IS.RTReadback->Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
+      vkMapMemory(Device, Readback.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
       vkInvalidateMappedMemoryRanges(Device, 1, &Range);
 
-      const CPUBuffer &B = *P.Bindings.RTargetBufferPtr;
-      memcpy(B.Data[0].get(), Mapped, B.size());
-      vkUnmapMemory(Device, IS.RTReadback->Memory);
+      auto *RT = P.Bindings.RTargetBufferPtr;
+      RT->copyFromTexture(Mapped, RT->getImageRowBytes());
+      vkUnmapMemory(Device, Readback.Memory);
     }
     return llvm::Error::success();
   }
 
   void cleanup(InvocationState &IS) {
-    vkQueueWaitIdle(GraphicsQueue.Queue);
+    // Wait for all in-flight submissions to complete before destroying
+    // resources. On the happy path the caller already waited, but this
+    // handles early-return error paths.
+    llvm::consumeError(GraphicsQueue.SubmitFence->waitForCompletion(
+        GraphicsQueue.FenceCounter));
     for (auto &V : IS.BufferViews)
       vkDestroyBufferView(Device, V, nullptr);
 
@@ -2436,6 +4251,9 @@ public:
       vkDestroyImageView(Device, V, nullptr);
 
     for (auto &R : IS.Resources) {
+      // AS resources are owned by `IS.TLASes`; ResourceRef.AS is non-owning.
+      if (R.isAccelerationStructure())
+        continue;
       for (auto &ResRef : R.ResourceRefs) {
         if (R.isBuffer()) {
           vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
@@ -2463,31 +4281,8 @@ public:
       }
     }
 
-    if (IS.getFullShaderStageMask() != VK_SHADER_STAGE_COMPUTE_BIT) {
-      if (IS.VertexBuffer.has_value()) {
-        vkDestroyBuffer(Device, IS.VertexBuffer->Device.Buffer, nullptr);
-        vkFreeMemory(Device, IS.VertexBuffer->Device.Memory, nullptr);
-        vkDestroyBuffer(Device, IS.VertexBuffer->Host.Buffer, nullptr);
-        vkFreeMemory(Device, IS.VertexBuffer->Host.Memory, nullptr);
-      }
+    if (IS.FrameBuffer)
       vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
-      vkDestroyRenderPass(Device, IS.RenderPass, nullptr);
-    }
-
-    if (IS.Pipeline)
-      vkDestroyPipeline(Device, IS.Pipeline, nullptr);
-
-    for (auto &S : IS.Shaders)
-      vkDestroyShaderModule(Device, S.Shader, nullptr);
-
-    if (IS.PipelineCache)
-      vkDestroyPipelineCache(Device, IS.PipelineCache, nullptr);
-
-    if (IS.PipelineLayout)
-      vkDestroyPipelineLayout(Device, IS.PipelineLayout, nullptr);
-
-    for (auto &L : IS.DescriptorSetLayouts)
-      vkDestroyDescriptorSetLayout(Device, L, nullptr);
 
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
@@ -2500,40 +4295,195 @@ public:
       llvm::outs() << "Cleanup complete.\n";
     });
 
-    auto CBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto CBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
+    State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
 
-    auto FenceOrErr = createFence("Fence");
-    if (!FenceOrErr)
-      return FenceOrErr.takeError();
-    State.Fence = std::move(*FenceOrErr);
-    if (auto Err = createShaderModules(P, State))
-      return Err;
-    llvm::outs() << "Shader module created.\n";
-    llvm::outs() << "Copy command buffer created.\n";
     if (auto Err = createResources(P, State))
       return Err;
-    if (P.isGraphics()) {
-      if (auto Err = createRenderPass(State))
+
+    if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
+      auto EncOrErr = State.CB->createComputeEncoder();
+      if (!EncOrErr)
+        return EncOrErr.takeError();
+      if (auto Err = offloadtest::buildPipelineAccelerationStructures(
+              *this, **EncOrErr, P, State.BLASes, State.TLASes,
+              State.ASInputBuffers))
         return Err;
+      (*EncOrErr)->endEncoding();
+    }
+
+    BindingsDesc BindingsDesc = {};
+    for (auto &S : P.Sets) {
+      DescriptorSetLayoutDesc Layout;
+      for (auto &R : S.Resources) {
+        if (!R.VKBinding)
+          return llvm::createStringError(std::errc::invalid_argument,
+                                         "No VulkanBinding provided for '%s'",
+                                         R.Name.c_str());
+
+        ResourceBindingDesc ResourceBinding = {};
+        ResourceBinding.Kind = R.Kind;
+        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
+        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        ResourceBinding.VKBinding = R.VKBinding;
+        ResourceBinding.DescriptorCount = R.getArraySize();
+        Layout.ResourceBindings.push_back(ResourceBinding);
+
+        if (R.HasCounter && !R.VKBinding->CounterBinding)
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "No CounterBinding provided for resource '%s' with a counter",
+              R.Name.c_str());
+      }
+      BindingsDesc.DescriptorSetDescs.push_back(Layout);
+    }
+    for (const auto &PCB : P.PushConstants) {
+      PushConstantsRange Range = {};
+      Range.OffsetInBytes = 0;
+      Range.SizeInBytes = PCB.size();
+      BindingsDesc.PushConstantRanges.push_back(Range);
+    }
+
+    if (P.isCompute()) {
+      // This is an arbitrary distinction that we could alter in the future.
+      if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Compute pipeline must have exactly one compute shader.");
+
+      ShaderContainer CS = {};
+      CS.EntryPoint = P.Shaders[0].Entry;
+      CS.Shader = P.Shaders[0].Shader.get();
+      CS.SpecializationConstants = P.Shaders[0].SpecializationConstants;
+      if (CS.Shader == nullptr) {
+        llvm::outs() << "CS is null :(\n";
+        llvm::outs() << "Shader count: " << P.Shaders.size() << "\n";
+      }
+      assert(CS.Shader != nullptr);
+
+      auto PipelineStateOrErr =
+          createPipelineCs("Compute Pipeline State", BindingsDesc, CS);
+      if (!PipelineStateOrErr)
+        return PipelineStateOrErr.takeError();
+      State.Pipeline = std::move(*PipelineStateOrErr);
+      llvm::outs() << "Compute Pipeline created.\n";
+    } else if (P.isRaster()) {
+      ColorAttachmentFormatDesc ColorAttachment = {};
+      ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
+      ColorAttachment.Load = LoadAction::Clear;
+      ColorAttachment.Store = StoreAction::Store;
+
+      DepthStencilAttachmentFormatDesc DSAttachment = {};
+      DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
+      DSAttachment.DepthLoad = LoadAction::Clear;
+      DSAttachment.DepthStore = StoreAction::Store;
+      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilStore = StoreAction::DontCare;
+
+      RenderPassDesc PassDesc;
+      PassDesc.ColorAttachments.push_back(ColorAttachment);
+      PassDesc.DepthStencil = DSAttachment;
+
+      auto RenderPassOrErr = createRenderPass(PassDesc);
+      if (!RenderPassOrErr)
+        return RenderPassOrErr.takeError();
+      State.RenderPass = std::move(*RenderPassOrErr);
       llvm::outs() << "Render pass created.\n";
+
+      if (P.isTraditionalRaster()) {
+        TraditionalRasterPipelineCreateDesc PipelineDesc = {};
+        PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
+        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        for (auto &Shader : P.Shaders) {
+          ShaderContainer SC = {};
+          SC.EntryPoint = Shader.Entry;
+          SC.Shader = Shader.Shader.get();
+          SC.SpecializationConstants = Shader.SpecializationConstants;
+          PipelineDesc.setShader(Shader.Stage, std::move(SC));
+        }
+
+        // Create the input layout based on the vertex attributes.
+        for (auto &Attr : P.Bindings.VertexAttributes) {
+          auto FormatOrErr = toFormat(Attr.Format, Attr.Channels);
+          if (!FormatOrErr)
+            return FormatOrErr.takeError();
+
+          InputLayoutDesc Layout = {};
+          Layout.Name = Attr.Name;
+          Layout.Fmt = *FormatOrErr;
+          Layout.OffsetInBytes = Attr.Offset;
+          PipelineDesc.InputLayout.push_back(Layout);
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+        PipelineDesc.RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr = createTraditionalRasterPipeline(
+            "Graphics Pipeline State", BindingsDesc, PipelineDesc);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Graphics Pipeline created.\n";
+      } else if (P.isMeshShaderRaster()) {
+        MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
+        PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        for (auto &Shader : P.Shaders) {
+          ShaderContainer SC = {};
+          SC.EntryPoint = Shader.Entry;
+          SC.Shader = Shader.Shader.get();
+          PipelineDesc.setShader(Shader.Stage, std::move(SC));
+        }
+
+        auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
+                                    P.Bindings.RTargetBufferPtr->Channels);
+        if (!FormatOrErr)
+          return FormatOrErr.takeError();
+        PipelineDesc.RTFormats.push_back(*FormatOrErr);
+
+        auto PipelineStateOrErr = createMeshShaderRasterPipeline(
+            "Mesh Shader Pipeline State", BindingsDesc, PipelineDesc);
+        if (!PipelineStateOrErr)
+          return PipelineStateOrErr.takeError();
+        State.Pipeline = std::move(*PipelineStateOrErr);
+        llvm::outs() << "Mesh Shader Pipeline created.\n";
+      }
+
       if (auto Err = createFrameBuffer(State))
         return Err;
       llvm::outs() << "Frame buffer created.\n";
+    } else if (P.isRayTracing()) {
+      return llvm::createStringError(
+          "RayTracing pipeline not yet supported on Vulkan");
+    } else {
+      return llvm::createStringError(
+          "Pipeline was neither Compute nor Traditional Raster");
     }
+
     llvm::outs() << "Memory buffers created.\n";
-    if (auto Err = executeCommandBuffer(State))
-      return Err;
+    // No explicit wait: the next submit's GPU-side timeline semaphore
+    // dependency ensures the copy completes before the dispatch runs.
+    auto CopyResult = GraphicsQueue.submit(std::move(State.CB));
+    if (!CopyResult)
+      return CopyResult.takeError();
     llvm::outs() << "Executed copy command buffer.\n";
-    auto DispatchCBOrErr =
-        VulkanCommandBuffer::create(Device, GraphicsQueue.QueueFamilyIdx);
+    auto DispatchCBOrErr = VulkanCommandBuffer::create(
+        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
+        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
     if (!DispatchCBOrErr)
       return DispatchCBOrErr.takeError();
     State.CB = std::move(*DispatchCBOrErr);
+    State.CB->Dev = this;
     llvm::outs() << "Execute command buffer created.\n";
     if (auto Err = createDescriptorPool(P, State))
       return Err;
@@ -2541,15 +4491,15 @@ public:
     if (auto Err = createDescriptorSets(P, State))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createPipeline(P, State))
-      return Err;
-    llvm::outs() << "Compute pipeline created.\n";
     if (auto Err = createCommands(P, State))
       return Err;
     llvm::outs() << "Commands created.\n";
-    if (auto Err = executeCommandBuffer(State))
-      return Err;
+    auto DispatchResult = GraphicsQueue.submit(std::move(State.CB));
+    if (!DispatchResult)
+      return DispatchResult.takeError();
     llvm::outs() << "Executed compute command buffer.\n";
+    if (auto Err = DispatchResult->waitForCompletion())
+      return Err;
     if (auto Err = readBackData(P, State))
       return Err;
     llvm::outs() << "Compute pipeline created.\n";
@@ -2557,7 +4507,251 @@ public:
     return llvm::Error::success();
   }
 };
+
+llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
+  if (Items.empty())
+    return llvm::Error::success();
+  if (!CB.Dev || !CB.Dev->RT.CmdBuild)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Ray tracing not supported on this command buffer's device.");
+  VulkanDevice *Dev = CB.Dev;
+
+  // Pre-call barrier: ensure prior writes complete before AS-build reads
+  // (vertex/index/instance input buffers and, for TLAS, sibling BLASes built
+  // in a previous batchBuildAS() call). Including the READ bit is what makes a
+  // back-to-back BLAS-then-TLAS sequence safe: the second call's barrier
+  // flushes AS-build-write from the first into AS-build-read.
+  addDstBarrier(VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
+                    VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
+
+  const size_t N = Items.size();
+  // Per-item arrays must outlive the RT.CmdBuild() call.
+  llvm::SmallVector<llvm::SmallVector<VkAccelerationStructureGeometryKHR>>
+      Geoms(N);
+  llvm::SmallVector<llvm::SmallVector<VkAccelerationStructureBuildRangeInfoKHR>>
+      Ranges(N);
+  llvm::SmallVector<VkAccelerationStructureBuildGeometryInfoKHR> BuildInfos(N);
+  llvm::SmallVector<const VkAccelerationStructureBuildRangeInfoKHR *> RangePtrs(
+      N);
+
+  for (size_t I = 0; I < N; ++I) {
+    const auto &Item = Items[I];
+
+    auto &BI = BuildInfos[I];
+    BI.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    BI.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+
+    uint64_t ScratchSize = 0;
+    if (const auto *BLAS = llvm::dyn_cast<const BLASBuildRequest *>(Item)) {
+      auto *VkAS = llvm::cast<VulkanAccelerationStructure>(BLAS->AS);
+      BI.dstAccelerationStructure = VkAS->AccelStruct;
+      BI.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+
+      if (const auto *Tris =
+              std::get_if<llvm::SmallVector<TriangleGeometryDesc>>(
+                  &BLAS->Geometry)) {
+        Geoms[I].reserve(Tris->size());
+        Ranges[I].reserve(Tris->size());
+        for (const auto &T : *Tris) {
+          VkAccelerationStructureGeometryKHR G = {};
+          G.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+          G.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+          if (T.Opaque)
+            G.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+          auto &Tri = G.geometry.triangles;
+          Tri.sType =
+              VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+          auto *VB = llvm::cast<VulkanBuffer>(T.VertexBuffer);
+          Tri.vertexFormat = getVulkanFormat(T.VertexFormat);
+          Tri.vertexData.deviceAddress =
+              VB->getDeviceAddress() + T.VertexBufferOffset;
+          Tri.vertexStride = T.VertexStride;
+          Tri.maxVertex = T.VertexCount - 1;
+          if (T.IndexBuffer) {
+            auto *IB = llvm::cast<VulkanBuffer>(T.IndexBuffer);
+            Tri.indexType = getVulkanIndexType(T.IdxFormat);
+            Tri.indexData.deviceAddress =
+                IB->getDeviceAddress() + T.IndexBufferOffset;
+          } else {
+            Tri.indexType = VK_INDEX_TYPE_NONE_KHR;
+          }
+          Geoms[I].push_back(G);
+
+          VkAccelerationStructureBuildRangeInfoKHR R = {};
+          R.primitiveCount =
+              T.IndexBuffer ? T.IndexCount / 3 : T.VertexCount / 3;
+          Ranges[I].push_back(R);
+        }
+      } else {
+        const auto &AABBs =
+            std::get<llvm::SmallVector<AABBGeometryDesc>>(BLAS->Geometry);
+        Geoms[I].reserve(AABBs.size());
+        Ranges[I].reserve(AABBs.size());
+        for (const auto &A : AABBs) {
+          VkAccelerationStructureGeometryKHR G = {};
+          G.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+          G.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
+          if (A.Opaque)
+            G.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+          auto &Ab = G.geometry.aabbs;
+          Ab.sType =
+              VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR;
+          Ab.stride = A.AABBStride;
+          auto *AB = llvm::cast<VulkanBuffer>(A.AABBBuffer);
+          Ab.data.deviceAddress = AB->getDeviceAddress() + A.AABBBufferOffset;
+          Geoms[I].push_back(G);
+
+          VkAccelerationStructureBuildRangeInfoKHR R = {};
+          R.primitiveCount = A.AABBCount;
+          Ranges[I].push_back(R);
+        }
+      }
+
+      BI.geometryCount = Geoms[I].size();
+      BI.pGeometries = Geoms[I].data();
+      ScratchSize = BLAS->AS->getSizes().ScratchDataSizeInBytes;
+    } else {
+      const auto *TLAS = llvm::cast<const TLASBuildRequest *>(Item);
+      auto *VkAS = llvm::cast<VulkanAccelerationStructure>(TLAS->AS);
+      BI.dstAccelerationStructure = VkAS->AccelStruct;
+      BI.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+
+      // Serialize instances into the Vulkan-native struct.
+      llvm::SmallVector<VkAccelerationStructureInstanceKHR> Native;
+      Native.reserve(TLAS->Instances.size());
+      for (const auto &Inst : TLAS->Instances) {
+        VkAccelerationStructureInstanceKHR NI = {};
+        static_assert(sizeof(NI.transform.matrix) == sizeof(Inst.Transform),
+                      "Transform layout mismatch");
+        memcpy(&NI.transform.matrix, Inst.Transform, sizeof(Inst.Transform));
+        NI.instanceCustomIndex = Inst.InstanceID & 0xFFFFFFu;
+        NI.mask = Inst.InstanceMask;
+        NI.instanceShaderBindingTableRecordOffset =
+            Inst.InstanceContributionToHitGroupIndex & 0xFFFFFFu;
+        NI.flags = 0;
+        auto *BLASPtr = llvm::cast<VulkanAccelerationStructure>(Inst.BLAS);
+        NI.accelerationStructureReference = BLASPtr->getDeviceAddress();
+        Native.push_back(NI);
+      }
+      const size_t Bytes =
+          Native.size() * sizeof(VkAccelerationStructureInstanceKHR);
+
+      // Upload the instance array. Storage + CpuToGpu now carries device
+      // address and AS-build-input flags (because RT is supported).
+      const BufferCreateDesc Desc = BufferCreateDesc::uploadBuffer();
+      auto InstBufOrErr = offloadtest::createBufferWithData(
+          *Dev, "TLAS-Instances", Desc, Native.data(), Bytes, nullptr, nullptr);
+      if (!InstBufOrErr)
+        return InstBufOrErr.takeError();
+      auto *VkInstBuf = llvm::cast<VulkanBuffer>(InstBufOrErr->get());
+
+      VkAccelerationStructureGeometryKHR G = {};
+      G.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+      G.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+      auto &Inst = G.geometry.instances;
+      Inst.sType =
+          VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+      Inst.arrayOfPointers = VK_FALSE;
+      Inst.data.deviceAddress = VkInstBuf->getDeviceAddress();
+      Geoms[I].push_back(G);
+
+      VkAccelerationStructureBuildRangeInfoKHR R = {};
+      R.primitiveCount = static_cast<uint32_t>(TLAS->Instances.size());
+      Ranges[I].push_back(R);
+
+      BI.geometryCount = 1;
+      BI.pGeometries = Geoms[I].data();
+      ScratchSize = TLAS->AS->getSizes().ScratchDataSizeInBytes;
+
+      // Keep the instance buffer alive across submission.
+      CB.KeepAliveOwned.push_back(std::move(*InstBufOrErr));
+    }
+
+    const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
+    auto ScratchOrErr =
+        Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
+    if (!ScratchOrErr)
+      return ScratchOrErr.takeError();
+    auto *VkScratchBuf = llvm::cast<VulkanBuffer>(ScratchOrErr->get());
+    BI.scratchData.deviceAddress = VkScratchBuf->getDeviceAddress();
+    CB.KeepAliveOwned.push_back(std::move(*ScratchOrErr));
+
+    RangePtrs[I] = Ranges[I].data();
+  }
+
+  insertDebugSignpost(
+      llvm::formatv("BuildAccelerationStructures x{0}", N).str());
+  Dev->RT.CmdBuild(CB.CmdBuffer, static_cast<uint32_t>(N), BuildInfos.data(),
+                   RangePtrs.data());
+  return llvm::Error::success();
+}
 } // namespace
+
+llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
+    llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
+  // Non-blocking: query how far the GPU has progressed and release
+  // command buffers from completed submissions.
+  {
+    const uint64_t Completed = SubmitFence->getFenceValue();
+    llvm::erase_if(InFlightBatches, [Completed](const InFlightBatch &B) {
+      return B.FenceValue <= Completed;
+    });
+  }
+
+  llvm::SmallVector<VkCommandBuffer> CmdBuffers;
+  CmdBuffers.reserve(CBs.size());
+
+  // GPU-side wait so that back-to-back submits don't overlap on the GPU.
+  // Waiting for a value that is already signaled (including 0) is a no-op.
+  const uint64_t WaitValue = FenceCounter;
+  const uint64_t SignalValue = ++FenceCounter;
+  const VkPipelineStageFlags WaitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+
+  // Each command buffer defaults to src=HOST, which is only correct for
+  // standalone submissions.  Multi-CB batches would need inter-CB barriers.
+  if (CBs.size() > 1)
+    llvm::errs()
+        << "Warning: submitting multiple command buffers in a single batch; "
+           "encoder barriers do not account for inter-command-buffer "
+           "dependencies.\n";
+  for (auto &CB : CBs) {
+    auto &VCB = *llvm::cast<VulkanCommandBuffer>(CB.get());
+    if (auto Err = VK::toError(vkEndCommandBuffer(VCB.CmdBuffer),
+                               "Could not end command buffer."))
+      return Err;
+    CmdBuffers.push_back(VCB.CmdBuffer);
+  }
+
+  VkTimelineSemaphoreSubmitInfo TimelineInfo = {};
+  TimelineInfo.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO;
+  TimelineInfo.waitSemaphoreValueCount = 1;
+  TimelineInfo.pWaitSemaphoreValues = &WaitValue;
+  TimelineInfo.signalSemaphoreValueCount = 1;
+  TimelineInfo.pSignalSemaphoreValues = &SignalValue;
+
+  VkSubmitInfo SubmitInfo = {};
+  SubmitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  SubmitInfo.pNext = &TimelineInfo;
+  SubmitInfo.waitSemaphoreCount = 1;
+  SubmitInfo.pWaitSemaphores = &SubmitFence->Semaphore;
+  SubmitInfo.pWaitDstStageMask = &WaitStage;
+  SubmitInfo.commandBufferCount = CmdBuffers.size();
+  SubmitInfo.pCommandBuffers = CmdBuffers.data();
+  SubmitInfo.signalSemaphoreCount = 1;
+  SubmitInfo.pSignalSemaphores = &SubmitFence->Semaphore;
+
+  if (auto Err =
+          VK::toError(vkQueueSubmit(Queue, 1, &SubmitInfo, VK_NULL_HANDLE),
+                      "Failed to submit to queue."))
+    return Err;
+
+  // Keep submitted command buffers alive until the GPU is done with them.
+  InFlightBatches.push_back({SignalValue, std::move(CBs)});
+
+  return offloadtest::SubmitResult{SubmitFence.get(), SignalValue};
+}
 
 llvm::Error offloadtest::initializeVulkanDevices(
     const DeviceConfig Config,
@@ -2595,10 +4789,13 @@ llvm::Error offloadtest::initializeVulkanDevices(
   }
   const llvm::SmallVector<VkExtensionProperties, 0> AvailableExtensions =
       queryInstanceExtensions(nullptr);
-  if (Config.EnableDebugLayer) {
+  bool DebugUtilsEnabled = false;
+  if (Config.EnableDebugLayer || Config.EnableValidationLayer) {
     const llvm::StringRef DebugUtilsExtensionName = "VK_EXT_debug_utils";
-    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName))
+    if (isExtensionSupported(AvailableExtensions, DebugUtilsExtensionName)) {
       EnabledInstanceExtensions.push_back(DebugUtilsExtensionName.data());
+      DebugUtilsEnabled = true;
+    }
   }
 
   CreateInfo.ppEnabledLayerNames = EnabledLayers.data();
@@ -2607,35 +4804,29 @@ llvm::Error offloadtest::initializeVulkanDevices(
   CreateInfo.enabledExtensionCount = EnabledInstanceExtensions.size();
 
   VkInstance Instance = VK_NULL_HANDLE;
-  const VkResult Res = vkCreateInstance(&CreateInfo, NULL, &Instance);
-  if (Res == VK_ERROR_INCOMPATIBLE_DRIVER)
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Cannot find a base Vulkan device");
-  if (Res)
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Unknown Vulkan initialization error: %d",
-                                   Res);
+  if (auto Err = VK::toError(vkCreateInstance(&CreateInfo, NULL, &Instance),
+                             "Failed to create Vulkan instance"))
+    return Err;
 
-#ifndef NDEBUG
-  VkDebugUtilsMessengerEXT DebugMessenger = registerDebugUtilCallback(Instance);
-#else
-  VkDebugUtilsMessengerEXT DebugMessenger = VK_NULL_HANDLE;
-#endif
+  VkDebugUtilsMessengerEXT DebugMessenger =
+      DebugUtilsEnabled ? registerDebugUtilCallback(Instance) : VK_NULL_HANDLE;
 
   const std::shared_ptr<VulkanInstance> VulkanInstanceShPtr =
       std::make_shared<VulkanInstance>(Instance, DebugMessenger);
 
   uint32_t DeviceCount = 0;
-  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr))
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Failed to get device count");
+  if (auto Err = VK::toError(
+          vkEnumeratePhysicalDevices(Instance, &DeviceCount, nullptr),
+          "Failed to get device count"))
+    return Err;
   std::vector<VkPhysicalDevice> PhysicalDevices(DeviceCount);
-  if (vkEnumeratePhysicalDevices(Instance, &DeviceCount,
-                                 PhysicalDevices.data()))
-    return llvm::createStringError(std::errc::no_such_device,
-                                   "Failed to enumerate devices");
+  if (auto Err = VK::toError(vkEnumeratePhysicalDevices(Instance, &DeviceCount,
+                                                        PhysicalDevices.data()),
+                             "Failed to enumerate devices"))
+    return Err;
 
   for (const auto &PDev : PhysicalDevices) {
+
     auto DeviceOrErr = VulkanDevice::create(VulkanInstanceShPtr, PDev,
                                             AvailableInstanceLayers);
     if (!DeviceOrErr) {

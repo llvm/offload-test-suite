@@ -74,6 +74,8 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::R32Float;
     case 2:
       return Format::RG32Float;
+    case 3:
+      return Format::RGB32Float;
     case 4:
       return Format::RGBA32Float;
     }
@@ -85,13 +87,29 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
     if (Channels == 1)
       return Format::D32Float;
     break;
+  case DataFormat::UInt64:
+    // Only 1 and 2 channels of 64-bit integers are supported.
+    switch (Channels) {
+    case 1:
+      return Format::R64Uint;
+    case 2:
+      return Format::RG64Uint;
+    }
+    break;
+  case DataFormat::Int64:
+    // Only 1 and 2 channels of 64-bit integers are supported.
+    switch (Channels) {
+    case 1:
+      return Format::R64Sint;
+    case 2:
+      return Format::RG64Sint;
+    }
+    break;
   // No Format mapping for these DataFormats.
   case DataFormat::Hex8:
   case DataFormat::Hex16:
   case DataFormat::Hex32:
   case DataFormat::Hex64:
-  case DataFormat::UInt64:
-  case DataFormat::Int64:
   case DataFormat::Float16:
   case DataFormat::Float64:
   case DataFormat::Bool:
@@ -114,12 +132,12 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
   auto ExpectedFmt = toFormat(Buf.Format, Buf.Channels);
   if (!ExpectedFmt)
     return ExpectedFmt.takeError();
-  if (Desc.Format != *ExpectedFmt)
+  if (Desc.Fmt != *ExpectedFmt)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "TextureCreateDesc format '%s' does not match CPUBuffer format "
         "(DataFormat %d, %d channels -> '%s').",
-        getFormatName(Desc.Format).data(), static_cast<int>(Buf.Format),
+        getFormatName(Desc.Fmt).data(), static_cast<int>(Buf.Format),
         Buf.Channels, getFormatName(*ExpectedFmt).data());
   if (Desc.Width != static_cast<uint32_t>(Buf.OutputProps.Width))
     return llvm::createStringError(
@@ -137,7 +155,7 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
         "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
         "levels %d.",
         Desc.MipLevels, Buf.OutputProps.MipLevels);
-  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Format);
+  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Fmt);
   if (Buf.Stride > 0 && static_cast<uint32_t>(Buf.Stride) != TexelSize)
     return llvm::createStringError(
         std::errc::invalid_argument,

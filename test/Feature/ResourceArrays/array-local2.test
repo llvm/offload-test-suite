@@ -26,7 +26,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufX
     Format: Int32
@@ -78,13 +77,13 @@ DescriptorSets:
 # of a function argument if the type is resource or resource array.
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7678
 # XFAIL: DXC && DirectX
+# Metal also uses the DirectX path here, and has the same issue.
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/7678
+# XFAIL: DXC && Metal
 
 # DXC-Vulkan support for arrays of RWStructuredBuffer are pretty broken.
 # Tracked by https://github.com/microsoft/DirectXShaderCompiler/issues/7727
 # XFAIL: DXC && Vulkan
-
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/154669
 # XFAIL: Clang && Vulkan

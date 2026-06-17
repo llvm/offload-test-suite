@@ -12,10 +12,12 @@
 #ifndef OFFLOADTEST_API_TEXTURE_H
 #define OFFLOADTEST_API_TEXTURE_H
 
+#include "API/API.h"
 #include "API/Resources.h"
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 
 #include <cstdint>
@@ -24,6 +26,7 @@
 #include <variant>
 
 namespace offloadtest {
+LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
 enum TextureUsage : uint32_t {
   Sampled = 1 << 0,
@@ -65,7 +68,7 @@ using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 struct TextureCreateDesc {
   MemoryLocation Location;
   TextureUsage Usage;
-  Format Format;
+  Format Fmt;
   uint32_t Width;
   uint32_t Height;
   uint32_t MipLevels;
@@ -77,13 +80,13 @@ struct TextureCreateDesc {
 };
 
 inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
-  if (!isTextureCompatible(Desc.Format))
+  if (!isTextureCompatible(Desc.Fmt))
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Format '%s' is not compatible with texture creation.",
-        getFormatName(Desc.Format).data());
+        getFormatName(Desc.Fmt).data());
 
-  const bool IsDepth = isDepthFormat(Desc.Format);
+  const bool IsDepth = isDepthFormat(Desc.Fmt);
   const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
   const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
 
@@ -104,12 +107,12 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Depth format '%s' requires DepthStencil usage.",
-        getFormatName(Desc.Format).data());
+        getFormatName(Desc.Fmt).data());
   if (!IsDepth && IsDS)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "DepthStencil usage requires a depth format, got '%s'.",
-        getFormatName(Desc.Format).data());
+        getFormatName(Desc.Fmt).data());
 
   // Render targets and depth/stencil textures only support a single mip level.
   if ((IsRT || IsDS) && Desc.MipLevels != 1)
@@ -140,14 +143,18 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
 }
 
 class Texture {
-public:
-  virtual ~Texture() = default;
+  GPUAPI API;
 
+public:
+  virtual ~Texture();
   Texture(const Texture &) = delete;
   Texture &operator=(const Texture &) = delete;
 
+  GPUAPI getAPI() const { return API; }
+  virtual const TextureCreateDesc &getDesc() const = 0;
+
 protected:
-  Texture() = default;
+  explicit Texture(GPUAPI API) : API(API) {}
 };
 
 } // namespace offloadtest
