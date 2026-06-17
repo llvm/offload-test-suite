@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstring>
 #include <sstream>
+#include <type_traits>
 
 constexpr uint16_t Float16BitSign = 0x8000;
 constexpr uint16_t Float16BitExp = 0x7c00;
@@ -178,11 +179,24 @@ static bool testAll(std::function<bool(const T &, const T &)> ComparisonFn,
   if (Arr1.size() != Arr2.size())
     return false;
 
+  bool Passed = true;
   for (size_t I = 0, E = Arr1.size(); I < E; ++I) {
-    if (!ComparisonFn(Arr1[I], Arr2[I]))
-      return false;
+    if (!ComparisonFn(Arr1[I], Arr2[I])) {
+      std::ostringstream ActStr, ExpStr;
+      if constexpr (std::is_floating_point_v<T>) {
+        ActStr << Arr1[I] << " (" << std::hexfloat << Arr1[I] << ")";
+        ExpStr << Arr2[I] << " (" << std::hexfloat << Arr2[I] << ")";
+      } else {
+        ActStr << "0x" << std::hex << Arr1[I];
+        ExpStr << "0x" << std::hex << Arr2[I];
+      }
+      llvm::errs() << "  Mismatch at element " << I
+                    << ": expected=" << ExpStr.str()
+                    << ", actual=" << ActStr.str() << "\n";
+      Passed = false;
+    }
   }
-  return true;
+  return Passed;
 }
 
 template <typename T>
