@@ -441,9 +441,18 @@ jobs:
             # bare name elsewhere.
             dxc_path="$GITHUB_WORKSPACE/dxc-dist/bin/dxc"
             if [ -x "${dxc_path}.exe" ]; then dxc_path="${dxc_path}.exe"; fi
+            warp_arch_args=()
+            if [ '${{ inputs.OS }}' = 'windows' ]; then
+              if [ '${{ runner.arch }}' = 'ARM64' ]; then
+                warp_arch_args=(--warp-arch arm64)
+              else
+                warp_arch_args=(--warp-arch x64)
+              fi
+            fi
             python configure-test-suite.py \
               --suite "${{ steps.suite.outputs.suite }}" \
-              --dxc-path "$dxc_path"
+              --dxc-path "$dxc_path" \
+              "${warp_arch_args[@]}"
       - name: Run HLSL Tests
         shell: bash
         run: |

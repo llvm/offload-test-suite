@@ -66,10 +66,14 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("Bindings", P.Bindings);
   I.mapOptional("PushConstants", P.PushConstants);
   I.mapOptional("AccelerationStructures", P.AccelStructs);
+  I.mapOptional("RayTracingPipelineConfig", P.RTConfig);
+  I.mapOptional("HitGroups", P.HitGroups);
+  I.mapOptional("ShaderBindingTable", P.SBT);
 
   // Runs here (not right after Shaders) because the tessellation topology
-  // check reads Bindings.Topology and Bindings.PatchControlPoints. Must
-  // still run before validateDispatchParameters, which reads P.Kind.
+  // check reads Bindings.Topology and Bindings.PatchControlPoints, and the
+  // RT-pipeline check reads HitGroups / RTConfig / SBT. Must still run
+  // before validateDispatchParameters, which reads P.Kind.
   if (auto Err = P.validatePipelineKind())
     I.setError(llvm::toString(std::move(Err)));
 
@@ -693,23 +697,93 @@ void MappingTraits<offloadtest::AccelerationStructureDescs>::mapping(
   I.mapOptional("TLAS", D.TLAS);
 }
 
+void MappingTraits<offloadtest::HitGroup>::mapping(IO &I,
+                                                   offloadtest::HitGroup &G) {
+  I.mapRequired("Name", G.Name);
+  I.mapOptional("Type", G.Type, offloadtest::HitGroupType::Triangles);
+  I.mapRequired("ClosestHit", G.ClosestHit);
+  I.mapOptional("AnyHit", G.AnyHit);
+  I.mapOptional("Intersection", G.Intersection);
+}
+
+void MappingTraits<offloadtest::RayTracingPipelineConfig>::mapping(
+    IO &I, offloadtest::RayTracingPipelineConfig &C) {
+  I.mapOptional("MaxTraceRecursionDepth", C.MaxTraceRecursionDepth, 1u);
+  I.mapOptional("MaxPayloadSizeInBytes", C.MaxPayloadSizeInBytes, 0u);
+  I.mapOptional("MaxAttributeSizeInBytes", C.MaxAttributeSizeInBytes, 8u);
+  I.mapOptional("PipelineFlags", C.PipelineFlags);
+}
+
+void MappingTraits<offloadtest::SBTEntry>::mapping(IO &I,
+                                                   offloadtest::SBTEntry &E) {
+  I.mapRequired("ShaderName", E.ShaderName);
+  llvm::SmallVector<llvm::yaml::Hex8> Bytes;
+  if (I.outputting())
+    for (const uint8_t B : E.LocalRootData)
+      Bytes.push_back(static_cast<llvm::yaml::Hex8>(B));
+  I.mapOptional("LocalRootData", Bytes);
+  if (!I.outputting()) {
+    E.LocalRootData.clear();
+    E.LocalRootData.reserve(Bytes.size());
+    for (auto B : Bytes)
+      E.LocalRootData.push_back(static_cast<uint8_t>(B));
+  }
+}
+
+void MappingTraits<offloadtest::ShaderBindingTable>::mapping(
+    IO &I, offloadtest::ShaderBindingTable &S) {
+  I.mapRequired("RayGen", S.RayGen);
+  I.mapOptional("Miss", S.Miss);
+  I.mapOptional("HitGroup", S.HitGroup);
+  I.mapOptional("Callable", S.Callable);
+}
+
 } // namespace yaml
 } // namespace llvm
 
 llvm::Error offloadtest::Pipeline::validatePipelineKind() {
   bool HasShaderType[NumStages] = {};
+  bool HasAnyRayTracingStage = false;
   for (const auto &Shader : Shaders) {
-    // This works except for ray tracing shaders. We will have to make an
-    // exception for miss, closest hit, any hit and intersection shaders once we
-    // support those.
-    if (HasShaderType[llvm::to_underlying(Shader.Stage)])
+    const auto Idx = llvm::to_underlying(Shader.Stage);
+    // RayTracing pipelines may host multiple shaders of the same stage (e.g.
+    // several miss shaders, multiple hit groups). Every other pipeline kind
+    // forbids duplicates.
+    if (HasShaderType[Idx] && !isRayTracingStage(Shader.Stage))
       return llvm::createStringError(
           "Pipeline has multiple shaders of the same type.");
-
-    HasShaderType[llvm::to_underlying(Shader.Stage)] = true;
+    HasShaderType[Idx] = true;
+    if (isRayTracingStage(Shader.Stage))
+      HasAnyRayTracingStage = true;
   }
 
-  if (HasShaderType[llvm::to_underlying(Stages::Compute)]) {
+  const bool HasComputeStage =
+      HasShaderType[llvm::to_underlying(Stages::Compute)];
+  const bool HasVertexStage =
+      HasShaderType[llvm::to_underlying(Stages::Vertex)];
+  const bool HasMeshStage = HasShaderType[llvm::to_underlying(Stages::Mesh)];
+  const bool HasAmplificationStage =
+      HasShaderType[llvm::to_underlying(Stages::Amplification)];
+
+  if (HasAnyRayTracingStage) {
+    if (HasComputeStage || HasVertexStage || HasMeshStage ||
+        HasAmplificationStage)
+      return llvm::createStringError(
+          "RayTracing shaders cannot be combined with Compute, Vertex, "
+          "Amplification, or Mesh shaders.");
+    if (!HasShaderType[llvm::to_underlying(Stages::RayGeneration)])
+      return llvm::createStringError(
+          "RayTracing pipeline requires at least one RayGeneration shader.");
+    Kind = ShaderPipelineKind::RayTracing;
+    return llvm::Error::success();
+  }
+
+  if (!HitGroups.empty() || RTConfig || SBT)
+    return llvm::createStringError(
+        "HitGroups / RayTracingPipelineConfig / ShaderBindingTable are only "
+        "valid on a RayTracing pipeline.");
+
+  if (HasComputeStage) {
     if (Shaders.size() > 1)
       return llvm::createStringError(
           "Compute Pipeline is only allowed to have Compute Shader.");
@@ -717,9 +791,8 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
     return llvm::Error::success();
   }
 
-  if (HasShaderType[llvm::to_underlying(Stages::Vertex)]) {
-    if (HasShaderType[llvm::to_underlying(Stages::Amplification)] ||
-        HasShaderType[llvm::to_underlying(Stages::Mesh)])
+  if (HasVertexStage) {
+    if (HasAmplificationStage || HasMeshStage)
       return llvm::createStringError("Vertex and Mesh/Amplification Shaders "
                                      "cannot be used in the same pipeline.");
 
@@ -747,7 +820,7 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
     return llvm::Error::success();
   }
 
-  if (HasShaderType[llvm::to_underlying(Stages::Mesh)]) {
+  if (HasMeshStage) {
     Kind = ShaderPipelineKind::MeshShaderRaster;
     return llvm::Error::success();
   }
@@ -755,7 +828,7 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
   // As we add more pipeline types this error message should be updated with
   // more required shader types.
   return llvm::createStringError(
-      "The pipeline misses a Compute, Vertex or Mesh Shader.");
+      "The pipeline misses a Compute, Vertex, Mesh, or RayGeneration Shader.");
 }
 
 llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
@@ -773,6 +846,14 @@ llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
       return llvm::createStringError(
           "DispatchParameters.DispatchGroupCount set on a TraditionalRaster "
           "pipeline. Only allowed on a Compute pipeline.");
+    break;
+  case ShaderPipelineKind::RayTracing:
+    // DispatchGroupCount is reinterpreted as { Width, Height, Depth } for
+    // DispatchRays. VertexCount is not meaningful for an RT dispatch.
+    if (DispatchParameters.VertexCount)
+      return llvm::createStringError(
+          "DispatchParameters.VertexCount set on a RayTracing pipeline. Only "
+          "allowed on a TraditionalRaster pipeline.");
     break;
   }
 
