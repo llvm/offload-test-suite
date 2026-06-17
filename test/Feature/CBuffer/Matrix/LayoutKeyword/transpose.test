@@ -183,7 +183,7 @@ DescriptorSets:
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
 # XFAIL: Vulkan && DXC
 
-# Task: https://github.com/llvm/llvm-project/issues/201712
+# Unimplemented: https://github.com/llvm/llvm-project/issues/201712
 # XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
