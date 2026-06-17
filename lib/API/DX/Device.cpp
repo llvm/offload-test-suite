@@ -2589,16 +2589,14 @@ public:
                 std::errc::value_too_large,
                 "Root descriptor cannot refer to resource arrays.");
 
-          const DXBuffer *BufferDX =
-              llvm::cast_if_present<DXBuffer>(RootDescIt->second.back().Buffer);
+          const DXBuffer *BufferDX = llvm::cast_if_present<DXBuffer>(
+              RootDescIt->second.back().Buffer.get());
           if (!BufferDX) {
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root descriptor can only refer to buffers.");
           }
 
-          const auto &BufferDX =
-              llvm::cast<DXBuffer>(*RootDescIt->second.back().Buffer);
           const D3D12_GPU_VIRTUAL_ADDRESS VirtualAddress =
               BufferDX->Buffer->GetGPUVirtualAddress();
           switch (getDescriptorKind(RootDescIt->first->Kind)) {
