@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource variable can alias a global and store through it.
 
 RWByteAddressBuffer Out : register(u0);

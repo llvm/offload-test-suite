@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a method can be called directly on the return value of a
 // function that returns a resource (temporary resource lifetime).
 

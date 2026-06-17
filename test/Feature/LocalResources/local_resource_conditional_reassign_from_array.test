@@ -1,0 +1,130 @@
+#--- source.hlsl
+RWBuffer<uint> In : register(u0);
+RWStructuredBuffer<uint> Out0 : register(u1);
+RWStructuredBuffer<uint> OutArr[];
+
+cbuffer c {
+    bool cond;
+};
+
+void branched_assignment_with_array(uint idx) {
+    RWStructuredBuffer<uint> Out = Out0;
+    if (cond) {
+        Out = OutArr[0];
+    }
+    Out[idx] = In[idx];
+}
+
+[numthreads(64, 1, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    branched_assignment_with_array(tid.x);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+    DispatchSize: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 4
+    Data: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+            10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+            20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+            30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+            40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+            50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+            60, 61, 62, 63 ]
+  - Name: Out0
+    Format: Int32
+    Stride: 4
+    FillSize: 256
+  - Name: OutArr
+    Format: Int32
+    Stride: 4
+    ArraySize: 1
+    Data:
+      - [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+          0, 0, 0, 0 ]
+  - Name: c
+    Format: Hex32
+    Data: [ 0x00000001 ]
+  - Name: ExpectedOut0
+    Format: Int32
+    Stride: 4
+    Data: [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0 ]
+  - Name: ExpectedOutArr
+    Format: Int32
+    Stride: 4
+    ArraySize: 1
+    Data:
+      - [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+          10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
+          20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+          30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
+          40, 41, 42, 43, 44, 45, 46, 47, 48, 49,
+          50, 51, 52, 53, 54, 55, 56, 57, 58, 59,
+          60, 61, 62, 63 ]
+Results:
+  - Result: Out0Check
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: OutArrCheck
+    Rule: BufferExact
+    Actual: OutArr
+    Expected: ExpectedOutArr
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutArr
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: c
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# DXC codegen error: local resource not guaranteed to map to unique global resource
+# XFAIL: DXC
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

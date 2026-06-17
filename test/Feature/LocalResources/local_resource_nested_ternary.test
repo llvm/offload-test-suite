@@ -2,18 +2,18 @@
 RWByteAddressBuffer gBuf0 : register(u0);
 RWByteAddressBuffer gBuf1 : register(u1);
 
-uint Pass_Reassign(uint idx) {
-    RWByteAddressBuffer buf = gBuf0;
-    buf = gBuf1;
-    buf.Store(idx * 4, 13);
+uint Pass_IfAlias(bool cond, uint idx) {
+    RWByteAddressBuffer buf;
+    buf = cond ? gBuf0 : gBuf1;
+    buf.Store(idx * 4, 14);
 
-    return 13;
+    return 14;
 }
 
 [numthreads(8,8,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
     uint idx = tid.x + tid.y * 8;
-    Pass_Reassign(idx);
+    Pass_IfAlias(idx < 32, idx);
 }
 
 //--- pipeline.yaml
@@ -35,11 +35,11 @@ Buffers:
   - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   - Name: ExpectedBuf1
     Format: Int32
     Stride: 4
-    Data: [13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13]
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14]
 Results:
   - Result: Buf0Check
     Rule: BufferExact
@@ -68,11 +68,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/351
-# XFAIL: Metal
-
 # Bug: https://github.com/llvm/llvm-project/issues/192523
 # XFAIL: Clang && Vulkan
+
+# DXC: codegen error (one per ternary level).
+# XFAIL: DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

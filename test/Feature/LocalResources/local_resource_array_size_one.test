@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource array of size 1 works correctly.
 
 RWByteAddressBuffer Out : register(u0);

@@ -1,5 +1,4 @@
 #--- source.hlsl
-
 // Test that a local resource assigned inside a nested block scope
 // remains valid after the block ends.
 
