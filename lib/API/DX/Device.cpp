@@ -157,9 +157,14 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   case ResourceKind::ConstantBuffer:
     return BufferUsage::ConstantBuffer;
     break;
-  default:
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::Sampler:
+  case ResourceKind::SampledTexture2D:
+  case ResourceKind::AccelerationStructure:
     llvm_unreachable("Invalid case, ResourceKind is not a buffer.");
   }
+  llvm_unreachable("All ResourceKind cases handled");
 }
 
 static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
@@ -186,10 +191,15 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::ConstantBuffer:
     return BufferShaderAccessType::Raw;
-  default:
+  case ResourceKind::Texture2D:
+  case ResourceKind::RWTexture2D:
+  case ResourceKind::Sampler:
+  case ResourceKind::SampledTexture2D:
+  case ResourceKind::AccelerationStructure:
     llvm_unreachable(
         "Invalid case, non-buffers should have been filtered out.");
   }
+  llvm_unreachable("All ResourceKind cases handled");
 }
 
 namespace {
@@ -596,28 +606,30 @@ public:
                              D3D12_RESOURCE_STATES StateBefore,
                              D3D12_RESOURCE_STATES StateAfter) {
 
-    for (size_t I = 0, N = PendingTransitions.size(); I < N; ++I) {
-      auto &Trans = PendingTransitions[I];
-      if (Trans.Transition.pResource == Resource) {
-        assert(StateBefore == Trans.Transition.StateAfter);
+    for (auto TransIt = PendingTransitions.begin(),
+              End = PendingTransitions.end();
+         TransIt != End; ++TransIt) {
+      if (TransIt->Transition.pResource != Resource)
+        continue;
 
-        if (StateAfter == Trans.Transition.StateBefore) {
-          // We actually need the resource to be in the original state!
-          // Remove the transition from the list of Pending Transitions.
-          PendingTransitions.erase(PendingTransitions.begin() + I);
+      assert(StateBefore == TransIt->Transition.StateAfter);
 
-          // NOTE: This could cause an execution barrier issue since legacy
-          // barriers don't allow us to express execution barriers, cache
-          // flushes, and layout transitions separately.
-          // As a workaround we add a UAV barrier so an execution barrier and
-          // cache flush is inserted.
-          addPendingUAVBarrier();
-        } else {
-          Trans.Transition.StateAfter = StateAfter;
-        }
+      if (StateAfter == TransIt->Transition.StateBefore) {
+        // We actually need the resource to be in the original state!
+        // Remove the transition from the list of Pending Transitions.
+        PendingTransitions.erase(TransIt);
 
-        return;
+        // NOTE: This could cause an execution barrier issue since legacy
+        // barriers don't allow us to express execution barriers, cache
+        // flushes, and layout transitions separately.
+        // As a workaround we add a UAV barrier so an execution barrier and
+        // cache flush is inserted.
+        addPendingUAVBarrier();
+      } else {
+        TransIt->Transition.StateAfter = StateAfter;
       }
+
+      return;
     }
 
     PendingTransitions.push_back(CD3DX12_RESOURCE_BARRIER::Transition(
@@ -1895,7 +1907,7 @@ public:
                                      Tex->DSVHandle);
     }
 
-    return std::move(Tex);
+    return Tex;
   }
 
   uint32_t getTextureUploadRowStrideInBytes(
@@ -2577,7 +2589,9 @@ public:
                 std::errc::value_too_large,
                 "Root descriptor cannot refer to resource arrays.");
 
-          if (!RootDescIt->second.back().Buffer) {
+          const DXBuffer *BufferDX =
+              llvm::cast_if_present<DXBuffer>(RootDescIt->second.back().Buffer);
+          if (!BufferDX) {
             return llvm::createStringError(
                 std::errc::value_too_large,
                 "Root descriptor can only refer to buffers.");
@@ -2586,7 +2600,7 @@ public:
           const auto &BufferDX =
               llvm::cast<DXBuffer>(*RootDescIt->second.back().Buffer);
           const D3D12_GPU_VIRTUAL_ADDRESS VirtualAddress =
-              BufferDX.Buffer->GetGPUVirtualAddress();
+              BufferDX->Buffer->GetGPUVirtualAddress();
           switch (getDescriptorKind(RootDescIt->first->Kind)) {
           case DescriptorKind::SRV:
             IS.CB->CmdList->SetComputeRootShaderResourceView(RootParamIndex++,

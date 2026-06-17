@@ -1477,7 +1477,7 @@ class MTLDevice : public offloadtest::Device {
           for (const auto &Inst : R.first->TLASPtr->Instances)
             Contributions.push_back(Inst.InstanceContributionToHitGroupIndex &
                                     0xFFFFFFu);
-          const BufferCreateDesc Desc = DescBufferCreateDesc::uploadBuffer();
+          const BufferCreateDesc Desc = BufferCreateDesc::uploadBuffer();
           auto ContribBufOrErr = createBufferWithData(
               *IS.CB->Dev, "AS-Contributions", Desc, Contributions.data(),
               InstCount * sizeof(uint32_t), nullptr, nullptr);
