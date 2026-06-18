@@ -401,6 +401,7 @@ createTextureWithData(Device &Dev, std::string Name,
                       size_t SizeInBytes, ComputeEncoder *Encoder,
                       std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
+// Create a sparse buffer with MappedTileCount tiles mapped.
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>> createSparseBufferWithData(
     Device &Dev, Queue &Q, std::string Name, const BufferCreateDesc &Desc,
     size_t SparseSizeInBytes, std::optional<uint32_t> MappedTileCount,
@@ -408,6 +409,7 @@ llvm::Expected<std::unique_ptr<offloadtest::Buffer>> createSparseBufferWithData(
     std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
     std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap);
 
+// Create a sparse texture with all tiles mapped.
 llvm::Expected<std::unique_ptr<offloadtest::Texture>>
 createSparseTextureWithData(
     Device &Dev, Queue &Q, std::string Name, const TextureCreateDesc &Desc,

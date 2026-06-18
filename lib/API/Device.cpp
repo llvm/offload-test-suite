@@ -277,13 +277,6 @@ offloadtest::createSparseBufferWithData(
     return BufferOrErr.takeError();
   auto Buffer = std::move(*BufferOrErr);
 
-  // Create Upload buffer
-  auto UploadBufferOrErr =
-      createUploadBufferWithData(Dev, Name, Data, UploadSizeInBytes);
-  if (!UploadBufferOrErr)
-    return UploadBufferOrErr.takeError();
-  OutUploadBuffer = std::move(*UploadBufferOrErr);
-
   const size_t Granularity = Buffer->querySparseTileSizeInBytes(Dev);
 
   size_t NumTilesToMap;
@@ -297,6 +290,16 @@ offloadtest::createSparseBufferWithData(
 
   if (NumTilesToMap == 0)
     return Buffer;
+
+  // Limit the bytes we will be uploading to the size that will be mapped.
+  UploadSizeInBytes = std::min(UploadSizeInBytes, NumTilesToMap * Granularity);
+
+  // Create Upload buffer
+  auto UploadBufferOrErr =
+      createUploadBufferWithData(Dev, Name, Data, UploadSizeInBytes);
+  if (!UploadBufferOrErr)
+    return UploadBufferOrErr.takeError();
+  OutUploadBuffer = std::move(*UploadBufferOrErr);
 
   // Create backing memory heap
   const std::string HeapName = Name + " (Backing Heap)";
