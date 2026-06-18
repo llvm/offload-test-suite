@@ -625,6 +625,12 @@ public:
   // MTL::Device handle (used to allocate scratch and instance buffers).
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
 
+  llvm::Error dispatchRays(const PipelineState &, const ShaderBindingTable &,
+                           uint32_t, uint32_t, uint32_t) override {
+    return llvm::createStringError(
+        "RayTracing dispatchRays not yet supported on Metal");
+  }
+
   /// Lazily transition into an AccelerationStructureCommandEncoder; mirrors
   /// the existing compute↔blit lazy switch.
   llvm::Error ensureASEncoder() {
@@ -1709,6 +1715,20 @@ public:
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
+
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef, const BindingsDesc &,
+                   const RayTracingPipelineCreateDesc &) override {
+    return llvm::createStringError(
+        "RayTracing pipeline state not yet supported on Metal");
+  }
+
+  llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &,
+                           const ShaderBindingTableDesc &) override {
+    return llvm::createStringError(
+        "RayTracing shader binding table not yet supported on Metal");
+  }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {

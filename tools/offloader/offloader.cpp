@@ -113,16 +113,27 @@ static int run() {
   YIn >> PipelineDesc;
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
-  // Read in the shaders
-  for (size_t I = 0; I < InputShader.size(); ++I) {
-    PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+  // Read in the shaders. Ray tracing PSOs compile every entry point into a
+  // single library blob, so one input file backs all Shaders[] entries; the
+  // backend reads the blob from Shaders.front() and uses the rest only for
+  // their (Stage, Entry) metadata. Other pipelines expect one object file per
+  // stage.
+  if (PipelineDesc.isRayTracing()) {
+    if (InputShader.size() != 1)
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "RayTracing pipeline expects a single shader library, %d provided",
+          InputShader.size()));
+    PipelineDesc.Shaders.front().Shader = readFile(InputShader[0]);
+  } else {
+    if (InputShader.size() != PipelineDesc.Shaders.size())
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "Pipeline description expects %d shader(s) %d provided",
+          PipelineDesc.Shaders.size(), InputShader.size()));
+    for (size_t I = 0; I < InputShader.size(); ++I)
+      PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
   }
-
-  if (InputShader.size() != PipelineDesc.Shaders.size())
-    ExitOnErr(createStringError(
-        std::errc::invalid_argument,
-        "Pipeline description expects %d shader(s) %d provided",
-        PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
   const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
