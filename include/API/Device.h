@@ -91,9 +91,9 @@ struct RayTracingShader {
 };
 
 struct RayTracingPipelineCreateDesc {
-  // All RT shaders are compiled into a single DXIL library; every entry in
-  // `Shaders` references this same blob via the backend's library-loading
-  // path.
+  // All RT shaders are compiled into a single shader library.
+  // Every entry in `Shaders` references this same blob via the backend's
+  // library-loading path.
   const llvm::MemoryBuffer *Library = nullptr;
   llvm::SmallVector<RayTracingShader> Shaders;
   llvm::SmallVector<HitGroup> HitGroups;
