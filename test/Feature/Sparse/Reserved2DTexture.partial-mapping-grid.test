@@ -1,0 +1,100 @@
+#--- source.hlsl
+// Multi-row partial-mapping sparse Texture2D test.
+//
+// The texture is 128x128 RGBA32 (128 bpp) = 4 standard tiles arranged
+// 2x2; each tile is 64x64 pixels. `TilesMapped: 2` maps the first two
+// tiles, which by D3D12 tile ordering (row-major: tile 0 at (0..63,0..63),
+// tile 1 at (64..127,0..63), tile 2 at (0..63,64..127), tile 3 at
+// (64..127,64..127)) covers the entire top row. The bottom row of tiles
+// (tile 2 and tile 3) is left unmapped, and reads from those regions
+// must return zero per the D3D12 tiled-resources spec.
+//
+// This guards the multi-row tile-mapping path: setupReservedResource maps
+// a contiguous prefix of tiles, and verifying that prefix crosses a tile
+// row exercises that the mapping math handles tile-grid layouts wider
+// than a single row of tiles. Single-row coverage is exercised by
+// Reserved2DTexture.partial-mapping.test (128x64, 2 tiles in a 2x1 grid).
+
+Texture2D<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  uint status;
+  // Top row of tiles (mapped) — centre texel of each.
+  Out[0] = In.Load(int3(32, 32, 0), status);   // tile (0,0)
+  Out[1] = In.Load(int3(96, 32, 0), status);   // tile (1,0)
+  // Bottom row of tiles (unmapped) — centre texel of each.
+  Out[2] = In.Load(int3(32, 96, 0), status);   // tile (0,1)
+  Out[3] = In.Load(int3(96, 96, 0), status);   // tile (1,1)
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [1, 1, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Channels: 4
+    # 128x128 RGBA32 = 4 standard 64KB tiles arranged 2x2.
+    FillSize: 262144
+    FillValue: 0.5
+    OutputProps:
+      Height: 128
+      Width: 128
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    # Top-row tiles return the uploaded FillValue 0.5; bottom-row tiles
+    # are unmapped and return 0.
+    Data: [
+      0.5, 0.5, 0.5, 0.5,
+      0.5, 0.5, 0.5, 0.5,
+      0.0, 0.0, 0.0, 0.0,
+      0.0, 0.0, 0.0, 0.0
+    ]
+Results:
+  - Result: PartialMappingGrid
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: Texture2D
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+      IsReserved: True
+      TilesMapped: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Sparse Texture2D support is DirectX-only today; VK lacks the
+# vkQueueBindSparse + sparseResidencyImage2D wiring (tracked in #1050).
+# Clang is fine here because the shader does not read the residency
+# `status` output of Texture2D.Load — only the data return value is
+# tested. See bb01e34 for the same fix on Reserved2DTexture.unmapped.
+# UNSUPPORTED: Vulkan, Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

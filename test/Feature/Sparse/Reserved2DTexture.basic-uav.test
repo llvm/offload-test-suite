@@ -1,0 +1,99 @@
+#--- source.hlsl
+// Smoke test for sparse / reserved RWTexture2D (UAV) support.
+//
+// The output RWTexture2D is created as a sparse / reserved resource with
+// `IsReserved: True`. With `TilesMapped` unset, setupReservedResource
+// defaults to "map every tile", so the entire 64x64 RGBA32 (one standard
+// 64KB tile) is backed by heap memory and writes from the compute shader
+// land in well-defined storage.
+//
+// The compute shader copies a normal (non-sparse) Texture2D SRV into the
+// sparse RWTexture2D, swizzling .bgra so a different value at each
+// position would be observable on readback. Both source and destination
+// use FillValue 0.5 here, so the swizzle is invisible — the point of the
+// test is to exercise the sparse-UAV createUAV/setupReservedResource +
+// CS UAV write + readback path end-to-end. The companion SRV path is
+// covered by Reserved2DTexture.basic.test.
+
+Texture2D<float4> In : register(t0);
+RWTexture2D<float4> Out : register(u1);
+
+[numthreads(8, 8, 1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  if (tid.x >= 64 || tid.y >= 64)
+    return;
+  Out[tid.xy] = In[tid.xy].bgra;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [8, 8, 1]
+Buffers:
+  - Name: In
+    Format: Float32
+    Channels: 4
+    # 64x64 RGBA32 = 1 standard 64KB tile.
+    FillSize: 65536
+    FillValue: 0.5
+    OutputProps:
+      Height: 64
+      Width: 64
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 65536
+    OutputProps:
+      Height: 64
+      Width: 64
+      Depth: 1
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    FillSize: 65536
+    FillValue: 0.5
+    OutputProps:
+      Height: 64
+      Width: 64
+      Depth: 1
+Results:
+  - Result: SparseUAVRoundTrip
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: Texture2D
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+      IsReserved: True
+...
+#--- end
+
+# Sparse / reserved Texture2D support is a DirectX-only feature in the
+# execution suite today; the VK backend has no equivalent wiring for tiled
+# textures yet (#1050 tracks porting it). Metal is similarly unimplemented.
+# UNSUPPORTED: Vulkan, Metal
+
+# Clang's HLSL -> DXIL lowering does not yet implement RWTexture2D
+# indexing for compute writes.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
