@@ -511,7 +511,6 @@ public:
         llvm::cast<DXTexture>(Resource).Resource.Get(), Mappings);
   }
 
-private:
   // Shared tile-mapping path for buffers and textures: they differ only in how
   // a TileRegion maps onto the underlying ID3D12Resource, so both variants
   // resolve to a native resource and funnel through here.
@@ -1160,10 +1159,6 @@ DXCommandBuffer::createRenderEncoder(
 }
 
 class DXDevice : public offloadtest::Device {
-  // DXComputeEncoder needs access to Device5 for AS build commands and to the
-  // raw ID3D12Device for scratch buffer allocation.
-  friend class DXComputeEncoder;
-
 public:
   ComPtr<IDXCoreAdapter> Adapter;
   ComPtr<ID3D12DeviceX> Device;
@@ -1260,7 +1255,6 @@ public:
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
 
-public:
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
            DescriptorAllocator CSUAllocator, std::string Desc,
@@ -2105,7 +2099,6 @@ public:
     return queryBLASPrebuildSize(GeomDescs);
   }
 
-private:
   AccelerationStructureSizes queryBLASPrebuildSize(
       llvm::ArrayRef<D3D12_RAYTRACING_GEOMETRY_DESC> GeomDescs) {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS Inputs = {};
@@ -2143,7 +2136,6 @@ private:
     return std::make_unique<DXAccelerationStructure>(ASBuffer, Sizes);
   }
 
-public:
   llvm::Expected<AccelerationStructureSizes>
   getTLASBuildSizes(uint32_t InstanceCount) override {
     D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS Inputs = {};

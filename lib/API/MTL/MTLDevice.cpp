@@ -1008,10 +1008,6 @@ MTLCommandBuffer::createRenderEncoder(
 }
 
 class MTLDevice : public offloadtest::Device {
-  // MTLComputeEncoder needs access to the MTL::Device handle for AS scratch
-  // and instance buffer allocation.
-  friend class MTLComputeEncoder;
-
 public:
   Capabilities Caps;
   MTL::Device *Device;
@@ -2277,7 +2273,6 @@ public:
     return Sizes;
   }
 
-private:
   AccelerationStructureSizes queryBLASPrebuildSize(
       llvm::ArrayRef<MTL::AccelerationStructureGeometryDescriptor *> Descs) {
     NS::Array *GeomDescs = NS::Array::array(
@@ -2312,7 +2307,6 @@ private:
     return std::make_unique<MetalAccelerationStructure>(AS, Sizes);
   }
 
-public:
   llvm::Expected<AccelerationStructureSizes>
   getTLASBuildSizes(uint32_t InstanceCount) override {
     if (!Device->supportsRaytracing())
@@ -2508,7 +2502,6 @@ public:
 
   virtual ~MTLDevice() {};
 
-private:
   void queryCapabilities() {
     // GPU Family Metal3 (macOS 13+) is where mesh shaders became available.
     const bool MeshShaderSupported =
