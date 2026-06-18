@@ -282,6 +282,31 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   return Dev.createTexture("DepthStencil", Desc);
 }
 
+llvm::Expected<std::unique_ptr<Texture>>
+offloadtest::createDepthBufferFromCPUBuffer(Device &Dev, const CPUBuffer &Buf) {
+  if (!Buf.GpuFormat || !isDepthFormat(*Buf.GpuFormat))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Depth buffer requires a CPUBuffer with a depth GpuFormat; got '%s'.",
+        Buf.GpuFormat ? getFormatName(*Buf.GpuFormat).data() : "<none>");
+
+  const Format Fmt = *Buf.GpuFormat;
+
+  TextureCreateDesc Desc = {};
+  Desc.Location = MemoryLocation::GpuOnly;
+  Desc.Usage = TextureUsage::DepthStencil;
+  Desc.Fmt = Fmt;
+  Desc.Width = Buf.OutputProps.Width;
+  Desc.Height = Buf.OutputProps.Height;
+  Desc.MipLevels = 1;
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
+
+  if (auto Err = validateTextureDimsMatchCPUBuffer(Desc, Buf))
+    return Err;
+
+  return Dev.createTexture("DepthBuffer", Desc);
+}
+
 // This is a separate function because recursion is not allowed in this code
 // base.
 static llvm::Expected<std::unique_ptr<offloadtest::Buffer>>

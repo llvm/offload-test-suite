@@ -1,0 +1,76 @@
+#--- source.hlsl
+// Verifies that a Texture2D<float> bound with a depth-compatible format
+// (GpuFormat: D32Float in the YAML; VK_FORMAT_D32_SFLOAT on Vulkan,
+// DXGI_FORMAT_R32_FLOAT SRV on DirectX) can be Load()ed by a compute shader
+// and round-trip the expected single-channel float values.
+//
+// Tracking: https://github.com/llvm/offload-test-suite/issues/1046
+
+[[vk::binding(0, 0)]] Texture2D<float> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  Out[0] = Tex.Load(int3(0, 0, 0));
+  Out[1] = Tex.Load(int3(1, 0, 0));
+  Out[2] = Tex.Load(int3(0, 1, 0));
+  Out[3] = Tex.Load(int3(1, 1, 0));
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+DispatchParameters:
+  DispatchGroupCount: [1, 1, 1]
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    GpuFormat: D32Float
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0.2,
+            0.8,
+            0.4,
+            0.6 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 16 # 4 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 0.2, 0.8, 0.4, 0.6 ]
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results:
+  - Result: LoadDepth32Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+
+# Metal's offload backend cannot bind a depth-format texture as an SRV
+# through this code path (hits "Metal does not support buffer robustness"
+# in the MTL backend). Mark unsupported until #1046 has a Metal story.
+# UNSUPPORTED: Metal

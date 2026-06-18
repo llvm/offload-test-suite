@@ -80,13 +80,6 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::RGBA32Float;
     }
     break;
-  case DataFormat::Depth32:
-    // D32FloatS8Uint is not expressible as DataFormat + Channels because the
-    // stencil component is uint8, not a second Depth32 channel. Once the
-    // pipeline uses Format directly, this limitation goes away.
-    if (Channels == 1)
-      return Format::D32Float;
-    break;
   case DataFormat::UInt64:
     // Only 1 and 2 channels of 64-bit integers are supported.
     switch (Channels) {
@@ -161,6 +154,42 @@ validateTextureDescMatchesCPUBuffer(const TextureCreateDesc &Desc,
         std::errc::invalid_argument,
         "CPUBuffer stride %d does not match texture format element size %u.",
         Buf.Stride, TexelSize);
+  const uint64_t ExpectedSize =
+      static_cast<uint64_t>(Desc.Width) * Desc.Height * TexelSize;
+  if (static_cast<uint64_t>(Buf.size()) != ExpectedSize)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "CPUBuffer size %u does not match expected size %llu "
+        "(width %u * height %u * element size %u).",
+        Buf.size(), ExpectedSize, Desc.Width, Desc.Height, TexelSize);
+  return llvm::Error::success();
+}
+
+// Validates that a TextureCreateDesc's dimensions and footprint are consistent
+// with the CPUBuffer used for readback storage. Call this when format
+// equivalence is not derived from DataFormat and Channels.
+// This helper intentionally skips the toFormat-based format check.
+// In that path, Desc.Fmt is set directly from GpuFormat.
+inline llvm::Error
+validateTextureDimsMatchCPUBuffer(const TextureCreateDesc &Desc,
+                                  const CPUBuffer &Buf) {
+  if (Desc.Width != static_cast<uint32_t>(Buf.OutputProps.Width))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc width %u does not match CPUBuffer width %d.",
+        Desc.Width, Buf.OutputProps.Width);
+  if (Desc.Height != static_cast<uint32_t>(Buf.OutputProps.Height))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc height %u does not match CPUBuffer height %d.",
+        Desc.Height, Buf.OutputProps.Height);
+  if (Desc.MipLevels != static_cast<uint32_t>(Buf.OutputProps.MipLevels))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "TextureCreateDesc mip levels %u does not match CPUBuffer mip "
+        "levels %d.",
+        Desc.MipLevels, Buf.OutputProps.MipLevels);
+  const uint32_t TexelSize = getFormatSizeInBytes(Desc.Fmt);
   const uint64_t ExpectedSize =
       static_cast<uint64_t>(Desc.Width) * Desc.Height * TexelSize;
   if (static_cast<uint64_t>(Buf.size()) != ExpectedSize)

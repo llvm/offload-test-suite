@@ -59,10 +59,6 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
     VKFormats(UINT, 64) break;
   case DataFormat::Float64:
     VKFormats(SFLOAT, 64) break;
-  case DataFormat::Depth32:
-    if (Channels != 1)
-      llvm_unreachable("Depth32 format only supports a single channel.");
-    return VK_FORMAT_D32_SFLOAT;
   default:
     llvm_unreachable("Unsupported Resource format specified");
   }
@@ -1486,6 +1482,7 @@ private:
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
+    std::unique_ptr<offloadtest::Buffer> DSReadback;
     std::unique_ptr<offloadtest::Buffer> VB;
 
     uint32_t ShaderStageMask = 0;
@@ -2794,8 +2791,9 @@ public:
                              VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
         ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
       } else {
-        ViewCi.subresourceRange.aspectMask =
-            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (isStencilFormat(Desc.Fmt))
+          ViewCi.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
       }
       // Tex destructor will clean up Image + Memory on failure.
       if (auto Err = VK::toError(
@@ -3278,13 +3276,15 @@ public:
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
-    if (B.Format == DataFormat::Depth32 && R.isReadWrite())
+    const bool IsDepth = B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
+    if (IsDepth && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
-    ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
+    ImageCreateInfo.format = B.GpuFormat ? getVulkanFormat(*B.GpuFormat)
+                                         : getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -3474,6 +3474,26 @@ public:
   }
 
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
+    // If the test bound a CPU-readable depth buffer, create the depth target
+    // from it and allocate a readback buffer. Otherwise fall back to the
+    // default depth target (which is not read back).
+    if (P.Bindings.DepthBuffer.Ptr) {
+      const CPUBuffer &DSBuf = *P.Bindings.DepthBuffer.Ptr;
+      auto TexOrErr = offloadtest::createDepthBufferFromCPUBuffer(*this, DSBuf);
+      if (!TexOrErr)
+        return TexOrErr.takeError();
+      IS.DepthStencil = std::move(*TexOrErr);
+
+      BufferCreateDesc BufDesc = {};
+      BufDesc.Location = MemoryLocation::GpuToCpu;
+      BufDesc.Usage = BufferUsage::Storage;
+      auto BufOrErr = createBuffer("DSReadback", BufDesc, DSBuf.size());
+      if (!BufOrErr)
+        return BufOrErr.takeError();
+      IS.DSReadback = std::move(*BufOrErr);
+      return llvm::Error::success();
+    }
+
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
         P.Bindings.RTargetBufferPtr->OutputProps.Height);
@@ -3706,12 +3726,14 @@ public:
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
           ViewCreateInfo.format =
-              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+              R.BufferPtr->GpuFormat
+                  ? getVulkanFormat(*R.BufferPtr->GpuFormat)
+                  : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
           ViewCreateInfo.components = {
               VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
           ViewCreateInfo.subresourceRange.aspectMask =
-              R.BufferPtr->Format == DataFormat::Depth32
+              (R.BufferPtr->GpuFormat && isDepthFormat(*R.BufferPtr->GpuFormat))
                   ? VK_IMAGE_ASPECT_DEPTH_BIT
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
@@ -3969,13 +3991,14 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const bool IsDepth =
+          B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
         VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
+        Region.imageSubresource.aspectMask =
+            IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
         Region.imageSubresource.layerCount = 1;
@@ -3993,9 +4016,8 @@ public:
       }
 
       VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
+      SubRange.aspectMask =
+          IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
@@ -4115,10 +4137,11 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
+      const bool IsDepth =
+          B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
       VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
+      SubRange.aspectMask =
+          IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
       SubRange.baseMipLevel = 0;
       SubRange.levelCount = B.OutputProps.MipLevels;
       SubRange.layerCount = 1;
@@ -4145,9 +4168,8 @@ public:
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
         VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
+        Region.imageSubresource.aspectMask =
+            IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
         Region.imageSubresource.mipLevel = I;
         Region.imageSubresource.baseArrayLayer = 0;
         Region.imageSubresource.layerCount = 1;
@@ -4330,6 +4352,15 @@ public:
                             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+
+      if (IS.DSReadback) {
+        copyTextureToReadback(IS.CB->CmdBuffer,
+                              llvm::cast<VulkanTexture>(*IS.DepthStencil),
+                              llvm::cast<VulkanBuffer>(*IS.DSReadback),
+                              VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                              VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT);
+      }
     }
 
     for (auto &R : IS.Resources)
@@ -4395,6 +4426,24 @@ public:
       auto *RT = P.Bindings.RTargetBufferPtr;
       RT->copyFromTexture(Mapped, RT->getImageRowBytes());
       vkUnmapMemory(Device, Readback.Memory);
+
+      if (IS.DSReadback) {
+        auto &DSReadback = llvm::cast<VulkanBuffer>(*IS.DSReadback);
+
+        VkMappedMemoryRange DSRange = {};
+        DSRange.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        DSRange.offset = 0;
+        DSRange.size = VK_WHOLE_SIZE;
+        DSRange.memory = DSReadback.Memory;
+
+        void *DSMapped = nullptr; // NOLINT(misc-const-correctness)
+        vkMapMemory(Device, DSReadback.Memory, 0, VK_WHOLE_SIZE, 0, &DSMapped);
+        vkInvalidateMappedMemoryRanges(Device, 1, &DSRange);
+
+        auto *DSBuf = P.Bindings.DepthBuffer.Ptr;
+        DSBuf->copyFromTexture(DSMapped, DSBuf->getImageRowBytes());
+        vkUnmapMemory(Device, DSReadback.Memory);
+      }
     }
     return llvm::Error::success();
   }

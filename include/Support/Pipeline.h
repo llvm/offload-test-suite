@@ -107,7 +107,6 @@ enum class DataFormat {
   Float16,
   Float32,
   Float64,
-  Depth32,
   Bool,
 };
 
@@ -198,7 +197,6 @@ static inline uint32_t getFormatSize(DataFormat Format) {
   case DataFormat::UInt32:
   case DataFormat::Int32:
   case DataFormat::Float32:
-  case DataFormat::Depth32:
   case DataFormat::Bool:
     return 4;
   case DataFormat::Hex64:
@@ -216,6 +214,11 @@ struct CPUBuffer {
   int Channels;
   int Stride;
   uint32_t ArraySize;
+  // When set, names the GPU texture format directly (e.g. D32Float) instead of
+  // inferring it from DataFormat + Channels via toFormat(). This lets depth
+  // buffers and other special formats be expressed without extending
+  // DataFormat.
+  std::optional<offloadtest::Format> GpuFormat;
   // Data can contain one block of data for a singular resource
   // or multiple blocks for a resource array.
   llvm::SmallVector<std::unique_ptr<char[]>> Data;
@@ -458,6 +461,19 @@ struct IOBindings {
 
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
+
+  // Optional depth target bound for readback; when Name is empty, backends
+  // create an internal depth target. Ptr is resolved after parsing to the
+  // named CPUBuffer entry that owns the readback storage; the GPU format for
+  // the depth texture comes from the buffer's GpuFormat field.
+  struct DepthBufferBinding {
+    std::string Name;
+    CPUBuffer *Ptr = nullptr;
+
+    bool empty() const { return Name.empty(); }
+  };
+  DepthBufferBinding DepthBuffer;
+
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
   // Set if Topology == PatchList. Validated in
@@ -746,6 +762,10 @@ template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
 };
 
+template <> struct MappingTraits<offloadtest::IOBindings::DepthBufferBinding> {
+  static void mapping(IO &I, offloadtest::IOBindings::DepthBufferBinding &B);
+};
+
 template <> struct MappingTraits<offloadtest::PushConstantValue> {
   static void mapping(IO &I, offloadtest::PushConstantValue &B);
 };
@@ -911,7 +931,6 @@ template <> struct ScalarEnumerationTraits<offloadtest::DataFormat> {
     ENUM_CASE(Float16);
     ENUM_CASE(Float32);
     ENUM_CASE(Float64);
-    ENUM_CASE(Depth32);
     ENUM_CASE(Bool);
 #undef ENUM_CASE
   }

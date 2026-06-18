@@ -169,6 +169,13 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
                    P.Bindings.RenderTarget + " not found!");
     }
 
+    if (!P.Bindings.DepthBuffer.empty()) {
+      P.Bindings.DepthBuffer.Ptr = P.getBuffer(P.Bindings.DepthBuffer.Name);
+      if (!P.Bindings.DepthBuffer.Ptr)
+        I.setError(Twine("Referenced depth buffer ") +
+                   P.Bindings.DepthBuffer.Name + " not found!");
+    }
+
     // Resolve buffer name references in acceleration structure descriptions.
     for (auto &B : P.AccelStructs.BLAS) {
       for (auto &T : B.Triangles) {
@@ -363,6 +370,7 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
   I.mapRequired("Name", B.Name);
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
+  I.mapOptional("GpuFormat", B.GpuFormat);
   I.mapOptional("Stride", B.Stride, 0);
   I.mapOptional("ArraySize", B.ArraySize, 1);
   setCounters(I, B);
@@ -405,9 +413,6 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
     setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
     break;
   case DF::Float32:
-    setData<float>(I, B);
-    break;
-  case DF::Depth32:
     setData<float>(I, B);
     break;
   case DF::Float64:
@@ -477,9 +482,15 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("VertexBuffer", B.VertexBuffer);
   I.mapOptional("VertexAttributes", B.VertexAttributes);
   I.mapOptional("RenderTarget", B.RenderTarget);
+  I.mapOptional("DepthBuffer", B.DepthBuffer);
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
   I.mapOptional("PatchControlPoints", B.PatchControlPoints);
+}
+
+void MappingTraits<offloadtest::IOBindings::DepthBufferBinding>::mapping(
+    IO &I, offloadtest::IOBindings::DepthBufferBinding &B) {
+  I.mapRequired("Name", B.Name);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -527,8 +538,6 @@ void MappingTraits<offloadtest::PushConstantValue>::mapping(
   case DF::Float16:
     return setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
   case DF::Float32:
-    return setData<float>(I, B);
-  case DF::Depth32:
     return setData<float>(I, B);
   case DF::Float64:
     return setData<double>(I, B);

@@ -1,0 +1,128 @@
+# This test exercises:
+#   * SV_Depth - Pixel shader output that overrides the rasterizer-interpolated
+#                depth and is written to the bound depth target.
+#
+# SV_Depth: https://github.com/llvm/wg-hlsl/issues/1046
+# Clang's HLSL -> DXIL lowering does not yet implement SV_Depth.
+
+#--- vertex.hlsl
+struct VSInput {
+    float4 pos : POSITION;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput o;
+    o.position = input.pos;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+struct PSOutput {
+    float4 color : SV_TARGET;
+    float depth : SV_Depth;
+};
+
+// Four primitives, one per pixel of a 4x1 render target. Each primitive emits
+// a distinct depth value via SV_Depth so the depth target read back to the
+// CPU can be checked element-by-element.
+//
+// All emitted depths are exact binary fractions in [0, 1) and all are less
+// than the clear value of 1.0, so they pass the default DepthFunc=LESS test.
+PSOutput main(PSInput input, uint primID : SV_PrimitiveID) {
+    PSOutput o;
+    o.color = float4(1.0, 0.0, 0.0, 1.0);
+    float depths[4] = { 0.125, 0.250, 0.375, 0.5 };
+    o.depth = depths[primID];
+    return o;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Geometry: 4 triangles, each covering exactly one pixel of a 4x1 render
+  # target. Pixel-center NDC coordinates are (-0.75, 0), (-0.25, 0), (+0.25,
+  # 0), (+0.75, 0). Shared edges fall at NDC x in {-0.5, 0, +0.5}, none of
+  # which coincide with a pixel center, so coverage is unambiguous.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+      # Triangle 0 (CCW, pixel 0):
+      -1.0, -1.0, 0.0, 1.0,
+       0.0, -1.0, 0.0, 1.0,
+      -1.0,  1.0, 0.0, 1.0,
+      # Triangle 1 (CCW, pixel 1):
+       0.0, -1.0, 0.0, 1.0,
+       0.0,  1.0, 0.0, 1.0,
+      -1.0,  1.0, 0.0, 1.0,
+      # Triangle 2 (CW,  pixel 2):
+       0.0, -1.0, 0.0, 1.0,
+       0.0,  1.0, 0.0, 1.0,
+       1.0, -1.0, 0.0, 1.0,
+      # Triangle 3 (CW,  pixel 3):
+       0.0,  1.0, 0.0, 1.0,
+       1.0,  1.0, 0.0, 1.0,
+       1.0, -1.0, 0.0, 1.0,
+    ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+  - Name: DepthTarget
+    Format: Float32
+    GpuFormat: D32Float
+    Channels: 1
+    FillSize: 16 # 4x1 @ 4 bytes per pixel; contents are overwritten on clear
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+  - Name: DepthTarget_Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 0.125, 0.250, 0.375, 0.5 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+  DepthBuffer:
+    Name: DepthTarget
+DescriptorSets: []
+Results:
+  - Result: DepthValues
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: DepthTarget
+    Expected: DepthTarget_Expected
+...
+#--- end
+
+# XFAIL: Clang
+# Metal backend doesn't yet support Bindings.DepthBuffer.
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
