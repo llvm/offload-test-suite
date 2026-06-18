@@ -18,7 +18,8 @@ void main(uint3 TID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [32, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [32, 1, 1]
 Buffers:
   - Name: In0
     Format: Int16
