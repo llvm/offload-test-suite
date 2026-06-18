@@ -2207,72 +2207,6 @@ public:
     return createTLAS(*SizesOrErr);
   }
 
-  static UINT getNumTiles(std::optional<uint32_t> NumTiles, uint32_t Width) {
-    UINT Ret;
-    if (NumTiles.has_value())
-      Ret = static_cast<UINT>(*NumTiles);
-    else {
-      // Map the entire buffer by computing how many 64KB tiles cover it
-      Ret = static_cast<UINT>(
-          (Width + D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1) /
-          D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES);
-      // check for overflow
-      assert(Width < std::numeric_limits<UINT>::max() -
-                         D3D12_TILED_RESOURCE_TILE_SIZE_IN_BYTES - 1);
-    }
-    return Ret;
-  }
-
-  llvm::Error setupReservedResource(Resource &R,
-                                    const D3D12_RESOURCE_DESC ResDesc,
-                                    ComPtr<ID3D12Heap> &Heap,
-                                    ComPtr<ID3D12Resource> &Buffer) {
-    // Tile mapping setup (only skipped when TilesMapped is set to 0)
-    const UINT NumTiles = getNumTiles(R.TilesMapped, ResDesc.Width);
-
-    if (NumTiles == 0)
-      return llvm::Error::success();
-
-    // Create a Heap large enough for the mapped tiles
-    D3D12_HEAP_DESC HeapDesc = {};
-    HeapDesc.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    HeapDesc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    HeapDesc.SizeInBytes = static_cast<UINT64>(NumTiles) *
-                           D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    HeapDesc.Flags = D3D12_HEAP_FLAG_ALLOW_ALL_BUFFERS_AND_TEXTURES;
-
-    if (auto Err =
-            HR::toError(Device->CreateHeap(&HeapDesc, IID_PPV_ARGS(&Heap)),
-                        "Failed to create heap for tiled SRV resource."))
-      return Err;
-
-    // Define one contiguous mapping region
-    const D3D12_TILED_RESOURCE_COORDINATE StartCoord = {0, 0, 0, 0};
-    D3D12_TILE_REGION_SIZE RegionSize = {};
-    RegionSize.NumTiles = NumTiles;
-    RegionSize.UseBox = FALSE;
-
-    const D3D12_TILE_RANGE_FLAGS RangeFlag = D3D12_TILE_RANGE_FLAG_NONE;
-    const UINT HeapRangeStartOffset = 0;
-    const UINT RangeTileCount = NumTiles;
-
-    ID3D12CommandQueue *CommandQueue = GraphicsQueue.Queue.Get();
-    CommandQueue->UpdateTileMappings(
-        Buffer.Get(), 1, &StartCoord, &RegionSize, Heap.Get(), 1, &RangeFlag,
-        &HeapRangeStartOffset, &RangeTileCount, D3D12_TILE_MAPPING_FLAG_NONE);
-
-    // Synchronize after UpdateTileMappings, which is a queue operation (not
-    // recorded into a command list).
-    const uint64_t CurrentCounter = ++GraphicsQueue.FenceCounter;
-    if (auto Err = HR::toError(
-            CommandQueue->Signal(GraphicsQueue.SubmitFence->Fence.Get(),
-                                 CurrentCounter),
-            "Failed to add signal."))
-      return Err;
-
-    return GraphicsQueue.SubmitFence->waitForCompletion(CurrentCounter);
-  }
-
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto EncOrErr = IS.CB->createComputeEncoder();
     if (!EncOrErr)
@@ -2301,8 +2235,9 @@ public:
           std::unique_ptr<offloadtest::Buffer> Buffer;
           if (R.IsReserved) {
             auto BufferOrErr = createSparseBufferWithData(
-                *this, GraphicsQueue, "Sparse Buffer", CreateDesc, Data.get(),
-                R.size(), *Enc.get(), UploadBuffer, BackingMemoryHeap);
+                *this, GraphicsQueue, "Sparse Buffer", CreateDesc, R.size(),
+                R.TilesMapped, Data.get(), R.size(), *Enc.get(), UploadBuffer,
+                BackingMemoryHeap);
             if (!BufferOrErr)
               return BufferOrErr.takeError();
 

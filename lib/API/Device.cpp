@@ -263,7 +263,8 @@ createUploadBufferWithData(Device &Dev, std::string Name, const void *Data,
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 offloadtest::createSparseBufferWithData(
     Device &Dev, Queue &Q, std::string Name, const BufferCreateDesc &Desc,
-    const void *Data, size_t SizeInBytes, ComputeEncoder &Encoder,
+    size_t SparseSizeInBytes, std::optional<uint32_t> MappedTileCount,
+    const void *Data, size_t UploadSizeInBytes, ComputeEncoder &Encoder,
     std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
     std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap) {
 
@@ -271,30 +272,41 @@ offloadtest::createSparseBufferWithData(
     return llvm::createStringError("createSparseBufferWithData can only create "
                                    "buffers with a sparse memory backing.");
 
-  auto BufferOrErr = Dev.createBuffer(Name, Desc, SizeInBytes);
+  auto BufferOrErr = Dev.createBuffer(Name, Desc, SparseSizeInBytes);
   if (!BufferOrErr)
     return BufferOrErr.takeError();
   auto Buffer = std::move(*BufferOrErr);
 
   // Create Upload buffer
   auto UploadBufferOrErr =
-      createUploadBufferWithData(Dev, Name, Data, SizeInBytes);
+      createUploadBufferWithData(Dev, Name, Data, UploadSizeInBytes);
   if (!UploadBufferOrErr)
     return UploadBufferOrErr.takeError();
   OutUploadBuffer = std::move(*UploadBufferOrErr);
 
   const size_t Granularity = Buffer->querySparseTileSizeInBytes(Dev);
-  const size_t TileCount = llvm::divideCeil(SizeInBytes, Granularity);
+
+  size_t NumTilesToMap;
+  if (MappedTileCount.has_value()) {
+    // Tests assume a tile size of 64 KiB, in reality the tile size can differ
+    // so we translate to the actual number of tiles.
+    NumTilesToMap = llvm::divideCeil(*MappedTileCount * 64 * 1024, Granularity);
+  } else {
+    NumTilesToMap = llvm::divideCeil(SparseSizeInBytes, Granularity);
+  }
+
+  if (NumTilesToMap == 0)
+    return Buffer;
 
   // Create backing memory heap
   const std::string HeapName = Name + " (Backing Heap)";
-  auto HeapOrErr = Dev.createMemoryHeap(HeapName, TileCount * Granularity);
+  auto HeapOrErr = Dev.createMemoryHeap(HeapName, NumTilesToMap * Granularity);
   if (!HeapOrErr)
     return HeapOrErr.takeError();
   OutBackingMemoryHeap = std::move(*HeapOrErr);
 
   TileMapping Tile = {};
-  Tile.Region.NumTilesX = static_cast<uint32_t>(TileCount);
+  Tile.Region.NumTilesX = static_cast<uint32_t>(NumTilesToMap);
   Tile.Backing = OutBackingMemoryHeap.get();
   Tile.BackingTileOffset = 0;
 
@@ -312,7 +324,7 @@ offloadtest::createSparseBufferWithData(
 
   // Copy Buffer to Buffer
   if (auto Err = Encoder.copyBufferToBuffer(*OutUploadBuffer, 0, *Buffer, 0,
-                                            SizeInBytes))
+                                            UploadSizeInBytes))
     return Err;
 
   return Buffer;
