@@ -14,6 +14,8 @@
 using namespace llvm;
 using namespace offloadtest;
 
+ImageComparatorDiffImage::~ImageComparatorDiffImage() {}
+
 void yaml::MappingTraits<CompareCheck>::mapping(IO &I, CompareCheck &C) {
   I.mapRequired("Type", C.Type);
   if (C.Type == CompareCheck::Intervals)
@@ -81,4 +83,5 @@ bool ImageComparatorDistance::evaluateCheck(const CompareCheck &C,
   case CompareCheck::None:
     llvm_unreachable("Check run with no rule");
   }
+  llvm_unreachable("All cases handled");
 }

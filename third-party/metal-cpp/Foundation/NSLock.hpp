@@ -2,7 +2,7 @@
 //
 // Foundation/NSLock.hpp
 //
-// Copyright 2020-2023 Apple Inc.
+// Copyright 2020-2024 Apple Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,90 +18,101 @@
 //
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+
 #pragma once
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-#include "NSDate.hpp"
 #include "NSDefines.hpp"
 #include "NSObject.hpp"
 #include "NSPrivate.hpp"
 #include "NSTypes.hpp"
+#include "NSDate.hpp"
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-namespace NS {
+namespace NS
+{
 
 template <class _Class, class _Base = class Object>
-class Locking : public _Base {
+class Locking : public _Base
+{
 public:
-  void lock();
-  void unlock();
+    void lock();
+    void unlock();
 };
 
-class Condition : public Locking<Condition> {
+class Condition : public Locking<Condition>
+{
 public:
-  static Condition *alloc();
+    static Condition* alloc();
 
-  Condition *init();
+    Condition*        init();
 
-  void wait();
-  bool waitUntilDate(Date *pLimit);
-  void signal();
-  void broadcast();
+    void              wait();
+    bool              waitUntilDate(Date* pLimit);
+    void              signal();
+    void              broadcast();
 };
 
-} // namespace NS
+} // NS
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-template <class _Class, class _Base /* = NS::Object */>
-_NS_INLINE void NS::Locking<_Class, _Base>::lock() {
-  NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(lock));
+template<class _Class, class _Base /* = NS::Object */>
+_NS_INLINE void NS::Locking<_Class, _Base>::lock()
+{
+    NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(lock));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-template <class _Class, class _Base /* = NS::Object */>
-_NS_INLINE void NS::Locking<_Class, _Base>::unlock() {
-  NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(unlock));
+template<class _Class, class _Base /* = NS::Object */>
+_NS_INLINE void NS::Locking<_Class, _Base>::unlock()
+{
+    NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(unlock));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE NS::Condition *NS::Condition::alloc() {
-  return NS::Object::alloc<NS::Condition>(_NS_PRIVATE_CLS(NSCondition));
+_NS_INLINE NS::Condition* NS::Condition::alloc()
+{
+    return NS::Object::alloc<NS::Condition>(_NS_PRIVATE_CLS(NSCondition));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE NS::Condition *NS::Condition::init() {
-  return NS::Object::init<NS::Condition>();
+_NS_INLINE NS::Condition* NS::Condition::init()
+{
+    return NS::Object::init<NS::Condition>();
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE void NS::Condition::wait() {
-  NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(wait));
+_NS_INLINE void NS::Condition::wait()
+{
+    NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(wait));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE bool NS::Condition::waitUntilDate(NS::Date *pLimit) {
-  return NS::Object::sendMessage<bool>(this, _NS_PRIVATE_SEL(waitUntilDate_),
-                                       pLimit);
+_NS_INLINE bool NS::Condition::waitUntilDate(NS::Date* pLimit)
+{
+    return NS::Object::sendMessage<bool>(this, _NS_PRIVATE_SEL(waitUntilDate_), pLimit);
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE void NS::Condition::signal() {
-  NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(signal));
+_NS_INLINE void NS::Condition::signal()
+{
+    NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(signal));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-_NS_INLINE void NS::Condition::broadcast() {
-  NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(broadcast));
+_NS_INLINE void NS::Condition::broadcast()
+{
+    NS::Object::sendMessage<void>(this, _NS_PRIVATE_SEL(broadcast));
 }
 
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------

@@ -34,6 +34,24 @@ static ArrayRef<EnumEntry<RootSignature>> getRootSignatures() {
   return ArrayRef(RootSignatureNames);
 }
 
+#define MESH_SHADER_TIER_ENUM(NewCase, Str, Value) {#Str, NewCase},
+static const EnumEntry<directx::MeshShaderTier> MeshShaderTierNames[]{
+#include "DXFeatures.def"
+};
+
+static ArrayRef<EnumEntry<MeshShaderTier>> getMeshShaderTiers() {
+  return ArrayRef(MeshShaderTierNames);
+}
+
+#define RAYTRACING_TIER_ENUM(NewCase, Str, Value) {#Str, NewCase},
+static const EnumEntry<directx::RaytracingTier> RaytracingTierNames[]{
+#include "DXFeatures.def"
+};
+
+static ArrayRef<EnumEntry<RaytracingTier>> getRaytracingTiers() {
+  return ArrayRef(RaytracingTierNames);
+}
+
 template <typename T>
 static std::string enumEntryToString(ArrayRef<EnumEntry<T>> EnumValues,
                                      T Value) {
@@ -51,4 +69,14 @@ std::string CapabilityPrinter<directx::ShaderModel>::toString(
 std::string CapabilityPrinter<directx::RootSignature>::toString(
     const directx::RootSignature &V) {
   return enumEntryToString(getRootSignatures(), V);
+}
+
+std::string CapabilityPrinter<directx::MeshShaderTier>::toString(
+    const directx::MeshShaderTier &V) {
+  return enumEntryToString(getMeshShaderTiers(), V);
+}
+
+std::string CapabilityPrinter<directx::RaytracingTier>::toString(
+    const directx::RaytracingTier &V) {
+  return enumEntryToString(getRaytracingTiers(), V);
 }

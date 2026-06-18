@@ -71,7 +71,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Cond
     Format: Bool
@@ -202,9 +201,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 8
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/615
-# XFAIL: Clang && Vulkan && Intel
 
 # REQUIRES: Int64
 # RUN: split-file %s %t

@@ -20,7 +20,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float16
@@ -65,7 +64,7 @@ DescriptorSets:
 # so we will not investigate this.
 # only fails with DXC so once Gis spirv support is added to Clang I suspect it will
 # fail with clang as well.
-# XFAIL: Intel && Vulkan && DXC
+# XFAIL: Intel-Gen-10 && Vulkan && DXC
 
 # Unimplemented: support for the Gis flag generating the
 # SignedZeroInfNanPreserve capability needs to be added to clang

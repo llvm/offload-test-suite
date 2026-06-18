@@ -1,0 +1,91 @@
+#--- vertex.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+PSInput main(float4 position : POSITION) {
+  PSInput result;
+
+  result.position = position;
+
+  return result;
+}
+
+#--- pixel.hlsl
+// Offset into the image of our circle
+#define OFFSET 128.0
+// Radius of our circle
+#define radius 32.0
+// Blur intensity
+#define intensity 5.0
+
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET {
+  float4 c1 = float4(1.0, 1.0, 1.0, 1.0);
+  float4 c2 = float4(0.0, 0.0, 0.0, 1.0);
+
+  float2 coord = input.position.xy - OFFSET;
+
+  float dist = length(coord) - radius;
+  float width = fwidth(dist);
+  float effect = clamp(dist / width / intensity, 0.0, 1.0);
+
+  float result = lerp(c1, c2, effect);
+
+  return float4(result, result, result, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12 # 16 bytes per vertex
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0, 1.0, 0.0,
+            1.0, 1.0, 0.0,
+            1.0, 1.0, 0.0,
+            1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+# Issues https://github.com/llvm/wg-hlsl/issues/145 https://github.com/llvm/wg-hlsl/issues/146
+# XFAIL: Clang && DirectX || Clang && Metal
+# REQUIRES: goldenimage
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/Fwidth.png -rules %t/rules.yaml

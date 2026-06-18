@@ -1,0 +1,88 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(1,1,1)]
+void main() {
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_NONE> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  Q.Proceed();
+  Output[0] = Q.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 1 : 0;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  # Vertex 0 sits far above the ray's plane (z=10) so the triangle formed by
+  # the first three vertices misses the ray entirely. Only the index buffer
+  # selects the at-z=0 triangle (v1, v2, v3) that the ray actually hits — if a
+  # backend silently consumed VertexBuffer[0..2] instead of going through the
+  # index buffer, RayQuery would return no hit and the test would fail.
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 0.0, 10.0, 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Indices
+    Format: UInt32
+    Data: [ 1, 2, 3 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 1 ]
+AccelerationStructures:
+  BLAS:
+    - Name: IndexedBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 4
+          IndexBuffer: Indices
+          IndexFormat: Uint32
+          IndexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: IndexedBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: IndexedTriangleSetup
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

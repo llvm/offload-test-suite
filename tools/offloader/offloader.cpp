@@ -86,7 +86,7 @@ int main(int ArgC, char **ArgV) {
 
   if (run())
     return 1;
-  Device::uninitialize();
+
   return 0;
 }
 
@@ -96,11 +96,16 @@ static bool matchesRegexIgnoreCase(StringRef GPUDescription,
   return R.isValid() && R.match(GPUDescription);
 }
 
-int run() {
+static int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   const DeviceConfig Config = {Debug, Validation};
-  logAllUnhandledErrors(Device::initialize(Config), errs(),
-                        "gpu-exec: warning: ");
+  auto DevicesOrErr = initializeDevices(Config);
+  if (!DevicesOrErr) {
+    logAllUnhandledErrors(DevicesOrErr.takeError(), errs(),
+                          "gpu-exec: error: ");
+    return 1;
+  }
+  auto Devices = std::move(*DevicesOrErr);
 
   const std::unique_ptr<MemoryBuffer> PipelineBuf = readFile(InputPipeline);
   Pipeline PipelineDesc;
@@ -108,29 +113,43 @@ int run() {
   YIn >> PipelineDesc;
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
-  // Read in the shaders
-  for (size_t I = 0; I < InputShader.size(); ++I)
-    PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
-
-  if (InputShader.size() != PipelineDesc.Shaders.size())
-    ExitOnErr(createStringError(
-        std::errc::invalid_argument,
-        "Pipeline description expects %d shader(s) %d provided",
-        PipelineDesc.Shaders.size(), InputShader.size()));
+  // Read in the shaders. Ray tracing PSOs compile every entry point into a
+  // single library blob, so one input file backs all Shaders[] entries; the
+  // backend reads the blob from Shaders.front() and uses the rest only for
+  // their (Stage, Entry) metadata. Other pipelines expect one object file per
+  // stage.
+  if (PipelineDesc.isRayTracing()) {
+    if (InputShader.size() != 1)
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "RayTracing pipeline expects a single shader library, %d provided",
+          InputShader.size()));
+    PipelineDesc.Shaders.front().Shader = readFile(InputShader[0]);
+  } else {
+    if (InputShader.size() != PipelineDesc.Shaders.size())
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "Pipeline description expects %d shader(s) %d provided",
+          PipelineDesc.Shaders.size(), InputShader.size()));
+    for (size_t I = 0; I < InputShader.size(); ++I)
+      PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+  }
 
   // Try to guess the API by reading the shader binary.
   const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
     if (Binary.starts_with("DXBC")) {
+#ifdef __APPLE__
+      APIToUse = GPUAPI::Metal;
+      outs() << "Using Metal API\n";
+#else
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
+#endif
     } else if (*reinterpret_cast<const uint32_t *>(Binary.data()) ==
                0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (Binary.starts_with("MTLB")) {
-      APIToUse = GPUAPI::Metal;
-      outs() << "Using Metal API\n";
     }
   }
 
@@ -143,12 +162,12 @@ int run() {
         createStringError(std::errc::executable_format_error,
                           "Could not identify API to execute provided shader"));
 
-  if (Device::devices().empty()) {
+  if (Devices.empty()) {
     errs() << "No device available.";
     return 1;
   }
 
-  for (const auto &D : Device::devices()) {
+  for (const auto &D : Devices) {
     if (D->getAPI() != APIToUse)
       continue;
     if (UseWarp && D->getDescription() != "Microsoft Basic Render Driver")

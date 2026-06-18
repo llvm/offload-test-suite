@@ -19,7 +19,6 @@ void main(uint3 ThreadID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: UInt32
@@ -60,8 +59,8 @@ DescriptorSets:
 # Bug https://github.com/llvm/llvm-project/issues/172577
 # XFAIL: Clang && Vulkan
 
-# Bug https://github.com/llvm/offload-test-suite/issues/452
-# XFAIL: Metal
+# Bug https://github.com/llvm/offload-test-suite/issues/1293
+# XFAIL: DirectX && Clang && Intel-Gen-Current
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

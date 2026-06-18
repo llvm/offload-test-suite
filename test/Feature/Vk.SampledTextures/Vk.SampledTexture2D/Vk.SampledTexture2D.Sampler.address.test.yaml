@@ -1,0 +1,186 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTexClamp : register(s0);
+[[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTexRepeat : register(s1);
+[[vk::binding(2, 0)]] vk::SampledTexture2D<float4> SampledTexBorder : register(s2);
+[[vk::binding(3, 0)]] vk::SampledTexture2D<float4> SampledTexMirror : register(s3);
+[[vk::binding(4, 0)]] RWBuffer<float4> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // Texture 2x1: [Red, Green]
+  // Red covers [0.0, 0.5], Center 0.25
+  // Green covers [0.5, 1.0], Center 0.75
+
+  // Coordinate 1.25 is to the right of the texture.
+  float2 uv = float2(1.25, 0.5);
+
+  // 1. Clamp: Snaps 1.25 -> 1.0 (Edge). Result: Green.
+  float4 r0 = SampledTexClamp.SampleLevel(uv, 0);
+
+  // 2. Repeat: Wraps 1.25 -> 0.25 (Start). Result: Red.
+  float4 r1 = SampledTexRepeat.SampleLevel(uv, 0);
+
+  // 3. Border: 1.25 is outside. Result: Border Color (0,0,0,0).
+  float4 r2 = SampledTexBorder.SampleLevel(uv, 0);
+
+  // 4. Mirror: Test at 1.75
+  // Range [1.0, 2.0] is mirrored [1.0, 0.0].
+  // 1.75 maps to 1.0 - (0.75) = 0.25 (Center of Red).
+  // Result: Red.
+  float4 r3 = SampledTexMirror.SampleLevel(float2(1.75, 0.5), 0);
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+  }
+  return float4(0,0,0,0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: SampledTexClamp
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0 ] # Green
+
+  - Name: SampledTexRepeat
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0 ]
+
+  - Name: SampledTexBorder
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0 ]
+
+  - Name: SampledTexMirror
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.0, 1.0, 0.0, 1.0,  # Clamp -> Green
+            1.0, 0.0, 0.0, 1.0,  # Repeat -> Red
+            0.0, 0.0, 0.0, 0.0,  # Border -> Transparent Black
+            1.0, 0.0, 0.0, 1.0 ] # Mirror -> Red
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps: { Width: 1, Height: 1, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: SampledTexClamp
+    Address: Clamp
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: SampledTexRepeat
+    Address: Repeat
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: SampledTexBorder
+    Address: Border
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: SampledTexMirror
+    Address: Mirror
+    MinFilter: Nearest
+    MagFilter: Nearest
+
+DescriptorSets:
+  - Resources:
+    - Name: SampledTexClamp
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: SampledTexRepeat
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: SampledTexBorder
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: SampledTexMirror
+      Kind: SampledTexture2D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+
+Results:
+  - Result: AddressTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: This is a Vulkan specific feature.
+# UNSUPPORTED: !Vulkan
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/181910
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

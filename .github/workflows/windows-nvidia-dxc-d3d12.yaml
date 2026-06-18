@@ -6,7 +6,7 @@ permissions:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 * * * *' # run every 30 minutes
+    - cron: '0 */4 * * *' # run every 4 hours
   pull_request:
     paths:
      - .github/workflows/windows-nvidia-dxc-d3d12.yaml
@@ -23,4 +23,5 @@ jobs:
       BuildType: Debug
       TestTarget: check-hlsl-d3d12
       OffloadTest-branch: ${{ github.ref }}
+      SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

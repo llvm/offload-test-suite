@@ -20,7 +20,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float32
@@ -60,9 +59,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
-# XFAIL: Vulkan && MoltenVK
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

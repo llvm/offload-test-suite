@@ -17,7 +17,7 @@
 
 namespace llvm {
 template <typename T> struct EnumEntry;
-}
+} // namespace llvm
 
 namespace offloadtest {
 namespace directx {
@@ -32,6 +32,16 @@ enum RootSignature {
 #include "DXFeatures.def"
 };
 
+#define MESH_SHADER_TIER_ENUM(NewCase, Str, Value) NewCase = Value,
+enum MeshShaderTier {
+#include "DXFeatures.def"
+};
+
+#define RAYTRACING_TIER_ENUM(NewCase, Str, Value) NewCase = Value,
+enum RaytracingTier {
+#include "DXFeatures.def"
+};
+
 } // namespace directx
 
 template <> struct CapabilityPrinter<directx::ShaderModel> {
@@ -40,6 +50,14 @@ template <> struct CapabilityPrinter<directx::ShaderModel> {
 
 template <> struct CapabilityPrinter<directx::RootSignature> {
   static std::string toString(const directx::RootSignature &V);
+};
+
+template <> struct CapabilityPrinter<directx::MeshShaderTier> {
+  static std::string toString(const directx::MeshShaderTier &V);
+};
+
+template <> struct CapabilityPrinter<directx::RaytracingTier> {
+  static std::string toString(const directx::RaytracingTier &V);
 };
 
 } // namespace offloadtest

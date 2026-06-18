@@ -16,7 +16,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Constants
     Format: Hex32
@@ -80,6 +79,9 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/llvm-project/issues/177806
 # XFAIL: Vulkan && MoltenVK && Clang
+
+# Bug http://github.com/llvm/llvm-project/issues/185144
+XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl

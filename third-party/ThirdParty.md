@@ -18,10 +18,19 @@ binaries through the DirectX API.
 The libpng library is used by the test runtime to emit viewable images in PNG
 format.
 
+## metal_ir_converter
+
+* URL: https://developer.apple.com/metal/shader-converter/
+* Version: 3.1.0
+* License: Apache 2.0
+
+Metal shader converter converts shader intermediate representations in LLVM IR bytecode
+into a form suitable to be loaded into Metal.
+
 ## metal_ir_converter_runtime
 
 * URL: https://developer.apple.com/metal/shader-converter/
-* Version: 2.0.0
+* Version: 3.1.0
 * License: Apache 2.0
 
 The Metal IR Converter runtime is part of the Metal Shader Converter tooling

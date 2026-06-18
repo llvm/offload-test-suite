@@ -19,7 +19,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: UInt16
@@ -56,9 +55,6 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/518
-# XFAIL: Clang && Vulkan && QC
 
 # REQUIRES: Int16
 # RUN: split-file %s %t

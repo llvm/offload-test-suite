@@ -16,7 +16,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: Out
     Format: Int32
@@ -70,7 +69,7 @@ DescriptorSets:
 # CHECK: Height:          0
 # CHECK: Width:           0
 # CHECK: Depth:           0
-# CHECK: Full Hex 64bit representation of Expected Buffer Values:
+# CHECK: Full Hex representation of Expected Buffer Values:
 # CHECK: [ 0x1, 0x2, 0x3, 0x4 ]
-# CHECK: Full Hex 64bit representation of Actual Buffer Values:
+# CHECK: Full Hex representation of Actual Buffer Values:
 # CHECK: [ 0x14, 0x1e, 0x28, 0x32 ]
