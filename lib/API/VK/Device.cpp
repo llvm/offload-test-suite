@@ -2708,6 +2708,15 @@ public:
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 
+    // MSAA support is not yet wired up on the Vulkan backend. Tests that
+    // require it should mark themselves `UNSUPPORTED: Vulkan` so this guard
+    // never fires in CI; it exists to keep the shared TextureCreateDesc
+    // contract honest across backends (see #1043).
+    if (Desc.SampleCount > 1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "MSAA textures (SampleCount > 1) are not yet implemented on Vulkan");
+
     VkImageCreateInfo ImageInfo = {};
     ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageInfo.imageType = VK_IMAGE_TYPE_2D;

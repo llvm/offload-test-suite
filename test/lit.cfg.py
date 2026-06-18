@@ -179,6 +179,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64TypedResourceAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
+        if device["Features"].get("MSAA_4xSamples", False):
+            config.available_features.add("MSAA_4xSamples")
         setWaveSizeFeaturesDirectX(config, device)
         if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
             config.available_features.add("acceleration-structure")

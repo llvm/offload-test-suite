@@ -104,6 +104,7 @@ struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<InputLayoutDesc> InputLayout;
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
+  uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind.
@@ -356,8 +357,11 @@ llvm::Expected<std::unique_ptr<Texture>>
 createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
 
 // Creates a depth/stencil texture matching the dimensions of a render target.
+// SampleCount must match the matching color render target when used in the
+// same render pass (default 1, i.e. non-MSAA).
 llvm::Expected<std::unique_ptr<Texture>>
-createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
+createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height,
+                                uint32_t SampleCount = 1);
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 createBufferWithData(Device &Dev, std::string Name,
