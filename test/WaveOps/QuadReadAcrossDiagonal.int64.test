@@ -48,7 +48,6 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [ 1, 1, 1 ]
 Buffers:
   - Name: In
     Format: Int64
@@ -232,13 +231,6 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int64
-
-# Unsupported in Clang, I have a working branch for QuadReadAcrossDiagonal intrinsic support
-# waiting on https://github.com/llvm/llvm-project/pull/187440 to be merged, so I can open a PR for it
-# XFAIL: Clang
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/986
-# XFAIL: Intel && Vulkan && DXC
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/988
 # XFAIL: Metal

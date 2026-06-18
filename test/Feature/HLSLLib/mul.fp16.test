@@ -72,7 +72,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Float16
@@ -114,7 +113,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/offload-test-suite/issues/777
-# XFAIL: Intel && DirectX
+# XFAIL: Intel-Gen-10 && DirectX
 
 # REQUIRES: Half
 # RUN: split-file %s %t

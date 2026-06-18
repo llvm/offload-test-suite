@@ -69,11 +69,6 @@ static cl::opt<std::string> AdapterRegex(
         "Case-insensitive regular expression to match GPU adapter description"),
     cl::value_desc("<regex>"), cl::init(""));
 
-static cl::list<std::string> Reflection(
-    "reflection",
-    cl::desc("Filenames for shader reflection metadata (Metal only)"),
-    cl::value_desc("filename"));
-
 static std::unique_ptr<MemoryBuffer> readFile(const std::string &Path) {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   ErrorOr<std::unique_ptr<MemoryBuffer>> FileOrErr =
@@ -101,7 +96,7 @@ static bool matchesRegexIgnoreCase(StringRef GPUDescription,
   return R.isValid() && R.match(GPUDescription);
 }
 
-int run() {
+static int run() {
   const ExitOnError ExitOnErr("gpu-exec: error: ");
   const DeviceConfig Config = {Debug, Validation};
   auto DevicesOrErr = initializeDevices(Config);
@@ -118,33 +113,43 @@ int run() {
   YIn >> PipelineDesc;
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
-  // Read in the shaders
-  for (size_t I = 0; I < InputShader.size(); ++I) {
-    PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
-    if (I < Reflection.size()) {
-      PipelineDesc.Shaders[I].Reflection = readFile(Reflection[I]);
-    }
+  // Read in the shaders. Ray tracing PSOs compile every entry point into a
+  // single library blob, so one input file backs all Shaders[] entries; the
+  // backend reads the blob from Shaders.front() and uses the rest only for
+  // their (Stage, Entry) metadata. Other pipelines expect one object file per
+  // stage.
+  if (PipelineDesc.isRayTracing()) {
+    if (InputShader.size() != 1)
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "RayTracing pipeline expects a single shader library, %d provided",
+          InputShader.size()));
+    PipelineDesc.Shaders.front().Shader = readFile(InputShader[0]);
+  } else {
+    if (InputShader.size() != PipelineDesc.Shaders.size())
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "Pipeline description expects %d shader(s) %d provided",
+          PipelineDesc.Shaders.size(), InputShader.size()));
+    for (size_t I = 0; I < InputShader.size(); ++I)
+      PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
   }
-
-  if (InputShader.size() != PipelineDesc.Shaders.size())
-    ExitOnErr(createStringError(
-        std::errc::invalid_argument,
-        "Pipeline description expects %d shader(s) %d provided",
-        PipelineDesc.Shaders.size(), InputShader.size()));
 
   // Try to guess the API by reading the shader binary.
   const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();
   if (APIToUse == GPUAPI::Unknown) {
     if (Binary.starts_with("DXBC")) {
+#ifdef __APPLE__
+      APIToUse = GPUAPI::Metal;
+      outs() << "Using Metal API\n";
+#else
       APIToUse = GPUAPI::DirectX;
       outs() << "Using DirectX API\n";
+#endif
     } else if (*reinterpret_cast<const uint32_t *>(Binary.data()) ==
                0x07230203) {
       APIToUse = GPUAPI::Vulkan;
       outs() << "Using Vulkan API\n";
-    } else if (Binary.starts_with("MTLB")) {
-      APIToUse = GPUAPI::Metal;
-      outs() << "Using Metal API\n";
     }
   }
 

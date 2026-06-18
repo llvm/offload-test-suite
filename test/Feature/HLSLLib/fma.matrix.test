@@ -41,7 +41,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: A
     Format: Float64
@@ -132,9 +131,6 @@ DescriptorSets:
       VulkanBinding:
         Binding: 3
 #--- end
-
-# Bug https://github.com/llvm/offload-test-suite/issues/1000
-# XFAIL: arm64 && WARP
 
 # REQUIRES: Double
 # RUN: split-file %s %t

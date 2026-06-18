@@ -74,6 +74,8 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::R32Float;
     case 2:
       return Format::RG32Float;
+    case 3:
+      return Format::RGB32Float;
     case 4:
       return Format::RGBA32Float;
     }
@@ -85,13 +87,29 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
     if (Channels == 1)
       return Format::D32Float;
     break;
+  case DataFormat::UInt64:
+    // Only 1 and 2 channels of 64-bit integers are supported.
+    switch (Channels) {
+    case 1:
+      return Format::R64Uint;
+    case 2:
+      return Format::RG64Uint;
+    }
+    break;
+  case DataFormat::Int64:
+    // Only 1 and 2 channels of 64-bit integers are supported.
+    switch (Channels) {
+    case 1:
+      return Format::R64Sint;
+    case 2:
+      return Format::RG64Sint;
+    }
+    break;
   // No Format mapping for these DataFormats.
   case DataFormat::Hex8:
   case DataFormat::Hex16:
   case DataFormat::Hex32:
   case DataFormat::Hex64:
-  case DataFormat::UInt64:
-  case DataFormat::Int64:
   case DataFormat::Float16:
   case DataFormat::Float64:
   case DataFormat::Bool:

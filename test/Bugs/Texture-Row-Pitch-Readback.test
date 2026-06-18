@@ -1,0 +1,289 @@
+#--- vertex.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+PSInput main(float4 position : POSITION) {
+    PSInput o;
+    o.position = position;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+// Emit a distinct color per pixel by encoding SV_POSITION.xy into the output.
+// A readback that mis-strides the staging buffer would not match 
+// these expected per-pixel coordinates.
+float4 main(PSInput input) : SV_TARGET {
+    return float4(input.position.x, input.position.y, 0.0, 1.0);
+}
+
+#--- pipeline-2x2.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 B/pixel
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [
+      # Row 0 (y = 0.5)
+      0.5, 0.5, 0.0, 1.0,  1.5, 0.5, 0.0, 1.0,
+      # Row 1 (y = 1.5)
+      0.5, 1.5, 0.0, 1.0,  1.5, 1.5, 0.0, 1.0,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: ReadbackPixels
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+
+#--- pipeline-3x3.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 144 # 3x3 @ 16 B/pixel
+    OutputProps:
+      Width: 3
+      Height: 3
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [
+      # Row 0 (y = 0.5)
+      0.5, 0.5, 0.0, 1.0,  1.5, 0.5, 0.0, 1.0,  2.5, 0.5, 0.0, 1.0,
+      # Row 1 (y = 1.5)
+      0.5, 1.5, 0.0, 1.0,  1.5, 1.5, 0.0, 1.0,  2.5, 1.5, 0.0, 1.0,
+      # Row 2 (y = 2.5)
+      0.5, 2.5, 0.0, 1.0,  1.5, 2.5, 0.0, 1.0,  2.5, 2.5, 0.0, 1.0,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: ReadbackPixels
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+
+#--- pipeline-16x3.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 768 # 16x3 @ 16 B/pixel
+    OutputProps:
+      Width: 16
+      Height: 3
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [
+      # Row 0 (y = 0.5)
+       0.5, 0.5, 0.0, 1.0,   1.5, 0.5, 0.0, 1.0,   2.5, 0.5, 0.0, 1.0,   3.5, 0.5, 0.0, 1.0,
+       4.5, 0.5, 0.0, 1.0,   5.5, 0.5, 0.0, 1.0,   6.5, 0.5, 0.0, 1.0,   7.5, 0.5, 0.0, 1.0,
+       8.5, 0.5, 0.0, 1.0,   9.5, 0.5, 0.0, 1.0,  10.5, 0.5, 0.0, 1.0,  11.5, 0.5, 0.0, 1.0,
+      12.5, 0.5, 0.0, 1.0,  13.5, 0.5, 0.0, 1.0,  14.5, 0.5, 0.0, 1.0,  15.5, 0.5, 0.0, 1.0,
+      # Row 1 (y = 1.5)
+       0.5, 1.5, 0.0, 1.0,   1.5, 1.5, 0.0, 1.0,   2.5, 1.5, 0.0, 1.0,   3.5, 1.5, 0.0, 1.0,
+       4.5, 1.5, 0.0, 1.0,   5.5, 1.5, 0.0, 1.0,   6.5, 1.5, 0.0, 1.0,   7.5, 1.5, 0.0, 1.0,
+       8.5, 1.5, 0.0, 1.0,   9.5, 1.5, 0.0, 1.0,  10.5, 1.5, 0.0, 1.0,  11.5, 1.5, 0.0, 1.0,
+      12.5, 1.5, 0.0, 1.0,  13.5, 1.5, 0.0, 1.0,  14.5, 1.5, 0.0, 1.0,  15.5, 1.5, 0.0, 1.0,
+      # Row 2 (y = 2.5)
+       0.5, 2.5, 0.0, 1.0,   1.5, 2.5, 0.0, 1.0,   2.5, 2.5, 0.0, 1.0,   3.5, 2.5, 0.0, 1.0,
+       4.5, 2.5, 0.0, 1.0,   5.5, 2.5, 0.0, 1.0,   6.5, 2.5, 0.0, 1.0,   7.5, 2.5, 0.0, 1.0,
+       8.5, 2.5, 0.0, 1.0,   9.5, 2.5, 0.0, 1.0,  10.5, 2.5, 0.0, 1.0,  11.5, 2.5, 0.0, 1.0,
+      12.5, 2.5, 0.0, 1.0,  13.5, 2.5, 0.0, 1.0,  14.5, 2.5, 0.0, 1.0,  15.5, 2.5, 0.0, 1.0,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: ReadbackPixels
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+
+#--- pipeline-17x3.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ -1.0, -1.0, 0.0,
+            -1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0,  1.0, 0.0,
+             1.0, -1.0, 0.0,
+            -1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 816 # 17x3 @ 16 B/pixel
+    OutputProps:
+      Width: 17
+      Height: 3
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [
+      # Row 0 (y = 0.5)
+       0.5, 0.5, 0.0, 1.0,   1.5, 0.5, 0.0, 1.0,   2.5, 0.5, 0.0, 1.0,   3.5, 0.5, 0.0, 1.0,
+       4.5, 0.5, 0.0, 1.0,   5.5, 0.5, 0.0, 1.0,   6.5, 0.5, 0.0, 1.0,   7.5, 0.5, 0.0, 1.0,
+       8.5, 0.5, 0.0, 1.0,   9.5, 0.5, 0.0, 1.0,  10.5, 0.5, 0.0, 1.0,  11.5, 0.5, 0.0, 1.0,
+      12.5, 0.5, 0.0, 1.0,  13.5, 0.5, 0.0, 1.0,  14.5, 0.5, 0.0, 1.0,  15.5, 0.5, 0.0, 1.0,
+      16.5, 0.5, 0.0, 1.0,
+      # Row 1 (y = 1.5)
+       0.5, 1.5, 0.0, 1.0,   1.5, 1.5, 0.0, 1.0,   2.5, 1.5, 0.0, 1.0,   3.5, 1.5, 0.0, 1.0,
+       4.5, 1.5, 0.0, 1.0,   5.5, 1.5, 0.0, 1.0,   6.5, 1.5, 0.0, 1.0,   7.5, 1.5, 0.0, 1.0,
+       8.5, 1.5, 0.0, 1.0,   9.5, 1.5, 0.0, 1.0,  10.5, 1.5, 0.0, 1.0,  11.5, 1.5, 0.0, 1.0,
+      12.5, 1.5, 0.0, 1.0,  13.5, 1.5, 0.0, 1.0,  14.5, 1.5, 0.0, 1.0,  15.5, 1.5, 0.0, 1.0,
+      16.5, 1.5, 0.0, 1.0,
+      # Row 2 (y = 2.5)
+       0.5, 2.5, 0.0, 1.0,   1.5, 2.5, 0.0, 1.0,   2.5, 2.5, 0.0, 1.0,   3.5, 2.5, 0.0, 1.0,
+       4.5, 2.5, 0.0, 1.0,   5.5, 2.5, 0.0, 1.0,   6.5, 2.5, 0.0, 1.0,   7.5, 2.5, 0.0, 1.0,
+       8.5, 2.5, 0.0, 1.0,   9.5, 2.5, 0.0, 1.0,  10.5, 2.5, 0.0, 1.0,  11.5, 2.5, 0.0, 1.0,
+      12.5, 2.5, 0.0, 1.0,  13.5, 2.5, 0.0, 1.0,  14.5, 2.5, 0.0, 1.0,  15.5, 2.5, 0.0, 1.0,
+      16.5, 2.5, 0.0, 1.0,
+    ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: ReadbackPixels
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# Regression test for
+# https://github.com/llvm/offload-test-suite/pull/1126 -
+# D3D12 requires the placed-footprint RowPitch be a multiple of
+# D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256 bytes). For render targets whose
+# natural row size (Width * elementSize) is not already a multiple of 256,
+# the readback path must walk the staging buffer at the aligned pitch, not
+# the natural pitch. Before #1126 the buggy readback would surface garbage /
+# zeroed pixels in row 1+ of any small or unaligned RT. Sub-256-byte rows on
+# Vulkan and Metal are handled by their respective backends already; this
+# test still runs everywhere so the invariant is enforced across the matrix.
+#
+# The four pipelines below share the same shaders (pixel output = (x+0.5,
+# y+0.5, 0, 1) at each pixel center). The interesting variable is the RT
+# dimensions:
+#
+#   Size   | Row bytes | Aligned? | Why include it
+#   2 x 2  |   32      | no       | Original repro from PR #1126.
+#   3 x 3  |   48      | no       | Square, multiple non-final rows.
+#   16 x 3 |  256      | yes      | Control: already-aligned fast path.
+#   17 x 3 |  272      | no       | Row > 256 but crosses to the 512 boundary,
+#                                   exercises different alignment arithmetic.
+#
+# Height > 1 is required everywhere -- a 1-row RT would only read the
+# unpadded last row and silently sidestep the bug.
+
+# Clang's HLSL -> DXIL lowering does not yet implement the graphics-stage
+# signature intrinsics (llvm.dx.load.input / llvm.dx.store.output) needed
+# for SV_POSITION / SV_TARGET plumbing; clang -> SPIR-V is unaffected.
+# XFAIL: Clang && DirectX
+# XFAIL: Clang && Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline-2x2.yaml   %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/pipeline-3x3.yaml   %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/pipeline-16x3.yaml  %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/pipeline-17x3.yaml  %t-vertex.o %t-pixel.o

@@ -32,11 +32,12 @@ jobs:
       fail-fast: false
       matrix:
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk, check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
-    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: windows-intel
       TestTarget: ${{ matrix.TestTarget }}
+      SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   split-nvidia:
@@ -48,11 +49,12 @@ jobs:
       fail-fast: false
       matrix:
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
-    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: windows-nvidia
       TestTarget: ${{ matrix.TestTarget }}
+      SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   split-amd:
@@ -64,11 +66,12 @@ jobs:
       fail-fast: false
       matrix:
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
-    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: windows-amd
       TestTarget: ${{ matrix.TestTarget }}
+      SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   split-qc:
@@ -80,11 +83,12 @@ jobs:
       fail-fast: false
       matrix:
         TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk, check-hlsl-warp-d3d12, check-hlsl-clang-warp-d3d12]
-    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: windows
       SKU: windows-qc
       TestTarget: ${{ matrix.TestTarget }}
+      SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
   split-macos:
@@ -96,8 +100,9 @@ jobs:
       fail-fast: false
       matrix:
         TestTarget: [check-hlsl-mtl, check-hlsl-clang-mtl]
-    uses: ./.github/workflows/build-and-test-split-callable.yaml
+    uses: ./.github/workflows/build-and-test-callable.yaml
     with:
       OS: macOS
       SKU: macos
+      SplitBuild: true
       TestTarget: ${{ matrix.TestTarget }}

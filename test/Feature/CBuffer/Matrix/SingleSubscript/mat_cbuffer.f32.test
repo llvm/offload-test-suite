@@ -43,7 +43,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: cbuffer_f1x4
     Format: Float32
@@ -168,10 +167,6 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 7
-
-# Note: Metal and Vulkan KosmicKrisp and MoltenVK
-# Are always empty
-# UNSUPPORTED: Darwin
 
 # BUG https://github.com/llvm/llvm-project/issues/191070
 # XFAIL: Clang && Vulkan

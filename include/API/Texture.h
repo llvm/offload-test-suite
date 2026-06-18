@@ -26,6 +26,7 @@
 #include <variant>
 
 namespace offloadtest {
+LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
 enum TextureUsage : uint32_t {
   Sampled = 1 << 0,
@@ -150,6 +151,7 @@ public:
   Texture &operator=(const Texture &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  virtual const TextureCreateDesc &getDesc() const = 0;
 
 protected:
   explicit Texture(GPUAPI API) : API(API) {}

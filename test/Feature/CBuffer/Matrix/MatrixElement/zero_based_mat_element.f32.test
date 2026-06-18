@@ -51,7 +51,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: cbuffer_f1x4
     Format: Float32
@@ -178,10 +177,6 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 7
-
-# Note: Metal and Vulkan KosmicKrisp and MoltenVK
-# Are always empty
-# UNSUPPORTED: Darwin
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl

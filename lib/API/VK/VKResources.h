@@ -66,6 +66,14 @@ inline VkFormat getVulkanFormat(Format Format) {
     return VK_FORMAT_R32G32B32A32_UINT;
   case Format::RGBA32Float:
     return VK_FORMAT_R32G32B32A32_SFLOAT;
+  case Format::R64Uint:
+    return VK_FORMAT_R64_UINT;
+  case Format::R64Sint:
+    return VK_FORMAT_R64_SINT;
+  case Format::RG64Uint:
+    return VK_FORMAT_R64G64_UINT;
+  case Format::RG64Sint:
+    return VK_FORMAT_R64G64_SINT;
   case Format::D32Float:
     return VK_FORMAT_D32_SFLOAT;
   case Format::D32FloatS8Uint:
@@ -86,6 +94,16 @@ inline VkImageUsageFlags getVulkanImageUsage(TextureUsage Usage) {
   if ((Usage & DepthStencil) != 0)
     Flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
   return Flags;
+}
+
+inline VkIndexType getVulkanIndexType(IndexFormat Fmt) {
+  switch (Fmt) {
+  case IndexFormat::Uint16:
+    return VK_INDEX_TYPE_UINT16;
+  case IndexFormat::Uint32:
+    return VK_INDEX_TYPE_UINT32;
+  }
+  llvm_unreachable("All IndexFormat cases handled");
 }
 
 } // namespace offloadtest

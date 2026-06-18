@@ -19,7 +19,8 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [4, 1, 1]
+DispatchParameters:
+  DispatchGroupCount: [4, 1, 1]
 Buffers:
   - Name: BufA
     Format: Int32
@@ -69,10 +70,6 @@ DescriptorSets:
 # DXC's vulkan backend doesn't drop unused bindings, so it isn't possible to
 # specify descriptor sets that are valid for both DirectX and Vulkan there.
 # UNSUPPORTED: DXC && Vulkan
-
-# CBuffer bindings seem to be broken under metal
-# https://github.com/llvm/offload-test-suite/issues/55
-# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

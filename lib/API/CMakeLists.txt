@@ -19,18 +19,22 @@ if (OFFLOADTEST_ENABLE_D3D12)
 endif()
 
 if (APPLE)
-  list(APPEND api_sources MTL/MTLDevice.cpp)
+  list(APPEND api_sources MTL/MTLDevice.cpp
+                          MTL/MTLDescriptorHeap.cpp
+                          MTL/MTLTopLevelArgumentBuffer.cpp)
   list(APPEND api_libraries "-framework Metal"
                             "-framework MetalKit"
                             "-framework AppKit"
                             "-framework Foundation"
-                            "-framework QuartzCore")
+                            "-framework QuartzCore"
+                            ${METAL_LIBRARIES})
   list(APPEND api_headers PRIVATE ${METAL_INCLUDE_DIRS})
 endif()
 
 add_offloadtest_library(API
   Capabilities.cpp
   Device.cpp
+  Util.cpp
   ${api_sources})
 
 target_include_directories(OffloadTestAPI SYSTEM BEFORE ${api_headers})

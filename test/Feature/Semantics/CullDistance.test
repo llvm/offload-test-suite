@@ -1,0 +1,104 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 pos      : POSITION;
+    float  cullDist : CULLDIST;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+    float  cullDist : SV_CullDistance0;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput o;
+    o.position = input.pos;
+    o.cullDist = input.cullDist;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET {
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Two triangles drawn into a 4x1 render target. Each triangle covers one
+  # half of the viewport at y = 0 (the only row of pixel centers); both
+  # triangles extend past y = +/-1 to guarantee coverage independent of the
+  # tile/scan layout.
+  #
+  #   Triangle A: apex at NDC (0, 0), base on x = -1. Covers pixels 0, 1.
+  #     cullDist = +1 at every vertex -> primitive kept, rendered red.
+  #   Triangle B: apex at NDC (0, 0), base on x = +1. Covers pixels 2, 3.
+  #     cullDist = -1 at every vertex -> entire primitive culled, never
+  #     rasterized, target pixels remain at the clear value.
+  - Name: VertexData
+    Format: Float32
+    Stride: 20  # float4 pos (16) + float cullDist (4)
+    Data: [
+      # Triangle A (rendered)
+      -1.0, -3.0, 0.0, 1.0,   1.0,
+      -1.0,  3.0, 0.0, 1.0,   1.0,
+       0.0,  0.0, 0.0, 1.0,   1.0,
+      # Triangle B (culled)
+       0.0,  0.0, 0.0, 1.0,  -1.0,
+       1.0, -3.0, 0.0, 1.0,  -1.0,
+       1.0,  3.0, 0.0, 1.0,  -1.0,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+    - Format: Float32
+      Channels: 1
+      Offset: 16
+      Name: CULLDIST
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# SV_CullDistance: whole-primitive culling. A primitive is dropped before
+# rasterization when, for some component, every vertex carries a negative
+# value. Tracked under https://github.com/llvm/wg-hlsl/issues/25.
+# Clang's HLSL frontend does not yet lower SV_CullDistance on either the
+# DXIL or SPIR-V path.
+# XFAIL: Clang
+# Metal Shading Language has no cull_distance attribute (only clip_distance,
+# per the MSL Specification at
+# https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf)
+# and Apple's metal-irconverter does not emulate SV_CullDistance via
+# clip_distance, so the culled primitive still rasterizes.
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
+
+# Pixels 0,1 rendered red (triangle A kept).
+# Pixels 2,3 zero-initialized clear (triangle B culled).
+# CHECK: Name: Output
+# CHECK: Data: [ 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0 ]

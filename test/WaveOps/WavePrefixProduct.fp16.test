@@ -50,7 +50,6 @@ void main(uint3 tid : SV_GroupThreadID)
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [ 1, 1, 1 ]
 Buffers:
   - Name: In
     Format: Float16
@@ -178,6 +177,9 @@ DescriptorSets:
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1084
 # XFAIL: NV && Clang && DirectX
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1293
+# XFAIL: Intel-Gen-Current && Clang && DirectX
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1102
 # XFAIL: AMD && DirectX

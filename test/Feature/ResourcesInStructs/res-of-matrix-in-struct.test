@@ -20,7 +20,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufA1
     Format: Int32
@@ -60,14 +59,12 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
-# XFAIL: Clang
-
 # Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8302
 # XFAIL: Vulkan && DXC
 
+# Bug https://github.com/llvm/llvm-project/issues/202064
+# XFAIL: Vulkan && Clang && Intel-Gen-Current
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
-

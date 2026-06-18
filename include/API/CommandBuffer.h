@@ -17,8 +17,23 @@
 #define OFFLOADTEST_API_COMMANDBUFFER_H
 
 #include "API/API.h"
+#include "API/Encoder.h"
+
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Error.h"
+
+#include <memory>
 
 namespace offloadtest {
+
+class RenderPass;
+class Texture;
+
+struct RenderPassBeginDesc {
+  RenderPass *Pass = nullptr;
+  llvm::SmallVector<Texture *, 8> ColorAttachments;
+  Texture *DepthStencil = nullptr;
+};
 
 class CommandBuffer {
   GPUAPI Kind;
@@ -30,6 +45,15 @@ public:
   CommandBuffer &operator=(const CommandBuffer &) = delete;
 
   GPUAPI getKind() const { return Kind; }
+
+  /// Create a compute command encoder for recording dispatch commands.
+  /// Barriers are automatically inserted between commands.
+  virtual llvm::Expected<std::unique_ptr<ComputeEncoder>>
+  createComputeEncoder() = 0;
+
+  /// Create a render command encoder for recording draw commands.
+  virtual llvm::Expected<std::unique_ptr<RenderEncoder>>
+  createRenderEncoder(const RenderPassBeginDesc &Desc) = 0;
 };
 
 } // namespace offloadtest

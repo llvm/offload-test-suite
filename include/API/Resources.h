@@ -25,6 +25,20 @@ enum class MemoryLocation {
   GpuToCpu,
 };
 
+enum class MemoryBacking {
+  // Allocates all memory for this resource.
+  Automatic,
+
+  // No memory allocated; physical pages mapped manually on demand.
+  // DX: CreateReservedResource + UpdateTileMappings.
+  // VK: VK_IMAGE_CREATE_SPARSE_BINDING_BIT + vkQueueBindSparse.
+  // Metal: MTLTextureDescriptor.sparseLevel + heap tile mapping
+  //        (requires Apple Silicon).
+  Sparse,
+};
+
+enum class IndexFormat { Uint16, Uint32 };
+
 // TODO: Add Unorm types (e.g. R8Unorm, RGBA8Unorm) which can be sampled as
 // floats.
 // TODO: Add SRGB types (e.g. RGBA8Srgb) once needed.
@@ -45,6 +59,10 @@ enum class Format {
   RGBA32Sint,
   RGBA32Uint,
   RGBA32Float,
+  R64Uint,
+  R64Sint,
+  RG64Uint,
+  RG64Sint,
   D32Float,
   D32FloatS8Uint,
 };
@@ -83,6 +101,14 @@ inline llvm::StringRef getFormatName(Format Format) {
     return "RGBA32Uint";
   case Format::RGBA32Float:
     return "RGBA32Float";
+  case Format::R64Uint:
+    return "R64Uint";
+  case Format::R64Sint:
+    return "R64Sint";
+  case Format::RG64Uint:
+    return "RG64Uint";
+  case Format::RG64Sint:
+    return "RG64Sint";
   case Format::D32Float:
     return "D32Float";
   case Format::D32FloatS8Uint:
@@ -110,12 +136,16 @@ inline uint32_t getFormatSizeInBytes(Format Format) {
   case Format::RG32Uint:
   case Format::RG32Float:
   case Format::D32FloatS8Uint:
+  case Format::R64Uint:
+  case Format::R64Sint:
     return 8;
   case Format::RGB32Float:
     return 12;
   case Format::RGBA32Sint:
   case Format::RGBA32Uint:
   case Format::RGBA32Float:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
     return 16;
   }
   llvm_unreachable("All Format cases handled");
@@ -139,8 +169,42 @@ inline bool isDepthFormat(Format Format) {
   case Format::RGBA32Sint:
   case Format::RGBA32Uint:
   case Format::RGBA32Float:
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
     return false;
   case Format::D32Float:
+  case Format::D32FloatS8Uint:
+    return true;
+  }
+  llvm_unreachable("All Format cases handled");
+}
+
+inline bool isStencilFormat(Format Format) {
+  switch (Format) {
+  case Format::R16Sint:
+  case Format::R16Uint:
+  case Format::RG16Sint:
+  case Format::RG16Uint:
+  case Format::R32Sint:
+  case Format::R32Uint:
+  case Format::R32Float:
+  case Format::RGBA16Sint:
+  case Format::RGBA16Uint:
+  case Format::RG32Sint:
+  case Format::RG32Uint:
+  case Format::RG32Float:
+  case Format::RGB32Float:
+  case Format::RGBA32Sint:
+  case Format::RGBA32Uint:
+  case Format::RGBA32Float:
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
+  case Format::D32Float:
+    return false;
   case Format::D32FloatS8Uint:
     return true;
   }
@@ -171,6 +235,11 @@ inline bool isTextureCompatible(Format Format) {
   case Format::RGBA32Float:
   case Format::D32Float:
   case Format::D32FloatS8Uint:
+  // Only for RWTextures
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
     return true;
   }
   llvm_unreachable("All Format cases handled");
@@ -196,6 +265,10 @@ inline bool isVertexCompatible(Format Format) {
   case Format::RGBA32Uint:
   case Format::RGBA32Float:
     return true;
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
   case Format::D32Float:
   case Format::D32FloatS8Uint:
     return false;
@@ -225,6 +298,10 @@ inline bool isPositionCompatible(Format Format) {
   case Format::RG32Uint:
   case Format::RGBA32Sint:
   case Format::RGBA32Uint:
+  case Format::R64Uint:
+  case Format::R64Sint:
+  case Format::RG64Uint:
+  case Format::RG64Sint:
   case Format::D32Float:
   case Format::D32FloatS8Uint:
     return false;

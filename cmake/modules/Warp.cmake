@@ -62,6 +62,26 @@ function(setup_warp version)
     file(COPY_FILE ${FILE} "${LLVM_RUNTIME_OUTPUT_INTDIR}/${FILENAME}")
   endforeach()
 
+  # Install the WARP DLLs into the offload-tools component so they ride
+  # alongside offloader.exe in the SplitBuild install prefix. Without
+  # this, the test runner's offloader.exe has no d3d10warp.dll next to
+  # it, Windows falls back to the OS-shipped system WARP, and tests
+  # exercising newer WARP features (e.g. native 16-bit cbuffer support)
+  # fail. We install from LLVM_RUNTIME_OUTPUT_INTDIR (where COPY_FILE
+  # just placed them) rather than the original LIBS paths, since the
+  # NuGet extract dir under CMAKE_CURRENT_BINARY_DIR is removed below.
+  # Filtering by *.dll skips PDBs from the install image.
+  set(WARP_INSTALL_LIBS "")
+  foreach(FILE ${LIBS})
+    if (FILE MATCHES "\\.dll$")
+      get_filename_component(FILENAME ${FILE} NAME)
+      list(APPEND WARP_INSTALL_LIBS "${LLVM_RUNTIME_OUTPUT_INTDIR}/${FILENAME}")
+    endif()
+  endforeach()
+  install(FILES ${WARP_INSTALL_LIBS}
+    DESTINATION bin
+    COMPONENT offload-tools)
+
   file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/warp")
   set_property(GLOBAL PROPERTY WARP_ARCHITECTURE ${NUGET_ARCH})
 endfunction()

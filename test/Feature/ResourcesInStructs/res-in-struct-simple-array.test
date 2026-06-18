@@ -24,7 +24,6 @@ void main(uint3 ID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufB1
     Format: Int32
@@ -70,11 +69,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
-# XFAIL: Clang
-
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/305
-# XFAIL: Metal
+# Bug: https://github.com/llvm/llvm-project/issues/194435
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

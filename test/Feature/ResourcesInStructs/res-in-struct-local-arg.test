@@ -32,7 +32,6 @@ void main(uint3 ID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufA1
     Format: Int32
@@ -76,9 +75,6 @@ DescriptorSets:
 
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/367
 # XFAIL: Clang
-
-# Unsupported on Metal - requires Vulkan feature robustBufferAccess
-# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

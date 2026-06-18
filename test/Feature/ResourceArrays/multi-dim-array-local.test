@@ -31,7 +31,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: BufA
     Format: Float32
@@ -78,9 +77,6 @@ DescriptorSets:
 
 # Vulkan does not support multi-dimensional resource arrays
 # UNSUPPORTED: Vulkan
-
-# Resource arrays are not yet supported on Metal
-# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

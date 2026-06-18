@@ -1,0 +1,167 @@
+# Tessellates a viewport-filling quad with the quad domain and integer
+# partitioning. Validated by reading back a 2x2 render target whose four texels
+# must carry the four quadrant colours.
+# This covers the quad-domain SV_DomainLocation mapping and tiling
+
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : POSITION;
+};
+
+VSOutput main(float4 position : POSITION) {
+  VSOutput o;
+  o.position = position;
+  return o;
+}
+
+#--- hull.hlsl
+struct HSInput {
+  float4 position : POSITION;
+};
+
+struct HSOutput {
+  float4 position : POSITION;
+};
+
+struct HSPatchConstants {
+  float Edges[4] : SV_TessFactor;        // quad domain: 4 edge factors
+  float Inside[2] : SV_InsideTessFactor; // quad domain: 2 inside factors
+};
+
+// Factors of 2 with integer partitioning subdivide the quad into a 2x2 grid of
+// sub-quads (eight triangles) that tile the original quad exactly.
+HSPatchConstants PatchConstants(InputPatch<HSInput, 4> patch,
+                                uint patchID : SV_PrimitiveID) {
+  HSPatchConstants c;
+  c.Edges[0] = 2.0;
+  c.Edges[1] = 2.0;
+  c.Edges[2] = 2.0;
+  c.Edges[3] = 2.0;
+  c.Inside[0] = 2.0;
+  c.Inside[1] = 2.0;
+  return c;
+}
+
+[domain("quad")]
+[partitioning("integer")]
+[outputtopology("triangle_ccw")]
+[outputcontrolpoints(4)]
+[patchconstantfunc("PatchConstants")]
+HSOutput main(InputPatch<HSInput, 4> patch, uint i : SV_OutputControlPointID) {
+  HSOutput o;
+  o.position = patch[i].position;
+  return o;
+}
+
+#--- domain.hlsl
+struct DSInput {
+  float4 position : POSITION;
+};
+
+struct DSPatchConstants {
+  float Edges[4] : SV_TessFactor;
+  float Inside[2] : SV_InsideTessFactor;
+};
+
+struct DSOutput {
+  float4 position : SV_POSITION;
+  float2 uv : TEXCOORD0; // domain location forwarded to the pixel stage
+};
+
+// Bilinearly interpolate the four corner control points by the quad domain's
+// (u, v) location, and pass the raw (u, v) on so the pixel shader can colour by
+// quadrant. The generated triangles tile the input quad, so the whole viewport
+// is covered.
+[domain("quad")]
+DSOutput main(DSPatchConstants constants, float2 uv : SV_DomainLocation,
+              const OutputPatch<DSInput, 4> patch) {
+  float4 bottom = lerp(patch[0].position, patch[1].position, uv.x);
+  float4 top = lerp(patch[3].position, patch[2].position, uv.x);
+
+  DSOutput o;
+  o.position = lerp(bottom, top, uv.y);
+  o.uv = uv;
+  return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+  float2 uv : TEXCOORD0;
+};
+
+// Colour by which quarter of the domain the pixel falls in. The 2x2 render
+// target's pixel centres land at domain (u, v) = {0.25, 0.75} on each axis --
+// the centres of the four sub-quads -- so each texel gets one quadrant's
+// colour. The colours are branch-selected (never interpolated), so the readback
+// is exact and identical across backends.
+float4 main(PSInput input) : SV_TARGET {
+  float3 col;
+  if (input.uv.x < 0.5)
+    col = (input.uv.y < 0.5) ? float3(1.0, 0.0, 0.0)  // bottom-left  -> red
+                             : float3(0.0, 0.0, 1.0); // top-left     -> blue
+  else
+    col = (input.uv.y < 0.5) ? float3(0.0, 1.0, 0.0)  // bottom-right -> green
+                             : float3(1.0, 1.0, 0.0); // top-right    -> yellow
+  return float4(col, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Hull
+    Entry: main
+  - Stage: Domain
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Four control points: a quad covering the whole clip-space viewport.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8 # float2 position
+    Data: [ -1.0, -1.0,   # cp0 bottom-left
+             1.0, -1.0,    # cp1 bottom-right
+             1.0,  1.0,    # cp2 top-right
+            -1.0,  1.0 ]   # cp3 top-left
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  Topology: PatchList
+  PatchControlPoints: 4
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# UNSUPPORTED: Metal
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T hs_6_0 -Fo %t-hull.o   %t/hull.hlsl
+# RUN: %dxc_target -T ds_6_0 -Fo %t-domain.o %t/domain.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o  %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-hull.o %t-domain.o %t-pixel.o | FileCheck %s
+
+# Readback is top-left origin, row-major:
+#   texel 0 = top-left     (u<0.5, v>0.5) -> blue
+#   texel 1 = top-right    (u>0.5, v>0.5) -> yellow
+#   texel 2 = bottom-left  (u<0.5, v<0.5) -> red
+#   texel 3 = bottom-right (u>0.5, v<0.5) -> green
+# CHECK: Name: Output
+# CHECK: Data: [ 0, 0, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 1, 0, 1 ]

@@ -49,8 +49,9 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [4, 1, 1]
 
+DispatchParameters:
+  DispatchGroupCount: [4, 1, 1]
 Buffers:
   - Name: A
     Format: Int32

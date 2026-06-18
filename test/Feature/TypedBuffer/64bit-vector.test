@@ -33,7 +33,6 @@ void main() {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: U0
     Format: Int64
@@ -122,8 +121,6 @@ DescriptorSets:
         Binding: 5
 ...
 #--- end
-
-# UNSUPPORTED: Metal
 
 # This test is failing on Vulkan due to two separate issues.
 # Bug https://github.com/llvm/offload-test-suite/issues/1030
