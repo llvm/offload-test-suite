@@ -20,7 +20,7 @@ void main(uint groupThreadID: SV_GroupThreadID, out vertices PSInput verts[32], 
 
     const float radius = 0.5;
     const float angle = float(groupThreadID) / 32.0f;
-    const float tau = 2.0 * 3.14159265359
+    const float tau = 2.0 * 3.14159265359;
     const float x = cos(angle * tau) * radius;
     const float y = sin(angle * tau) * radius;
 
