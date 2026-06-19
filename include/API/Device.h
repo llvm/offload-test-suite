@@ -222,10 +222,12 @@ protected:
   explicit MemoryHeap(GPUAPI API) : API(API) {}
 };
 
-/// A region of a Sparse-backed resource, expressed in tiles (not bytes). For
-/// buffers only TileOffsetX / NumTilesX are meaningful; textures additionally
-/// use Subresource and the Y/Z extents. Query the backend tile shape to convert
-/// between texels and tiles.
+/// A region of a Sparse-backed resource, expressed in tiles (not bytes).
+/// For buffers, only TileOffsetX / NumTilesX are meaningful.
+/// Textures additionally use Subresource and the Y/Z extents.
+/// Query the backend tile shape to convert between texels and tiles
+/// (`Buffer::querySparseTileSizeInBytes(...)`,
+/// `Texture::querySparseTileShape(...)`)
 struct TileRegion {
   uint32_t Subresource = 0;
   uint32_t TileOffsetX = 0;
