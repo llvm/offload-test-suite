@@ -153,10 +153,8 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWByteAddressBuffer:
     return BufferUsage::Storage;
-    break;
   case ResourceKind::ConstantBuffer:
     return BufferUsage::ConstantBuffer;
-    break;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Sampler:
