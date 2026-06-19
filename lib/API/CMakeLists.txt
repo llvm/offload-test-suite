@@ -34,6 +34,7 @@ endif()
 add_offloadtest_library(API
   Capabilities.cpp
   Device.cpp
+  Texture.cpp
   Util.cpp
   ${api_sources})
 

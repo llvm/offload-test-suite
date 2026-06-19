@@ -19,6 +19,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/MathExtras.h"
 
 #include "../Util.h"
 
@@ -454,7 +455,18 @@ public:
         DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
 
+  VulkanBuffer(const VulkanBuffer &) = delete;
+  VulkanBuffer(VulkanBuffer &&) = delete;
+  VulkanBuffer &operator=(const VulkanBuffer &) = delete;
+  VulkanBuffer &operator=(VulkanBuffer &&) = delete;
+
   size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  size_t querySparseTileSizeInBytes(const Device & /*Dev*/) const override {
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Dev, Buffer, &MemReqs);
+    return MemReqs.alignment;
+  }
 
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
@@ -480,6 +492,8 @@ public:
   void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   ~VulkanBuffer() override {
+    if (CounterBuffer != nullptr)
+      vkDestroyBuffer(Dev, CounterBuffer, nullptr);
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
@@ -487,6 +501,8 @@ public:
   // Only valid when the buffer was created with VK_BUFFER_USAGE_SHADER_DEVICE_
   // ADDRESS_BIT, which the device adds whenever ray tracing is supported.
   VkDeviceAddress getDeviceAddress() const { return DeviceAddress; }
+
+  const BufferCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Vulkan;
@@ -506,18 +522,22 @@ public:
   VkImageView View = VK_NULL_HANDLE;
   std::string Name;
   TextureCreateDesc Desc;
+  VkImageTiling Tiling = VK_IMAGE_TILING_OPTIMAL;
 
   VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
   VkImageSubresourceRange FullRange;
   bool IsInUndefinedLayout = true;
+  uint64_t SizeInBytes;
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
                 llvm::StringRef Name, TextureCreateDesc Desc,
                 VkImageLayout PreferredLayout,
-                VkImageSubresourceRange FullRange)
+                VkImageSubresourceRange FullRange, VkImageTiling Tiling,
+                uint64_t SizeInBytes)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), Name(Name), Desc(Desc),
-        PreferredLayout(PreferredLayout), FullRange(FullRange) {}
+        Memory(Memory), Name(Name), Desc(Desc), Tiling(Tiling),
+        PreferredLayout(PreferredLayout), FullRange(FullRange),
+        SizeInBytes(SizeInBytes) {}
 
   ~VulkanTexture() override {
     if (View)
@@ -528,6 +548,17 @@ public:
 
   VkImageLayout preferredLayoutOrUndefined() {
     return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
+  }
+
+  TileShape querySparseTileShape(const Device & /*Dev*/) const override {
+    uint32_t Count = 0;
+    vkGetImageSparseMemoryRequirements(Dev, Image, &Count, nullptr);
+    if (Count == 0)
+      return TileShape{};
+    llvm::SmallVector<VkSparseImageMemoryRequirements> Reqs(Count);
+    vkGetImageSparseMemoryRequirements(Dev, Image, &Count, Reqs.data());
+    const VkExtent3D G = Reqs[0].formatProperties.imageGranularity;
+    return TileShape{G.width, G.height, G.depth};
   }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
@@ -654,6 +685,22 @@ public:
   llvm::Expected<offloadtest::SubmitResult>
   submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Buffer & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support tile mappings.");
+  }
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Texture & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support tile mappings.");
+  }
 };
 
 class VulkanDevice; // forward decl — defined below in this same anon ns
@@ -729,7 +776,6 @@ public:
   VkAccessFlags PendingSrcAccess = VK_ACCESS_HOST_WRITE_BIT;
   VkPipelineStageFlags PendingDstStage = 0;
   VkAccessFlags PendingDstAccess = 0;
-
   llvm::SmallVector<VkImageMemoryBarrier> PendingImageTransitions;
 
   void addImageTransition(VkAccessFlags SrcAccessMask,
@@ -973,8 +1019,8 @@ public:
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
-    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
-    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
     VkBufferCopy Region = {};
     Region.srcOffset = SrcOffset;
     Region.dstOffset = DstOffset;
@@ -1013,6 +1059,60 @@ public:
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
                           VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
                           VKDst);
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyCounterToBuffer(offloadtest::Buffer &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
+
+    if (!VKSrc.Desc.HasCounter)
+      return llvm::createStringError(
+          "Counter resource passed does not hvae a counter.");
+
+    const VkBufferCopy Region{
+        0,               /*srcOffset*/
+        0,               /*dstOffset*/
+        sizeof(uint32_t) /*size*/
+    };
+    addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost("copyCounterToBuffer 4B");
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.CounterBuffer, VKDst.Buffer, 1,
+                    &Region);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanTexture>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT,        /*DstAccessMask*/
+                          VKSrc.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
+                          VKSrc);
+    VKSrc.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
+                           0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,              /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
+                          VKSrc.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKSrc);
 
     return llvm::Error::success();
   }
@@ -1357,6 +1457,8 @@ VulkanCommandBuffer::createRenderEncoder(
   BeginInfo.renderArea.extent.height = Height;
   BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
   BeginInfo.pClearValues = ClearValues.data();
+
+  this->flushBarrier();
 
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -1909,6 +2011,10 @@ public:
 
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+
+  static bool classof(const offloadtest::Device *D) {
+    return D->getAPI() == GPUAPI::Vulkan;
+  }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
@@ -2562,6 +2668,13 @@ public:
     return VulkanFence::create(Device, Name);
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::MemoryHeap>>
+  createMemoryHeap(std::string /*Name*/, size_t /*SizeInBytes*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support memory heaps.");
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
@@ -2601,7 +2714,6 @@ public:
       BufInfo.usage |=
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VkBuffer BufferObject;
     if (auto Err = VK::toError(
@@ -2716,7 +2828,9 @@ public:
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = 1;
     ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
+                           ? VK_IMAGE_TILING_OPTIMAL
+                           : VK_IMAGE_TILING_LINEAR;
     ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
     ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -2775,7 +2889,8 @@ public:
       PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     auto Tex = std::make_unique<VulkanTexture>(
-        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange);
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
+        ImageInfo.tiling, MemReqs.size);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;

@@ -246,6 +246,22 @@ public:
   llvm::Expected<offloadtest::SubmitResult>
   submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Buffer & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal backend does not yet support tile mappings.");
+  }
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Texture & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal backend does not yet support tile mappings.");
+  }
 };
 
 class MTLPipelineState : public offloadtest::PipelineState {
@@ -318,8 +334,14 @@ public:
             size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
+  MTLBuffer(const MTLBuffer &) = delete;
+  MTLBuffer(MTLBuffer &&) = delete;
+  MTLBuffer &operator=(const MTLBuffer &) = delete;
+  MTLBuffer &operator=(MTLBuffer &&) = delete;
 
   size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  size_t querySparseTileSizeInBytes(const Device &Dev) const override;
 
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
@@ -341,6 +363,8 @@ public:
       Buf->release();
   }
 
+  const BufferCreateDesc &getDesc() const override { return Desc; }
+
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Metal;
   }
@@ -359,6 +383,8 @@ public:
     if (Tex)
       Tex->release();
   }
+
+  TileShape querySparseTileShape(const Device &Dev) const override;
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
 
@@ -618,6 +644,37 @@ public:
                             MTL::Origin(0, 0, 0));
     addBarrierScope(MTL::BarrierScopeTextures);
 
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyCounterToBuffer(offloadtest::Buffer &,
+                                  offloadtest::Buffer &) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Counter buffers are not supported on the Metal backend.");
+  }
+
+  llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
+                                  offloadtest::Buffer &Dst) override {
+    if (auto Err = ensureBlitEncoder())
+      return Err;
+    auto &MTLSrc = static_cast<MTLTexture &>(Src);
+    auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+
+    // The readback buffer is linear with a tightly packed row stride, so the
+    // destination bytes-per-row is the texture width times the element size.
+    const size_t ElemSize = getFormatSizeInBytes(MTLSrc.Desc.Fmt);
+    const size_t RowBytes = MTLSrc.Desc.Width * ElemSize;
+    const size_t ImageBytes = RowBytes * MTLSrc.Desc.Height;
+    const MTL::Size CopySize(MTLSrc.Desc.Width, MTLSrc.Desc.Height, 1);
+
+    insertDebugSignpost(llvm::formatv("copyTextureToBuffer {0} -> {1}",
+                                      MTLSrc.Name, MTLDst.Name)
+                            .str());
+    BlitEnc->copyFromTexture(MTLSrc.Tex, /*sourceSlice=*/0, /*sourceLevel=*/0,
+                             MTL::Origin(0, 0, 0), CopySize, MTLDst.Buf,
+                             /*destinationOffset=*/0, RowBytes, ImageBytes);
+    addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
   }
 
@@ -957,10 +1014,7 @@ MTLCommandBuffer::createRenderEncoder(
 }
 
 class MTLDevice : public offloadtest::Device {
-  // MTLComputeEncoder needs access to the MTL::Device handle for AS scratch
-  // and instance buffer allocation.
-  friend class MTLComputeEncoder;
-
+public:
   Capabilities Caps;
   MTL::Device *Device;
   MTLQueue GraphicsQueue;
@@ -1425,12 +1479,7 @@ class MTLDevice : public offloadtest::Device {
           for (const auto &Inst : R.first->TLASPtr->Instances)
             Contributions.push_back(Inst.InstanceContributionToHitGroupIndex &
                                     0xFFFFFFu);
-          const BufferCreateDesc Desc{MemoryLocation::GpuToCpu,
-                                      MemoryBacking::Automatic,
-                                      BufferUsage::Storage,
-                                      BufferShaderAccessType::Raw,
-                                      {},
-                                      false};
+          const BufferCreateDesc Desc = BufferCreateDesc::uploadBuffer();
           auto ContribBufOrErr = createBufferWithData(
               *IS.CB->Dev, "AS-Contributions", Desc, Contributions.data(),
               InstCount * sizeof(uint32_t), nullptr, nullptr);
@@ -1714,6 +1763,10 @@ public:
   llvm::StringRef getAPIName() const override { return "Metal"; };
   GPUAPI getAPI() const override { return GPUAPI::Metal; };
 
+  static bool classof(const offloadtest::Device *D) {
+    return D->getAPI() == GPUAPI::Metal;
+  }
+
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -1735,9 +1788,26 @@ public:
     return MTLFence::create(Device, Name);
   }
 
+  llvm::Expected<std::unique_ptr<offloadtest::MemoryHeap>>
+  createMemoryHeap(std::string /*Name*/, size_t /*SizeInBytes*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Metal backend does not yet support memory heaps.");
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
   createBuffer(std::string Name, const BufferCreateDesc &Desc,
                size_t SizeInBytes) override {
+    if (Desc.HasCounter)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Metal backend does not support buffers with a counter.");
+
+    if (Desc.Backing == MemoryBacking::Sparse)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Metal backend does not support sparse memory backing.");
+
     MTL::Buffer *Buf = Device->newBuffer(
         SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
     if (!Buf)
@@ -2222,7 +2292,6 @@ public:
     return Sizes;
   }
 
-private:
   AccelerationStructureSizes queryBLASPrebuildSize(
       llvm::ArrayRef<MTL::AccelerationStructureGeometryDescriptor *> Descs) {
     NS::Array *GeomDescs = NS::Array::array(
@@ -2257,7 +2326,6 @@ private:
     return std::make_unique<MetalAccelerationStructure>(AS, Sizes);
   }
 
-public:
   llvm::Expected<AccelerationStructureSizes>
   getTLASBuildSizes(uint32_t InstanceCount) override {
     if (!Device->supportsRaytracing())
@@ -2453,7 +2521,6 @@ public:
 
   virtual ~MTLDevice() {};
 
-private:
   void queryCapabilities() {
     // GPU Family Metal3 (macOS 13+) is where mesh shaders became available.
     const bool MeshShaderSupported =
@@ -2466,6 +2533,19 @@ private:
                                             Device->supportsRaytracing())));
   }
 };
+
+size_t MTLBuffer::querySparseTileSizeInBytes(const Device &Dev) const {
+  return llvm::cast<MTLDevice>(Dev).Device->sparseTileSizeInBytes();
+}
+
+TileShape MTLTexture::querySparseTileShape(const Device &Dev) const {
+  // The owning device is recovered from the texture so it needn't store it.
+  const MTL::Size S = llvm::cast<MTLDevice>(Dev).Device->sparseTileSize(
+      Tex->textureType(), Tex->pixelFormat(), Tex->sampleCount());
+  return TileShape{static_cast<uint32_t>(S.width),
+                   static_cast<uint32_t>(S.height),
+                   static_cast<uint32_t>(S.depth)};
+}
 
 llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
   if (Items.empty())
