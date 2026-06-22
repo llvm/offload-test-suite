@@ -63,7 +63,7 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8582
-# XFAIL: DXC
+# XFAIL: DXC && D3D12
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
