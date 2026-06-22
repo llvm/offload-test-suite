@@ -2752,6 +2752,39 @@ public:
     return llvm::Error::success();
   }
 
+  static llvm::Error
+  CopyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
+                   ResourcePair &R) {
+    if (R.first->isTexture()) {
+      for (const ResourceSet &RS : R.second) {
+        if (RS.Readback == nullptr)
+          continue;
+
+        if (auto Err =
+                ReadbackEncoder.copyTextureToBuffer(*RS.Texture, *RS.Readback))
+          return Err;
+      }
+    } else if (R.first->isBuffer()) {
+      for (const ResourceSet &RS : R.second) {
+        if (RS.Readback == nullptr)
+          continue;
+
+        if (auto Err = ReadbackEncoder.copyBufferToBuffer(
+                *RS.Buffer, 0, *RS.Readback, 0, RS.Buffer->getSizeInBytes()))
+          return Err;
+
+        if (!RS.Buffer->getDesc().HasCounter)
+          continue;
+
+        if (auto Err = ReadbackEncoder.copyCounterToBuffer(*RS.Buffer,
+                                                           *RS.CounterReadback))
+          return Err;
+      }
+    }
+
+    return llvm::Error::success();
+  }
+
   llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
     if (IS.DescHeap) {
@@ -2866,41 +2899,13 @@ public:
       return EncoderOrErr.takeError();
     auto ReadbackEncoder = std::move(*EncoderOrErr);
 
-    auto CopyBackResource = [&ReadbackEncoder](ResourcePair &R) -> llvm::Error {
-      if (R.first->isTexture()) {
-        for (const ResourceSet &RS : R.second) {
-          if (RS.Readback == nullptr)
-            continue;
-          if (auto Err = ReadbackEncoder->copyTextureToBuffer(*RS.Texture,
-                                                              *RS.Readback))
-            return Err;
-        }
-      } else {
-        for (const ResourceSet &RS : R.second) {
-          if (RS.Readback == nullptr)
-            continue;
-
-          if (auto Err = ReadbackEncoder->copyBufferToBuffer(
-                  *RS.Buffer, 0, *RS.Readback, 0,
-                  RS.Readback->getSizeInBytes()))
-            return Err;
-
-          if (RS.Buffer->getDesc().HasCounter)
-            if (auto Err = ReadbackEncoder->copyCounterToBuffer(
-                    *RS.Buffer, *RS.CounterReadback))
-              return Err;
-        }
-      }
-      return llvm::Error::success();
-    };
-
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = CopyBackResource(R))
+        if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = CopyBackResource(R))
+      if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
         return Err;
 
     ReadbackEncoder->endEncoding();
@@ -3086,35 +3091,13 @@ public:
                                                         *IS.RTReadback))
       return Err;
 
-    auto CopyBackResource = [&ReadbackEncoder](ResourcePair &R) -> llvm::Error {
-      if (R.first->isTexture()) {
-        for (const ResourceSet &RS : R.second) {
-          if (RS.Readback == nullptr)
-            continue;
-
-          if (auto Err = ReadbackEncoder->copyTextureToBuffer(*RS.Texture,
-                                                              *RS.Readback))
-            return Err;
-        }
-      } else {
-        for (const ResourceSet &RS : R.second) {
-          if (RS.Readback != nullptr)
-            if (auto Err = ReadbackEncoder->copyBufferToBuffer(
-                    *RS.Buffer, 0, *RS.Readback, 0,
-                    RS.Buffer->getSizeInBytes()))
-              return Err;
-        }
-      }
-      return llvm::Error::success();
-    };
-
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = CopyBackResource(R))
+        if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = CopyBackResource(R))
+      if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
         return Err;
 
     return llvm::Error::success();
