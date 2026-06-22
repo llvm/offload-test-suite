@@ -2565,7 +2565,6 @@ public:
                 : toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
-        const Format Fmt = *FormatOrErr;
 
         LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
@@ -2576,7 +2575,7 @@ public:
         CreateDesc.Usage = TextureUsage::Sampled;
         if (R.Kind == ResourceKind::RWTexture2D)
           CreateDesc.Usage |= TextureUsage::Storage;
-        CreateDesc.Fmt = Fmt;
+        CreateDesc.Fmt = *FormatOrErr;
         CreateDesc.Width = R.BufferPtr->OutputProps.Width;
         CreateDesc.Height = R.BufferPtr->OutputProps.Height;
         CreateDesc.MipLevels = 1;
