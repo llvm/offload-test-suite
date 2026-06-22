@@ -52,8 +52,8 @@ DescriptorSets:
 # Bug: https://github.com/llvm/llvm-project/issues/192523
 # XFAIL: Clang && Vulkan
 
-# DXC: ICE (`llvm::cast<X>()` argument of incompatible type).
-# XFAIL: DXC
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8580
+# XFAIL: DXC && D3D12
 
 # Bug: https://github.com/llvm/llvm-project/issues/205169
 # XFAIL: Clang
