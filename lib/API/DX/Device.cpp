@@ -2753,7 +2753,7 @@ public:
   }
 
   static llvm::Error
-  CopyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
+  copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
                    ResourcePair &R) {
     if (R.first->isTexture()) {
       for (const ResourceSet &RS : R.second) {
@@ -2901,11 +2901,11 @@ public:
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
+        if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
+      if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
         return Err;
 
     ReadbackEncoder->endEncoding();
@@ -3093,11 +3093,11 @@ public:
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
+        if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = DXDevice::CopyBackResource(*ReadbackEncoder, R))
+      if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
         return Err;
 
     return llvm::Error::success();
