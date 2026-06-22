@@ -53,7 +53,7 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8580
-# XFAIL: DXC && (D3D12 || Metal)
+# XFAIL: DXC && (DirectX || Metal)
 
 # Bug: https://github.com/llvm/llvm-project/issues/205169
 # XFAIL: Clang
