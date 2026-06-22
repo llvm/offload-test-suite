@@ -106,7 +106,7 @@ Results:
 
 # REQUIRES: raytracing-pipeline
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
-# XFAIL: Clang, DirectX, Metal
+# XFAIL: Clang, Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
