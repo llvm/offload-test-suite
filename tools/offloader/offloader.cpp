@@ -126,7 +126,7 @@ static int run() {
   // path N times on the offloader command line.
   if (PipelineDesc.isRayTracing() && InputShader.size() == 1 &&
       PipelineDesc.Shaders.size() > 1) {
-    std::unique_ptr<MemoryBuffer> Lib = readFile(InputShader[0]);
+    const std::unique_ptr<MemoryBuffer> Lib = readFile(InputShader[0]);
     const StringRef LibBytes = Lib->getBuffer();
     const StringRef LibName = Lib->getBufferIdentifier();
     for (size_t I = 0; I < PipelineDesc.Shaders.size(); ++I)
