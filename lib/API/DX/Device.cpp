@@ -2747,6 +2747,13 @@ public:
                 DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
             HeapIndex += 1;
           }
+
+          assert(DescriptorHandle.ptr != 0 &&
+                 "Somehow got a null descriptor :(");
+          Device->CopyDescriptorsSimple(
+              1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
+              DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+          HeapIndex += 1;
         }
       }
     }
