@@ -1584,15 +1584,11 @@ private:
     // Lifetime-tied to the pipeline; only set for RT pipelines.
     std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
 
-    // FrameBuffer associated data for offscreen rendering.
-    VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
-
-    uint32_t ShaderStageMask = 0;
 
     llvm::SmallVector<ResourceBundle> Resources;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
@@ -3925,29 +3921,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createFrameBuffer(InvocationState &IS) {
-    auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
-    auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-
-    std::array<VkImageView, 2> Views = {RT.View, DS.View};
-
-    VkFramebufferCreateInfo FbufCreateInfo = {};
-    FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    FbufCreateInfo.renderPass =
-        llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
-    FbufCreateInfo.attachmentCount = Views.size();
-    FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = RT.Desc.Width;
-    FbufCreateInfo.height = RT.Desc.Height;
-    FbufCreateInfo.layers = 1;
-
-    if (auto Err = VK::toError(vkCreateFramebuffer(Device, &FbufCreateInfo,
-                                                   nullptr, &IS.FrameBuffer),
-                               "Failed to create frame buffer."))
-      return Err;
-    return llvm::Error::success();
-  }
-
   static llvm::Expected<VkSpecializationMapEntry>
   parseSpecializationConstant(const SpecializationConstant &SpecConst,
                               llvm::SmallVectorImpl<char> &SpecData) {
@@ -4559,9 +4532,6 @@ public:
       }
     }
 
-    if (IS.FrameBuffer)
-      vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
-
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
   }
@@ -4736,10 +4706,6 @@ public:
         State.Pipeline = std::move(*PipelineStateOrErr);
         llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
-
-      if (auto Err = createFrameBuffer(State))
-        return Err;
-      llvm::outs() << "Frame buffer created.\n";
     } else if (P.isRayTracing()) {
       if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
         return llvm::createStringError(
