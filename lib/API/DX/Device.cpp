@@ -2559,9 +2559,13 @@ public:
                                          "Multiple mip levels are not yet "
                                          "supported for DirectX textures.");
 
-        auto FormatOrErr = toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+        auto FormatOrErr =
+            R.BufferPtr->GpuFormat
+                ? llvm::Expected<Format>(*R.BufferPtr->GpuFormat)
+                : toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
+        const Format Fmt = *FormatOrErr;
 
         LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
@@ -2572,7 +2576,7 @@ public:
         CreateDesc.Usage = TextureUsage::Sampled;
         if (R.Kind == ResourceKind::RWTexture2D)
           CreateDesc.Usage |= TextureUsage::Storage;
-        CreateDesc.Fmt = *FormatOrErr;
+        CreateDesc.Fmt = Fmt;
         CreateDesc.Width = R.BufferPtr->OutputProps.Width;
         CreateDesc.Height = R.BufferPtr->OutputProps.Height;
         CreateDesc.MipLevels = 1;

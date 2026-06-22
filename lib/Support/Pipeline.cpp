@@ -363,6 +363,7 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
   I.mapRequired("Name", B.Name);
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
+  I.mapOptional("GpuFormat", B.GpuFormat);
   I.mapOptional("Stride", B.Stride, 0);
   I.mapOptional("ArraySize", B.ArraySize, 1);
   setCounters(I, B);
@@ -405,9 +406,6 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
     setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
     break;
   case DF::Float32:
-    setData<float>(I, B);
-    break;
-  case DF::Depth32:
     setData<float>(I, B);
     break;
   case DF::Float64:
@@ -527,8 +525,6 @@ void MappingTraits<offloadtest::PushConstantValue>::mapping(
   case DF::Float16:
     return setData<llvm::yaml::Hex16>(I, B); // assuming no native float16
   case DF::Float32:
-    return setData<float>(I, B);
-  case DF::Depth32:
     return setData<float>(I, B);
   case DF::Float64:
     return setData<double>(I, B);

@@ -80,13 +80,6 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::RGBA32Float;
     }
     break;
-  case DataFormat::Depth32:
-    // D32FloatS8Uint is not expressible as DataFormat + Channels because the
-    // stencil component is uint8, not a second Depth32 channel. Once the
-    // pipeline uses Format directly, this limitation goes away.
-    if (Channels == 1)
-      return Format::D32Float;
-    break;
   case DataFormat::UInt64:
     // Only 1 and 2 channels of 64-bit integers are supported.
     switch (Channels) {
