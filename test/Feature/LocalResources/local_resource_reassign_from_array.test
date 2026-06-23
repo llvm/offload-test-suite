@@ -1,6 +1,8 @@
 #--- source.hlsl
-// Test that a local resource can be reassigned from different elements
-// of a global resource array (bindless selection pattern).
+// Test that reassigning a local resource from different elements of a
+// global resource array correctly updates the live binding. Both bindings
+// are observably used (each does a Store) so DCE cannot drop either, and
+// the test fails if the compiler picks the wrong element for either Store.
 
 RWByteAddressBuffer gBufArray[4] : register(u0);
 
@@ -8,6 +10,7 @@ RWByteAddressBuffer gBufArray[4] : register(u0);
 void main() {
     RWByteAddressBuffer buf;
     buf = gBufArray[2];
+    buf.Store(0, 100);
     buf = gBufArray[3];
     buf.Store(0, 42);
 }
@@ -35,7 +38,7 @@ Buffers:
     Data:
       - [0]
       - [0]
-      - [0]
+      - [100]
       - [42]
 Results:
   - Result: ArrayCheck
