@@ -363,7 +363,7 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
   I.mapRequired("Name", B.Name);
   I.mapRequired("Format", B.Format);
   I.mapOptional("Channels", B.Channels, 1);
-  I.mapOptional("GpuFormat", B.GpuFormat);
+  I.mapOptional("GPUFormat", B.GPUFormat);
   I.mapOptional("Stride", B.Stride, 0);
   I.mapOptional("ArraySize", B.ArraySize, 1);
   setCounters(I, B);

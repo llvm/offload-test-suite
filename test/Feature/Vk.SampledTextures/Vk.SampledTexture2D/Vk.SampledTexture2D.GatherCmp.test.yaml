@@ -50,7 +50,7 @@ Shaders:
 Buffers:
   - Name: SampledTexLess
     Format: Float32
-    GpuFormat: D32Float
+    GPUFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,  # (0,0) R=0.2
@@ -60,7 +60,7 @@ Buffers:
 
   - Name: SampledTexGreater
     Format: Float32
-    GpuFormat: D32Float
+    GPUFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,
@@ -70,7 +70,7 @@ Buffers:
 
   - Name: SampledTexRepeat
     Format: Float32
-    GpuFormat: D32Float
+    GPUFormat: D32Float
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
     Data: [ 0.2,

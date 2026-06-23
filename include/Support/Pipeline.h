@@ -218,7 +218,7 @@ struct CPUBuffer {
   // inferring it from DataFormat + Channels via toFormat(). This lets depth
   // buffers and other special formats be expressed without extending
   // DataFormat.
-  std::optional<offloadtest::Format> GpuFormat;
+  std::optional<offloadtest::Format> GPUFormat;
   // Data can contain one block of data for a singular resource
   // or multiple blocks for a resource array.
   llvm::SmallVector<std::unique_ptr<char[]>> Data;

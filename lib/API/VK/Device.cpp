@@ -3391,14 +3391,14 @@ public:
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
-    const bool IsDepth = B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
+    const bool IsDepth = B.GPUFormat.has_value() && isDepthFormat(*B.GPUFormat);
     if (IsDepth && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
     VkImageCreateInfo ImageCreateInfo = {};
     ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
-    ImageCreateInfo.format = B.GpuFormat ? getVulkanFormat(*B.GpuFormat)
+    ImageCreateInfo.format = B.GPUFormat ? getVulkanFormat(*B.GPUFormat)
                                          : getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = 1;
@@ -3821,14 +3821,14 @@ public:
           ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
           ViewCreateInfo.viewType = getImageViewType(R.Kind);
           ViewCreateInfo.format =
-              R.BufferPtr->GpuFormat
-                  ? getVulkanFormat(*R.BufferPtr->GpuFormat)
+              R.BufferPtr->GPUFormat
+                  ? getVulkanFormat(*R.BufferPtr->GPUFormat)
                   : getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
           ViewCreateInfo.components = {
               VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
               VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
           ViewCreateInfo.subresourceRange.aspectMask =
-              (R.BufferPtr->GpuFormat && isDepthFormat(*R.BufferPtr->GpuFormat))
+              (R.BufferPtr->GPUFormat && isDepthFormat(*R.BufferPtr->GPUFormat))
                   ? VK_IMAGE_ASPECT_DEPTH_BIT
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
@@ -4087,7 +4087,7 @@ public:
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
       const bool IsDepth =
-          B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
+          B.GPUFormat.has_value() && isDepthFormat(*B.GPUFormat);
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -4233,7 +4233,7 @@ public:
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
       const bool IsDepth =
-          B.GpuFormat.has_value() && isDepthFormat(*B.GpuFormat);
+          B.GPUFormat.has_value() && isDepthFormat(*B.GPUFormat);
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask =
           IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;

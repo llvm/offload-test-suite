@@ -2560,8 +2560,8 @@ public:
                                          "supported for DirectX textures.");
 
         auto FormatOrErr =
-            R.BufferPtr->GpuFormat
-                ? llvm::Expected<Format>(*R.BufferPtr->GpuFormat)
+            R.BufferPtr->GPUFormat
+                ? llvm::Expected<Format>(*R.BufferPtr->GPUFormat)
                 : toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
