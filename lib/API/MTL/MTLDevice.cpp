@@ -1834,13 +1834,13 @@ public:
 
     const BufferCreateDesc ArgsBufDesc = BufferCreateDesc::uploadBuffer();
     auto ArgsBufOrErr = offloadtest::createBufferWithData(
-        *CB->Dev, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
+        *IS.CB->Dev, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
         sizeof(IRDispatchRaysArgument), nullptr, nullptr);
     if (!ArgsBufOrErr)
       return ArgsBufOrErr.takeError();
 
     auto *MTLArgsBuf = llvm::cast<MTLBuffer>(ArgsBufOrErr->get());
-    CB->KeepAliveOwned.push_back(std::move(*ArgsBufOrErr));
+    IS.CB->KeepAliveOwned.push_back(std::move(*ArgsBufOrErr));
 
     NativeEncoder->setBuffer(MTLArgsBuf->Buf, 0,
                              kIRRayDispatchArgumentsBindPoint);
