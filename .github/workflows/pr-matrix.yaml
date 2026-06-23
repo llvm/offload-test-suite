@@ -58,6 +58,20 @@ jobs:
     permissions:
       contents: read
       checks: write
+    if: contains( github.event.pull_request.labels.*.name, 'test-dx-all')
+    strategy:
+      fail-fast: false
+      matrix:
+        SKU: [windows-amd, windows-qc]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-clang-d3d12]
+    
+    if: contains( github.event.pull_request.labels.*.name, 'test-vk-all')
+    strategy:
+      fail-fast: false
+      matrix:
+        SKU: [windows-amd, windows-nvidia, windows-qc]
+        TestTarget: [check-hlsl-vk, check-hlsl-clang-vk]
+
     if: contains( github.event.pull_request.labels.*.name, 'test-all')
     strategy:
       fail-fast: false
