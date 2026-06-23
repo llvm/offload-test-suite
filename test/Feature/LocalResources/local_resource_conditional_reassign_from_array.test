@@ -118,6 +118,9 @@ DescriptorSets:
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8581
 # XFAIL: DXC && Vulkan
 
+# Bug: https://github.com/llvm/llvm-project/issues/205168
+# XFAIL: Clang
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
