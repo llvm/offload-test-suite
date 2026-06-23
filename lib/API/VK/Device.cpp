@@ -3391,7 +3391,7 @@ public:
   llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
                                           int UsageOverride = 0) {
     const offloadtest::CPUBuffer &B = *R.BufferPtr;
-    const bool IsDepth = B.GPUFormat.has_value() && isDepthFormat(*B.GPUFormat);
+    const bool IsDepth = B.GPUFormat && isDepthFormat(*B.GPUFormat);
     if (IsDepth && R.isReadWrite())
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Image memory allocation failed.");
@@ -4086,8 +4086,7 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      const bool IsDepth =
-          B.GPUFormat.has_value() && isDepthFormat(*B.GPUFormat);
+      const bool IsDepth = B.GPUFormat && isDepthFormat(*B.GPUFormat);
       llvm::SmallVector<VkBufferImageCopy> Regions;
       uint64_t CurrentOffset = 0;
       for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
@@ -4232,8 +4231,7 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      const bool IsDepth =
-          B.GPUFormat.has_value() && isDepthFormat(*B.GPUFormat);
+      const bool IsDepth = B.GPUFormat && isDepthFormat(*B.GPUFormat);
       VkImageSubresourceRange SubRange = {};
       SubRange.aspectMask =
           IsDepth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
