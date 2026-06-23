@@ -4,6 +4,7 @@ RWByteAddressBuffer gBuf1 : register(u1);
 
 uint Pass_Reassign(uint idx) {
     RWByteAddressBuffer buf = gBuf0;
+    buf.Store(idx * 4, 7);
     buf = gBuf1;
     buf.Store(idx * 4, 13);
 
@@ -34,7 +35,7 @@ Buffers:
   - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7]
   - Name: ExpectedBuf1
     Format: Int32
     Stride: 4

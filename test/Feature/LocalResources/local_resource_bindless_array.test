@@ -1,12 +1,14 @@
 #--- source.hlsl
-// Test that a local resource can be assigned from a dynamically-indexed
-// global resource array (bindless pattern).
+// Test that a local resource initialized from a dynamically-indexed
+// global resource array dispatches to the correct array element. The
+// 4-thread dispatch and per-thread index ensure the compiler cannot
+// constant-fold the index away.
 
 RWByteAddressBuffer gBufArray[4] : register(u0);
 
-[numthreads(1,1,1)]
+[numthreads(4,1,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
-    RWByteAddressBuffer buf = gBufArray[tid.x & 3];
+    RWByteAddressBuffer buf = gBufArray[tid.x];
     buf.Store(0, 42);
 }
 
@@ -32,9 +34,9 @@ Buffers:
     ArraySize: 4
     Data:
       - [42]
-      - [0]
-      - [0]
-      - [0]
+      - [42]
+      - [42]
+      - [42]
 Results:
   - Result: ArrayCheck
     Rule: BufferExact
