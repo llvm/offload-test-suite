@@ -38,7 +38,6 @@ void main(uint GI : SV_GroupIndex) {
 Shaders:
   - Stage: Compute
     Entry: main
-    DispatchSize: [1, 1, 1]
 Buffers:
   - Name: In
     Format: Int32
@@ -133,8 +132,8 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/704
 # XFAIL: Clang && Intel && Vulkan
 
-# Bug https://github.com/llvm/offload-test-suite/issues/705
-# XFAIL: Clang && NV && DirectX
+# Bug: https://github.com/llvm/offload-test-suite/issues/696
+# XFAIL: Intel-Gen-Current && DirectX && Clang
 
 # Note: Metal does not support boolean matrix types. For
 # Vulkan KosmicKrisp and MoltenVK the output is always False.
