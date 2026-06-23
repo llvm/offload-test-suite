@@ -1832,15 +1832,19 @@ public:
         RTPSO.IFT ? RTPSO.IFT->gpuResourceID() : MTL::ResourceID{0};
     Args.IntersectionFunctionTables = 0;
 
-    MTL::Buffer *ArgsBuf = Device->newBuffer(
-        &Args, sizeof(IRDispatchRaysArgument), MTL::ResourceStorageModeShared);
-    if (!ArgsBuf)
-      return llvm::createStringError(
-          std::errc::not_enough_memory,
-          "Failed to allocate IRDispatchRaysArgument buffer.");
-    IS.CB->KeepAliveMTLBuffers.push_back(ArgsBuf);
-    NativeEncoder->setBuffer(ArgsBuf, 0, kIRRayDispatchArgumentsBindPoint);
-    NativeEncoder->useResource(ArgsBuf, MTL::ResourceUsageRead);
+    const BufferCreateDesc ArgsBufDesc = BufferCreateDesc::uploadBuffer();
+    auto ArgsBufOrErr = offloadtest::createBufferWithData(
+        *CB->Dev, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
+        sizeof(IRDispatchRaysArgument), nullptr, nullptr);
+    if (!ArgsBufOrErr)
+      return ArgsBufOrErr.takeError();
+
+    auto *MTLArgsBuf = llvm::cast<MTLBuffer>(ArgsBufOrErr->get());
+    CB->KeepAliveOwned.push_back(std::move(*ArgsBufOrErr));
+
+    NativeEncoder->setBuffer(MTLArgsBuf->Buf, 0,
+                             kIRRayDispatchArgumentsBindPoint);
+    NativeEncoder->useResource(MTLArgsBuf->Buf, MTL::ResourceUsageRead);
 
     // Mark every dispatch-side resource resident: descriptor-table bundles,
     // acceleration structures + their irconverter header/contribution
@@ -1853,12 +1857,19 @@ public:
           NativeEncoder->useResource(ResSet.Resource.get(),
                                      MTL::ResourceUsageRead |
                                          MTL::ResourceUsageWrite);
-    for (auto &AS : IS.AccelStructs) {
-      auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
-      NativeEncoder->useResource(MTLAS->AccelStruct, MTL::ResourceUsageRead);
-    }
-    for (MTL::Buffer *B : IS.ASDescriptorBuffers)
-      NativeEncoder->useResource(B, MTL::ResourceUsageRead);
+    auto MarkASResident =
+        [&](std::unique_ptr<offloadtest::AccelerationStructure> &AS) {
+          auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
+          NativeEncoder->useResource(MTLAS->AccelStruct,
+                                     MTL::ResourceUsageRead);
+        };
+    for (auto &AS : IS.BLASes)
+      MarkASResident(AS);
+    for (auto &Entry : IS.TLASes)
+      MarkASResident(Entry.second);
+    for (auto &B : IS.ASDescriptorBuffers)
+      NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
+                                 MTL::ResourceUsageRead);
     if (SBT.Buffer)
       NativeEncoder->useResource(SBT.Buffer, MTL::ResourceUsageRead);
     if (RTPSO.VFT)
