@@ -54,6 +54,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1334
+# XFAIL: AMD && (DXC || (Clang && DirectX))
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/305
 # UNSUPPORTED: Metal
 
