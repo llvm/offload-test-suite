@@ -2916,8 +2916,7 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
             GD.Triangles.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
           }
           if (T.Transform) {
-            const BufferCreateDesc XformDesc{MemoryLocation::CpuToGpu,
-                                             BufferUsage::Storage};
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
             auto XformOrErr = offloadtest::createBufferWithData(
                 *Dev, "AS-Geom-Transform", XformDesc, T.Transform->data(),
                 T.Transform->size() * sizeof(float), nullptr, nullptr);
