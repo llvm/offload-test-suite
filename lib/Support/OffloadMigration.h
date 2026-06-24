@@ -51,6 +51,7 @@ struct ResourceSet {
         Readback(std::move(Readback)),
         CounterReadback(std::move(CounterReadback)) {}
   ResourceSet(std::unique_ptr<offloadtest::Texture> Texture,
+              std::unique_ptr<offloadtest::Sampler> Sampler,
               std::unique_ptr<MemoryHeap> BackingMemory,
               std::unique_ptr<offloadtest::Buffer> Readback)
       : BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),

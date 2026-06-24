@@ -2654,12 +2654,12 @@ public:
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  void buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
+  llvm::Error buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
                              const ComPtr<ID3D12DescriptorHeap> &DescHeap,
                              const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     // Bind descriptors in descriptor tables.
     if (!DescHeap && !SamplerHeap)
-      return;
+      return llvm::Error::success();
 
     uint32_t HeapIndex = 0;
     uint32_t SamplerHeapIndex = 0;
@@ -2702,6 +2702,10 @@ public:
               break;
             }
           } else if (Set.Texture != nullptr) {
+            if (Set.Sampler != nullptr)
+              return llvm::createStringError(
+                  "DirectX 12 does not support Combined Image Samplers.");
+
             const DXTexture &TextureDX =
                 llvm::cast<DXTexture>(*Set.Texture.get());
             switch (getDescriptorKind(R.first->Kind)) {
@@ -2757,6 +2761,8 @@ public:
         }
       }
     }
+
+    return llvm::Error::success();
   }
 
   llvm::Error
@@ -3034,7 +3040,8 @@ public:
       return Err;
     llvm::outs() << "Buffers created.\n";
 
-    buildDescriptorTables(State.DescTables, DescHeap, SamplerHeap);
+    if (auto Err = buildDescriptorTables(State.DescTables, DescHeap, SamplerHeap))
+      return Err;
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
       auto EncOrErr = State.CB->createComputeEncoder();

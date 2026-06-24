@@ -540,7 +540,19 @@ public:
 
 class VulkanSampler : public offloadtest::Sampler {
 public:
+  VkSampler Sampler;
+  VkDevice Device;
+  std::string Name;
   SamplerCreateDesc Desc;
+
+  VulkanSampler(std::string Name, const SamplerCreateDesc &Desc,
+                VkSampler Sampler, VkDevice Device)
+      : offloadtest::Sampler(GPUAPI::Vulkan), Sampler(Sampler), Device(Device),
+        Name(std::move(Name)), Desc(Desc) {}
+  ~VulkanSampler() override {
+    if (Sampler)
+      vkDestroySampler(Device, Sampler, nullptr);
+  }
 
   const SamplerCreateDesc &getDesc() const override { return Desc; }
 
@@ -2952,8 +2964,35 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<Sampler>>
-  createSampler(std::string, const SamplerCreateDesc &) override {
-    return llvm::createStringError("createSampler is unimplemented on Vulkan.");
+  createSampler(std::string Name, const SamplerCreateDesc &Desc) override {
+
+    VkSamplerCreateInfo SamplerInfo = {};
+    SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    SamplerInfo.magFilter = getVKFilter(Desc.MagFilter);
+    SamplerInfo.minFilter = getVKFilter(Desc.MinFilter);
+    SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    SamplerInfo.addressModeU = getVKAddressMode(Desc.Address);
+    SamplerInfo.addressModeV = getVKAddressMode(Desc.Address);
+    SamplerInfo.addressModeW = getVKAddressMode(Desc.Address);
+    SamplerInfo.mipLodBias = Desc.MipLODBias;
+    SamplerInfo.anisotropyEnable = VK_FALSE;
+    SamplerInfo.maxAnisotropy = 1.0f;
+    SamplerInfo.compareEnable =
+        Desc.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+    SamplerInfo.compareOp = getVKCompareOp(Desc.ComparisonOp);
+    SamplerInfo.minLod = Desc.MinLOD;
+    SamplerInfo.maxLod = Desc.MaxLOD;
+    SamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    SamplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler Sampler;
+    if (auto Err = VK::toError(
+            vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler),
+            "Failed to create sampler."))
+      return Err;
+
+    return std::make_unique<VulkanSampler>(std::move(Name), Desc, Sampler,
+                                           Device);
   }
 
   uint32_t getTextureUploadRowStrideInBytes(
@@ -3573,7 +3612,6 @@ public:
           continue;
         }
         if (R.isSampler()) {
-          assert(false && "No sampler support for now :(");
           ImageInfoCount += 1;
           continue;
         }
@@ -3654,11 +3692,20 @@ public:
               BufferInfos.push_back(BI);
             }
           } else if (RS.Texture != nullptr) {
+            // Combined Image Sampler
+            VkSampler SamplerHandle = VK_NULL_HANDLE;
+            if (RS.Sampler != nullptr)
+              SamplerHandle = llvm::cast<VulkanSampler>(*RS.Sampler).Sampler;
+
             VulkanTexture &TextureVk = llvm::cast<VulkanTexture>(*RS.Texture);
-            // TODO(manon): Support combined image samplers (and samplers in
-            // general)
             const VkDescriptorImageInfo ImageInfo = {
-                VK_NULL_HANDLE, TextureVk.View, TextureVk.PreferredLayout};
+                SamplerHandle, TextureVk.View, TextureVk.PreferredLayout};
+            ImageInfos.push_back(ImageInfo);
+          } else if (RS.Sampler != nullptr) {
+            VulkanSampler &SamplerVk = llvm::cast<VulkanSampler>(*RS.Sampler);
+            const VkDescriptorImageInfo ImageInfo = {
+                SamplerVk.Sampler, VK_NULL_HANDLE,
+                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             ImageInfos.push_back(ImageInfo);
           } else {
             return llvm::createStringError(
@@ -3692,7 +3739,6 @@ public:
             assert(BufferVk.Desc.HasCounter &&
                    "Pipeline Resource says there is a counter, actual buffer "
                    "is missing it.");
-            // TODO(manon): Is it fine if we interleave these? NO :(
             if (BufferVk.Desc.HasCounter) {
               const VkDescriptorBufferInfo CBI = {BufferVk.CounterBuffer, 0,
                                                   VK_WHOLE_SIZE};

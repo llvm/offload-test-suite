@@ -310,8 +310,24 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
           ReadbackBuffer = std::move(*ReadbackOrErr);
         }
 
+        std::unique_ptr<Sampler> Sampler;
+        if (R.Kind == ResourceKind::SampledTexture2D) {
+          SamplerCreateDesc Desc = {
+              R.SamplerPtr->MinFilter,    R.SamplerPtr->MagFilter,
+              R.SamplerPtr->Address,      R.SamplerPtr->MinLOD,
+              R.SamplerPtr->MaxLOD,       R.SamplerPtr->MipLODBias,
+              R.SamplerPtr->ComparisonOp, R.SamplerPtr->Kind,
+          };
+
+          auto SamplerOrErr = Dev.createSampler(R.SamplerPtr->Name, Desc);
+          if (!SamplerOrErr)
+            return SamplerOrErr.takeError();
+          Sampler = std::move(*SamplerOrErr);
+        }
+
         IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
-        ResourceSet RSet(std::move(Texture), std::move(BackingMemoryHeap),
+        ResourceSet RSet(std::move(Texture), std::move(Sampler),
+                         std::move(BackingMemoryHeap),
                          std::move(ReadbackBuffer));
         ResBundle.push_back(std::move(RSet));
       }
