@@ -4849,8 +4849,7 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
             Tri.indexType = VK_INDEX_TYPE_NONE_KHR;
           }
           if (T.Transform) {
-            const BufferCreateDesc XformDesc{MemoryLocation::CpuToGpu,
-                                             BufferUsage::Storage};
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
             auto XformOrErr = offloadtest::createBufferWithData(
                 *Dev, "AS-Geom-Transform", XformDesc, T.Transform->data(),
                 T.Transform->size() * sizeof(float), nullptr, nullptr);

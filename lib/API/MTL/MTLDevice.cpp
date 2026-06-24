@@ -3068,8 +3068,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
           }
           TD->setOpaque(T.Opaque);
           if (T.Transform) {
-            const BufferCreateDesc XformDesc{MemoryLocation::CpuToGpu,
-                                             BufferUsage::Storage};
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
             auto XformBufOrErr = offloadtest::createBufferWithData(
                 *CB->Dev, "BLAS-Transform", XformDesc, T.Transform->data(),
                 T.Transform->size() * sizeof(float), nullptr, nullptr);
