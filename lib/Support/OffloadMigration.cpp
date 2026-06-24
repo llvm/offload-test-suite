@@ -256,11 +256,6 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
         ResBundle.push_back(std::move(RSet));
       }
     } else if (R.isTexture()) {
-      if (R.BufferPtr->OutputProps.MipLevels != 1)
-        return llvm::createStringError(std::errc::not_supported,
-                                       "Multiple mip levels are not yet "
-                                       "supported for DirectX textures.");
-
       auto FormatOrErr = toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
       if (!FormatOrErr)
         return FormatOrErr.takeError();

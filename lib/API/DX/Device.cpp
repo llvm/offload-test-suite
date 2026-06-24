@@ -2407,7 +2407,7 @@ public:
   llvm::Error
   createComputeCommands(Pipeline &P, SharedInvocationState &IS,
                         const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
-    DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
+    const DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
 
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
     if (DescHeap) {
@@ -2540,7 +2540,7 @@ public:
                          const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
-    DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
+    const DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
 
     DXCB.CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
     if (DescHeap) {
