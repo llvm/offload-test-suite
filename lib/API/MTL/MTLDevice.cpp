@@ -743,21 +743,27 @@ public:
     auto &MTLSrc = static_cast<MTLBuffer &>(Src);
     auto &MTLDst = static_cast<MTLTexture &>(Dst);
 
-    // The upload buffer is laid out with a tightly packed row stride matching
-    // getTextureUploadRowStrideInBytes(), so the source bytes-per-row is the
-    // texture width times the element size.
+    // The upload buffer holds tightly packed texel data for every mip level
+    // (see createTextureWithData): each mip's rows are contiguous with no
+    // padding, and the mips follow one another. Copy one mip at a time, with
+    // the source bytes-per-row being that mip's width times the element size.
     const size_t ElemSize = getFormatSizeInBytes(MTLDst.Desc.Fmt);
-    const size_t RowBytes = MTLDst.Desc.Width * ElemSize;
-    const size_t ImageBytes = RowBytes * MTLDst.Desc.Height;
-    const MTL::Size CopySize(MTLDst.Desc.Width, MTLDst.Desc.Height, 1);
 
     insertDebugSignpost(llvm::formatv("copyBufferToTexture {0} -> {1}",
                                       MTLSrc.Name, MTLDst.Name)
                             .str());
-    BlitEnc->copyFromBuffer(MTLSrc.Buf, /*sourceOffset=*/0, RowBytes,
-                            ImageBytes, CopySize, MTLDst.Tex,
-                            /*destinationSlice=*/0, /*destinationLevel=*/0,
-                            MTL::Origin(0, 0, 0));
+    size_t CurrentOffset = 0;
+    for (uint32_t I = 0; I < MTLDst.Desc.MipLevels; ++I) {
+      const uint32_t MipWidth = std::max(1u, MTLDst.Desc.Width >> I);
+      const uint32_t MipHeight = std::max(1u, MTLDst.Desc.Height >> I);
+      const size_t RowBytes = MipWidth * ElemSize;
+      const size_t ImageBytes = RowBytes * MipHeight;
+      BlitEnc->copyFromBuffer(MTLSrc.Buf, CurrentOffset, RowBytes, ImageBytes,
+                              MTL::Size(MipWidth, MipHeight, 1), MTLDst.Tex,
+                              /*destinationSlice=*/0, /*destinationLevel=*/I,
+                              MTL::Origin(0, 0, 0));
+      CurrentOffset += ImageBytes;
+    }
     addBarrierScope(MTL::BarrierScopeTextures);
 
     return llvm::Error::success();
@@ -2416,6 +2422,12 @@ public:
   uint32_t getTextureUploadRowStrideInBytes(
       const TextureCreateDesc &Desc) const override {
     return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  }
+
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // copyBufferToTexture consumes a tightly-packed staging buffer.
+    return computeTightTextureUploadLayout(Desc);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
