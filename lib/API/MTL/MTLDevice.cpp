@@ -3249,7 +3249,10 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         for (int Row = 0; Row < 3; ++Row)
           for (int Col = 0; Col < 4; ++Col)
             D.transformationMatrix.columns[Col][Row] = Src.Transform[Row][Col];
-        D.options = MTL::AccelerationStructureInstanceOptionNone;
+        // Bits in AccelerationStructureInstanceFlags match
+        // MTLAccelerationStructureInstanceOptions by design.
+        D.options =
+            static_cast<MTL::AccelerationStructureInstanceOptions>(Src.Flags);
         D.mask = Src.InstanceMask;
         D.intersectionFunctionTableOffset = 0;
         D.accelerationStructureIndex = InstanceASIdx[I];

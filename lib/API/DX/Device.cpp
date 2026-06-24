@@ -3454,7 +3454,9 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         NI.InstanceMask = Inst.InstanceMask;
         NI.InstanceContributionToHitGroupIndex =
             Inst.InstanceContributionToHitGroupIndex & 0xFFFFFFu;
-        NI.Flags = D3D12_RAYTRACING_INSTANCE_FLAG_NONE;
+        // Bits in AccelerationStructureInstanceFlags match
+        // D3D12_RAYTRACING_INSTANCE_FLAGS by design.
+        NI.Flags = static_cast<D3D12_RAYTRACING_INSTANCE_FLAGS>(Inst.Flags);
         auto *BLASPtr = llvm::cast<DXAccelerationStructure>(Inst.BLAS);
         NI.AccelerationStructure = BLASPtr->getGPUVirtualAddress();
         Native.push_back(NI);
