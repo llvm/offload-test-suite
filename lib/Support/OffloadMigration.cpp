@@ -272,7 +272,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       CreateDesc.Fmt = *FormatOrErr;
       CreateDesc.Width = R.BufferPtr->OutputProps.Width;
       CreateDesc.Height = R.BufferPtr->OutputProps.Height;
-      CreateDesc.MipLevels = 1;
+      CreateDesc.MipLevels = R.BufferPtr->OutputProps.MipLevels;
 
       for (auto &Data : R.BufferPtr->Data) {
         std::unique_ptr<offloadtest::Buffer> UploadBuffer;
@@ -290,7 +290,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
           Texture = std::move(*TextureOrErr);
         } else {
           auto TextureOrErr =
-              createTextureWithData(Dev, "Texture", CreateDesc, Data.get(),
+              createTextureWithData(Dev, R.Name, CreateDesc, Data.get(),
                                     R.size(), Enc.get(), &UploadBuffer);
           if (!TextureOrErr)
             return TextureOrErr.takeError();
