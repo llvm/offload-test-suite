@@ -197,6 +197,10 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("MeshShader")
         if device["Features"].get("supportsRaytracing", False):
             config.available_features.add("acceleration-structure")
+            # The Metal RT pipeline path lowers DXIL → Metal IR via
+            # metal_irconverter; gate on the same Raytracing-tier capability
+            # as inline RT, matching the DX / VK plumbing-vs-impl split.
+            config.available_features.add("raytracing-pipeline")
 
     if device["API"] == "Vulkan":
         if device["Features"].get("shaderInt16", False):

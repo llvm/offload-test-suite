@@ -188,3 +188,7 @@ void MTLTopLevelArgumentBuffer::bind(
   Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   Encoder->setBuffer(Buffer, 0, kIRArgumentBufferBindPoint);
 }
+
+uint64_t MTLTopLevelArgumentBuffer::getGPUAddress() const {
+  return Buffer ? Buffer->gpuAddress() : 0;
+}
