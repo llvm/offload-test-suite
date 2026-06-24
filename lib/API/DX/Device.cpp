@@ -50,6 +50,8 @@
 
 #include "../Util.h"
 
+#include "../Support/OffloadMigration.h"
+
 #include <atomic>
 #include <codecvt>
 #include <locale>
@@ -137,71 +139,6 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
     return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
-}
-
-static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
-  const uint64_t AlignedPitch =
-      getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
-  const uint64_t LastRowSize =
-      uint64_t(B.OutputProps.Width) * B.getElementSize();
-  return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
-}
-
-static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
-  // Determine Buffer Usage
-  switch (Kind) {
-  case ResourceKind::Buffer:
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::RWBuffer:
-  case ResourceKind::RWStructuredBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-    return BufferUsage::Storage;
-  case ResourceKind::ConstantBuffer:
-    return BufferUsage::ConstantBuffer;
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::Sampler:
-  case ResourceKind::SampledTexture2D:
-  case ResourceKind::AccelerationStructure:
-    llvm_unreachable("Invalid case, ResourceKind is not a buffer.");
-  }
-  llvm_unreachable("All ResourceKind cases handled");
-}
-
-static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
-    const Resource &Resource, BufferShaderAccessTypeParams &OutParams) {
-  // Determine Buffer Access Type
-  switch (Resource.Kind) {
-  case ResourceKind::Buffer:
-  case ResourceKind::RWBuffer: {
-    auto FmtOrErr =
-        toFormat(Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
-    if (!FmtOrErr) {
-      printf("Invalid format! FMT: %d, CHANNELS: %d\n",
-             Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
-      assert(false && "Invalid format.");
-    }
-    OutParams.Fmt = *FmtOrErr;
-    return BufferShaderAccessType::Typed;
-  }
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::RWStructuredBuffer:
-    OutParams.StructureStride = Resource.BufferPtr->getElementSize();
-    return BufferShaderAccessType::Structured;
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-  case ResourceKind::ConstantBuffer:
-    return BufferShaderAccessType::Raw;
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::Sampler:
-  case ResourceKind::SampledTexture2D:
-  case ResourceKind::AccelerationStructure:
-    llvm_unreachable(
-        "Invalid case, non-buffers should have been filtered out.");
-  }
-  llvm_unreachable("All ResourceKind cases handled");
 }
 
 namespace {
@@ -1230,86 +1167,6 @@ public:
   DescriptorAllocator DSVAllocator;
   DescriptorAllocator CSUAllocator;
 
-  struct ResourceSet {
-    std::unique_ptr<MemoryHeap> BackingMemory;
-    std::unique_ptr<Buffer> Buffer;
-    std::unique_ptr<Texture> Texture;
-    std::unique_ptr<offloadtest::Buffer> Readback;
-    std::unique_ptr<offloadtest::Buffer> CounterReadback;
-
-    // AS-only; mutually exclusive with the buffer/texture fields above.
-    AccelerationStructure *AS = nullptr;
-
-    ResourceSet(std::unique_ptr<offloadtest::Buffer> Buffer,
-                std::unique_ptr<MemoryHeap> BackingMemory,
-                std::unique_ptr<offloadtest::Buffer> Readback,
-                std::unique_ptr<offloadtest::Buffer> CounterReadback)
-        : BackingMemory(std::move(BackingMemory)), Buffer(std::move(Buffer)),
-          Readback(std::move(Readback)),
-          CounterReadback(std::move(CounterReadback)) {}
-    ResourceSet(std::unique_ptr<offloadtest::Texture> Texture,
-                std::unique_ptr<MemoryHeap> BackingMemory,
-                std::unique_ptr<offloadtest::Buffer> Readback)
-        : BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
-          Readback(std::move(Readback)) {}
-    explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
-
-    ResourceSet(const ResourceSet &) = delete;
-    ResourceSet &operator=(const ResourceSet &) = delete;
-
-    ResourceSet(ResourceSet &&A)
-        : BackingMemory(std::move(A.BackingMemory)),
-          Buffer(std::move(A.Buffer)), Texture(std::move(A.Texture)),
-          Readback(std::move(A.Readback)),
-          CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
-    ResourceSet &operator=(ResourceSet &&A) {
-      BackingMemory = std::move(A.BackingMemory);
-      Buffer = std::move(A.Buffer);
-      Texture = std::move(A.Texture);
-      Readback = std::move(A.Readback);
-      CounterReadback = std::move(A.CounterReadback);
-      AS = A.AS;
-      return *this;
-    }
-  };
-
-  // ResourceBundle will contain one ResourceSet for a singular resource
-  // or multiple ResourceSets for resource array.
-  using ResourceBundle = llvm::SmallVector<ResourceSet>;
-  using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
-
-  struct DescriptorTable {
-    llvm::SmallVector<ResourcePair> Resources;
-  };
-
-  struct InvocationState {
-    ComPtr<ID3D12DescriptorHeap> DescHeap;
-    std::unique_ptr<DXCommandBuffer> CB;
-    std::unique_ptr<PipelineState> Pipeline;
-    // Lifetime-tied to the pipeline; only set for RT pipelines.
-    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
-
-    // Resources for graphics pipelines.
-    std::unique_ptr<offloadtest::RenderPass> RenderPass;
-    std::unique_ptr<offloadtest::Texture> RenderTarget;
-    std::unique_ptr<offloadtest::Buffer> RTReadback;
-    std::unique_ptr<offloadtest::Texture> DepthStencil;
-    std::unique_ptr<offloadtest::Buffer> VB;
-
-    llvm::SmallVector<std::unique_ptr<Buffer>> KeepAliveBuffers;
-
-    llvm::SmallVector<DescriptorTable> DescTables;
-    llvm::SmallVector<ResourcePair> RootResources;
-
-    // Parallel-indexed to `P.AccelStructs.BLAS`.
-    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
-        BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
-    // Vertex/index buffers consumed during AS builds; must outlive submission.
-    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
-  };
-
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
            DescriptorAllocator CSUAllocator, std::string Desc,
@@ -2303,16 +2160,17 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
+  llvm::Error createDescriptorHeap(Pipeline &P,
+                                   ComPtr<ID3D12DescriptorHeap> &DescHeap) {
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
         P.getDescriptorCountWithFlattenedArrays(),
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &HeapDesc, IID_PPV_ARGS(&State.DescHeap)),
-                               "Failed to create descriptor heap."))
+    if (auto Err = HR::toError(
+            Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&DescHeap)),
+            "Failed to create descriptor heap."))
       return Err;
     return llvm::Error::success();
   }
@@ -2472,329 +2330,94 @@ public:
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    return createTLAS(*SizesOrErr);
-  }
-
-  llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    auto EncOrErr = IS.CB->createComputeEncoder();
-    if (!EncOrErr)
-      return EncOrErr.takeError();
-    auto Enc = std::move(*EncOrErr);
-
-    auto CreateBuffer =
-        [&Enc, &IS,
-         this](Resource &R,
-               llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
-      ResourceBundle ResBundle;
-      if (R.isBuffer()) {
-        BufferCreateDesc CreateDesc = {};
-        CreateDesc.Location = MemoryLocation::GpuOnly;
-        CreateDesc.Backing =
-            R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
-        CreateDesc.Usage = bufferUsageFromResourceKind(R.Kind);
-        CreateDesc.AccessType = bufferShaderAccessTypeFromResourceKind(
-            R, CreateDesc.AccessTypeParams);
-        CreateDesc.HasCounter = R.HasCounter;
-
-        for (auto &Data : R.BufferPtr->Data) {
-          std::unique_ptr<offloadtest::Buffer> UploadBuffer;
-          std::unique_ptr<offloadtest::MemoryHeap> BackingMemoryHeap;
-
-          std::unique_ptr<offloadtest::Buffer> Buffer;
-          if (R.IsReserved) {
-            auto BufferOrErr = createSparseBufferWithData(
-                *this, GraphicsQueue, "Sparse Buffer", CreateDesc, R.size(),
-                R.TilesMapped, Data.get(), R.size(), *Enc.get(), UploadBuffer,
-                BackingMemoryHeap);
-            if (!BufferOrErr)
-              return BufferOrErr.takeError();
-
-            Buffer = std::move(*BufferOrErr);
-          } else {
-            auto BufferOrErr =
-                createBufferWithData(*this, "Buffer", CreateDesc, Data.get(),
-                                     R.size(), Enc.get(), &UploadBuffer);
-            if (!BufferOrErr)
-              return BufferOrErr.takeError();
-
-            Buffer = std::move(*BufferOrErr);
-          }
-
-          std::unique_ptr<offloadtest::Buffer> ReadbackBuffer;
-          std::unique_ptr<offloadtest::Buffer> CounterReadbackBuffer;
-          if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
-            const BufferCreateDesc ReadbackDesc =
-                BufferCreateDesc::readbackBuffer();
-            auto ReadbackOrErr = createBuffer("Readback", ReadbackDesc,
-                                              Buffer->getSizeInBytes());
-            if (!ReadbackOrErr)
-              return ReadbackOrErr.takeError();
-            ReadbackBuffer = std::move(*ReadbackOrErr);
-
-            if (R.HasCounter) {
-              auto CounterReadbackOrErr =
-                  createBuffer("Readback", ReadbackDesc, sizeof(uint32_t));
-              if (!CounterReadbackOrErr)
-                return CounterReadbackOrErr.takeError();
-              CounterReadbackBuffer = std::move(*CounterReadbackOrErr);
-            }
-          }
-
-          IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
-          ResourceSet RSet(std::move(Buffer), std::move(BackingMemoryHeap),
-                           std::move(ReadbackBuffer),
-                           std::move(CounterReadbackBuffer));
-          ResBundle.push_back(std::move(RSet));
-        }
-      } else if (R.isTexture()) {
-        if (R.BufferPtr->OutputProps.MipLevels != 1)
-          return llvm::createStringError(std::errc::not_supported,
-                                         "Multiple mip levels are not yet "
-                                         "supported for DirectX textures.");
-
-        auto FormatOrErr = toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-        if (!FormatOrErr)
-          return FormatOrErr.takeError();
-
-        LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
-
-        TextureCreateDesc CreateDesc = {};
-        CreateDesc.Location = MemoryLocation::GpuOnly;
-        CreateDesc.Backing =
-            R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
-        CreateDesc.Usage = TextureUsage::Sampled;
-        if (R.Kind == ResourceKind::RWTexture2D)
-          CreateDesc.Usage |= TextureUsage::Storage;
-        CreateDesc.Fmt = *FormatOrErr;
-        CreateDesc.Width = R.BufferPtr->OutputProps.Width;
-        CreateDesc.Height = R.BufferPtr->OutputProps.Height;
-        CreateDesc.MipLevels = 1;
-
-        for (auto &Data : R.BufferPtr->Data) {
-          std::unique_ptr<offloadtest::Buffer> UploadBuffer;
-          std::unique_ptr<offloadtest::MemoryHeap> BackingMemoryHeap;
-
-          std::unique_ptr<offloadtest::Texture> Texture;
-          if (R.IsReserved) {
-            auto TextureOrErr = createSparseTextureWithData(
-                *this, GraphicsQueue, "Sparse Texture", CreateDesc, Data.get(),
-                R.size(), *Enc.get(), UploadBuffer, BackingMemoryHeap);
-            if (!TextureOrErr)
-              return TextureOrErr.takeError();
-
-            Texture = std::move(*TextureOrErr);
-          } else {
-            auto TextureOrErr =
-                createTextureWithData(*this, "Texture", CreateDesc, Data.get(),
-                                      R.size(), Enc.get(), &UploadBuffer);
-            if (!TextureOrErr)
-              return TextureOrErr.takeError();
-
-            Texture = std::move(*TextureOrErr);
-          }
-
-          std::unique_ptr<Buffer> ReadbackBuffer;
-          if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
-            const BufferCreateDesc ReadbackDesc =
-                BufferCreateDesc::readbackBuffer();
-            auto ReadbackOrErr =
-                createBuffer("Readback", ReadbackDesc,
-                             Texture->calculateLinearSizeInBytes(*this));
-            if (!ReadbackOrErr)
-              return ReadbackOrErr.takeError();
-            ReadbackBuffer = std::move(*ReadbackOrErr);
-          }
-
-          IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
-          ResourceSet RSet(std::move(Texture), std::move(BackingMemoryHeap),
-                           std::move(ReadbackBuffer));
-          ResBundle.push_back(std::move(RSet));
-        }
-      } else if (R.isAccelerationStructure()) {
-        auto ASOrErr = createAS(R);
-        if (!ASOrErr)
-          return ASOrErr.takeError();
-        ResBundle.emplace_back(ASOrErr->get());
-        auto Inserted =
-            IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
-        assert(Inserted.second && "TLAS bound to multiple resources NYI");
-        (void)Inserted;
-      } else {
-        return llvm::createStringError(
-            std::errc::not_supported,
-            "Samplers are not yet implemented for DirectX.");
-      }
-
-      Resources.push_back(std::make_pair(&R, std::move(ResBundle)));
-      return llvm::Error::success();
-    };
-
-    for (auto &D : P.Sets) {
-      IS.DescTables.emplace_back(DescriptorTable());
-      DescriptorTable &Table = IS.DescTables.back();
-      for (auto &R : D.Resources)
-        if (auto Err = CreateBuffer(R, Table.Resources))
-          return Err;
-    }
-
-    Enc->endEncoding();
-
+  void buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
+                             const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
     // Bind descriptors in descriptor tables.
-    if (IS.DescHeap) {
-      uint32_t HeapIndex = 0;
-      const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
-          IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
-      const uint32_t DescHandleIncSize =
-          Device->GetDescriptorHandleIncrementSize(
-              D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-      for (auto &T : IS.DescTables) {
-        for (auto &R : T.Resources) {
-          for (const auto &Set : R.second) {
-            D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
-            if (Set.Buffer != nullptr) {
-              const DXBuffer &BufferDX =
-                  llvm::cast<DXBuffer>(*Set.Buffer.get());
-              switch (getDescriptorKind(R.first->Kind)) {
-              case DescriptorKind::SRV:
-                assert(BufferDX.SRVHandle.ptr != 0 &&
-                       "Missing SRV Descriptor. Is BufferUsage correct?");
-                DescriptorHandle = BufferDX.SRVHandle;
-                break;
-              case DescriptorKind::UAV:
-                assert(BufferDX.UAVHandle.ptr != 0 &&
-                       "Missing UAV Descriptor. Is BufferUsage correct?");
-                DescriptorHandle = BufferDX.UAVHandle;
-                break;
-              case DescriptorKind::CBV:
-                assert(BufferDX.CBVHandle.ptr != 0 &&
-                       "Missing CBV Descriptor. Is BufferUsage correct?");
-                DescriptorHandle = BufferDX.CBVHandle;
-                break;
-              default:
-                llvm_unreachable("Invalid DescriptorKind for a Buffer.");
-                break;
-              }
-            } else if (Set.Texture != nullptr) {
-              const DXTexture &TextureDX =
-                  llvm::cast<DXTexture>(*Set.Texture.get());
-              switch (getDescriptorKind(R.first->Kind)) {
-              case DescriptorKind::SRV:
-                assert(TextureDX.SRVHandle.ptr != 0 &&
-                       "Missing SRV Descriptor. Is TextureUsage correct?");
-                DescriptorHandle = TextureDX.SRVHandle;
-                break;
-              case DescriptorKind::UAV:
-                assert(TextureDX.UAVHandle.ptr != 0 &&
-                       "Missing UAV Descriptor. Is TextureUsage correct?");
-                DescriptorHandle = TextureDX.UAVHandle;
-                break;
-              default:
-                llvm_unreachable("Invalid DescriptorKind for a Texture.");
-                break;
-              }
-            } else if (Set.AS != nullptr) {
-              const DXAccelerationStructure &AccelerationStructureDX =
-                  llvm::cast<DXAccelerationStructure>(*Set.AS);
-              DescriptorHandle = AccelerationStructureDX.SRVHandle;
-            } else {
-              llvm_unreachable("Resource was a texture nor buffer. Samplers "
-                               "are unsupported");
+    if (!DescHeap)
+      return;
+    uint32_t HeapIndex = 0;
+    const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
+        DescHeap->GetCPUDescriptorHandleForHeapStart();
+    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    for (auto &T : DescTables) {
+      for (auto &R : T.Resources) {
+        for (const auto &Set : R.second) {
+          D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
+          if (Set.Buffer != nullptr) {
+            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buffer.get());
+            switch (getDescriptorKind(R.first->Kind)) {
+            case DescriptorKind::SRV:
+              assert(BufferDX.SRVHandle.ptr != 0 &&
+                     "Missing SRV Descriptor. Is BufferUsage correct?");
+              DescriptorHandle = BufferDX.SRVHandle;
+              break;
+            case DescriptorKind::UAV:
+              assert(BufferDX.UAVHandle.ptr != 0 &&
+                     "Missing UAV Descriptor. Is BufferUsage correct?");
+              DescriptorHandle = BufferDX.UAVHandle;
+              break;
+            case DescriptorKind::CBV:
+              assert(BufferDX.CBVHandle.ptr != 0 &&
+                     "Missing CBV Descriptor. Is BufferUsage correct?");
+              DescriptorHandle = BufferDX.CBVHandle;
+              break;
+            default:
+              llvm_unreachable("Invalid DescriptorKind for a Buffer.");
+              break;
             }
-
-            assert(DescriptorHandle.ptr != 0 &&
-                   "Somehow got a null descriptor :(");
-            Device->CopyDescriptorsSimple(
-                1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
-                DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            HeapIndex += 1;
+          } else if (Set.Texture != nullptr) {
+            const DXTexture &TextureDX =
+                llvm::cast<DXTexture>(*Set.Texture.get());
+            switch (getDescriptorKind(R.first->Kind)) {
+            case DescriptorKind::SRV:
+              assert(TextureDX.SRVHandle.ptr != 0 &&
+                     "Missing SRV Descriptor. Is TextureUsage correct?");
+              DescriptorHandle = TextureDX.SRVHandle;
+              break;
+            case DescriptorKind::UAV:
+              assert(TextureDX.UAVHandle.ptr != 0 &&
+                     "Missing UAV Descriptor. Is TextureUsage correct?");
+              DescriptorHandle = TextureDX.UAVHandle;
+              break;
+            default:
+              llvm_unreachable("Invalid DescriptorKind for a Texture.");
+              break;
+            }
+          } else if (Set.AS != nullptr) {
+            const DXAccelerationStructure &AccelerationStructureDX =
+                llvm::cast<DXAccelerationStructure>(*Set.AS);
+            DescriptorHandle = AccelerationStructureDX.SRVHandle;
+          } else {
+            llvm_unreachable("Resource was a texture nor buffer. Samplers "
+                             "are unsupported");
           }
+
+          assert(DescriptorHandle.ptr != 0 &&
+                 "Somehow got a null descriptor :(");
+          Device->CopyDescriptorsSimple(
+              1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
+              DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+          HeapIndex += 1;
         }
       }
     }
-
-    // Setup root descriptors
-    for (auto &R : P.Settings.DX.RootParams) {
-      if (R.Kind != dx::RootParamKind::RootDescriptor)
-        continue;
-      auto &Resource = std::get<dx::RootResource>(R.Data);
-      if (!Resource.IsReserved && Resource.TilesMapped.has_value()) {
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Error: Cannot define tiles mapped without declaring resource as "
-            "reserved.");
-      }
-      if (auto Err = CreateBuffer(Resource, IS.RootResources))
-        return Err;
-    }
-
-    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
-      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
-
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
-                                           VBuffer->Data[0].get(),
-                                           VBuffer->size(), nullptr, nullptr);
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.VB = std::move(*BufOrErr);
-      llvm::outs() << "Vertex buffer created.\n";
-    }
-
-    return llvm::Error::success();
   }
 
-  static llvm::Error
-  copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
-                   ResourcePair &R) {
-    if (R.first->isTexture()) {
-      for (const ResourceSet &RS : R.second) {
-        if (RS.Readback == nullptr)
-          continue;
+  llvm::Error
+  createComputeCommands(Pipeline &P, SharedInvocationState &IS,
+                        const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
+    DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
 
-        if (auto Err =
-                ReadbackEncoder.copyTextureToBuffer(*RS.Texture, *RS.Readback))
-          return Err;
-      }
-    } else if (R.first->isBuffer()) {
-      for (const ResourceSet &RS : R.second) {
-        if (RS.Readback == nullptr)
-          continue;
-
-        if (auto Err = ReadbackEncoder.copyBufferToBuffer(
-                *RS.Buffer, 0, *RS.Readback, 0, RS.Buffer->getSizeInBytes()))
-          return Err;
-
-        if (!RS.Buffer->getDesc().HasCounter)
-          continue;
-
-        if (auto Err = ReadbackEncoder.copyCounterToBuffer(*RS.Buffer,
-                                                           *RS.CounterReadback))
-          return Err;
-      }
-    }
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
     CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
-      Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
+    if (DescHeap) {
+      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get()};
+      DXCB.CmdList->SetDescriptorHeaps(1, Heaps);
+      Handle = DescHeap->GetGPUDescriptorHandleForHeapStart();
     }
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
-    IS.CB->CmdList->SetComputeRootSignature(DXPipeline.RootSig.Get());
+    DXCB.CmdList->SetComputeRootSignature(DXPipeline.RootSig.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -2814,15 +2437,14 @@ public:
                 "Root constant cannot refer to resource arrays.");
           const uint32_t NumValues =
               Constant.BufferPtr->size() / sizeof(uint32_t);
-          IS.CB->CmdList->SetComputeRoot32BitConstants(
+          DXCB.CmdList->SetComputeRoot32BitConstants(
               RootParamIndex++, NumValues,
               Constant.BufferPtr->Data.back().get(), ConstantOffset);
           ConstantOffset += NumValues;
           break;
         }
         case dx::RootParamKind::DescriptorTable:
-          IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
-                                                        Handle);
+          DXCB.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
           Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
           break;
         case dx::RootParamKind::RootDescriptor:
@@ -2844,16 +2466,16 @@ public:
               BufferDX->Buffer->GetGPUVirtualAddress();
           switch (getDescriptorKind(RootDescIt->first->Kind)) {
           case DescriptorKind::SRV:
-            IS.CB->CmdList->SetComputeRootShaderResourceView(RootParamIndex++,
-                                                             VirtualAddress);
+            DXCB.CmdList->SetComputeRootShaderResourceView(RootParamIndex++,
+                                                           VirtualAddress);
             break;
           case DescriptorKind::UAV:
-            IS.CB->CmdList->SetComputeRootUnorderedAccessView(RootParamIndex++,
-                                                              VirtualAddress);
+            DXCB.CmdList->SetComputeRootUnorderedAccessView(RootParamIndex++,
+                                                            VirtualAddress);
             break;
           case DescriptorKind::CBV:
-            IS.CB->CmdList->SetComputeRootConstantBufferView(RootParamIndex++,
-                                                             VirtualAddress);
+            DXCB.CmdList->SetComputeRootConstantBufferView(RootParamIndex++,
+                                                           VirtualAddress);
             break;
           case DescriptorKind::SAMPLER:
             llvm_unreachable("Not implemented yet.");
@@ -2867,7 +2489,7 @@ public:
       // descriptor set layout. This is to make it easier to write tests that
       // don't need complicated root signatures.
       for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-        IS.CB->CmdList->SetComputeRootDescriptorTable(Idx, Handle);
+        DXCB.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
         Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
       }
     }
@@ -2901,11 +2523,11 @@ public:
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
         return Err;
 
     ReadbackEncoder->endEncoding();
@@ -2913,132 +2535,19 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error readBack(Pipeline &P, InvocationState &IS) {
-    auto MemCpyBack = [this](ResourcePair &R) -> llvm::Error {
-      if (!R.first->isReadWrite())
-        return llvm::Error::success();
-
-      auto *RSIt = R.second.begin();
-      auto *DataIt = R.first->BufferPtr->Data.begin();
-      for (; RSIt != R.second.end() && DataIt != R.first->BufferPtr->Data.end();
-           ++RSIt, ++DataIt) {
-        offloadtest::Buffer &Readback = *RSIt->Readback;
-        auto DataPtrOrErr = Readback.map();
-        if (!DataPtrOrErr)
-          return DataPtrOrErr.takeError();
-        const void *DataPtr = *DataPtrOrErr;
-
-        if (R.first->isTexture()) {
-          const TextureCreateDesc &Desc = RSIt->Texture->getDesc();
-          const uint32_t SrcStrideInBytes =
-              getTextureUploadRowStrideInBytes(Desc);
-          const uint32_t DstStrideInBytes =
-              Desc.Width * getFormatSizeInBytes(Desc.Fmt);
-          assert(DstStrideInBytes <= SrcStrideInBytes &&
-                 "Destination should not have padding and thus should be <= "
-                 "than SrcStride where we do expect potential padding.");
-          uint8_t *Dst = (uint8_t *)DataIt->get();
-          const uint8_t *Src = (const uint8_t *)DataPtr;
-
-          for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
-            memcpy(Dst, Src, DstStrideInBytes);
-            Dst += DstStrideInBytes;
-            Src += SrcStrideInBytes;
-          }
-        } else {
-          memcpy(DataIt->get(), DataPtr, R.first->size());
-        }
-
-        Readback.unmap();
-
-        if (R.first->HasCounter) {
-          offloadtest::Buffer &CounterReadback = *RSIt->CounterReadback;
-          auto CounterPtrOrErr = CounterReadback.map();
-          if (!CounterPtrOrErr)
-            return CounterPtrOrErr.takeError();
-          const uint32_t *CounterPtr = (const uint32_t *)*CounterPtrOrErr;
-          R.first->BufferPtr->Counters.push_back(*CounterPtr);
-          CounterReadback.unmap();
-        }
-      }
-
-      return llvm::Error::success();
-    };
-
-    for (auto &Table : IS.DescTables)
-      for (auto &R : Table.Resources)
-        if (auto Err = MemCpyBack(R))
-          return Err;
-
-    for (auto &R : IS.RootResources)
-      if (auto Err = MemCpyBack(R))
-        return Err;
-
-    // If there is no render target, return early.
-    if (!IS.RTReadback)
-      return llvm::Error::success();
-
-    auto DataPtrOrErr = IS.RTReadback->map();
-    if (!DataPtrOrErr)
-      return DataPtrOrErr.takeError();
-    const void *Mapped = *DataPtrOrErr;
-
-    const uint32_t SrcStrideInBytes =
-        getTextureUploadRowStrideInBytes(IS.RenderTarget->getDesc());
-
-    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped, SrcStrideInBytes);
-    IS.RTReadback->unmap();
-    return llvm::Error::success();
-  }
-
-  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
-    if (!P.Bindings.RTargetBufferPtr)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "No render target bound for graphics pipeline.");
-    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
-
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-
-    IS.RenderTarget = std::move(*TexOrErr);
-
-    // Create readback buffer sized for the pixel data with row pitch padded
-    // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
-    // for the placed footprint used by CopyTextureRegion. The compaction
-    // back to a tight layout happens in readBack() via GetCopyableFootprints.
-    BufferCreateDesc BufDesc = {};
-    BufDesc.Location = MemoryLocation::GpuToCpu;
-    BufDesc.Usage = BufferUsage::Storage;
-    auto BufOrErr = createBuffer("RTReadback", BufDesc,
-                                 getAlignedTextureBufferSize(OutBuf));
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-    IS.RTReadback = std::move(*BufOrErr);
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
-        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-    IS.DepthStencil = std::move(*TexOrErr);
-    return llvm::Error::success();
-  }
-
-  llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error
+  createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
+                         const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
-    IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
-      IS.CB->CmdList->SetGraphicsRootDescriptorTable(
-          0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
+    DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
+
+    DXCB.CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
+    if (DescHeap) {
+      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get()};
+      DXCB.CmdList->SetDescriptorHeaps(1, Heaps);
+      DXCB.CmdList->SetGraphicsRootDescriptorTable(
+          0, DescHeap->GetGPUDescriptorHandleForHeapStart());
     }
 
     RenderPassBeginDesc BeginDesc = {};
@@ -3093,33 +2602,38 @@ public:
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
         return Err;
+
+    ReadbackEncoder->endEncoding();
 
     return llvm::Error::success();
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
-    if (auto Err = createDescriptorHeap(P, State))
+
+    ComPtr<ID3D12DescriptorHeap> DescHeap;
+    if (auto Err = createDescriptorHeap(P, DescHeap))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
 
-    auto CBOrErr = DXCommandBuffer::create(Device);
+    SharedInvocationState State;
+    auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
-    State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
 
-    if (auto Err = createBuffers(P, State))
+    if (auto Err = createResources(*this, P, State))
       return Err;
     llvm::outs() << "Buffers created.\n";
+
+    buildDescriptorTables(State.DescTables, DescHeap);
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
       auto EncOrErr = State.CB->createComputeEncoder();
@@ -3149,18 +2663,6 @@ public:
       BndDesc.DescriptorSetDescs.push_back(Layout);
     }
 
-    if (P.isRaster()) {
-      // Create render target and depth/stencil
-      if (auto Err = createRenderTarget(P, State))
-        return Err;
-      llvm::outs() << "Render target created.\n";
-      // TODO: Always created for graphics pipelines. Consider making this
-      // conditional on the pipeline definition.
-      if (auto Err = createDepthStencil(P, State))
-        return Err;
-      llvm::outs() << "Depth stencil created.\n";
-    }
-
     if (P.isCompute()) {
       // This is an arbitrary distinction that we could alter in the future.
       if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
@@ -3178,7 +2680,7 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
-      if (auto Err = createComputeCommands(P, State))
+      if (auto Err = createComputeCommands(P, State, DescHeap))
         return Err;
       llvm::outs() << "Compute command list created.\n";
 
@@ -3284,7 +2786,7 @@ public:
         llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
 
-      if (auto Err = createGraphicsCommands(P, State))
+      if (auto Err = createGraphicsCommands(P, State, DescHeap))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
     } else if (P.isRayTracing()) {
@@ -3315,7 +2817,7 @@ public:
       State.SBT = std::move(*SBTOrErr);
       llvm::outs() << "Shader Binding Table created.\n";
 
-      if (auto Err = createComputeCommands(P, State))
+      if (auto Err = createComputeCommands(P, State, DescHeap))
         return Err;
       llvm::outs() << "RayTracing command list created.\n";
     } else {
@@ -3328,7 +2830,7 @@ public:
     llvm::outs() << "Compute commands executed.\n";
     if (auto Err = SubmitResult->waitForCompletion())
       return Err;
-    if (auto Err = readBack(P, State))
+    if (auto Err = readBack(*this, P, State))
       return Err;
     llvm::outs() << "Read data back.\n";
 
