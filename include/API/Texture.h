@@ -106,12 +106,6 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         std::errc::not_supported,
         "DepthStencil combined with Storage is not yet supported.");
 
-  // Depth formats require DepthStencil usage; non-depth formats forbid it.
-  if (IsDepth && !IsDS)
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "Depth format '%s' requires DepthStencil usage.",
-        getFormatName(Desc.Fmt).data());
   if (!IsDepth && IsDS)
     return llvm::createStringError(
         std::errc::invalid_argument,

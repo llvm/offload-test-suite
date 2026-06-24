@@ -36,6 +36,8 @@ Queue::~Queue() {}
 
 Texture::~Texture() {}
 
+Sampler::~Sampler() {}
+
 MemoryHeap::~MemoryHeap() {}
 
 RenderPass::~RenderPass() {}
