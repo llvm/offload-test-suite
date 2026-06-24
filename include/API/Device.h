@@ -20,6 +20,7 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/RenderPass.h"
+#include "API/Sampler.h"
 #include "API/ShaderBindingTable.h"
 #include "API/Texture.h"
 
@@ -345,6 +346,9 @@ public:
 
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string Name, const SamplerCreateDesc &Desc) = 0;
 
   virtual llvm::Expected<std::unique_ptr<MemoryHeap>>
   createMemoryHeap(std::string Name, size_t SizeInBytes) = 0;

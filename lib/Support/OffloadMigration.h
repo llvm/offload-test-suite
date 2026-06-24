@@ -36,6 +36,7 @@ struct ResourceSet {
   std::unique_ptr<MemoryHeap> BackingMemory;
   std::unique_ptr<Buffer> Buffer;
   std::unique_ptr<Texture> Texture;
+  std::unique_ptr<Sampler> Sampler;
   std::unique_ptr<offloadtest::Buffer> Readback;
   std::unique_ptr<offloadtest::Buffer> CounterReadback;
 
@@ -54,6 +55,8 @@ struct ResourceSet {
               std::unique_ptr<offloadtest::Buffer> Readback)
       : BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
         Readback(std::move(Readback)) {}
+  ResourceSet(std::unique_ptr<offloadtest::Sampler> Sampler)
+      : Sampler(std::move(Sampler)) {}
   explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
 
   ResourceSet(const ResourceSet &) = delete;
@@ -61,12 +64,14 @@ struct ResourceSet {
 
   ResourceSet(ResourceSet &&A)
       : BackingMemory(std::move(A.BackingMemory)), Buffer(std::move(A.Buffer)),
-        Texture(std::move(A.Texture)), Readback(std::move(A.Readback)),
+        Texture(std::move(A.Texture)), Sampler(std::move(A.Sampler)),
+        Readback(std::move(A.Readback)),
         CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
   ResourceSet &operator=(ResourceSet &&A) {
     BackingMemory = std::move(A.BackingMemory);
     Buffer = std::move(A.Buffer);
     Texture = std::move(A.Texture);
+    Sampler = std::move(A.Sampler);
     Readback = std::move(A.Readback);
     CounterReadback = std::move(A.CounterReadback);
     AS = A.AS;
