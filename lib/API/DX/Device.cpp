@@ -2559,7 +2559,10 @@ public:
                                          "Multiple mip levels are not yet "
                                          "supported for DirectX textures.");
 
-        auto FormatOrErr = toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
+        auto FormatOrErr =
+            R.BufferPtr->GPUFormat
+                ? llvm::Expected<Format>(*R.BufferPtr->GPUFormat)
+                : toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
         if (!FormatOrErr)
           return FormatOrErr.takeError();
 
