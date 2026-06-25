@@ -104,34 +104,6 @@ static llvm::Error toError(const IRError *Err, llvm::StringRef Context) {
   return llvm::createStringError(EC, ErrMsg);
 }
 
-#define MTLFormats(FMT)                                                        \
-  if (Channels == 1)                                                           \
-    return MTL::PixelFormatR##FMT;                                             \
-  if (Channels == 2)                                                           \
-    return MTL::PixelFormatRG##FMT;                                            \
-  if (Channels == 4)                                                           \
-    return MTL::PixelFormatRGBA##FMT;
-
-static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
-  switch (Format) {
-  case DataFormat::Int32:
-    MTLFormats(32Sint) break;
-  case DataFormat::Float32:
-    MTLFormats(32Float) break;
-  case DataFormat::UInt64:
-  case DataFormat::Int64:
-    if (Channels == 1)
-      return MTL::PixelFormatRG32Uint;
-    if (Channels == 2)
-      return MTL::PixelFormatRGBA32Uint;
-    llvm_unreachable("Unsupported channel count for 64-bit format");
-
-  default:
-    llvm_unreachable("Unsupported Resource format specified");
-  }
-  return MTL::PixelFormatInvalid;
-}
-
 static IRShaderStage getShaderStage(Stages Stage) {
   switch (Stage) {
   case Stages::Compute:
