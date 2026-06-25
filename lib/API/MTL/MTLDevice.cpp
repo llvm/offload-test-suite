@@ -1822,13 +1822,25 @@ public:
     }
 
     PS->ArgBuffer->bind(NativeEncoder);
-    // TODO(manon): Figure out what to do with this.
-    // for (const auto &Table : IS.DescTables)
-    //   for (const auto &ResPair : Table.Resources)
-    //     for (const auto &ResSet : ResPair.second)
-    //       NativeEncoder->useResource(ResSet.Resource.get(),
-    //                                  MTL::ResourceUsageRead |
-    //                                      MTL::ResourceUsageWrite);
+    for (const auto &Table : IS.DescTables) {
+      for (const auto &ResPair : Table.Resources) {
+        for (const auto &ResSet : ResPair.second) {
+          MTL::Resource *Res = nullptr;
+          if (ResSet.Buffer != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Buf,
+                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+          else if (ResSet.Texture != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
+                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+          else if (ResSet.AS != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MetalAccelerationStructure>(*ResSet.AS).AccelStruct,
+                MTL::ResourceUsageRead);
+        }
+      }
+    }
     auto MarkASResident =
         [&](const std::unique_ptr<AccelerationStructure> &AS) {
           auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
