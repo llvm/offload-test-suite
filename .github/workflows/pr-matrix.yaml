@@ -77,6 +77,46 @@ jobs:
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
+  Exec-Tests-Extra-DX-All:
+    permissions:
+      contents: read
+      checks: write
+    if: contains( github.event.pull_request.labels.*.name, 'test-dx-all')
+    strategy:
+      fail-fast: false
+      matrix:
+        SKU: [windows-amd, windows-qc]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-clang-d3d12]
+
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: ${{ matrix.SKU }}
+      TestTarget: ${{ matrix.TestTarget }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      SplitBuild: true
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
+  Exec-Tests-Extra-VK-All:
+    permissions:
+      contents: read
+      checks: write
+    if: contains( github.event.pull_request.labels.*.name, 'test-vk-all')
+    strategy:
+      fail-fast: false
+      matrix:
+        SKU: [windows-amd, windows-nvidia, windows-qc]
+        TestTarget: [check-hlsl-vk, check-hlsl-clang-vk]
+
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: ${{ matrix.SKU }}
+      TestTarget: ${{ matrix.TestTarget }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      SplitBuild: true
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
+
   Exec-Tests-MacOS:
     permissions:
       contents: read
