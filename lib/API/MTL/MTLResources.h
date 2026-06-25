@@ -85,12 +85,16 @@ inline MTL::PixelFormat getMetalPixelFormat(Format Format) {
     return MTL::PixelFormatRGBA32Uint;
   case Format::RGBA32Float:
     return MTL::PixelFormatRGBA32Float;
-  // Metal has no 64-bit-per-channel pixel formats.
   case Format::R64Uint:
+    return MTL::PixelFormatRG32Uint; // Metal has no R64, expects R32G32
   case Format::R64Sint:
+    return MTL::PixelFormatRG32Sint; // Metal has no R64, expects R32G32
   case Format::RG64Uint:
+    return MTL::PixelFormatRGBA32Uint; // Metal has no RG64, expects
+                                       // R32G32B32A32
   case Format::RG64Sint:
-    llvm_unreachable("64-bit formats have no Metal pixel format equivalent");
+    return MTL::PixelFormatRGBA32Sint; // Metal has no RG64, expects
+                                       // R32G32B32A32
   case Format::D32Float:
     return MTL::PixelFormatDepth32Float;
   case Format::D32FloatS8Uint:
