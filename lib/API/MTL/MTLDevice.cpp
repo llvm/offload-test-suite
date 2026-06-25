@@ -1825,7 +1825,6 @@ public:
     for (const auto &Table : IS.DescTables) {
       for (const auto &ResPair : Table.Resources) {
         for (const auto &ResSet : ResPair.second) {
-          MTL::Resource *Res = nullptr;
           if (ResSet.Buffer != nullptr)
             NativeEncoder->useResource(
                 llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Buf,
@@ -2074,25 +2073,6 @@ public:
 
     Encoder.endEncoding();
 
-    auto EncoderOrErr = IS.CB->createComputeEncoder();
-    if (!EncoderOrErr)
-      return EncoderOrErr.takeError();
-    auto ReadbackEncoder = std::move(*EncoderOrErr);
-
-    if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
-                                                        *IS.RTReadback))
-      return Err;
-
-    for (auto &Table : IS.DescTables)
-      for (auto &R : Table.Resources)
-        if (auto Err = copyBackResource(*ReadbackEncoder, R))
-          return Err;
-
-    for (auto &R : IS.RootResources)
-      if (auto Err = copyBackResource(*ReadbackEncoder, R))
-        return Err;
-
-    ReadbackEncoder->endEncoding();
 #if 0
     // Blit the render target into the readback buffer for CPU access.
     auto &FBTex = llvm::cast<MTLTexture>(*IS.RenderTarget);
@@ -3226,6 +3206,28 @@ public:
       if (auto Err = createRayTracingCommands(P, IS, DescHeap))
         return Err;
     }
+
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto ReadbackEncoder = std::move(*EncoderOrErr);
+
+    if (IS.RenderTarget) {
+      if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
+                                                          *IS.RTReadback))
+        return Err;
+    }
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
+          return Err;
+
+    for (auto &R : IS.RootResources)
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
+        return Err;
+
+    ReadbackEncoder->endEncoding();
 
     auto SubmitResult = GraphicsQueue.submit(std::move(IS.CB));
     if (!SubmitResult)
