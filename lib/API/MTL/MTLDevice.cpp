@@ -1619,13 +1619,35 @@ public:
   llvm::Error buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
                                     const MTLDescriptorHeap &DescHeap) {
 
+    uint32_t HeapIdx = 0;
     for (auto &T : DescTables) {
       for (auto &R : T.Resources) {
         for (const auto &Set : R.second) {
           if (Set.Buffer != nullptr) {
-            return llvm::createStringError("TODO(manon): Buffers");
+            const MTLBuffer &BufferMTL =
+                llvm::cast<MTLBuffer>(*Set.Buffer.get());
+            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
+
+            if (BufferMTL.Desc.AccessType != BufferShaderAccessType::Typed) {
+              IRBufferView View = {};
+              View.buffer = BufferMTL.Buf;
+              View.bufferSize = BufferMTL.SizeInBytes;
+              IRDescriptorTableSetBufferView(Entry, &View);
+            } else {
+              return llvm::createStringError(
+                  "TODO(manon): Metal does not support typed buffers.");
+            }
+            HeapIdx += 1;
           } else if (Set.Texture != nullptr) {
-            return llvm::createStringError("TODO(manon): Textures");
+            if (Set.Sampler != nullptr)
+              return llvm::createStringError(
+                  "Metal does not support Combined Image Samplers.");
+
+            const MTLTexture &TextureMTL =
+                llvm::cast<MTLTexture>(*Set.Texture.get());
+            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
+            IRDescriptorTableSetTexture(Entry, TextureMTL.Tex, 0, 0);
+            HeapIdx += 1;
           } else if (Set.AS != nullptr) {
             return llvm::createStringError(
                 "TODO(manon): Acceleration Structures");
@@ -2440,6 +2462,11 @@ public:
       return llvm::createStringError(
           std::errc::not_supported,
           "Metal backend does not support sparse memory backing.");
+
+    if (Desc.AccessType == BufferShaderAccessType::Typed)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "TODO(manon): Metal backend does not typed buffers.");
 
     MTL::Buffer *Buf = Device->newBuffer(
         SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
