@@ -38,6 +38,8 @@
 
 #include "../Util.h"
 
+#include "../Support/OffloadMigration.h"
+
 #include <algorithm>
 #include <memory>
 
@@ -1169,7 +1171,7 @@ public:
   Capabilities Caps;
   MTL::Device *Device;
   MTLQueue GraphicsQueue;
-
+#if 0
   struct ResourceSet {
     MTLPtr<MTL::Resource> Resource;
     // AS-only; mutually exclusive with Resource above.
@@ -1215,7 +1217,7 @@ public:
     // Per-AS header + contributions buffers; resident at dispatch.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASDescriptorBuffers;
   };
-
+#endif
   llvm::Error createRootSignature(
       const BindingsDesc &BindingsDesc, bool IsGraphics,
       IRRootSignaturePtr &OutRootSig,
@@ -1303,11 +1305,12 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
+  llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
+  createDescriptorHeap(Pipeline &P) {
     if (P.getDescriptorCount() == 0) {
       llvm::outs()
           << "No descriptors found, skipping descriptor heap creation.\n";
-      return llvm::Error::success();
+      return nullptr;
     }
     const uint32_t DescriptorCount = P.getDescriptorCountWithFlattenedArrays();
     const MTLDescriptorHeapDesc HeapDesc = {MTLDescriptorHeapType::CBV_SRV_UAV,
@@ -1317,10 +1320,9 @@ public:
     if (!DescHeapOrErr)
       return DescHeapOrErr.takeError();
 
-    State.DescHeap = std::move(*DescHeapOrErr);
     llvm::outs() << "Descriptor heap created with " << DescriptorCount
                  << " descriptors.\n";
-    return llvm::Error::success();
+    return std::move(*DescHeapOrErr);
   }
 
   llvm::Expected<MetalIR> convertToMetalIR(Stages Stage, bool IsGraphics,
@@ -1434,6 +1436,7 @@ public:
     return MetalIR{std::move(MetalLib), std::move(Reflection)};
   }
 
+#if 0
   // Creates a Metal resource (buffer or texture) for the given Resource at the
   // specified array index.
   llvm::Expected<MTL::Resource *>
@@ -1611,7 +1614,33 @@ public:
       return SizesOrErr.takeError();
     return createTLAS(*SizesOrErr);
   }
+#endif
 
+  llvm::Error buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
+                                    const MTLDescriptorHeap &DescHeap) {
+
+    for (auto &T : DescTables) {
+      for (auto &R : T.Resources) {
+        for (const auto &Set : R.second) {
+          if (Set.Buffer != nullptr) {
+            return llvm::createStringError("TODO(manon): Buffers");
+          } else if (Set.Texture != nullptr) {
+            return llvm::createStringError("TODO(manon): Textures");
+          } else if (Set.AS != nullptr) {
+            return llvm::createStringError(
+                "TODO(manon): Acceleration Structures");
+          } else if (Set.Sampler != nullptr) {
+            return llvm::createStringError("Samplers are unsupported in Metal");
+          } else {
+            return llvm::createStringError("Unrecognized Resource Type");
+          }
+        }
+      }
+    }
+
+    return llvm::Error::success();
+  }
+#if 0
   llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
     auto CreateBuffer =
         [&IS,
@@ -1748,8 +1777,10 @@ public:
     }
     return llvm::Error::success();
   }
-
-  llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
+#endif
+  llvm::Error
+  createComputeCommands(Pipeline &P, SharedInvocationState &IS,
+                        const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
@@ -1758,9 +1789,9 @@ public:
 
     const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
     MTLGPUDescriptorHandle Handle = {};
-    if (IS.DescHeap) {
-      IS.DescHeap->bind(NativeEncoder);
-      Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
+    if (DescHeap) {
+      DescHeap->bind(NativeEncoder);
+      Handle = DescHeap->getGPUDescriptorHandleForHeapStart();
     }
 
     for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
@@ -1769,12 +1800,13 @@ public:
     }
 
     PS->ArgBuffer->bind(NativeEncoder);
-    for (const auto &Table : IS.DescTables)
-      for (const auto &ResPair : Table.Resources)
-        for (const auto &ResSet : ResPair.second)
-          NativeEncoder->useResource(ResSet.Resource.get(),
-                                     MTL::ResourceUsageRead |
-                                         MTL::ResourceUsageWrite);
+    // TODO(manon): Figure out what to do with this.
+    // for (const auto &Table : IS.DescTables)
+    //   for (const auto &ResPair : Table.Resources)
+    //     for (const auto &ResSet : ResPair.second)
+    //       NativeEncoder->useResource(ResSet.Resource.get(),
+    //                                  MTL::ResourceUsageRead |
+    //                                      MTL::ResourceUsageWrite);
     auto MarkASResident =
         [&](const std::unique_ptr<AccelerationStructure> &AS) {
           auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
@@ -1785,9 +1817,10 @@ public:
       MarkASResident(AS);
     for (auto &Entry : IS.TLASes)
       MarkASResident(Entry.second);
-    for (auto &B : IS.ASDescriptorBuffers)
-      NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
-                                 MTL::ResourceUsageRead);
+    // TODO(manon): Figure out what to do with this.
+    // for (auto &B : IS.ASDescriptorBuffers)
+    // NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
+    //  MTL::ResourceUsageRead);
 
     if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
                                     P.DispatchParameters.DispatchGroupCount[0],
@@ -1798,7 +1831,9 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRayTracingCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error
+  createRayTracingCommands(Pipeline &P, SharedInvocationState &IS,
+                           const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
@@ -1814,9 +1849,9 @@ public:
     // callees consume them at the same slots (kIRDescriptorHeapBindPoint and
     // kIRArgumentBufferBindPoint).
     MTLGPUDescriptorHandle Handle = {};
-    if (IS.DescHeap) {
-      IS.DescHeap->bind(NativeEncoder);
-      Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
+    if (DescHeap) {
+      DescHeap->bind(NativeEncoder);
+      Handle = DescHeap->getGPUDescriptorHandleForHeapStart();
     }
     for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
       RTPSO.ArgBuffer->setRootDescriptorTable(Idx, Handle);
@@ -1841,7 +1876,7 @@ public:
     Args.DispatchRaysDesc.Depth = P.DispatchParameters.DispatchGroupCount[2];
     Args.GRS = RTPSO.ArgBuffer->getGPUAddress();
     Args.ResDescHeap =
-        IS.DescHeap ? IS.DescHeap->getGPUDescriptorHandleForHeapStart().Ptr : 0;
+        DescHeap ? DescHeap->getGPUDescriptorHandleForHeapStart().Ptr : 0;
     Args.SmpDescHeap = 0;
     Args.VisibleFunctionTable =
         RTPSO.VFT ? RTPSO.VFT->gpuResourceID() : MTL::ResourceID{0};
@@ -1851,13 +1886,13 @@ public:
 
     const BufferCreateDesc ArgsBufDesc = BufferCreateDesc::uploadBuffer();
     auto ArgsBufOrErr = offloadtest::createBufferWithData(
-        *IS.CB->Dev, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
+        *this, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
         sizeof(IRDispatchRaysArgument), nullptr, nullptr);
     if (!ArgsBufOrErr)
       return ArgsBufOrErr.takeError();
 
     auto *MTLArgsBuf = llvm::cast<MTLBuffer>(ArgsBufOrErr->get());
-    IS.CB->KeepAliveOwned.push_back(std::move(*ArgsBufOrErr));
+    IS.KeepAliveBuffers.push_back(std::move(*ArgsBufOrErr));
 
     NativeEncoder->setBuffer(MTLArgsBuf->Buf, 0,
                              kIRRayDispatchArgumentsBindPoint);
@@ -1868,12 +1903,13 @@ public:
     // buffers (so RayQuery/TraceRay can read them), the SBT buffer (the
     // raygen kernel dereferences SBT addresses), and the visible /
     // intersection function tables.
-    for (const auto &Table : IS.DescTables)
-      for (const auto &ResPair : Table.Resources)
-        for (const auto &ResSet : ResPair.second)
-          NativeEncoder->useResource(ResSet.Resource.get(),
-                                     MTL::ResourceUsageRead |
-                                         MTL::ResourceUsageWrite);
+    // TODO(manon): Figure this out
+    // for (const auto &Table : IS.DescTables)
+    // for (const auto &ResPair : Table.Resources)
+    // for (const auto &ResSet : ResPair.second)
+    // NativeEncoder->useResource(ResSet.Resource.get(),
+    //  MTL::ResourceUsageRead |
+    //  MTL::ResourceUsageWrite);
     auto MarkASResident =
         [&](std::unique_ptr<offloadtest::AccelerationStructure> &AS) {
           auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
@@ -1884,9 +1920,10 @@ public:
       MarkASResident(AS);
     for (auto &Entry : IS.TLASes)
       MarkASResident(Entry.second);
-    for (auto &B : IS.ASDescriptorBuffers)
-      NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
-                                 MTL::ResourceUsageRead);
+    // TODO(manon): Figure out what to do with this
+    // for (auto &B : IS.ASDescriptorBuffers)
+    // NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
+    //  MTL::ResourceUsageRead);
     if (SBT.Buffer)
       NativeEncoder->useResource(SBT.Buffer, MTL::ResourceUsageRead);
     if (RTPSO.VFT)
@@ -1903,7 +1940,7 @@ public:
     Encoder.endEncoding();
     return llvm::Error::success();
   }
-
+#if 0
   llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
     if (!P.Bindings.RTargetBufferPtr)
       return llvm::createStringError(
@@ -1936,15 +1973,10 @@ public:
     IS.DepthStencil = std::move(*TexOrErr);
     return llvm::Error::success();
   }
-
-  llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    if (auto Err = createRenderTarget(P, IS))
-      return Err;
-    // TODO: Always created for graphics pipelines. Consider making this
-    // conditional on the pipeline definition.
-    if (auto Err = createDepthStencil(P, IS))
-      return Err;
-
+#endif
+  llvm::Error
+  createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
+                         const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     const uint64_t Width = IS.RenderTarget->getDesc().Width;
     const uint64_t Height = IS.RenderTarget->getDesc().Height;
 
@@ -1962,20 +1994,21 @@ public:
       auto &MTLEncoder = llvm::cast<MTLRenderEncoder>(Encoder);
       const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
       auto *CmdEncoder = MTLEncoder.getNative();
-      if (IS.DescHeap) {
-        IS.DescHeap->bind(CmdEncoder);
+      if (DescHeap) {
+        DescHeap->bind(CmdEncoder);
         // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
         // this)
         PS->ArgBuffer->setRootDescriptorTable(
-            0, IS.DescHeap->getGPUDescriptorHandleForHeapStart());
+            0, DescHeap->getGPUDescriptorHandleForHeapStart());
       }
       PS->ArgBuffer->bind(CmdEncoder);
-      for (const auto &Table : IS.DescTables)
-        for (const auto &ResPair : Table.Resources)
-          for (const auto &ResSet : ResPair.second)
-            CmdEncoder->useResource(ResSet.Resource.get(),
-                                    MTL::ResourceUsageRead |
-                                        MTL::ResourceUsageWrite);
+      // TODO(manon): Figure this out
+      // for (const auto &Table : IS.DescTables)
+      //   for (const auto &ResPair : Table.Resources)
+      //     for (const auto &ResSet : ResPair.second)
+      //       CmdEncoder->useResource(ResSet.Resource.get(),
+      //                               MTL::ResourceUsageRead |
+      //                                   MTL::ResourceUsageWrite);
     }
 
     Viewport VP;
@@ -2007,6 +2040,26 @@ public:
 
     Encoder.endEncoding();
 
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto ReadbackEncoder = std::move(*EncoderOrErr);
+
+    if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
+                                                        *IS.RTReadback))
+      return Err;
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
+          return Err;
+
+    for (auto &R : IS.RootResources)
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
+        return Err;
+
+    ReadbackEncoder->endEncoding();
+#if 0
     // Blit the render target into the readback buffer for CPU access.
     auto &FBTex = llvm::cast<MTLTexture>(*IS.RenderTarget);
     auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
@@ -2017,10 +2070,10 @@ public:
                           MTL::Size(Width, Height, 1), FBReadback.Buf, 0,
                           RowBytes, 0);
     Blit->endEncoding();
-
+#endif
     return llvm::Error::success();
   }
-
+#if 0
   llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
     auto MemCpyBack = [](ResourcePair &Pair) -> llvm::Error {
       const Resource &R = *Pair.first;
@@ -2060,6 +2113,7 @@ public:
     }
     return llvm::Error::success();
   }
+#endif
 
 public:
   MTLDevice(MTL::Device *D, MTL::CommandQueue *Q,
@@ -2953,18 +3007,26 @@ public:
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    InvocationState IS;
+    SharedInvocationState IS;
 
-    auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);
+    NS::AutoreleasePool *Pool = NS::AutoreleasePool::alloc()->init();
+    ;
+    auto PoolScape = llvm::scope_exit([&] { Pool->release(); });
+
+    auto DescHeapOrErr = createDescriptorHeap(P);
+    if (!DescHeapOrErr)
+      return DescHeapOrErr.takeError();
+    auto DescHeap = std::move(*DescHeapOrErr);
+
+    auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
-    IS.CB->Dev = this;
 
-    if (auto Err = createDescriptorHeap(P, IS))
+    if (auto Err = createResources(*this, P, IS))
       return Err;
 
-    if (auto Err = createBuffers(P, IS))
+    if (auto Err = buildDescriptorTables(IS.DescTables, *DescHeap))
       return Err;
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
@@ -3009,7 +3071,7 @@ public:
       IS.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
 
-      if (auto Err = createComputeCommands(P, IS))
+      if (auto Err = createComputeCommands(P, IS, DescHeap))
         return Err;
     } else if (P.isRaster()) {
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
@@ -3090,7 +3152,7 @@ public:
         return RenderPassOrErr.takeError();
       IS.RenderPass = std::move(*RenderPassOrErr);
 
-      if (auto Err = createGraphicsCommands(P, IS))
+      if (auto Err = createGraphicsCommands(P, IS, DescHeap))
         return Err;
     } else if (P.isRayTracing()) {
       if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
@@ -3122,7 +3184,7 @@ public:
       IS.SBT = std::move(*SBTOrErr);
       llvm::outs() << "Shader Binding Table created.\n";
 
-      if (auto Err = createRayTracingCommands(P, IS))
+      if (auto Err = createRayTracingCommands(P, IS, DescHeap))
         return Err;
     }
 
@@ -3133,8 +3195,9 @@ public:
     if (auto Err = SubmitResult->waitForCompletion())
       return Err;
 
-    if (auto Err = copyBack(P, IS))
+    if (auto Err = readBack(*this, P, IS))
       return Err;
+    llvm::outs() << "Read data back.\n";
     return llvm::Error::success();
   }
 
