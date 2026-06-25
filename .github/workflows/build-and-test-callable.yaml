@@ -360,11 +360,6 @@ jobs:
         run: |
             set -euxo pipefail
             cd $GITHUB_WORKSPACE
-            # Self-hosted test runners persist $GITHUB_WORKSPACE between runs.
-            # `tar xf` overlays onto whatever the previous run left behind and
-            # never removes orphan files, so stale tests from an earlier PR
-            # extracted here would survive and be picked up by lit. Wipe the
-            # prefixes first so we run exactly the tests in this PR's tarball.
             rm -rf install dxc-dist
             mkdir -p install dxc-dist
             # Pipe the archive in via stdin and use a relative -C path so
