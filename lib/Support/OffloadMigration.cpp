@@ -325,7 +325,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       assert(Inserted.second && "TLAS bound to multiple resources NYI");
       (void)Inserted;
     } else if (R.isSampler()) {
-      SamplerCreateDesc Desc = {
+      const SamplerCreateDesc Desc = {
           R.SamplerPtr->MinFilter,    R.SamplerPtr->MagFilter,
           R.SamplerPtr->Address,      R.SamplerPtr->MinLOD,
           R.SamplerPtr->MaxLOD,       R.SamplerPtr->MipLODBias,

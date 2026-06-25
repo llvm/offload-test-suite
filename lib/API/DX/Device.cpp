@@ -148,20 +148,19 @@ static D3D12_FILTER getDXFilterMode(FilterMode MinFilter, FilterMode MagFilter,
       return MagFilter == FilterMode::Nearest
                  ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT
                  : D3D12_FILTER_COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT;
-    else
-      return MagFilter == FilterMode::Nearest
-                 ? D3D12_FILTER_COMPARISON_MIN_LINEAR_MAG_MIP_POINT
-                 : D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
-  } else {
-    if (MinFilter == FilterMode::Nearest)
-      return MagFilter == FilterMode::Nearest
-                 ? D3D12_FILTER_MIN_MAG_MIP_POINT
-                 : D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
-    else
-      return MagFilter == FilterMode::Nearest
-                 ? D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT
-                 : D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+
+    return MagFilter == FilterMode::Nearest
+               ? D3D12_FILTER_COMPARISON_MIN_LINEAR_MAG_MIP_POINT
+               : D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
   }
+  if (MinFilter == FilterMode::Nearest)
+    return MagFilter == FilterMode::Nearest
+               ? D3D12_FILTER_MIN_MAG_MIP_POINT
+               : D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+
+  return MagFilter == FilterMode::Nearest
+             ? D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT
+             : D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
 }
 
 static D3D12_TEXTURE_ADDRESS_MODE getDXTextureAddressMode(AddressMode Mode) {
