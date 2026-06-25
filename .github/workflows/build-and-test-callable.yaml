@@ -266,6 +266,15 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
+            # Self-hosted runners persist $GITHUB_WORKSPACE between runs, and
+            # neither `cmake --install` nor `install(DIRECTORY ...)` deletes
+            # files that no longer exist in the source tree -- they only
+            # overlay. Without wiping the prefix first, stale test sources
+            # (e.g. a `.test` from a different PR built earlier on this same
+            # generic builder) linger in install/share/hlsl-test-suite/test/,
+            # get tarred up, shipped to the test runner, and executed by lit.
+            # Start from a clean prefix so the tarball reflects only this PR.
+            rm -rf "$GITHUB_WORKSPACE/install" "$GITHUB_WORKSPACE/dxc-dist"
             cd $GITHUB_WORKSPACE/llvm-project/build
             ninja install-distribution install-offload-tools install-offload-test-suite
             # Stage DXC into a portable bin/+lib/ tree at dxc-dist.
@@ -358,6 +367,12 @@ jobs:
         run: |
             set -euxo pipefail
             cd $GITHUB_WORKSPACE
+            # Self-hosted test runners persist $GITHUB_WORKSPACE between runs.
+            # `tar xf` overlays onto whatever the previous run left behind and
+            # never removes orphan files, so stale tests from an earlier PR
+            # extracted here would survive and be picked up by lit. Wipe the
+            # prefixes first so we run exactly the tests in this PR's tarball.
+            rm -rf install dxc-dist
             mkdir -p install dxc-dist
             # Pipe the archive in via stdin and use a relative -C path so
             # tar doesn't try to parse the Windows drive letter or treat

@@ -131,6 +131,7 @@ Extract both prefixes, then run the configure script with `--dxc-path`
 pointing at the DXC binary in its prefix:
 
 ```
+rm -rf install dxc-dist
 mkdir install dxc-dist
 tar xf llvm-prefix.tar -C install
 tar xf dxc-prefix.tar  -C dxc-dist
@@ -140,6 +141,13 @@ python configure-test-suite.py \
     --suite clang-d3d12 \
     --dxc-path ../../../dxc-dist/bin/dxc[.exe]
 ```
+
+> **Always extract into freshly-cleaned prefixes.** `tar xf` overlays files
+> onto whatever already exists and never removes orphans, so on a reused
+> working directory (e.g. a persistent self-hosted runner) stale `.test`
+> files from a previous build would survive and be run by lit. The `rm -rf`
+> above guarantees lit sees only the tests in this tarball. The build runner
+> likewise wipes its `install`/`dxc-dist` prefixes before installing.
 
 This emits a fully-substituted `run/test/<suite>/lit.site.cfg.py`.
 
