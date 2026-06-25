@@ -50,6 +50,8 @@
 
 #include "../Util.h"
 
+#include "../Support/OffloadMigration.h"
+
 #include <atomic>
 #include <codecvt>
 #include <locale>
@@ -139,69 +141,65 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
-static uint64_t getAlignedTextureBufferSize(const CPUBuffer &B) {
-  const uint64_t AlignedPitch =
-      getAlignedTexturePitch(B.OutputProps.Width, B.getElementSize());
-  const uint64_t LastRowSize =
-      uint64_t(B.OutputProps.Width) * B.getElementSize();
-  return uint64_t(B.OutputProps.Height - 1) * AlignedPitch + LastRowSize;
+static D3D12_FILTER getDXFilterMode(FilterMode MinFilter, FilterMode MagFilter,
+                                    bool IsComparison) {
+  if (IsComparison) {
+    if (MinFilter == FilterMode::Nearest)
+      return MagFilter == FilterMode::Nearest
+                 ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT
+                 : D3D12_FILTER_COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT;
+    else
+      return MagFilter == FilterMode::Nearest
+                 ? D3D12_FILTER_COMPARISON_MIN_LINEAR_MAG_MIP_POINT
+                 : D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+  } else {
+    if (MinFilter == FilterMode::Nearest)
+      return MagFilter == FilterMode::Nearest
+                 ? D3D12_FILTER_MIN_MAG_MIP_POINT
+                 : D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+    else
+      return MagFilter == FilterMode::Nearest
+                 ? D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT
+                 : D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+  }
 }
 
-static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
-  // Determine Buffer Usage
-  switch (Kind) {
-  case ResourceKind::Buffer:
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::RWBuffer:
-  case ResourceKind::RWStructuredBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-    return BufferUsage::Storage;
-  case ResourceKind::ConstantBuffer:
-    return BufferUsage::ConstantBuffer;
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::Sampler:
-  case ResourceKind::SampledTexture2D:
-  case ResourceKind::AccelerationStructure:
-    llvm_unreachable("Invalid case, ResourceKind is not a buffer.");
+static D3D12_TEXTURE_ADDRESS_MODE getDXTextureAddressMode(AddressMode Mode) {
+  switch (Mode) {
+  case AddressMode::Clamp:
+    return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+  case AddressMode::Repeat:
+    return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+  case AddressMode::Mirror:
+    return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+  case AddressMode::Border:
+    return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+  case AddressMode::MirrorOnce:
+    return D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE;
   }
-  llvm_unreachable("All ResourceKind cases handled");
+  llvm_unreachable("All cases handled.");
 }
 
-static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
-    const Resource &Resource, BufferShaderAccessTypeParams &OutParams) {
-  // Determine Buffer Access Type
-  switch (Resource.Kind) {
-  case ResourceKind::Buffer:
-  case ResourceKind::RWBuffer: {
-    auto FmtOrErr =
-        toFormat(Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
-    if (!FmtOrErr) {
-      printf("Invalid format! FMT: %d, CHANNELS: %d\n",
-             Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
-      assert(false && "Invalid format.");
-    }
-    OutParams.Fmt = *FmtOrErr;
-    return BufferShaderAccessType::Typed;
+static D3D12_COMPARISON_FUNC getDXComparisonFunc(CompareFunction ComparisonOp) {
+  switch (ComparisonOp) {
+  case CompareFunction::Never:
+    return D3D12_COMPARISON_FUNC_NEVER;
+  case CompareFunction::Less:
+    return D3D12_COMPARISON_FUNC_LESS;
+  case CompareFunction::Equal:
+    return D3D12_COMPARISON_FUNC_EQUAL;
+  case CompareFunction::LessEqual:
+    return D3D12_COMPARISON_FUNC_LESS_EQUAL;
+  case CompareFunction::Greater:
+    return D3D12_COMPARISON_FUNC_GREATER;
+  case CompareFunction::NotEqual:
+    return D3D12_COMPARISON_FUNC_NOT_EQUAL;
+  case CompareFunction::GreaterEqual:
+    return D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+  case CompareFunction::Always:
+    return D3D12_COMPARISON_FUNC_ALWAYS;
   }
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::RWStructuredBuffer:
-    OutParams.StructureStride = Resource.BufferPtr->getElementSize();
-    return BufferShaderAccessType::Structured;
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-  case ResourceKind::ConstantBuffer:
-    return BufferShaderAccessType::Raw;
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::Sampler:
-  case ResourceKind::SampledTexture2D:
-  case ResourceKind::AccelerationStructure:
-    llvm_unreachable(
-        "Invalid case, non-buffers should have been filtered out.");
-  }
-  llvm_unreachable("All ResourceKind cases handled");
+  llvm_unreachable("All cases handled.");
 }
 
 namespace {
@@ -306,10 +304,47 @@ public:
   }
 };
 
+class DXSampler : public offloadtest::Sampler {
+public:
+  D3D12_CPU_DESCRIPTOR_HANDLE Handle = {};
+  std::string Name;
+  SamplerCreateDesc Desc;
+
+  DXSampler(llvm::StringRef Name, SamplerCreateDesc Desc,
+            D3D12_CPU_DESCRIPTOR_HANDLE Handle)
+      : offloadtest::Sampler(GPUAPI::DirectX), Handle(Handle), Name(Name),
+        Desc(Desc) {}
+
+  const SamplerCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Sampler *S) {
+    return S->getAPI() == GPUAPI::DirectX;
+  }
+};
+
+enum class RootParameterType : uint32_t {
+  DescriptorTable = 0,
+  SamplerTable,
+  Constant,
+  CBV,
+  SRV,
+  UAV,
+};
+
+struct RoogtSignatureLayout {
+  RootParameterType ParameterType : 3;
+  uint32_t Count : 29;
+
+  RoogtSignatureLayout(RootParameterType ParameterType, uint32_t Count)
+      : ParameterType(ParameterType), Count(Count) {}
+  RoogtSignatureLayout() = delete;
+};
+
 class DXPipelineState : public offloadtest::PipelineState {
 public:
   std::string Name;
   ComPtr<ID3D12RootSignature> RootSig;
+  llvm::SmallVector<RoogtSignatureLayout> Layout;
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
@@ -319,11 +354,13 @@ public:
   bool IsRayTracing = false;
 
   DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
+                  llvm::SmallVector<RoogtSignatureLayout> Layout,
                   ComPtr<ID3D12PipelineState> PSO,
                   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology,
                   bool IsRT = false)
       : offloadtest::PipelineState(GPUAPI::DirectX), Name(Name),
-        RootSig(RootSig), PSO(PSO), Topology(Topology), IsRayTracing(IsRT) {}
+        RootSig(RootSig), Layout(std::move(Layout)), PSO(PSO),
+        Topology(Topology), IsRayTracing(IsRT) {}
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::DirectX;
@@ -342,9 +379,11 @@ public:
 
   DXRayTracingPipelineState(llvm::StringRef Name,
                             ComPtr<ID3D12RootSignature> RootSig,
+                            llvm::SmallVector<RoogtSignatureLayout> Layout,
                             ComPtr<ID3D12StateObject> SO,
                             ComPtr<ID3D12StateObjectProperties> Props)
-      : DXPipelineState(Name, RootSig, /*PSO=*/nullptr, std::nullopt,
+      : DXPipelineState(Name, RootSig, std::move(Layout), /*PSO=*/nullptr,
+                        std::nullopt,
                         /*IsRT=*/true),
         StateObject(SO), Properties(Props) {}
 
@@ -852,15 +891,20 @@ public:
                                D3D12_RESOURCE_STATE_COPY_DEST);
     CB.flushBarrier();
 
-    const uint32_t ElementSize = getFormatSizeInBytes(DXDst.Desc.Fmt);
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXGIFormat(DXDst.Desc.Fmt), DXDst.Desc.Width, DXDst.Desc.Height,
-            1, getAlignedTexturePitch(DXDst.Desc.Width, ElementSize))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), 0);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(), Footprint);
-    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    const D3D12_RESOURCE_DESC TexDesc = DXDst.Resource->GetDesc();
+    const uint32_t NumSubresources = TexDesc.MipLevels;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Layouts(
+        NumSubresources);
+    ComPtr<ID3D12DeviceX> Device;
+    DXDst.Resource->GetDevice(IID_PPV_ARGS(&Device));
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Layouts.data(), nullptr, nullptr, nullptr);
+    for (uint32_t Sub = 0; Sub < NumSubresources; ++Sub) {
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), Sub);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(),
+                                                 Layouts[Sub]);
+      CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
       CB.addResourceTransition(DXSrc.Buffer.Get(),
@@ -1229,95 +1273,18 @@ public:
   DescriptorAllocator RTVAllocator;
   DescriptorAllocator DSVAllocator;
   DescriptorAllocator CSUAllocator;
-
-  struct ResourceSet {
-    std::unique_ptr<MemoryHeap> BackingMemory;
-    std::unique_ptr<Buffer> Buffer;
-    std::unique_ptr<Texture> Texture;
-    std::unique_ptr<offloadtest::Buffer> Readback;
-    std::unique_ptr<offloadtest::Buffer> CounterReadback;
-
-    // AS-only; mutually exclusive with the buffer/texture fields above.
-    AccelerationStructure *AS = nullptr;
-
-    ResourceSet(std::unique_ptr<offloadtest::Buffer> Buffer,
-                std::unique_ptr<MemoryHeap> BackingMemory,
-                std::unique_ptr<offloadtest::Buffer> Readback,
-                std::unique_ptr<offloadtest::Buffer> CounterReadback)
-        : BackingMemory(std::move(BackingMemory)), Buffer(std::move(Buffer)),
-          Readback(std::move(Readback)),
-          CounterReadback(std::move(CounterReadback)) {}
-    ResourceSet(std::unique_ptr<offloadtest::Texture> Texture,
-                std::unique_ptr<MemoryHeap> BackingMemory,
-                std::unique_ptr<offloadtest::Buffer> Readback)
-        : BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
-          Readback(std::move(Readback)) {}
-    explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
-
-    ResourceSet(const ResourceSet &) = delete;
-    ResourceSet &operator=(const ResourceSet &) = delete;
-
-    ResourceSet(ResourceSet &&A)
-        : BackingMemory(std::move(A.BackingMemory)),
-          Buffer(std::move(A.Buffer)), Texture(std::move(A.Texture)),
-          Readback(std::move(A.Readback)),
-          CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
-    ResourceSet &operator=(ResourceSet &&A) {
-      BackingMemory = std::move(A.BackingMemory);
-      Buffer = std::move(A.Buffer);
-      Texture = std::move(A.Texture);
-      Readback = std::move(A.Readback);
-      CounterReadback = std::move(A.CounterReadback);
-      AS = A.AS;
-      return *this;
-    }
-  };
-
-  // ResourceBundle will contain one ResourceSet for a singular resource
-  // or multiple ResourceSets for resource array.
-  using ResourceBundle = llvm::SmallVector<ResourceSet>;
-  using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
-
-  struct DescriptorTable {
-    llvm::SmallVector<ResourcePair> Resources;
-  };
-
-  struct InvocationState {
-    ComPtr<ID3D12DescriptorHeap> DescHeap;
-    std::unique_ptr<DXCommandBuffer> CB;
-    std::unique_ptr<PipelineState> Pipeline;
-    // Lifetime-tied to the pipeline; only set for RT pipelines.
-    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
-
-    // Resources for graphics pipelines.
-    std::unique_ptr<offloadtest::RenderPass> RenderPass;
-    std::unique_ptr<offloadtest::Texture> RenderTarget;
-    std::unique_ptr<offloadtest::Buffer> RTReadback;
-    std::unique_ptr<offloadtest::Texture> DepthStencil;
-    std::unique_ptr<offloadtest::Buffer> VB;
-
-    llvm::SmallVector<std::unique_ptr<Buffer>> KeepAliveBuffers;
-
-    llvm::SmallVector<DescriptorTable> DescTables;
-    llvm::SmallVector<ResourcePair> RootResources;
-
-    // Parallel-indexed to `P.AccelStructs.BLAS`.
-    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
-        BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
-    // Vertex/index buffers consumed during AS builds; must outlive submission.
-    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
-  };
+  DescriptorAllocator SamplerAllocator;
 
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
-           DescriptorAllocator CSUAllocator, std::string Desc,
+           DescriptorAllocator CSUAllocator,
+           DescriptorAllocator SamplerAllocator, std::string Desc,
            std::string DriverVer)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)),
-        CSUAllocator(std::move(CSUAllocator)) {
+        CSUAllocator(std::move(CSUAllocator)),
+        SamplerAllocator(std::move(SamplerAllocator)) {
     Description = std::move(Desc);
     DriverVersion = std::move(DriverVer);
     DriverName = "DirectX";
@@ -1359,9 +1326,10 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
-  llvm::Error
-  createRootSignatureFromShader(llvm::StringRef, const ShaderContainer &Shader,
-                                ComPtr<ID3D12RootSignature> &OutRootSignature) {
+  llvm::Error createRootSignatureFromShader(
+      llvm::StringRef Name, const ShaderContainer &Shader,
+      ComPtr<ID3D12RootSignature> &OutRootSignature,
+      llvm::SmallVectorImpl<RoogtSignatureLayout> &Layout) {
     // Try pulling a root signature from the DXIL first
     auto ExContainer =
         llvm::object::DXContainer::create(Shader.Shader->getMemBufferRef());
@@ -1381,14 +1349,71 @@ public:
                                           IID_PPV_ARGS(&OutRootSignature)),
               "Failed to create root signature."))
         return Err;
+
+      const std::wstring WStr(Name.begin(), Name.end());
+      OutRootSignature->SetName(WStr.c_str());
+
+      // Deserialize the root signature to determine how we need to bind
+      // descriptor tables
+      ComPtr<ID3D12VersionedRootSignatureDeserializer> Deserializer;
+      if (auto Err = HR::toError(
+              D3D12CreateVersionedRootSignatureDeserializer(
+                  Binary.data(), Binary.size(), IID_PPV_ARGS(&Deserializer)),
+              "Failed to create Root Signature Deserializer"))
+        return Err;
+
+      const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *RootSigDesc = nullptr;
+      if (auto Err =
+              HR::toError(Deserializer->GetRootSignatureDescAtVersion(
+                              D3D_ROOT_SIGNATURE_VERSION_1, &RootSigDesc),
+                          "Failed to deseralize root signature"))
+        return Err;
+
+      for (uint32_t I = 0; I < RootSigDesc->Desc_1_0.NumParameters; ++I) {
+        const D3D12_ROOT_PARAMETER &Parameter =
+            RootSigDesc->Desc_1_0.pParameters[I];
+        switch (Parameter.ParameterType) {
+        case D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE: {
+          uint32_t DescriptorCount = 0;
+          for (uint32_t I = 0;
+               I < Parameter.DescriptorTable.NumDescriptorRanges; ++I)
+            DescriptorCount +=
+                Parameter.DescriptorTable.pDescriptorRanges[I].NumDescriptors;
+
+          if (Parameter.DescriptorTable.NumDescriptorRanges > 0 &&
+              Parameter.DescriptorTable.pDescriptorRanges[0].RangeType ==
+                  D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
+            Layout.push_back(RoogtSignatureLayout(
+                RootParameterType::SamplerTable, DescriptorCount));
+          else
+            Layout.push_back(RoogtSignatureLayout(
+                RootParameterType::DescriptorTable, DescriptorCount));
+          break;
+        }
+        case D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS:
+          Layout.push_back(RoogtSignatureLayout(
+              RootParameterType::Constant, Parameter.Constants.Num32BitValues));
+          break;
+        case D3D12_ROOT_PARAMETER_TYPE_CBV:
+          Layout.push_back(RoogtSignatureLayout(RootParameterType::CBV, 1));
+          break;
+        case D3D12_ROOT_PARAMETER_TYPE_SRV:
+          Layout.push_back(RoogtSignatureLayout(RootParameterType::SRV, 1));
+          break;
+        case D3D12_ROOT_PARAMETER_TYPE_UAV:
+          Layout.push_back(RoogtSignatureLayout(RootParameterType::UAV, 1));
+          break;
+        }
+      }
     }
 
     return llvm::Error::success();
   }
 
   llvm::Error createRootSignatureFromBindingsDesc(
-      llvm::StringRef, const BindingsDesc &BndDesc, bool IsGraphics,
-      ComPtr<ID3D12RootSignature> &OutRootSignature) {
+      llvm::StringRef Name, const BindingsDesc &BndDesc, bool IsGraphics,
+      ComPtr<ID3D12RootSignature> &OutRootSignature,
+      llvm::SmallVectorImpl<RoogtSignatureLayout> &Layout) {
     uint32_t DescriptorCount = 0;
     for (auto &D : BndDesc.DescriptorSetDescs)
       DescriptorCount += D.ResourceBindings.size();
@@ -1401,7 +1426,11 @@ public:
       uint32_t DescriptorIdx = 0;
       const uint32_t StartRangeIdx = RangeIdx;
       for (const auto &Binding : Set.ResourceBindings) {
-        switch (getDescriptorKind(Binding.Kind)) {
+        const DescriptorKind Kind = getDescriptorKind(Binding.Kind);
+        if (Kind == DescriptorKind::SAMPLER)
+          continue;
+
+        switch (Kind) {
         case DescriptorKind::SRV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
           break;
@@ -1412,7 +1441,8 @@ public:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
         case DescriptorKind::SAMPLER:
-          llvm_unreachable("Not implemented yet."); // Requires a separate heap
+          llvm_unreachable("Sampler should have been filtered out.");
+          break;
         }
         Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
         Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
@@ -1422,12 +1452,49 @@ public:
         RangeIdx++;
         DescriptorIdx += Binding.DescriptorCount;
       }
-      RootParams.push_back(D3D12_ROOT_PARAMETER{
-          D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-          {D3D12_ROOT_DESCRIPTOR_TABLE{
-              static_cast<uint32_t>(Set.ResourceBindings.size()),
-              &Ranges.get()[StartRangeIdx]}},
-          D3D12_SHADER_VISIBILITY_ALL});
+      const uint32_t RangeCount =
+          static_cast<uint32_t>(RangeIdx - StartRangeIdx);
+      if (RangeCount > 0) {
+        RootParams.push_back(
+            D3D12_ROOT_PARAMETER{D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+                                 {D3D12_ROOT_DESCRIPTOR_TABLE{
+                                     RangeCount, &Ranges.get()[StartRangeIdx]}},
+                                 D3D12_SHADER_VISIBILITY_ALL});
+        Layout.push_back(RoogtSignatureLayout(
+            RootParameterType::DescriptorTable, DescriptorIdx));
+      }
+
+      uint32_t SamplerDescriptorIdx = 0;
+      const uint32_t SamplerStartRangeIdx = RangeIdx;
+      for (const auto &Binding : Set.ResourceBindings) {
+        const DescriptorKind Kind = getDescriptorKind(Binding.Kind);
+        if (Kind != DescriptorKind::SAMPLER)
+          continue;
+
+        Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
+        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
+        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
+        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
+            SamplerDescriptorIdx;
+
+        assert(Binding.DescriptorCount == 1 && "Manon expected this to be 1.");
+        RangeIdx++;
+        SamplerDescriptorIdx += Binding.DescriptorCount;
+      }
+
+      const uint32_t SamplerRangeCount =
+          static_cast<uint32_t>(RangeIdx - SamplerStartRangeIdx);
+      if (SamplerRangeCount > 0) {
+        RootParams.push_back(D3D12_ROOT_PARAMETER{
+            D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            {D3D12_ROOT_DESCRIPTOR_TABLE{
+                static_cast<uint32_t>(RangeIdx - SamplerStartRangeIdx),
+                &Ranges.get()[SamplerStartRangeIdx]}},
+            D3D12_SHADER_VISIBILITY_ALL});
+        Layout.push_back(RoogtSignatureLayout(RootParameterType::SamplerTable,
+                                              SamplerDescriptorIdx));
+      }
     }
 
     CD3DX12_ROOT_SIGNATURE_DESC Desc;
@@ -1458,32 +1525,37 @@ public:
             "Failed to create root signature."))
       return Err;
 
+    const std::wstring WStr(Name.begin(), Name.end());
+    OutRootSignature->SetName(WStr.c_str());
+
     return llvm::Error::success();
   }
 
   llvm::Error
   createRootSignature(llvm::StringRef Name, const BindingsDesc &BndDesc,
                       const ShaderContainer &Shader, bool IsGraphics,
-                      ComPtr<ID3D12RootSignature> &OutRootSignature) {
+                      ComPtr<ID3D12RootSignature> &OutRootSignature,
+                      llvm::SmallVectorImpl<RoogtSignatureLayout> &Layout) {
     assert(OutRootSignature.Get() == nullptr);
 
-    if (auto Err =
-            createRootSignatureFromShader(Name, Shader, OutRootSignature))
+    if (auto Err = createRootSignatureFromShader(Name, Shader, OutRootSignature,
+                                                 Layout))
       return Err;
 
     if (OutRootSignature.Get() != nullptr)
       return llvm::Error::success();
 
     return createRootSignatureFromBindingsDesc(Name, BndDesc, IsGraphics,
-                                               OutRootSignature);
+                                               OutRootSignature, Layout);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BndDesc,
                    ShaderContainer CS) override {
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RoogtSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, CS,
-                                       /*IsGraphics=*/false, RootSig))
+                                       /*IsGraphics=*/false, RootSig, Layout))
       return Err;
 
     auto DXIL = CS.Shader->getBuffer();
@@ -1503,7 +1575,8 @@ public:
             "Failed to create PSO."))
       return Err;
 
-    return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
+    return std::make_unique<DXPipelineState>(Name, RootSig, std::move(Layout),
+                                             PSO, std::nullopt);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -1513,8 +1586,9 @@ public:
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RoogtSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, Desc.VS,
-                                       /*IsGraphics=*/true, RootSig))
+                                       /*IsGraphics=*/true, RootSig, Layout))
       return Err;
 
     std::vector<D3D12_INPUT_ELEMENT_DESC> DXInputLayout;
@@ -1578,7 +1652,7 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(
-        Name, RootSig, PSO,
+        Name, RootSig, std::move(Layout), PSO,
         getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints));
   }
 
@@ -1588,8 +1662,9 @@ public:
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RoogtSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BindingsDesc, Desc.MS,
-                                       /*IsGraphics=*/true, RootSig))
+                                       /*IsGraphics=*/true, RootSig, Layout))
       return Err;
 
     const D3D12_SHADER_BYTECODE MSBytecode = {
@@ -1655,7 +1730,8 @@ public:
             "Failed to create mesh shader PSO."))
       return Err;
 
-    return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
+    return std::make_unique<DXPipelineState>(Name, RootSig, std::move(Layout),
+                                             PSO, std::nullopt);
   }
 
   static std::wstring widen(llvm::StringRef S) {
@@ -1687,8 +1763,9 @@ public:
     ShaderContainer LibContainer = {};
     LibContainer.Shader = Desc.Library;
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RoogtSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, LibContainer,
-                                       /*IsGraphics=*/false, RootSig))
+                                       /*IsGraphics=*/false, RootSig, Layout))
       return Err;
 
     CD3DX12_STATE_OBJECT_DESC SODesc(
@@ -1755,7 +1832,7 @@ public:
       return Err;
 
     auto State = std::make_unique<DXRayTracingPipelineState>(
-        Name, RootSig, StateObject, Properties);
+        Name, RootSig, Layout, StateObject, Properties);
     // Cache identifiers up-front. The driver-owned blobs are alive for
     // Properties' lifetime, which lives on the PSO.
     //
@@ -2187,9 +2264,82 @@ public:
     return Tex;
   }
 
+  llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string Name, const SamplerCreateDesc &Desc) override {
+
+    auto HandleOrErr = SamplerAllocator.allocate();
+    if (!HandleOrErr)
+      return HandleOrErr.takeError();
+    const D3D12_CPU_DESCRIPTOR_HANDLE Handle = *HandleOrErr;
+
+    const D3D12_TEXTURE_ADDRESS_MODE AddressMode =
+        getDXTextureAddressMode(Desc.Address);
+
+    bool IsComparison = false;
+    D3D12_COMPARISON_FUNC ComparisonFunc = D3D12_COMPARISON_FUNC_NONE;
+    if (Desc.Kind == SamplerKind::SamplerComparison) {
+      IsComparison = true;
+      ComparisonFunc = getDXComparisonFunc(Desc.ComparisonOp);
+    }
+
+    const D3D12_SAMPLER_DESC SamplerDesc = {
+        getDXFilterMode(Desc.MinFilter, Desc.MagFilter, IsComparison),
+        AddressMode, // U
+        AddressMode, // V
+        AddressMode, // W
+        Desc.MipLODBias,
+        0, // MaxAnisotropy
+        ComparisonFunc,
+        {0.0f, 0.0f, 0.0f, 0.0f}, // BorderColor
+        Desc.MinLOD,
+        Desc.MaxLOD,
+    };
+
+    Device->CreateSampler(&SamplerDesc, Handle);
+
+    return std::make_unique<DXSampler>(Name, Desc, Handle);
+  }
+
   uint32_t getTextureUploadRowStrideInBytes(
       const TextureCreateDesc &Desc) const override {
     return getAlignedTexturePitch(Desc.Width, getFormatSizeInBytes(Desc.Fmt));
+  }
+
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // Only the fields GetCopyableFootprints consults are needed here; layout,
+    // flags, and clear value do not affect the copyable footprint.
+    D3D12_RESOURCE_DESC TexDesc = {};
+    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    TexDesc.Width = Desc.Width;
+    TexDesc.Height = Desc.Height;
+    TexDesc.DepthOrArraySize = 1;
+    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
+    TexDesc.Format = getDXGIFormat(Desc.Fmt);
+    TexDesc.SampleDesc.Count = 1;
+
+    const uint32_t NumSubresources = Desc.MipLevels;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints(
+        NumSubresources);
+    llvm::SmallVector<UINT> NumRows(NumSubresources);
+    llvm::SmallVector<UINT64> RowSizes(NumSubresources);
+    UINT64 TotalBytes = 0;
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Footprints.data(), NumRows.data(),
+                                  RowSizes.data(), &TotalBytes);
+
+    TextureUploadLayout Layout;
+    Layout.TotalSizeInBytes = TotalBytes;
+    Layout.Subresources.reserve(NumSubresources);
+    for (uint32_t I = 0; I < NumSubresources; ++I) {
+      SubresourceFootprint Sub;
+      Sub.Offset = Footprints[I].Offset;
+      Sub.RowPitchInBytes = Footprints[I].Footprint.RowPitch;
+      Sub.RowSizeInBytes = static_cast<uint32_t>(RowSizes[I]);
+      Sub.NumRows = NumRows[I];
+      Layout.Subresources.push_back(Sub);
+    }
+    return Layout;
   }
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
@@ -2257,11 +2407,16 @@ public:
     if (!CSUHeapOrErr)
       return CSUHeapOrErr.takeError();
 
+    auto SamplerHeapOrErr = DescriptorAllocator::create(
+        Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 256);
+    if (!SamplerHeapOrErr)
+      return SamplerHeapOrErr.takeError();
+
     return std::make_unique<DXDevice>(
         Adapter, Device, std::move(*GraphicsQueueOrErr),
         std::move(*RTVHeapOrErr), std::move(*DSVHeapOrErr),
-        std::move(*CSUHeapOrErr), std::string(DescVec.data()),
-        std::move(DriverVer));
+        std::move(*CSUHeapOrErr), std::move(*SamplerHeapOrErr),
+        std::string(DescVec.data()), std::move(DriverVer));
   }
 
   const Capabilities &getCapabilities() override {
@@ -2303,17 +2458,44 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
+  llvm::Error createDescriptorHeaps(Pipeline &P,
+                                    ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                                    ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
+
+    uint32_t DescriptorCount = 0;
+    uint32_t SamplerCount = 0;
+    for (auto &D : P.Sets)
+      for (auto &R : D.Resources)
+        if (R.isSampler())
+          SamplerCount += 1;
+        else
+          DescriptorCount += R.getArraySize();
+
+    // prevent empty heaps
+    if (DescriptorCount == 0)
+      DescriptorCount = 1;
+    if (SamplerCount == 0)
+      SamplerCount = 1;
+
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        P.getDescriptorCountWithFlattenedArrays(),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, DescriptorCount,
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
-    if (auto Err = HR::toError(Device->CreateDescriptorHeap(
-                                   &HeapDesc, IID_PPV_ARGS(&State.DescHeap)),
-                               "Failed to create descriptor heap."))
+    if (auto Err = HR::toError(
+            Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&DescHeap)),
+            "Failed to create descriptor heap."))
       return Err;
+
+    const D3D12_DESCRIPTOR_HEAP_DESC SamplerHeapDesc = {
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, SamplerCount,
+        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+    if (auto Err =
+            HR::toError(Device->CreateDescriptorHeap(
+                            &SamplerHeapDesc, IID_PPV_ARGS(&SamplerHeap)),
+                        "Failed to create sampler descriptor heap."))
+      return Err;
+
     return llvm::Error::success();
   }
 
@@ -2472,332 +2654,138 @@ public:
     return (Sz + 255u) & 0xFFFFFFFFFFFFFF00;
   }
 
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    return createTLAS(*SizesOrErr);
-  }
-
-  llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    auto EncOrErr = IS.CB->createComputeEncoder();
-    if (!EncOrErr)
-      return EncOrErr.takeError();
-    auto Enc = std::move(*EncOrErr);
-
-    auto CreateBuffer =
-        [&Enc, &IS,
-         this](Resource &R,
-               llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
-      ResourceBundle ResBundle;
-      if (R.isBuffer()) {
-        BufferCreateDesc CreateDesc = {};
-        CreateDesc.Location = MemoryLocation::GpuOnly;
-        CreateDesc.Backing =
-            R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
-        CreateDesc.Usage = bufferUsageFromResourceKind(R.Kind);
-        CreateDesc.AccessType = bufferShaderAccessTypeFromResourceKind(
-            R, CreateDesc.AccessTypeParams);
-        CreateDesc.HasCounter = R.HasCounter;
-
-        for (auto &Data : R.BufferPtr->Data) {
-          std::unique_ptr<offloadtest::Buffer> UploadBuffer;
-          std::unique_ptr<offloadtest::MemoryHeap> BackingMemoryHeap;
-
-          std::unique_ptr<offloadtest::Buffer> Buffer;
-          if (R.IsReserved) {
-            auto BufferOrErr = createSparseBufferWithData(
-                *this, GraphicsQueue, "Sparse Buffer", CreateDesc, R.size(),
-                R.TilesMapped, Data.get(), R.size(), *Enc.get(), UploadBuffer,
-                BackingMemoryHeap);
-            if (!BufferOrErr)
-              return BufferOrErr.takeError();
-
-            Buffer = std::move(*BufferOrErr);
-          } else {
-            auto BufferOrErr =
-                createBufferWithData(*this, "Buffer", CreateDesc, Data.get(),
-                                     R.size(), Enc.get(), &UploadBuffer);
-            if (!BufferOrErr)
-              return BufferOrErr.takeError();
-
-            Buffer = std::move(*BufferOrErr);
-          }
-
-          std::unique_ptr<offloadtest::Buffer> ReadbackBuffer;
-          std::unique_ptr<offloadtest::Buffer> CounterReadbackBuffer;
-          if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
-            const BufferCreateDesc ReadbackDesc =
-                BufferCreateDesc::readbackBuffer();
-            auto ReadbackOrErr = createBuffer("Readback", ReadbackDesc,
-                                              Buffer->getSizeInBytes());
-            if (!ReadbackOrErr)
-              return ReadbackOrErr.takeError();
-            ReadbackBuffer = std::move(*ReadbackOrErr);
-
-            if (R.HasCounter) {
-              auto CounterReadbackOrErr =
-                  createBuffer("Readback", ReadbackDesc, sizeof(uint32_t));
-              if (!CounterReadbackOrErr)
-                return CounterReadbackOrErr.takeError();
-              CounterReadbackBuffer = std::move(*CounterReadbackOrErr);
-            }
-          }
-
-          IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
-          ResourceSet RSet(std::move(Buffer), std::move(BackingMemoryHeap),
-                           std::move(ReadbackBuffer),
-                           std::move(CounterReadbackBuffer));
-          ResBundle.push_back(std::move(RSet));
-        }
-      } else if (R.isTexture()) {
-        if (R.BufferPtr->OutputProps.MipLevels != 1)
-          return llvm::createStringError(std::errc::not_supported,
-                                         "Multiple mip levels are not yet "
-                                         "supported for DirectX textures.");
-
-        auto FormatOrErr = toFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-        if (!FormatOrErr)
-          return FormatOrErr.takeError();
-
-        LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
-
-        TextureCreateDesc CreateDesc = {};
-        CreateDesc.Location = MemoryLocation::GpuOnly;
-        CreateDesc.Backing =
-            R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
-        CreateDesc.Usage = TextureUsage::Sampled;
-        if (R.Kind == ResourceKind::RWTexture2D)
-          CreateDesc.Usage |= TextureUsage::Storage;
-        CreateDesc.Fmt = *FormatOrErr;
-        CreateDesc.Width = R.BufferPtr->OutputProps.Width;
-        CreateDesc.Height = R.BufferPtr->OutputProps.Height;
-        CreateDesc.MipLevels = 1;
-
-        for (auto &Data : R.BufferPtr->Data) {
-          std::unique_ptr<offloadtest::Buffer> UploadBuffer;
-          std::unique_ptr<offloadtest::MemoryHeap> BackingMemoryHeap;
-
-          std::unique_ptr<offloadtest::Texture> Texture;
-          if (R.IsReserved) {
-            auto TextureOrErr = createSparseTextureWithData(
-                *this, GraphicsQueue, "Sparse Texture", CreateDesc, Data.get(),
-                R.size(), *Enc.get(), UploadBuffer, BackingMemoryHeap);
-            if (!TextureOrErr)
-              return TextureOrErr.takeError();
-
-            Texture = std::move(*TextureOrErr);
-          } else {
-            auto TextureOrErr =
-                createTextureWithData(*this, "Texture", CreateDesc, Data.get(),
-                                      R.size(), Enc.get(), &UploadBuffer);
-            if (!TextureOrErr)
-              return TextureOrErr.takeError();
-
-            Texture = std::move(*TextureOrErr);
-          }
-
-          std::unique_ptr<Buffer> ReadbackBuffer;
-          if (getDescriptorKind(R.Kind) == DescriptorKind::UAV) {
-            const BufferCreateDesc ReadbackDesc =
-                BufferCreateDesc::readbackBuffer();
-            auto ReadbackOrErr =
-                createBuffer("Readback", ReadbackDesc,
-                             Texture->calculateLinearSizeInBytes(*this));
-            if (!ReadbackOrErr)
-              return ReadbackOrErr.takeError();
-            ReadbackBuffer = std::move(*ReadbackOrErr);
-          }
-
-          IS.KeepAliveBuffers.push_back(std::move(UploadBuffer));
-          ResourceSet RSet(std::move(Texture), std::move(BackingMemoryHeap),
-                           std::move(ReadbackBuffer));
-          ResBundle.push_back(std::move(RSet));
-        }
-      } else if (R.isAccelerationStructure()) {
-        auto ASOrErr = createAS(R);
-        if (!ASOrErr)
-          return ASOrErr.takeError();
-        ResBundle.emplace_back(ASOrErr->get());
-        auto Inserted =
-            IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
-        assert(Inserted.second && "TLAS bound to multiple resources NYI");
-        (void)Inserted;
-      } else {
-        return llvm::createStringError(
-            std::errc::not_supported,
-            "Samplers are not yet implemented for DirectX.");
-      }
-
-      Resources.push_back(std::make_pair(&R, std::move(ResBundle)));
-      return llvm::Error::success();
-    };
-
-    for (auto &D : P.Sets) {
-      IS.DescTables.emplace_back(DescriptorTable());
-      DescriptorTable &Table = IS.DescTables.back();
-      for (auto &R : D.Resources)
-        if (auto Err = CreateBuffer(R, Table.Resources))
-          return Err;
-    }
-
-    Enc->endEncoding();
-
+  llvm::Error buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
+                             const ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                             const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     // Bind descriptors in descriptor tables.
-    if (IS.DescHeap) {
-      uint32_t HeapIndex = 0;
-      const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
-          IS.DescHeap->GetCPUDescriptorHandleForHeapStart();
-      const uint32_t DescHandleIncSize =
-          Device->GetDescriptorHandleIncrementSize(
-              D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-      for (auto &T : IS.DescTables) {
-        for (auto &R : T.Resources) {
-          for (const auto &Set : R.second) {
-            D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
-            if (Set.Buffer != nullptr) {
-              const DXBuffer &BufferDX =
-                  llvm::cast<DXBuffer>(*Set.Buffer.get());
-              switch (getDescriptorKind(R.first->Kind)) {
-              case DescriptorKind::SRV:
-                assert(BufferDX.SRVHandle.ptr != 0 &&
-                       "Missing SRV Descriptor. Is BufferUsage correct?");
-                DescriptorHandle = BufferDX.SRVHandle;
-                break;
-              case DescriptorKind::UAV:
-                assert(BufferDX.UAVHandle.ptr != 0 &&
-                       "Missing UAV Descriptor. Is BufferUsage correct?");
-                DescriptorHandle = BufferDX.UAVHandle;
-                break;
-              case DescriptorKind::CBV:
-                assert(BufferDX.CBVHandle.ptr != 0 &&
-                       "Missing CBV Descriptor. Is BufferUsage correct?");
-                DescriptorHandle = BufferDX.CBVHandle;
-                break;
-              default:
-                llvm_unreachable("Invalid DescriptorKind for a Buffer.");
-                break;
-              }
-            } else if (Set.Texture != nullptr) {
-              const DXTexture &TextureDX =
-                  llvm::cast<DXTexture>(*Set.Texture.get());
-              switch (getDescriptorKind(R.first->Kind)) {
-              case DescriptorKind::SRV:
-                assert(TextureDX.SRVHandle.ptr != 0 &&
-                       "Missing SRV Descriptor. Is TextureUsage correct?");
-                DescriptorHandle = TextureDX.SRVHandle;
-                break;
-              case DescriptorKind::UAV:
-                assert(TextureDX.UAVHandle.ptr != 0 &&
-                       "Missing UAV Descriptor. Is TextureUsage correct?");
-                DescriptorHandle = TextureDX.UAVHandle;
-                break;
-              default:
-                llvm_unreachable("Invalid DescriptorKind for a Texture.");
-                break;
-              }
-            } else if (Set.AS != nullptr) {
-              const DXAccelerationStructure &AccelerationStructureDX =
-                  llvm::cast<DXAccelerationStructure>(*Set.AS);
-              DescriptorHandle = AccelerationStructureDX.SRVHandle;
-            } else {
-              llvm_unreachable("Resource was a texture nor buffer. Samplers "
-                               "are unsupported");
-            }
+    if (!DescHeap && !SamplerHeap)
+      return llvm::Error::success();
 
-            assert(DescriptorHandle.ptr != 0 &&
-                   "Somehow got a null descriptor :(");
+    uint32_t HeapIndex = 0;
+    uint32_t SamplerHeapIndex = 0;
+
+    const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
+        DescHeap->GetCPUDescriptorHandleForHeapStart();
+    const D3D12_CPU_DESCRIPTOR_HANDLE SamplerHeapStart =
+        SamplerHeap->GetCPUDescriptorHandleForHeapStart();
+
+    const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const uint32_t SamplerHandleIncSize =
+        Device->GetDescriptorHandleIncrementSize(
+            D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
+    for (auto &T : DescTables) {
+      for (auto &R : T.Resources) {
+        for (const auto &Set : R.second) {
+          D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
+          if (Set.Buffer != nullptr) {
+            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buffer.get());
+            switch (getDescriptorKind(R.first->Kind)) {
+            case DescriptorKind::SRV:
+              assert(BufferDX.SRVHandle.ptr != 0 &&
+                     "Missing SRV Descriptor. Is BufferUsage correct?");
+              DescriptorHandle = BufferDX.SRVHandle;
+              break;
+            case DescriptorKind::UAV:
+              assert(BufferDX.UAVHandle.ptr != 0 &&
+                     "Missing UAV Descriptor. Is BufferUsage correct?");
+              DescriptorHandle = BufferDX.UAVHandle;
+              break;
+            case DescriptorKind::CBV:
+              assert(BufferDX.CBVHandle.ptr != 0 &&
+                     "Missing CBV Descriptor. Is BufferUsage correct?");
+              DescriptorHandle = BufferDX.CBVHandle;
+              break;
+            default:
+              llvm_unreachable("Invalid DescriptorKind for a Buffer.");
+              break;
+            }
+          } else if (Set.Texture != nullptr) {
+            if (Set.Sampler != nullptr)
+              return llvm::createStringError(
+                  "DirectX 12 does not support Combined Image Samplers.");
+
+            const DXTexture &TextureDX =
+                llvm::cast<DXTexture>(*Set.Texture.get());
+            switch (getDescriptorKind(R.first->Kind)) {
+            case DescriptorKind::SRV:
+              assert(TextureDX.SRVHandle.ptr != 0 &&
+                     "Missing SRV Descriptor. Is TextureUsage correct?");
+              DescriptorHandle = TextureDX.SRVHandle;
+              break;
+            case DescriptorKind::UAV:
+              assert(TextureDX.UAVHandle.ptr != 0 &&
+                     "Missing UAV Descriptor. Is TextureUsage correct?");
+              DescriptorHandle = TextureDX.UAVHandle;
+              break;
+            default:
+              llvm_unreachable("Invalid DescriptorKind for a Texture.");
+              break;
+            }
+          } else if (Set.AS != nullptr) {
+            const DXAccelerationStructure &AccelerationStructureDX =
+                llvm::cast<DXAccelerationStructure>(*Set.AS);
+            DescriptorHandle = AccelerationStructureDX.SRVHandle;
+          } else if (Set.Sampler != nullptr) {
+            const DXSampler &SamplerDX = llvm::cast<DXSampler>(*Set.Sampler);
+            DescriptorHandle = SamplerDX.Handle;
+          } else {
+            llvm_unreachable("Resource was a texture nor buffer. Samplers "
+                             "are unsupported");
+          }
+
+          assert(DescriptorHandle.ptr != 0 &&
+                 "Somehow got a null descriptor :(");
+
+          if (Set.Sampler != nullptr) {
+            Device->CopyDescriptorsSimple(
+                1,
+                {SamplerHeapStart.ptr +
+                 SamplerHeapIndex * SamplerHandleIncSize},
+                DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+            SamplerHeapIndex += 1;
+          } else {
             Device->CopyDescriptorsSimple(
                 1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
                 DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
             HeapIndex += 1;
           }
+
+          assert(DescriptorHandle.ptr != 0 &&
+                 "Somehow got a null descriptor :(");
+          Device->CopyDescriptorsSimple(
+              1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
+              DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+          HeapIndex += 1;
         }
       }
     }
 
-    // Setup root descriptors
-    for (auto &R : P.Settings.DX.RootParams) {
-      if (R.Kind != dx::RootParamKind::RootDescriptor)
-        continue;
-      auto &Resource = std::get<dx::RootResource>(R.Data);
-      if (!Resource.IsReserved && Resource.TilesMapped.has_value()) {
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "Error: Cannot define tiles mapped without declaring resource as "
-            "reserved.");
-      }
-      if (auto Err = CreateBuffer(Resource, IS.RootResources))
-        return Err;
-    }
-
-    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
-      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
-
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
-                                           VBuffer->Data[0].get(),
-                                           VBuffer->size(), nullptr, nullptr);
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.VB = std::move(*BufOrErr);
-      llvm::outs() << "Vertex buffer created.\n";
-    }
-
     return llvm::Error::success();
   }
 
-  static llvm::Error
-  copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
-                   ResourcePair &R) {
-    if (R.first->isTexture()) {
-      for (const ResourceSet &RS : R.second) {
-        if (RS.Readback == nullptr)
-          continue;
+  llvm::Error
+  createComputeCommands(Pipeline &P, SharedInvocationState &IS,
+                        const ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                        const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
+    const DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
 
-        if (auto Err =
-                ReadbackEncoder.copyTextureToBuffer(*RS.Texture, *RS.Readback))
-          return Err;
-      }
-    } else if (R.first->isBuffer()) {
-      for (const ResourceSet &RS : R.second) {
-        if (RS.Readback == nullptr)
-          continue;
-
-        if (auto Err = ReadbackEncoder.copyBufferToBuffer(
-                *RS.Buffer, 0, *RS.Readback, 0, RS.Buffer->getSizeInBytes()))
-          return Err;
-
-        if (!RS.Buffer->getDesc().HasCounter)
-          continue;
-
-        if (auto Err = ReadbackEncoder.copyCounterToBuffer(*RS.Buffer,
-                                                           *RS.CounterReadback))
-          return Err;
-      }
-    }
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
-    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
-      Handle = IS.DescHeap->GetGPUDescriptorHandleForHeapStart();
+    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle, SamplerHandle;
+    if (DescHeap) {
+      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get(), SamplerHeap.Get()};
+      DXCB.CmdList->SetDescriptorHeaps(2, Heaps);
+      Handle = DescHeap->GetGPUDescriptorHandleForHeapStart();
+      SamplerHandle = SamplerHeap->GetGPUDescriptorHandleForHeapStart();
     }
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
-    IS.CB->CmdList->SetComputeRootSignature(DXPipeline.RootSig.Get());
+    DXCB.CmdList->SetComputeRootSignature(DXPipeline.RootSig.Get());
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     if (P.Settings.DX.RootParams.size() > 0) {
       uint32_t ConstantOffset = 0u;
@@ -2814,15 +2802,15 @@ public:
                 "Root constant cannot refer to resource arrays.");
           const uint32_t NumValues =
               Constant.BufferPtr->size() / sizeof(uint32_t);
-          IS.CB->CmdList->SetComputeRoot32BitConstants(
+          DXCB.CmdList->SetComputeRoot32BitConstants(
               RootParamIndex++, NumValues,
               Constant.BufferPtr->Data.back().get(), ConstantOffset);
           ConstantOffset += NumValues;
           break;
         }
         case dx::RootParamKind::DescriptorTable:
-          IS.CB->CmdList->SetComputeRootDescriptorTable(RootParamIndex++,
-                                                        Handle);
+          // TODO(manon): Add support for descriptor tables containing samplers
+          DXCB.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
           Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
           break;
         case dx::RootParamKind::RootDescriptor:
@@ -2844,19 +2832,20 @@ public:
               BufferDX->Buffer->GetGPUVirtualAddress();
           switch (getDescriptorKind(RootDescIt->first->Kind)) {
           case DescriptorKind::SRV:
-            IS.CB->CmdList->SetComputeRootShaderResourceView(RootParamIndex++,
-                                                             VirtualAddress);
+            DXCB.CmdList->SetComputeRootShaderResourceView(RootParamIndex++,
+                                                           VirtualAddress);
             break;
           case DescriptorKind::UAV:
-            IS.CB->CmdList->SetComputeRootUnorderedAccessView(RootParamIndex++,
-                                                              VirtualAddress);
+            DXCB.CmdList->SetComputeRootUnorderedAccessView(RootParamIndex++,
+                                                            VirtualAddress);
             break;
           case DescriptorKind::CBV:
-            IS.CB->CmdList->SetComputeRootConstantBufferView(RootParamIndex++,
-                                                             VirtualAddress);
+            DXCB.CmdList->SetComputeRootConstantBufferView(RootParamIndex++,
+                                                           VirtualAddress);
             break;
           case DescriptorKind::SAMPLER:
-            llvm_unreachable("Not implemented yet.");
+            llvm_unreachable(
+                "Samplers cannot be written directly into the Root Signature.");
           }
           ++RootDescIt;
           break;
@@ -2866,9 +2855,22 @@ public:
       // If no explicit root parameters are provided, fall back to using the
       // descriptor set layout. This is to make it easier to write tests that
       // don't need complicated root signatures.
-      for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-        IS.CB->CmdList->SetComputeRootDescriptorTable(Idx, Handle);
-        Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
+      for (uint32_t I = 0, N = DXPipeline.Layout.size(); I < N; ++I) {
+        const auto &Layout = DXPipeline.Layout[I];
+        switch (Layout.ParameterType) {
+        case RootParameterType::DescriptorTable:
+          DXCB.CmdList->SetComputeRootDescriptorTable(I, Handle);
+          Handle.Offset(Layout.Count, Inc);
+          break;
+        case RootParameterType::SamplerTable:
+          DXCB.CmdList->SetComputeRootDescriptorTable(I, SamplerHandle);
+          SamplerHandle.Offset(Layout.Count, SamplerInc);
+          break;
+        default:
+          return llvm::createStringError(
+              "Root Signatures that contain constants and inline descriptors "
+              "require custom RootParamters to be defined.");
+        }
       }
     }
 
@@ -2901,11 +2903,11 @@ public:
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
         return Err;
 
     ReadbackEncoder->endEncoding();
@@ -2913,132 +2915,46 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error readBack(Pipeline &P, InvocationState &IS) {
-    auto MemCpyBack = [this](ResourcePair &R) -> llvm::Error {
-      if (!R.first->isReadWrite())
-        return llvm::Error::success();
-
-      auto *RSIt = R.second.begin();
-      auto *DataIt = R.first->BufferPtr->Data.begin();
-      for (; RSIt != R.second.end() && DataIt != R.first->BufferPtr->Data.end();
-           ++RSIt, ++DataIt) {
-        offloadtest::Buffer &Readback = *RSIt->Readback;
-        auto DataPtrOrErr = Readback.map();
-        if (!DataPtrOrErr)
-          return DataPtrOrErr.takeError();
-        const void *DataPtr = *DataPtrOrErr;
-
-        if (R.first->isTexture()) {
-          const TextureCreateDesc &Desc = RSIt->Texture->getDesc();
-          const uint32_t SrcStrideInBytes =
-              getTextureUploadRowStrideInBytes(Desc);
-          const uint32_t DstStrideInBytes =
-              Desc.Width * getFormatSizeInBytes(Desc.Fmt);
-          assert(DstStrideInBytes <= SrcStrideInBytes &&
-                 "Destination should not have padding and thus should be <= "
-                 "than SrcStride where we do expect potential padding.");
-          uint8_t *Dst = (uint8_t *)DataIt->get();
-          const uint8_t *Src = (const uint8_t *)DataPtr;
-
-          for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
-            memcpy(Dst, Src, DstStrideInBytes);
-            Dst += DstStrideInBytes;
-            Src += SrcStrideInBytes;
-          }
-        } else {
-          memcpy(DataIt->get(), DataPtr, R.first->size());
-        }
-
-        Readback.unmap();
-
-        if (R.first->HasCounter) {
-          offloadtest::Buffer &CounterReadback = *RSIt->CounterReadback;
-          auto CounterPtrOrErr = CounterReadback.map();
-          if (!CounterPtrOrErr)
-            return CounterPtrOrErr.takeError();
-          const uint32_t *CounterPtr = (const uint32_t *)*CounterPtrOrErr;
-          R.first->BufferPtr->Counters.push_back(*CounterPtr);
-          CounterReadback.unmap();
-        }
-      }
-
-      return llvm::Error::success();
-    };
-
-    for (auto &Table : IS.DescTables)
-      for (auto &R : Table.Resources)
-        if (auto Err = MemCpyBack(R))
-          return Err;
-
-    for (auto &R : IS.RootResources)
-      if (auto Err = MemCpyBack(R))
-        return Err;
-
-    // If there is no render target, return early.
-    if (!IS.RTReadback)
-      return llvm::Error::success();
-
-    auto DataPtrOrErr = IS.RTReadback->map();
-    if (!DataPtrOrErr)
-      return DataPtrOrErr.takeError();
-    const void *Mapped = *DataPtrOrErr;
-
-    const uint32_t SrcStrideInBytes =
-        getTextureUploadRowStrideInBytes(IS.RenderTarget->getDesc());
-
-    P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped, SrcStrideInBytes);
-    IS.RTReadback->unmap();
-    return llvm::Error::success();
-  }
-
-  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
-    if (!P.Bindings.RTargetBufferPtr)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "No render target bound for graphics pipeline.");
-    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
-
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-
-    IS.RenderTarget = std::move(*TexOrErr);
-
-    // Create readback buffer sized for the pixel data with row pitch padded
-    // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
-    // for the placed footprint used by CopyTextureRegion. The compaction
-    // back to a tight layout happens in readBack() via GetCopyableFootprints.
-    BufferCreateDesc BufDesc = {};
-    BufDesc.Location = MemoryLocation::GpuToCpu;
-    BufDesc.Usage = BufferUsage::Storage;
-    auto BufOrErr = createBuffer("RTReadback", BufDesc,
-                                 getAlignedTextureBufferSize(OutBuf));
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-    IS.RTReadback = std::move(*BufOrErr);
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
-        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-    IS.DepthStencil = std::move(*TexOrErr);
-    return llvm::Error::success();
-  }
-
-  llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error
+  createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
+                         const ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                         const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
-    IS.CB->CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
-    if (IS.DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {IS.DescHeap.Get()};
-      IS.CB->CmdList->SetDescriptorHeaps(1, Heaps);
-      IS.CB->CmdList->SetGraphicsRootDescriptorTable(
-          0, IS.DescHeap->GetGPUDescriptorHandleForHeapStart());
+    const DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
+    DXCB.CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
+
+    if (DescHeap) {
+      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get(), SamplerHeap.Get()};
+      DXCB.CmdList->SetDescriptorHeaps(2, Heaps);
+      CD3DX12_GPU_DESCRIPTOR_HANDLE Handle(
+          DescHeap->GetGPUDescriptorHandleForHeapStart());
+      CD3DX12_GPU_DESCRIPTOR_HANDLE SamplerHandle(
+          SamplerHeap->GetGPUDescriptorHandleForHeapStart());
+
+      const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
+      for (uint32_t I = 0, N = DXPipeline.Layout.size(); I < N; ++I) {
+        const auto &Layout = DXPipeline.Layout[I];
+        llvm::outs() << "Layout.Count: " << Layout.Count << "\n";
+        switch (Layout.ParameterType) {
+        case RootParameterType::DescriptorTable:
+          DXCB.CmdList->SetGraphicsRootDescriptorTable(I, Handle);
+          Handle.Offset(Layout.Count, Inc);
+          break;
+        case RootParameterType::SamplerTable:
+          DXCB.CmdList->SetGraphicsRootDescriptorTable(I, SamplerHandle);
+          SamplerHandle.Offset(Layout.Count, SamplerInc);
+          break;
+        default:
+          return llvm::createStringError(
+              "Root Signatures that contain constants and inline descriptors "
+              "require custom RootParamters to be defined.");
+        }
+      }
     }
 
     RenderPassBeginDesc BeginDesc = {};
@@ -3093,33 +3009,39 @@ public:
 
     for (auto &Table : IS.DescTables)
       for (auto &R : Table.Resources)
-        if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
           return Err;
 
     for (auto &R : IS.RootResources)
-      if (auto Err = DXDevice::copyBackResource(*ReadbackEncoder, R))
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
         return Err;
+
+    ReadbackEncoder->endEncoding();
 
     return llvm::Error::success();
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    InvocationState State;
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
-    if (auto Err = createDescriptorHeap(P, State))
+
+    ComPtr<ID3D12DescriptorHeap> DescHeap, SamplerHeap;
+    if (auto Err = createDescriptorHeaps(P, DescHeap, SamplerHeap))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
 
-    auto CBOrErr = DXCommandBuffer::create(Device);
+    SharedInvocationState State;
+    auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
-    State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
 
-    if (auto Err = createBuffers(P, State))
+    if (auto Err = createResources(*this, P, State))
       return Err;
     llvm::outs() << "Buffers created.\n";
+
+    if (auto Err = buildDescriptorTables(State.DescTables, DescHeap, SamplerHeap))
+      return Err;
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
       auto EncOrErr = State.CB->createComputeEncoder();
@@ -3149,18 +3071,6 @@ public:
       BndDesc.DescriptorSetDescs.push_back(Layout);
     }
 
-    if (P.isRaster()) {
-      // Create render target and depth/stencil
-      if (auto Err = createRenderTarget(P, State))
-        return Err;
-      llvm::outs() << "Render target created.\n";
-      // TODO: Always created for graphics pipelines. Consider making this
-      // conditional on the pipeline definition.
-      if (auto Err = createDepthStencil(P, State))
-        return Err;
-      llvm::outs() << "Depth stencil created.\n";
-    }
-
     if (P.isCompute()) {
       // This is an arbitrary distinction that we could alter in the future.
       if (P.Shaders.size() != 1 || P.Shaders[0].Stage != Stages::Compute)
@@ -3178,7 +3088,7 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
-      if (auto Err = createComputeCommands(P, State))
+      if (auto Err = createComputeCommands(P, State, DescHeap, SamplerHeap))
         return Err;
       llvm::outs() << "Compute command list created.\n";
 
@@ -3284,7 +3194,7 @@ public:
         llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
 
-      if (auto Err = createGraphicsCommands(P, State))
+      if (auto Err = createGraphicsCommands(P, State, DescHeap, SamplerHeap))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
     } else if (P.isRayTracing()) {
@@ -3315,7 +3225,7 @@ public:
       State.SBT = std::move(*SBTOrErr);
       llvm::outs() << "Shader Binding Table created.\n";
 
-      if (auto Err = createComputeCommands(P, State))
+      if (auto Err = createComputeCommands(P, State, DescHeap, SamplerHeap))
         return Err;
       llvm::outs() << "RayTracing command list created.\n";
     } else {
@@ -3328,7 +3238,7 @@ public:
     llvm::outs() << "Compute commands executed.\n";
     if (auto Err = SubmitResult->waitForCompletion())
       return Err;
-    if (auto Err = readBack(P, State))
+    if (auto Err = readBack(*this, P, State))
       return Err;
     llvm::outs() << "Read data back.\n";
 

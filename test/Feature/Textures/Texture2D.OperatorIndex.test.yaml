@@ -60,9 +60,6 @@ Results:
 ...
 #--- end
 
-# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
-# XFAIL: DirectX
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

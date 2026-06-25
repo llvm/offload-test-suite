@@ -20,6 +20,7 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/RenderPass.h"
+#include "API/Sampler.h"
 #include "API/ShaderBindingTable.h"
 #include "API/Texture.h"
 
@@ -346,6 +347,9 @@ public:
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
 
+  virtual llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string Name, const SamplerCreateDesc &Desc) = 0;
+
   virtual llvm::Expected<std::unique_ptr<MemoryHeap>>
   createMemoryHeap(std::string Name, size_t SizeInBytes) = 0;
 
@@ -353,6 +357,12 @@ public:
   // texture created with the given description, via an upload buffer.
   virtual uint32_t
   getTextureUploadRowStrideInBytes(const TextureCreateDesc &Desc) const = 0;
+
+  // The layout an upload buffer must have to feed createTextureWithData /
+  // copyBufferToTexture for the given texture description. Encodes per-mip
+  // offsets, row pitch, and total size in the backend's required alignment.
+  virtual TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const = 0;
 
   virtual llvm::Expected<std::unique_ptr<RenderPass>>
   createRenderPass(const RenderPassDesc &Desc) = 0;
@@ -421,6 +431,9 @@ createBufferWithData(Device &Dev, std::string Name,
                      size_t SizeInBytes, ComputeEncoder *Encoder,
                      std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
 
+// Create a texture and upload `Data` (tightly-packed across mip levels) into
+// it via a staging buffer recorded on `Encoder`. The staging buffer is handed
+// back through `OutUploadBuffer` and must outlive command-buffer submission.
 llvm::Expected<std::unique_ptr<offloadtest::Texture>>
 createTextureWithData(Device &Dev, std::string Name,
                       const TextureCreateDesc &Desc, const void *Data,
