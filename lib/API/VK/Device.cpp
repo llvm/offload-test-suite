@@ -3469,46 +3469,6 @@ public:
     return BufferRef{Buffer, Memory};
   }
 
-  // llvm::Expected<ResourceRef> createSampler(Resource &R, BufferRef &Host) {
-  //   VkSamplerCreateInfo SamplerInfo = {};
-  //   SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-  //   const Sampler &S = *R.SamplerPtr;
-  //   SamplerInfo.magFilter = getVKFilter(S.MagFilter);
-  //   SamplerInfo.minFilter = getVKFilter(S.MinFilter);
-  //   SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-  //   SamplerInfo.addressModeU = getVKAddressMode(S.Address);
-  //   SamplerInfo.addressModeV = getVKAddressMode(S.Address);
-  //   SamplerInfo.addressModeW = getVKAddressMode(S.Address);
-  //   SamplerInfo.mipLodBias = S.MipLODBias;
-  //   SamplerInfo.anisotropyEnable = VK_FALSE;
-  //   SamplerInfo.maxAnisotropy = 1.0f;
-  //   SamplerInfo.compareEnable =
-  //       S.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
-  //   SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
-  //   SamplerInfo.minLod = S.MinLOD;
-  //   SamplerInfo.maxLod = S.MaxLOD;
-  //   SamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-  //   SamplerInfo.unnormalizedCoordinates = VK_FALSE;
-
-  //   VkSampler Sampler;
-  //   if (auto Err = VK::toError(
-  //           vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler),
-  //           "Failed to create sampler."))
-  //     return Err;
-
-  //   return ResourceRef(Host, ImageRef{0, Sampler, 0});
-  // }
-
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    return createTLAS(*SizesOrErr);
-  }
-
   llvm::Expected<VkDescriptorPool> createDescriptorPool(Pipeline &P) {
     constexpr VkDescriptorType DescriptorTypes[] = {
         VK_DESCRIPTOR_TYPE_SAMPLER,
