@@ -38,6 +38,8 @@
 
 #include "../Util.h"
 
+#include "../Support/OffloadMigration.h"
+
 #include <algorithm>
 #include <memory>
 
@@ -100,34 +102,6 @@ static llvm::Error toError(const IRError *Err, llvm::StringRef Context) {
 #undef IR_ERR
   }
   return llvm::createStringError(EC, ErrMsg);
-}
-
-#define MTLFormats(FMT)                                                        \
-  if (Channels == 1)                                                           \
-    return MTL::PixelFormatR##FMT;                                             \
-  if (Channels == 2)                                                           \
-    return MTL::PixelFormatRG##FMT;                                            \
-  if (Channels == 4)                                                           \
-    return MTL::PixelFormatRGBA##FMT;
-
-static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
-  switch (Format) {
-  case DataFormat::Int32:
-    MTLFormats(32Sint) break;
-  case DataFormat::Float32:
-    MTLFormats(32Float) break;
-  case DataFormat::UInt64:
-  case DataFormat::Int64:
-    if (Channels == 1)
-      return MTL::PixelFormatRG32Uint;
-    if (Channels == 2)
-      return MTL::PixelFormatRGBA32Uint;
-    llvm_unreachable("Unsupported channel count for 64-bit format");
-
-  default:
-    llvm_unreachable("Unsupported Resource format specified");
-  }
-  return MTL::PixelFormatInvalid;
 }
 
 static IRShaderStage getShaderStage(Stages Stage) {
@@ -430,15 +404,16 @@ public:
 
 class MTLBuffer : public offloadtest::Buffer {
 public:
-  MTL::Buffer *Buf;
+  MTL::Resource
+      *Resource; // MTL::Texture* for typed buffer, otherwise MTL::Buffer*
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  MTLBuffer(MTL::Buffer *Buf, llvm::StringRef Name, BufferCreateDesc Desc,
-            size_t SizeInBytes)
-      : offloadtest::Buffer(GPUAPI::Metal), Buf(Buf), Name(Name), Desc(Desc),
-        SizeInBytes(SizeInBytes) {}
+  MTLBuffer(MTL::Resource *Resource, llvm::StringRef Name,
+            BufferCreateDesc Desc, size_t SizeInBytes)
+      : offloadtest::Buffer(GPUAPI::Metal), Resource(Resource), Name(Name),
+        Desc(Desc), SizeInBytes(SizeInBytes) {}
   MTLBuffer(const MTLBuffer &) = delete;
   MTLBuffer(MTLBuffer &&) = delete;
   MTLBuffer &operator=(const MTLBuffer &) = delete;
@@ -448,11 +423,28 @@ public:
 
   size_t querySparseTileSizeInBytes(const Device &Dev) const override;
 
+  // Only valid for non-typed buffers
+  MTL::Buffer *getBufferPtr() const {
+    assert(Desc.AccessType != BufferShaderAccessType::Typed);
+    return static_cast<MTL::Buffer *>(Resource);
+  }
+
+  // Only valid for typed buffers
+  MTL::Texture *getTexturePtr() const {
+    assert(Desc.AccessType == BufferShaderAccessType::Typed);
+    return static_cast<MTL::Texture *>(Resource);
+  }
+
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Cannot map a GpuOnly buffer.");
-    return Buf->contents();
+    if (Desc.AccessType == BufferShaderAccessType::Typed)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Metal does not support mapping typed buffers.");
+
+    return getBufferPtr()->contents();
   }
 
   void unmap() override {
@@ -460,12 +452,12 @@ public:
     // propagate CPU-side writes to the GPU. Shared storage (GpuToCpu) is
     // coherent and needs no action.
     if (Desc.Location == MemoryLocation::CpuToGpu)
-      Buf->didModifyRange(NS::Range::Make(0, SizeInBytes));
+      getBufferPtr()->didModifyRange(NS::Range::Make(0, SizeInBytes));
   }
 
   ~MTLBuffer() override {
-    if (Buf)
-      Buf->release();
+    if (Resource)
+      Resource->release();
   }
 
   const BufferCreateDesc &getDesc() const override { return Desc; }
@@ -495,6 +487,17 @@ public:
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Metal;
+  }
+};
+
+class MTLSampler : public offloadtest::Sampler {
+public:
+  SamplerCreateDesc Desc;
+
+  const SamplerCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Sampler *S) {
+    return S->getAPI() == GPUAPI::Metal;
   }
 };
 
@@ -555,11 +558,23 @@ private:
 class MetalAccelerationStructure : public offloadtest::AccelerationStructure {
 public:
   MTL::AccelerationStructure *AccelStruct;
+  std::unique_ptr<offloadtest::Buffer> HeaderBuffer;  // TLAS Only
+  std::unique_ptr<offloadtest::Buffer> ContribBuffer; // TLAS Only
 
+  // BLAS
   MetalAccelerationStructure(MTL::AccelerationStructure *AccelStruct,
                              const AccelerationStructureSizes &Sizes)
       : offloadtest::AccelerationStructure(GPUAPI::Metal, Sizes),
         AccelStruct(AccelStruct) {}
+
+  // TLAS
+  MetalAccelerationStructure(MTL::AccelerationStructure *AccelStruct,
+                             const AccelerationStructureSizes &Sizes,
+                             std::unique_ptr<offloadtest::Buffer> HeaderBuffer,
+                             std::unique_ptr<offloadtest::Buffer> ContribBuffer)
+      : offloadtest::AccelerationStructure(GPUAPI::Metal, Sizes),
+        AccelStruct(AccelStruct), HeaderBuffer(std::move(HeaderBuffer)),
+        ContribBuffer(std::move(ContribBuffer)) {}
 
   ~MetalAccelerationStructure() override {
     if (AccelStruct)
@@ -720,7 +735,45 @@ public:
     auto &MTLSrc = static_cast<MTLBuffer &>(Src);
     auto &MTLDst = static_cast<MTLBuffer &>(Dst);
     insertDebugSignpost(llvm::formatv("CopyBuffer {0}B", Size).str());
-    BlitEnc->copyFromBuffer(MTLSrc.Buf, SrcOffset, MTLDst.Buf, DstOffset, Size);
+
+    if (MTLSrc.Desc.AccessType == BufferShaderAccessType::Typed) {
+      if (MTLDst.Desc.AccessType == BufferShaderAccessType::Typed) {
+        const uint32_t SrcElementSize =
+            getFormatSizeInBytes(MTLSrc.Desc.AccessTypeParams.Fmt);
+        const uint32_t DstElementSize =
+            getFormatSizeInBytes(MTLDst.Desc.AccessTypeParams.Fmt);
+        BlitEnc->copyFromTexture(
+            MTLSrc.getTexturePtr(), 0 /*sourceSlice (unused)*/,
+            0 /*sourceLevel (unused)*/,
+            MTL::Origin(SrcOffset / SrcElementSize, 0, 0),
+            MTL::Size(Size / SrcElementSize, 1, 1), MTLDst.getTexturePtr(),
+            0 /*destinationSlice (unused)*/, 0 /*destinationLevel (unused)*/,
+            MTL::Origin(DstOffset / DstElementSize, 0, 0));
+      } else {
+        const uint32_t ElementSize =
+            getFormatSizeInBytes(MTLSrc.Desc.AccessTypeParams.Fmt);
+        BlitEnc->copyFromTexture(
+            MTLSrc.getTexturePtr(), 0 /*sourceSlice (unused)*/,
+            0 /*sourceLevel (unused)*/,
+            MTL::Origin(SrcOffset / ElementSize, 0, 0),
+            MTL::Size(Size / ElementSize, 1, 1), MTLDst.getBufferPtr(),
+            DstOffset, 0 /*destinationBytesPerRow (unused)*/,
+            0 /*destinationBytesPerImage (unused)*/);
+      }
+    } else if (MTLDst.Desc.AccessType == BufferShaderAccessType::Typed) {
+      const uint32_t ElementSize =
+          getFormatSizeInBytes(MTLDst.Desc.AccessTypeParams.Fmt);
+      BlitEnc->copyFromBuffer(
+          MTLSrc.getBufferPtr(), SrcOffset, 0 /*sourceBytesPerRow (unused)*/,
+          0 /*sourceBytesPerImage (unused)*/,
+          MTL::Size(Size / ElementSize, 1, 1), MTLDst.getTexturePtr(),
+          0 /*destinationSlice (unused)*/, 0 /*destinationLevel (unused)*/,
+          MTL::Origin(DstOffset / ElementSize, 0, 0));
+    } else {
+      BlitEnc->copyFromBuffer(MTLSrc.getBufferPtr(), SrcOffset,
+                              MTLDst.getBufferPtr(), DstOffset, Size);
+    }
+
     addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
   }
@@ -731,22 +784,30 @@ public:
       return Err;
     auto &MTLSrc = static_cast<MTLBuffer &>(Src);
     auto &MTLDst = static_cast<MTLTexture &>(Dst);
+    assert(MTLSrc.Desc.AccessType != BufferShaderAccessType::Typed &&
+           "TODO(manon): Support typed buffer copies.");
 
-    // The upload buffer is laid out with a tightly packed row stride matching
-    // getTextureUploadRowStrideInBytes(), so the source bytes-per-row is the
-    // texture width times the element size.
+    // The upload buffer holds tightly packed texel data for every mip level
+    // (see createTextureWithData): each mip's rows are contiguous with no
+    // padding, and the mips follow one another. Copy one mip at a time, with
+    // the source bytes-per-row being that mip's width times the element size.
     const size_t ElemSize = getFormatSizeInBytes(MTLDst.Desc.Fmt);
-    const size_t RowBytes = MTLDst.Desc.Width * ElemSize;
-    const size_t ImageBytes = RowBytes * MTLDst.Desc.Height;
-    const MTL::Size CopySize(MTLDst.Desc.Width, MTLDst.Desc.Height, 1);
 
     insertDebugSignpost(llvm::formatv("copyBufferToTexture {0} -> {1}",
                                       MTLSrc.Name, MTLDst.Name)
                             .str());
-    BlitEnc->copyFromBuffer(MTLSrc.Buf, /*sourceOffset=*/0, RowBytes,
-                            ImageBytes, CopySize, MTLDst.Tex,
-                            /*destinationSlice=*/0, /*destinationLevel=*/0,
-                            MTL::Origin(0, 0, 0));
+    size_t CurrentOffset = 0;
+    for (uint32_t I = 0; I < MTLDst.Desc.MipLevels; ++I) {
+      const uint32_t MipWidth = std::max(1u, MTLDst.Desc.Width >> I);
+      const uint32_t MipHeight = std::max(1u, MTLDst.Desc.Height >> I);
+      const size_t RowBytes = MipWidth * ElemSize;
+      const size_t ImageBytes = RowBytes * MipHeight;
+      BlitEnc->copyFromBuffer(
+          MTLSrc.getBufferPtr(), CurrentOffset, RowBytes, ImageBytes,
+          MTL::Size(MipWidth, MipHeight, 1), MTLDst.Tex,
+          /*destinationSlice=*/0, /*destinationLevel=*/I, MTL::Origin(0, 0, 0));
+      CurrentOffset += ImageBytes;
+    }
     addBarrierScope(MTL::BarrierScopeTextures);
 
     return llvm::Error::success();
@@ -765,6 +826,8 @@ public:
       return Err;
     auto &MTLSrc = static_cast<MTLTexture &>(Src);
     auto &MTLDst = static_cast<MTLBuffer &>(Dst);
+    assert(MTLDst.Desc.AccessType != BufferShaderAccessType::Typed &&
+           "TODO(manon): Support typed buffer copies.");
 
     // The readback buffer is linear with a tightly packed row stride, so the
     // destination bytes-per-row is the texture width times the element size.
@@ -777,7 +840,8 @@ public:
                                       MTLSrc.Name, MTLDst.Name)
                             .str());
     BlitEnc->copyFromTexture(MTLSrc.Tex, /*sourceSlice=*/0, /*sourceLevel=*/0,
-                             MTL::Origin(0, 0, 0), CopySize, MTLDst.Buf,
+                             MTL::Origin(0, 0, 0), CopySize,
+                             MTLDst.getBufferPtr(),
                              /*destinationOffset=*/0, RowBytes, ImageBytes);
     addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
@@ -965,7 +1029,7 @@ public:
     assert(Slot == 0 && "Pipeline vertex descriptor only describes slot 0");
     if (VB) {
       auto &MTLVB = llvm::cast<MTLBuffer>(*VB);
-      RenderEnc->setVertexBuffer(MTLVB.Buf, Offset, BufIdx);
+      RenderEnc->setVertexBuffer(MTLVB.getBufferPtr(), Offset, BufIdx);
     } else {
       RenderEnc->setVertexBuffer(nullptr, 0, BufIdx);
     }
@@ -1153,52 +1217,6 @@ public:
   MTL::Device *Device;
   MTLQueue GraphicsQueue;
 
-  struct ResourceSet {
-    MTLPtr<MTL::Resource> Resource;
-    // AS-only; mutually exclusive with Resource above.
-    MetalAccelerationStructure *AS = nullptr;
-    explicit ResourceSet(MTL::Resource *Resource) : Resource(Resource) {}
-    explicit ResourceSet(MetalAccelerationStructure *AS) : AS(AS) {}
-  };
-
-  // ResourceBundle will contain one ResourceSet for a singular resource
-  // or multiple ResourceSets for resource array.
-  using ResourceBundle = llvm::SmallVector<ResourceSet>;
-  using ResourcePair = std::pair<offloadtest::Resource *, ResourceBundle>;
-
-  struct DescriptorTable {
-    llvm::SmallVector<ResourcePair> Resources;
-  };
-
-  struct InvocationState {
-    InvocationState() { Pool = NS::AutoreleasePool::alloc()->init(); }
-    ~InvocationState() { Pool->release(); }
-
-    NS::AutoreleasePool *Pool = nullptr;
-    std::unique_ptr<MTLDescriptorHeap> DescHeap;
-    std::unique_ptr<offloadtest::Buffer> VB;
-    std::unique_ptr<offloadtest::Texture> RenderTarget;
-    std::unique_ptr<offloadtest::Buffer> FrameBufferReadback;
-    std::unique_ptr<offloadtest::Texture> DepthStencil;
-    std::unique_ptr<MTLCommandBuffer> CB;
-    std::unique_ptr<PipelineState> Pipeline;
-    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
-    std::unique_ptr<offloadtest::RenderPass> RenderPass;
-
-    llvm::SmallVector<DescriptorTable> DescTables;
-    // TODO: Support RootResources?
-
-    // Parallel-indexed to `P.AccelStructs.BLAS`.
-    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
-        BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
-    // Vertex/index buffers consumed during AS builds; must outlive submission.
-    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
-    // Per-AS header + contributions buffers; resident at dispatch.
-    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASDescriptorBuffers;
-  };
-
   llvm::Error createRootSignature(
       const BindingsDesc &BindingsDesc, bool IsGraphics,
       IRRootSignaturePtr &OutRootSig,
@@ -1286,11 +1304,12 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createDescriptorHeap(Pipeline &P, InvocationState &State) {
+  llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
+  createDescriptorHeap(Pipeline &P) {
     if (P.getDescriptorCount() == 0) {
       llvm::outs()
           << "No descriptors found, skipping descriptor heap creation.\n";
-      return llvm::Error::success();
+      return nullptr;
     }
     const uint32_t DescriptorCount = P.getDescriptorCountWithFlattenedArrays();
     const MTLDescriptorHeapDesc HeapDesc = {MTLDescriptorHeapType::CBV_SRV_UAV,
@@ -1300,10 +1319,9 @@ public:
     if (!DescHeapOrErr)
       return DescHeapOrErr.takeError();
 
-    State.DescHeap = std::move(*DescHeapOrErr);
     llvm::outs() << "Descriptor heap created with " << DescriptorCount
                  << " descriptors.\n";
-    return llvm::Error::success();
+    return std::move(*DescHeapOrErr);
   }
 
   llvm::Expected<MetalIR> convertToMetalIR(Stages Stage, bool IsGraphics,
@@ -1417,322 +1435,62 @@ public:
     return MetalIR{std::move(MetalLib), std::move(Reflection)};
   }
 
-  // Creates a Metal resource (buffer or texture) for the given Resource at the
-  // specified array index.
-  llvm::Expected<MTL::Resource *>
-  createResource(Resource &R, size_t ResourceArrayIndex = 0) {
-    const offloadtest::CPUBuffer &B = *R.BufferPtr;
+  llvm::Error buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
+                                    const MTLDescriptorHeap &DescHeap) {
 
-    if (R.isRaw()) {
-      MTL::Buffer *Buf =
-          Device->newBuffer(B.Data[ResourceArrayIndex].get(), R.size(),
-                            MTL::ResourceStorageModeManaged);
-      Buf->didModifyRange(NS::Range::Make(0, Buf->length()));
-      return Buf;
-    }
-    const uint64_t Width =
-        R.isTexture() ? B.OutputProps.Width : R.size() / R.getElementSize();
-    const uint64_t Height = R.isTexture() ? B.OutputProps.Height : 1;
-    MTL::TextureUsage UsageFlags = MTL::ResourceUsageRead;
-    if (R.isReadWrite())
-      UsageFlags |= MTL::ResourceUsageWrite;
-    MTL::TextureDescriptor *Desc = nullptr;
-    const MTL::PixelFormat Format = getMTLFormat(B.Format, B.Channels);
-    switch (R.Kind) {
-    case ResourceKind::Buffer:
-    case ResourceKind::RWBuffer:
-      Desc = MTL::TextureDescriptor::textureBufferDescriptor(
-          Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
-      break;
-    case ResourceKind::Texture2D:
-    case ResourceKind::RWTexture2D:
-      Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width, Height,
-                                                         false);
-      break;
-    case ResourceKind::Sampler:
-      llvm_unreachable("Not implemented yet.");
-    case ResourceKind::SampledTexture2D:
-      llvm_unreachable("SampledTextures aren't supported in Metal.");
-    case ResourceKind::StructuredBuffer:
-    case ResourceKind::RWStructuredBuffer:
-    case ResourceKind::ByteAddressBuffer:
-    case ResourceKind::RWByteAddressBuffer:
-    case ResourceKind::ConstantBuffer:
-      llvm_unreachable("Raw is checked above");
-    case ResourceKind::AccelerationStructure:
-      llvm_unreachable("Acceleration structures use a separate path!");
-    }
-
-    MTL::Texture *NewTex = Device->newTexture(Desc);
-    NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
-                          B.Data[ResourceArrayIndex].get(),
-                          Width * R.getElementSize());
-    return NewTex;
-  }
-
-  llvm::Expected<ResourceBundle> createSRV(Resource &R) {
-    ResourceBundle Bundle;
-
-    for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
-         ++RegOffset) {
-      llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space;
-      llvm::outs() << " }\n";
-
-      auto ResourceOrErr = createResource(R, RegOffset);
-      if (!ResourceOrErr)
-        return ResourceOrErr.takeError();
-
-      Bundle.emplace_back(ResourceOrErr.get());
-    }
-    return Bundle;
-  }
-
-  // TODO: counter buffer via IRRuntimeCreateAppendBufferView?
-  llvm::Expected<ResourceBundle> createUAV(Resource &R) {
-    ResourceBundle Bundle;
-
-    for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
-         ++RegOffset) {
-      llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space
-                   << ", HasCounter = " << R.HasCounter;
-      llvm::outs() << " }\n";
-
-      auto ResourceOrErr = createResource(R, RegOffset);
-      if (!ResourceOrErr)
-        return ResourceOrErr.takeError();
-
-      Bundle.emplace_back(ResourceOrErr.get());
-    }
-    return Bundle;
-  }
-
-  llvm::Expected<ResourceBundle> createCBV(Resource &R) {
-    ResourceBundle Bundle;
-
-    for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
-         ++RegOffset) {
-      llvm::outs() << "Creating CBV: { Size = " << R.size() << ", Register = b"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space << " }\n";
-
-      auto ResourceOrErr = createResource(R, RegOffset);
-      if (!ResourceOrErr)
-        return ResourceOrErr.takeError();
-
-      Bundle.emplace_back(ResourceOrErr.get());
-    }
-    return Bundle;
-  }
-
-  void createDescriptor(Resource &R, MTL::Resource *Resource,
-                        IRDescriptorTableEntry *Entry) {
-    if (R.isRaw()) {
-      IRBufferView View = {};
-      View.buffer = static_cast<MTL::Buffer *>(Resource);
-      View.bufferSize = R.size();
-      IRDescriptorTableSetBufferView(Entry, &View);
-    } else {
-      MTL::Texture *Tex = static_cast<MTL::Texture *>(Resource);
-      IRDescriptorTableSetTexture(Entry, Tex, 0, 0);
-    }
-  }
-
-  // returns the next available HeapIdx
-  uint32_t bindSRV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
-                   const ResourceBundle &ResBundle) {
-    const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.size() / EltSize;
-
-    for (const ResourceSet &RS : ResBundle) {
-      llvm::outs() << "SRV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                   << " NumElts = " << NumElts << "\n";
-      createDescriptor(R, RS.Resource.get(),
-                       IS.DescHeap->getEntryHandle(HeapIdx));
-      HeapIdx++;
-    }
-    return HeapIdx;
-  }
-
-  // returns the next available HeapIdx
-  uint32_t bindUAV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
-                   const ResourceBundle &ResBundle) {
-    const uint32_t EltSize = R.getElementSize();
-    const uint32_t NumElts = R.size() / EltSize;
-    for (const ResourceSet &RS : ResBundle) {
-      llvm::outs() << "UAV: HeapIdx = " << HeapIdx << " EltSize = " << EltSize
-                   << " NumElts = " << NumElts << "\n";
-      createDescriptor(R, RS.Resource.get(),
-                       IS.DescHeap->getEntryHandle(HeapIdx));
-      HeapIdx++;
-    }
-    return HeapIdx;
-  }
-
-  // returns the next available HeapIdx
-  uint32_t bindCBV(Resource &R, InvocationState &IS, uint32_t HeapIdx,
-                   const ResourceBundle &ResBundle) {
-    for (const ResourceSet &RS : ResBundle) {
-      llvm::outs() << "CBV: HeapIdx = " << HeapIdx << " Size = " << R.size()
-                   << "\n";
-      createDescriptor(R, RS.Resource.get(),
-                       IS.DescHeap->getEntryHandle(HeapIdx));
-      HeapIdx++;
-    }
-    return HeapIdx;
-  }
-
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    return createTLAS(*SizesOrErr);
-  }
-
-  llvm::Error createBuffers(Pipeline &P, InvocationState &IS) {
-    auto CreateBuffer =
-        [&IS,
-         this](Resource &R,
-               llvm::SmallVectorImpl<ResourcePair> &Resources) -> llvm::Error {
-      if (R.isAccelerationStructure()) {
-        auto ASOrErr = createAS(R);
-        if (!ASOrErr)
-          return ASOrErr.takeError();
-        ResourceBundle Bundle;
-        Bundle.emplace_back(
-            llvm::cast<MetalAccelerationStructure>(ASOrErr->get()));
-        auto Inserted =
-            IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
-        assert(Inserted.second && "TLAS bound to multiple resources NYI");
-        (void)Inserted;
-        Resources.emplace_back(&R, std::move(Bundle));
-        return llvm::Error::success();
-      }
-      switch (getDescriptorKind(R.Kind)) {
-      case DescriptorKind::SRV: {
-        auto ExRes = createSRV(R);
-        if (!ExRes)
-          return ExRes.takeError();
-        Resources.emplace_back(&R, std::move(*ExRes));
-        break;
-      }
-      case DescriptorKind::UAV: {
-        auto ExRes = createUAV(R);
-        if (!ExRes)
-          return ExRes.takeError();
-        Resources.emplace_back(&R, std::move(*ExRes));
-        break;
-      }
-      case DescriptorKind::CBV: {
-        auto ExRes = createCBV(R);
-        if (!ExRes)
-          return ExRes.takeError();
-        Resources.emplace_back(&R, std::move(*ExRes));
-        break;
-      }
-      case DescriptorKind::SAMPLER:
-        return llvm::createStringError(
-            std::errc::not_supported,
-            "Samplers are not yet implemented for Metal.");
-      }
-      return llvm::Error::success();
-    };
-
-    for (auto &D : P.Sets) {
-      IS.DescTables.emplace_back(DescriptorTable());
-      DescriptorTable &Table = IS.DescTables.back();
-      for (auto &R : D.Resources)
-        if (auto Err = CreateBuffer(R, Table.Resources))
-          return Err;
-    }
-
-    // Bind descriptors in descriptor tables.
-    uint32_t HeapIndex = 0;
-    for (auto &T : IS.DescTables) {
+    uint32_t HeapIdx = 0;
+    for (auto &T : DescTables) {
       for (auto &R : T.Resources) {
-        if (MetalAccelerationStructure *MTLAS = R.second[0].AS) {
-          // The Metal shader converter binds the AS indirectly through an
-          // `IRRaytracingAccelerationStructureGPUHeader` buffer carrying the
-          // AS's `gpuResourceID` and a pointer to an instance-contributions
-          // array (one `uint32` per instance, equivalent to D3D12's
-          // `InstanceContributionToHitGroupIndex`).
-          const uint32_t InstCount =
-              static_cast<uint32_t>(R.first->TLASPtr->Instances.size());
-          llvm::SmallVector<uint32_t> Contributions;
-          Contributions.reserve(InstCount);
-          for (const auto &Inst : R.first->TLASPtr->Instances)
-            Contributions.push_back(Inst.InstanceContributionToHitGroupIndex &
-                                    0xFFFFFFu);
-          const BufferCreateDesc Desc = BufferCreateDesc::uploadBuffer();
-          auto ContribBufOrErr = createBufferWithData(
-              *IS.CB->Dev, "AS-Contributions", Desc, Contributions.data(),
-              InstCount * sizeof(uint32_t), nullptr, nullptr);
-          if (!ContribBufOrErr)
-            return ContribBufOrErr.takeError();
-          auto *MTLContrib = llvm::cast<MTLBuffer>(ContribBufOrErr->get());
-          auto HeaderBufOrErr = IS.CB->Dev->createBuffer(
-              "AS-Header", Desc,
-              sizeof(IRRaytracingAccelerationStructureGPUHeader));
-          if (!HeaderBufOrErr)
-            return HeaderBufOrErr.takeError();
-          auto *MTLHeader = llvm::cast<MTLBuffer>(HeaderBufOrErr->get());
-          IRRaytracingSetAccelerationStructure(
-              static_cast<uint8_t *>(MTLHeader->Buf->contents()),
-              MTLAS->AccelStruct->gpuResourceID(),
-              static_cast<uint8_t *>(MTLContrib->Buf->contents()),
-              MTLContrib->Buf->gpuAddress(), Contributions.data(), InstCount);
+        for (const auto &Set : R.second) {
+          if (Set.Buffer != nullptr) {
+            const MTLBuffer &BufferMTL =
+                llvm::cast<MTLBuffer>(*Set.Buffer.get());
+            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
 
-          IRDescriptorTableSetAccelerationStructure(
-              IS.DescHeap->getEntryHandle(HeapIndex),
-              MTLHeader->Buf->gpuAddress());
+            if (BufferMTL.Desc.AccessType != BufferShaderAccessType::Typed) {
+              IRBufferView View = {};
+              View.buffer = BufferMTL.getBufferPtr();
+              View.bufferSize = BufferMTL.SizeInBytes;
+              IRDescriptorTableSetBufferView(Entry, &View);
+            } else {
+              IRDescriptorTableSetTexture(Entry, BufferMTL.getTexturePtr(), 0,
+                                          0);
+            }
+            HeapIdx += 1;
+          } else if (Set.Texture != nullptr) {
+            if (Set.Sampler != nullptr)
+              return llvm::createStringError(
+                  "Metal does not support Combined Image Samplers.");
 
-          // The shader dereferences the contributions buffer through the
-          // header, so both must be resident at dispatch.
-          IS.ASDescriptorBuffers.push_back(std::move(*HeaderBufOrErr));
-          IS.ASDescriptorBuffers.push_back(std::move(*ContribBufOrErr));
-          HeapIndex += R.first->getArraySize();
-          continue;
-        }
-        switch (getDescriptorKind(R.first->Kind)) {
-        case DescriptorKind::SRV:
-          HeapIndex = bindSRV(*(R.first), IS, HeapIndex, R.second);
-          break;
-        case DescriptorKind::UAV:
-          HeapIndex = bindUAV(*(R.first), IS, HeapIndex, R.second);
-          break;
-        case DescriptorKind::CBV:
-          HeapIndex = bindCBV(*(R.first), IS, HeapIndex, R.second);
-          break;
-        case DescriptorKind::SAMPLER:
-          llvm_unreachable("Not implemented yet.");
+            const MTLTexture &TextureMTL =
+                llvm::cast<MTLTexture>(*Set.Texture.get());
+            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
+            IRDescriptorTableSetTexture(Entry, TextureMTL.Tex, 0, 0);
+            HeapIdx += 1;
+          } else if (Set.AS != nullptr) {
+            const MetalAccelerationStructure &AccelStructMTL =
+                llvm::cast<MetalAccelerationStructure>(*Set.AS);
+            const MTLBuffer &HeaderBufferMTL =
+                llvm::cast<MTLBuffer>(*AccelStructMTL.HeaderBuffer.get());
+            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
+            IRDescriptorTableSetAccelerationStructure(
+                Entry, HeaderBufferMTL.getBufferPtr()->gpuAddress());
+            HeapIdx += 1;
+          } else if (Set.Sampler != nullptr) {
+            return llvm::createStringError("Samplers are unsupported in Metal");
+          } else {
+            return llvm::createStringError("Unrecognized Resource Type");
+          }
         }
       }
     }
 
-    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
-      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
-
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
-                                           VBuffer->Data[0].get(),
-                                           VBuffer->size(), nullptr, nullptr);
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.VB = std::move(*BufOrErr);
-      llvm::outs() << "Vertex buffer created.\n";
-    }
     return llvm::Error::success();
   }
 
-  llvm::Error createComputeCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error
+  createComputeCommands(Pipeline &P, SharedInvocationState &IS,
+                        const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
@@ -1741,9 +1499,9 @@ public:
 
     const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
     MTLGPUDescriptorHandle Handle = {};
-    if (IS.DescHeap) {
-      IS.DescHeap->bind(NativeEncoder);
-      Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
+    if (DescHeap) {
+      DescHeap->bind(NativeEncoder);
+      Handle = DescHeap->getGPUDescriptorHandleForHeapStart();
     }
 
     for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
@@ -1752,25 +1510,41 @@ public:
     }
 
     PS->ArgBuffer->bind(NativeEncoder);
-    for (const auto &Table : IS.DescTables)
-      for (const auto &ResPair : Table.Resources)
-        for (const auto &ResSet : ResPair.second)
-          NativeEncoder->useResource(ResSet.Resource.get(),
-                                     MTL::ResourceUsageRead |
-                                         MTL::ResourceUsageWrite);
-    auto MarkASResident =
-        [&](const std::unique_ptr<AccelerationStructure> &AS) {
-          auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
-          NativeEncoder->useResource(MTLAS->AccelStruct,
-                                     MTL::ResourceUsageRead);
-        };
+    auto MarkASResident = [&](const AccelerationStructure &AS) {
+      const MetalAccelerationStructure &MTLAS =
+          llvm::cast<MetalAccelerationStructure>(AS);
+      NativeEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
+
+      const MTLBuffer *HeaderMTL =
+          llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
+      if (HeaderMTL)
+        NativeEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
+
+      const MTLBuffer *ContribMTL =
+          llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
+      if (ContribMTL)
+        NativeEncoder->useResource(ContribMTL->Resource,
+                                   MTL::ResourceUsageRead);
+    };
+
+    for (const auto &Table : IS.DescTables) {
+      for (const auto &ResPair : Table.Resources) {
+        for (const auto &ResSet : ResPair.second) {
+          if (ResSet.Buffer != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
+                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+          else if (ResSet.Texture != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
+                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+          else if (ResSet.AS != nullptr)
+            MarkASResident(*ResSet.AS);
+        }
+      }
+    }
     for (auto &AS : IS.BLASes)
-      MarkASResident(AS);
-    for (auto &Entry : IS.TLASes)
-      MarkASResident(Entry.second);
-    for (auto &B : IS.ASDescriptorBuffers)
-      NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
-                                 MTL::ResourceUsageRead);
+      MarkASResident(*AS.get());
 
     if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
                                     P.DispatchParameters.DispatchGroupCount[0],
@@ -1781,7 +1555,9 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRayTracingCommands(Pipeline &P, InvocationState &IS) {
+  llvm::Error
+  createRayTracingCommands(Pipeline &P, SharedInvocationState &IS,
+                           const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
@@ -1797,9 +1573,9 @@ public:
     // callees consume them at the same slots (kIRDescriptorHeapBindPoint and
     // kIRArgumentBufferBindPoint).
     MTLGPUDescriptorHandle Handle = {};
-    if (IS.DescHeap) {
-      IS.DescHeap->bind(NativeEncoder);
-      Handle = IS.DescHeap->getGPUDescriptorHandleForHeapStart();
+    if (DescHeap) {
+      DescHeap->bind(NativeEncoder);
+      Handle = DescHeap->getGPUDescriptorHandleForHeapStart();
     }
     for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
       RTPSO.ArgBuffer->setRootDescriptorTable(Idx, Handle);
@@ -1824,7 +1600,7 @@ public:
     Args.DispatchRaysDesc.Depth = P.DispatchParameters.DispatchGroupCount[2];
     Args.GRS = RTPSO.ArgBuffer->getGPUAddress();
     Args.ResDescHeap =
-        IS.DescHeap ? IS.DescHeap->getGPUDescriptorHandleForHeapStart().Ptr : 0;
+        DescHeap ? DescHeap->getGPUDescriptorHandleForHeapStart().Ptr : 0;
     Args.SmpDescHeap = 0;
     Args.VisibleFunctionTable =
         RTPSO.VFT ? RTPSO.VFT->gpuResourceID() : MTL::ResourceID{0};
@@ -1834,42 +1610,55 @@ public:
 
     const BufferCreateDesc ArgsBufDesc = BufferCreateDesc::uploadBuffer();
     auto ArgsBufOrErr = offloadtest::createBufferWithData(
-        *IS.CB->Dev, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
+        *this, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
         sizeof(IRDispatchRaysArgument), nullptr, nullptr);
     if (!ArgsBufOrErr)
       return ArgsBufOrErr.takeError();
 
     auto *MTLArgsBuf = llvm::cast<MTLBuffer>(ArgsBufOrErr->get());
-    IS.CB->KeepAliveOwned.push_back(std::move(*ArgsBufOrErr));
+    IS.KeepAliveBuffers.push_back(std::move(*ArgsBufOrErr));
 
-    NativeEncoder->setBuffer(MTLArgsBuf->Buf, 0,
+    NativeEncoder->setBuffer(MTLArgsBuf->getBufferPtr(), 0,
                              kIRRayDispatchArgumentsBindPoint);
-    NativeEncoder->useResource(MTLArgsBuf->Buf, MTL::ResourceUsageRead);
+    NativeEncoder->useResource(MTLArgsBuf->getBufferPtr(),
+                               MTL::ResourceUsageRead);
 
-    // Mark every dispatch-side resource resident: descriptor-table bundles,
-    // acceleration structures + their irconverter header/contribution
-    // buffers (so RayQuery/TraceRay can read them), the SBT buffer (the
-    // raygen kernel dereferences SBT addresses), and the visible /
-    // intersection function tables.
-    for (const auto &Table : IS.DescTables)
-      for (const auto &ResPair : Table.Resources)
-        for (const auto &ResSet : ResPair.second)
-          NativeEncoder->useResource(ResSet.Resource.get(),
-                                     MTL::ResourceUsageRead |
-                                         MTL::ResourceUsageWrite);
-    auto MarkASResident =
-        [&](std::unique_ptr<offloadtest::AccelerationStructure> &AS) {
-          auto *MTLAS = llvm::cast<MetalAccelerationStructure>(AS.get());
-          NativeEncoder->useResource(MTLAS->AccelStruct,
-                                     MTL::ResourceUsageRead);
-        };
+    auto MarkASResident = [&](const AccelerationStructure &AS) {
+      const MetalAccelerationStructure &MTLAS =
+          llvm::cast<MetalAccelerationStructure>(AS);
+      NativeEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
+
+      const MTLBuffer *HeaderMTL =
+          llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
+      if (HeaderMTL)
+        NativeEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
+
+      const MTLBuffer *ContribMTL =
+          llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
+      if (ContribMTL)
+        NativeEncoder->useResource(ContribMTL->Resource,
+                                   MTL::ResourceUsageRead);
+    };
+
+    for (const auto &Table : IS.DescTables) {
+      for (const auto &ResPair : Table.Resources) {
+        for (const auto &ResSet : ResPair.second) {
+          if (ResSet.Buffer != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
+                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+          else if (ResSet.Texture != nullptr)
+            NativeEncoder->useResource(
+                llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
+                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+          else if (ResSet.AS != nullptr)
+            MarkASResident(*ResSet.AS);
+        }
+      }
+    }
     for (auto &AS : IS.BLASes)
-      MarkASResident(AS);
-    for (auto &Entry : IS.TLASes)
-      MarkASResident(Entry.second);
-    for (auto &B : IS.ASDescriptorBuffers)
-      NativeEncoder->useResource(llvm::cast<MTLBuffer>(B.get())->Buf,
-                                 MTL::ResourceUsageRead);
+      MarkASResident(*AS.get());
+
     if (SBT.Buffer)
       NativeEncoder->useResource(SBT.Buffer, MTL::ResourceUsageRead);
     if (RTPSO.VFT)
@@ -1887,47 +1676,9 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
-    if (!P.Bindings.RTargetBufferPtr)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "No render target bound for graphics pipeline.");
-    const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
-
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-
-    IS.RenderTarget = std::move(*TexOrErr);
-
-    // Create a readback buffer for copying render target data to the CPU.
-    const BufferCreateDesc BufDesc = BufferCreateDesc::readbackBuffer();
-    auto BufOrErr = createBuffer("RTReadback", BufDesc, OutBuf.size());
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-    IS.FrameBufferReadback = std::move(*BufOrErr);
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
-        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-    IS.DepthStencil = std::move(*TexOrErr);
-    return llvm::Error::success();
-  }
-
-  llvm::Error createGraphicsCommands(Pipeline &P, InvocationState &IS) {
-    if (auto Err = createRenderTarget(P, IS))
-      return Err;
-    // TODO: Always created for graphics pipelines. Consider making this
-    // conditional on the pipeline definition.
-    if (auto Err = createDepthStencil(P, IS))
-      return Err;
-
+  llvm::Error
+  createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
+                         const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     const uint64_t Width = IS.RenderTarget->getDesc().Width;
     const uint64_t Height = IS.RenderTarget->getDesc().Height;
 
@@ -1945,20 +1696,49 @@ public:
       auto &MTLEncoder = llvm::cast<MTLRenderEncoder>(Encoder);
       const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
       auto *CmdEncoder = MTLEncoder.getNative();
-      if (IS.DescHeap) {
-        IS.DescHeap->bind(CmdEncoder);
+      if (DescHeap) {
+        DescHeap->bind(CmdEncoder);
         // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
         // this)
         PS->ArgBuffer->setRootDescriptorTable(
-            0, IS.DescHeap->getGPUDescriptorHandleForHeapStart());
+            0, DescHeap->getGPUDescriptorHandleForHeapStart());
       }
       PS->ArgBuffer->bind(CmdEncoder);
-      for (const auto &Table : IS.DescTables)
-        for (const auto &ResPair : Table.Resources)
-          for (const auto &ResSet : ResPair.second)
-            CmdEncoder->useResource(ResSet.Resource.get(),
-                                    MTL::ResourceUsageRead |
-                                        MTL::ResourceUsageWrite);
+
+      auto MarkASResident = [&](const AccelerationStructure &AS) {
+        const MetalAccelerationStructure &MTLAS =
+            llvm::cast<MetalAccelerationStructure>(AS);
+        CmdEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
+
+        const MTLBuffer *HeaderMTL =
+            llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
+        if (HeaderMTL)
+          CmdEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
+
+        const MTLBuffer *ContribMTL =
+            llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
+        if (ContribMTL)
+          CmdEncoder->useResource(ContribMTL->Resource, MTL::ResourceUsageRead);
+      };
+
+      for (const auto &Table : IS.DescTables) {
+        for (const auto &ResPair : Table.Resources) {
+          for (const auto &ResSet : ResPair.second) {
+            if (ResSet.Buffer != nullptr)
+              CmdEncoder->useResource(
+                  llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
+                  MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+            else if (ResSet.Texture != nullptr)
+              CmdEncoder->useResource(
+                  llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
+                  MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+            else if (ResSet.AS != nullptr)
+              MarkASResident(*ResSet.AS);
+          }
+        }
+      }
+      for (auto &AS : IS.BLASes)
+        MarkASResident(*AS.get());
     }
 
     Viewport VP;
@@ -1990,57 +1770,6 @@ public:
 
     Encoder.endEncoding();
 
-    // Blit the render target into the readback buffer for CPU access.
-    auto &FBTex = llvm::cast<MTLTexture>(*IS.RenderTarget);
-    auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
-    MTL::BlitCommandEncoder *Blit = IS.CB->CmdBuffer->blitCommandEncoder();
-    const size_t ElemSize = getFormatSizeInBytes(FBTex.Desc.Fmt);
-    const size_t RowBytes = Width * ElemSize;
-    Blit->copyFromTexture(FBTex.Tex, 0, 0, MTL::Origin(0, 0, 0),
-                          MTL::Size(Width, Height, 1), FBReadback.Buf, 0,
-                          RowBytes, 0);
-    Blit->endEncoding();
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error copyBack(Pipeline &P, InvocationState &IS) {
-    auto MemCpyBack = [](ResourcePair &Pair) -> llvm::Error {
-      const Resource &R = *Pair.first;
-      if (!R.isReadWrite())
-        return llvm::Error::success();
-
-      const CPUBuffer &B = *R.BufferPtr;
-      auto *RSIt = Pair.second.begin();
-      auto *DataIt = B.Data.begin();
-      for (; RSIt != Pair.second.end() && DataIt != B.Data.end();
-           ++RSIt, ++DataIt) {
-        if (R.isRaw()) {
-          MTL::Buffer *Buf = static_cast<MTL::Buffer *>(RSIt->Resource.get());
-          memcpy(DataIt->get(), Buf->contents(), Buf->length());
-        } else {
-          MTL::Texture *Tex = static_cast<MTL::Texture *>(RSIt->Resource.get());
-          const uint64_t Width = R.isTexture() ? B.OutputProps.Width
-                                               : R.size() / R.getElementSize();
-          const uint64_t Height = R.isTexture() ? B.OutputProps.Height : 1;
-          Tex->getBytes(DataIt->get(), Width * R.getElementSize(),
-                        MTL::Region(0, 0, Width, Height), 0);
-        }
-      }
-
-      return llvm::Error::success();
-    };
-
-    for (auto &Table : IS.DescTables)
-      for (auto &R : Table.Resources)
-        if (auto Err = MemCpyBack(R))
-          return Err;
-
-    if (P.isRaster()) {
-      auto &FBReadback = llvm::cast<MTLBuffer>(*IS.FrameBufferReadback);
-      auto *RT = P.Bindings.RTargetBufferPtr;
-      RT->copyFromTexture(FBReadback.Buf->contents(), RT->getImageRowBytes());
-    }
     return llvm::Error::success();
   }
 
@@ -2370,12 +2099,29 @@ public:
           std::errc::not_supported,
           "Metal backend does not support sparse memory backing.");
 
-    MTL::Buffer *Buf = Device->newBuffer(
-        SizeInBytes, getMetalBufferResourceOptions(Desc.Location));
-    if (!Buf)
-      return llvm::createStringError(std::errc::not_enough_memory,
-                                     "Failed to create Metal buffer.");
-    return std::make_unique<MTLBuffer>(Buf, Name, Desc, SizeInBytes);
+    MTL::Resource *Res = nullptr;
+    if (Desc.AccessType == BufferShaderAccessType::Typed) {
+      MTL::TextureDescriptor *TDesc =
+          MTL::TextureDescriptor::textureBufferDescriptor(
+              getMetalPixelFormat(Desc.AccessTypeParams.Fmt),
+              SizeInBytes / getFormatSizeInBytes(Desc.AccessTypeParams.Fmt),
+              getMetalBufferResourceOptions(Desc.Location),
+              MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
+
+      Res = Device->newTexture(TDesc);
+      if (!Res)
+        return llvm::createStringError(
+            std::errc::not_enough_memory,
+            "Failed to create Metal typed buffer (texture).");
+    } else {
+      Res = Device->newBuffer(SizeInBytes,
+                              getMetalBufferResourceOptions(Desc.Location));
+      if (!Res)
+        return llvm::createStringError(std::errc::not_enough_memory,
+                                       "Failed to create Metal buffer.");
+    }
+
+    return std::make_unique<MTLBuffer>(Res, Name, Desc, SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -2397,9 +2143,20 @@ public:
     return std::make_unique<MTLTexture>(Tex, Name, Desc);
   }
 
+  llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string, const SamplerCreateDesc &) override {
+    return llvm::createStringError("createSampler is unimplemented on Metal.");
+  }
+
   uint32_t getTextureUploadRowStrideInBytes(
       const TextureCreateDesc &Desc) const override {
     return Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  }
+
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // copyBufferToTexture consumes a tightly-packed staging buffer.
+    return computeTightTextureUploadLayout(Desc);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::CommandBuffer>>
@@ -2801,7 +2558,7 @@ public:
       auto *TD =
           MTL::AccelerationStructureTriangleGeometryDescriptor::alloc()->init();
       auto *VB = llvm::cast<MTLBuffer>(T.VertexBuffer);
-      TD->setVertexBuffer(VB->Buf);
+      TD->setVertexBuffer(VB->getBufferPtr());
       TD->setVertexBufferOffset(T.VertexBufferOffset);
       TD->setVertexStride(T.VertexStride);
       TD->setVertexFormat(getMetalPositionFormat(T.VertexFormat));
@@ -2809,7 +2566,7 @@ public:
                                          : T.VertexCount / 3);
       if (T.IndexBuffer) {
         auto *IB = llvm::cast<MTLBuffer>(T.IndexBuffer);
-        TD->setIndexBuffer(IB->Buf);
+        TD->setIndexBuffer(IB->getBufferPtr());
         TD->setIndexBufferOffset(T.IndexBufferOffset);
         TD->setIndexType(getMetalIndexType(T.IdxFormat));
       }
@@ -2840,7 +2597,7 @@ public:
           MTL::AccelerationStructureBoundingBoxGeometryDescriptor::alloc()
               ->init();
       auto *BB = llvm::cast<MTLBuffer>(A.AABBBuffer);
-      AD->setBoundingBoxBuffer(BB->Buf);
+      AD->setBoundingBoxBuffer(BB->getBufferPtr());
       AD->setBoundingBoxBufferOffset(A.AABBBufferOffset);
       AD->setBoundingBoxStride(A.AABBStride);
       AD->setBoundingBoxCount(A.AABBCount);
@@ -2872,22 +2629,6 @@ public:
             Sizes.refitScratchBufferSize};
   }
 
-  llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  allocateAS(const AccelerationStructureSizes &Sizes, const char *Kind) {
-    if (!Device->supportsRaytracing())
-      return llvm::createStringError(
-          std::errc::not_supported,
-          "Ray tracing is not supported on this device.");
-
-    MTL::AccelerationStructure *AS =
-        Device->newAccelerationStructure(Sizes.ResultDataMaxSizeInBytes);
-    if (!AS)
-      return llvm::createStringError(
-          std::make_error_code(std::errc::not_enough_memory),
-          "Failed to create Metal " + llvm::Twine(Kind) + ".");
-    return std::make_unique<MetalAccelerationStructure>(AS, Sizes);
-  }
-
   llvm::Expected<AccelerationStructureSizes>
   getTLASBuildSizes(uint32_t InstanceCount) override {
     if (!Device->supportsRaytracing())
@@ -2916,27 +2657,82 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
   createBLAS(const AccelerationStructureSizes &Sizes) override {
-    return allocateAS(Sizes, "BLAS");
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    MTL::AccelerationStructure *AS =
+        Device->newAccelerationStructure(Sizes.ResultDataMaxSizeInBytes);
+    if (!AS)
+      return llvm::createStringError(
+          std::make_error_code(std::errc::not_enough_memory),
+          "Failed to create Metal BLAS.");
+    return std::make_unique<MetalAccelerationStructure>(AS, Sizes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createTLAS(const AccelerationStructureSizes &Sizes) override {
-    return allocateAS(Sizes, "TLAS");
+  createTLAS(const AccelerationStructureSizes &Sizes,
+             uint32_t InstanceCount) override {
+    if (!Device->supportsRaytracing())
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Ray tracing is not supported on this device.");
+
+    // TODO(manon): We would prefer these to live in GPUOnly memory in the
+    // future.
+    const BufferCreateDesc BufferDesc = BufferCreateDesc::uploadBuffer();
+    auto ContribBufferOrErr = createBuffer("AS-Contributions", BufferDesc,
+                                           InstanceCount * sizeof(uint32_t));
+    if (!ContribBufferOrErr)
+      return ContribBufferOrErr.takeError();
+    auto ContribBuffer = std::move(*ContribBufferOrErr);
+
+    const MTLBuffer &ContribBufferMTL =
+        llvm::cast<MTLBuffer>(*ContribBuffer.get());
+
+    MTL::AccelerationStructure *AS =
+        Device->newAccelerationStructure(Sizes.ResultDataMaxSizeInBytes);
+    if (!AS)
+      return llvm::createStringError(
+          std::make_error_code(std::errc::not_enough_memory),
+          "Failed to create Metal TLAS.");
+
+    IRRaytracingAccelerationStructureGPUHeader Header = {};
+    Header.accelerationStructureID = AS->gpuResourceID()._impl;
+    Header.addressOfInstanceContributions =
+        ContribBufferMTL.getBufferPtr()->gpuAddress();
+    auto HeaderBufOrErr =
+        createBufferWithData(*this, "AS-Header", BufferDesc, &Header,
+                             sizeof(Header), nullptr, nullptr);
+    if (!HeaderBufOrErr)
+      return HeaderBufOrErr.takeError();
+    auto HeaderBuffer = std::move(*HeaderBufOrErr);
+
+    return std::make_unique<MetalAccelerationStructure>(
+        AS, Sizes, std::move(HeaderBuffer), std::move(ContribBuffer));
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    InvocationState IS;
+    SharedInvocationState IS;
 
-    auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);
+    NS::AutoreleasePool *Pool = NS::AutoreleasePool::alloc()->init();
+    auto PoolScope = llvm::scope_exit([&] { Pool->release(); });
+
+    auto DescHeapOrErr = createDescriptorHeap(P);
+    if (!DescHeapOrErr)
+      return DescHeapOrErr.takeError();
+    auto DescHeap = std::move(*DescHeapOrErr);
+
+    auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
       return CBOrErr.takeError();
     IS.CB = std::move(*CBOrErr);
-    IS.CB->Dev = this;
 
-    if (auto Err = createDescriptorHeap(P, IS))
+    if (auto Err = createResources(*this, P, IS))
       return Err;
 
-    if (auto Err = createBuffers(P, IS))
+    if (auto Err = buildDescriptorTables(IS.DescTables, *DescHeap))
       return Err;
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
@@ -2981,7 +2777,7 @@ public:
       IS.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
 
-      if (auto Err = createComputeCommands(P, IS))
+      if (auto Err = createComputeCommands(P, IS, DescHeap))
         return Err;
     } else if (P.isRaster()) {
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
@@ -3062,7 +2858,7 @@ public:
         return RenderPassOrErr.takeError();
       IS.RenderPass = std::move(*RenderPassOrErr);
 
-      if (auto Err = createGraphicsCommands(P, IS))
+      if (auto Err = createGraphicsCommands(P, IS, DescHeap))
         return Err;
     } else if (P.isRayTracing()) {
       if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
@@ -3094,9 +2890,31 @@ public:
       IS.SBT = std::move(*SBTOrErr);
       llvm::outs() << "Shader Binding Table created.\n";
 
-      if (auto Err = createRayTracingCommands(P, IS))
+      if (auto Err = createRayTracingCommands(P, IS, DescHeap))
         return Err;
     }
+
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto ReadbackEncoder = std::move(*EncoderOrErr);
+
+    if (IS.RenderTarget) {
+      if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
+                                                          *IS.RTReadback))
+        return Err;
+    }
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
+          return Err;
+
+    for (auto &R : IS.RootResources)
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
+        return Err;
+
+    ReadbackEncoder->endEncoding();
 
     auto SubmitResult = GraphicsQueue.submit(std::move(IS.CB));
     if (!SubmitResult)
@@ -3105,8 +2923,9 @@ public:
     if (auto Err = SubmitResult->waitForCompletion())
       return Err;
 
-    if (auto Err = copyBack(P, IS))
+    if (auto Err = readBack(*this, P, IS))
       return Err;
+    llvm::outs() << "Read data back.\n";
     return llvm::Error::success();
   }
 
@@ -3171,7 +2990,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
               MTL::AccelerationStructureTriangleGeometryDescriptor::alloc()
                   ->init();
           auto *VB = llvm::cast<MTLBuffer>(T.VertexBuffer);
-          TD->setVertexBuffer(VB->Buf);
+          TD->setVertexBuffer(VB->getBufferPtr());
           TD->setVertexBufferOffset(T.VertexBufferOffset);
           TD->setVertexStride(T.VertexStride);
           TD->setVertexFormat(getMetalPositionFormat(T.VertexFormat));
@@ -3179,7 +2998,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
                                              : T.VertexCount / 3);
           if (T.IndexBuffer) {
             auto *IB = llvm::cast<MTLBuffer>(T.IndexBuffer);
-            TD->setIndexBuffer(IB->Buf);
+            TD->setIndexBuffer(IB->getBufferPtr());
             TD->setIndexBufferOffset(T.IndexBufferOffset);
             TD->setIndexType(getMetalIndexType(T.IdxFormat));
           }
@@ -3195,7 +3014,7 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
               MTL::AccelerationStructureBoundingBoxGeometryDescriptor::alloc()
                   ->init();
           auto *BB = llvm::cast<MTLBuffer>(A.AABBBuffer);
-          AD->setBoundingBoxBuffer(BB->Buf);
+          AD->setBoundingBoxBuffer(BB->getBufferPtr());
           AD->setBoundingBoxBufferOffset(A.AABBBufferOffset);
           AD->setBoundingBoxStride(A.AABBStride);
           AD->setBoundingBoxCount(A.AABBCount);
@@ -3236,11 +3055,18 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         InstanceASIdx.push_back(Idx);
       }
 
+      auto ContribPtrOrErr = AS->ContribBuffer->map();
+      if (!ContribPtrOrErr)
+        return ContribPtrOrErr.takeError();
+      uint32_t *ContribPtr = static_cast<uint32_t *>(*ContribPtrOrErr);
+
       // Pack instance descriptors. Layout differs from VK/DX12: 32-byte
       // entries with an index instead of a GPU address.
       llvm::SmallVector<MTL::AccelerationStructureUserIDInstanceDescriptor>
           Native;
+      llvm::SmallVector<uint32_t> HitContributions;
       Native.reserve(TLAS->Instances.size());
+      HitContributions.reserve(TLAS->Instances.size());
       for (size_t I = 0; I < TLAS->Instances.size(); ++I) {
         const auto &Src = TLAS->Instances[I];
         MTL::AccelerationStructureUserIDInstanceDescriptor D = {};
@@ -3258,7 +3084,11 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         D.accelerationStructureIndex = InstanceASIdx[I];
         D.userID = Src.InstanceID;
         Native.push_back(D);
+        ContribPtr[I] = Src.InstanceContributionToHitGroupIndex &
+                        0xffffff; // cut-off to 24-bit to match dx12 and vulkan.
       }
+      AS->ContribBuffer->unmap();
+
       const size_t InstByteSize =
           Native.size() *
           sizeof(MTL::AccelerationStructureUserIDInstanceDescriptor);
@@ -3269,11 +3099,10 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
           nullptr, nullptr);
       if (!InstBufOrErr)
         return InstBufOrErr.takeError();
-      auto *MTLInstBuf = llvm::cast<MTLBuffer>(InstBufOrErr->get());
-      CB->KeepAliveOwned.push_back(std::move(*InstBufOrErr));
+      const MTLBuffer &MTLInstBuf = llvm::cast<MTLBuffer>(*InstBufOrErr->get());
 
       auto *ID = MTL::InstanceAccelerationStructureDescriptor::alloc()->init();
-      ID->setInstanceDescriptorBuffer(MTLInstBuf->Buf);
+      ID->setInstanceDescriptorBuffer(MTLInstBuf.getBufferPtr());
       ID->setInstanceCount(TLAS->Instances.size());
       ID->setInstanceDescriptorType(
           MTL::AccelerationStructureInstanceDescriptorTypeUserID);
@@ -3283,6 +3112,8 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       ID->setInstancedAccelerationStructures(BLASArr);
       Desc = ID;
       ScratchSize = TLAS->AS->getSizes().ScratchDataSizeInBytes;
+
+      CB->KeepAliveOwned.push_back(std::move(*InstBufOrErr));
     }
 
     const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
@@ -3296,8 +3127,8 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
     CB->KeepAliveOwned.push_back(std::move(*ScratchOrErr));
 
     insertDebugSignpost("BuildAccelerationStructure");
-    ASEnc->buildAccelerationStructure(AS->AccelStruct, Desc, MTLScratch->Buf,
-                                      0);
+    ASEnc->buildAccelerationStructure(AS->AccelStruct, Desc,
+                                      MTLScratch->getBufferPtr(), 0);
     Desc->release();
   }
 

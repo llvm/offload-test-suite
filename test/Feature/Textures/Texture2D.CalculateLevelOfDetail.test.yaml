@@ -126,8 +126,8 @@ Results:
 ...
 #--- end
 
-# Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
-# XFAIL: DirectX || Metal
+# Unimplemented: Metal: https://github.com/llvm/llvm-project/issues/101558
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/vertex.hlsl

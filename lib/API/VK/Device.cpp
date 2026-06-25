@@ -23,6 +23,8 @@
 
 #include "../Util.h"
 
+#include "../Support/OffloadMigration.h"
+
 #include <algorithm>
 #include <cmath>
 #include <map>
@@ -31,44 +33,6 @@
 #include <system_error>
 
 using namespace offloadtest;
-
-#define VKFormats(FMT, BITS)                                                   \
-  if (Channels == 1)                                                           \
-    return VK_FORMAT_R##BITS##_##FMT;                                          \
-  if (Channels == 2)                                                           \
-    return VK_FORMAT_R##BITS##G##BITS##_##FMT;                                 \
-  if (Channels == 3)                                                           \
-    return VK_FORMAT_R##BITS##G##BITS##B##BITS##_##FMT;                        \
-  if (Channels == 4)                                                           \
-    return VK_FORMAT_R##BITS##G##BITS##B##BITS##A##BITS##_##FMT;
-
-static VkFormat getVKFormat(DataFormat Format, int Channels) {
-  switch (Format) {
-  case DataFormat::Int16:
-    VKFormats(SINT, 16) break;
-  case DataFormat::UInt16:
-    VKFormats(UINT, 16) break;
-  case DataFormat::Int32:
-    VKFormats(SINT, 32) break;
-  case DataFormat::UInt32:
-    VKFormats(UINT, 32) break;
-  case DataFormat::Float32:
-    VKFormats(SFLOAT, 32) break;
-  case DataFormat::Int64:
-    VKFormats(SINT, 64) break;
-  case DataFormat::UInt64:
-    VKFormats(UINT, 64) break;
-  case DataFormat::Float64:
-    VKFormats(SFLOAT, 64) break;
-  case DataFormat::Depth32:
-    if (Channels != 1)
-      llvm_unreachable("Depth32 format only supports a single channel.");
-    return VK_FORMAT_D32_SFLOAT;
-  default:
-    llvm_unreachable("Unsupported Resource format specified");
-  }
-  return VK_FORMAT_UNDEFINED;
-}
 
 static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   switch (RK) {
@@ -150,61 +114,61 @@ static VkCompareOp getVKCompareOp(CompareFunction Func) {
   llvm_unreachable("All compare op cases handled");
 }
 
-static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
-  switch (RK) {
-  case ResourceKind::Buffer:
-    return VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
-  case ResourceKind::RWBuffer:
-    return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::RWStructuredBuffer:
-    return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
-  case ResourceKind::ConstantBuffer:
-    return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::Sampler:
-  case ResourceKind::SampledTexture2D:
-  case ResourceKind::AccelerationStructure:
-    llvm_unreachable(
-        "Textures, samplers, and AS don't have buffer usage bits!");
-  }
-  llvm_unreachable("All cases handled");
-}
+// static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
+//   switch (RK) {
+//   case ResourceKind::Buffer:
+//     return VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT;
+//   case ResourceKind::RWBuffer:
+//     return VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+//   case ResourceKind::ByteAddressBuffer:
+//   case ResourceKind::RWByteAddressBuffer:
+//   case ResourceKind::StructuredBuffer:
+//   case ResourceKind::RWStructuredBuffer:
+//     return VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+//   case ResourceKind::ConstantBuffer:
+//     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+//   case ResourceKind::Texture2D:
+//   case ResourceKind::RWTexture2D:
+//   case ResourceKind::Sampler:
+//   case ResourceKind::SampledTexture2D:
+//   case ResourceKind::AccelerationStructure:
+//     llvm_unreachable(
+//         "Textures, samplers, and AS don't have buffer usage bits!");
+//   }
+//   llvm_unreachable("All cases handled");
+// }
 
-static VkImageViewType getImageViewType(const ResourceKind RK) {
-  switch (RK) {
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::SampledTexture2D:
-    return VK_IMAGE_VIEW_TYPE_2D;
-  case ResourceKind::Buffer:
-  case ResourceKind::RWBuffer:
-  case ResourceKind::ByteAddressBuffer:
-  case ResourceKind::RWByteAddressBuffer:
-  case ResourceKind::StructuredBuffer:
-  case ResourceKind::RWStructuredBuffer:
-  case ResourceKind::ConstantBuffer:
-  case ResourceKind::Sampler:
-  case ResourceKind::AccelerationStructure:
-    llvm_unreachable("Not an image view!");
-  }
-  llvm_unreachable("All cases handled");
-}
+// static VkImageViewType getImageViewType(const ResourceKind RK) {
+//   switch (RK) {
+//   case ResourceKind::Texture2D:
+//   case ResourceKind::RWTexture2D:
+//   case ResourceKind::SampledTexture2D:
+//     return VK_IMAGE_VIEW_TYPE_2D;
+//   case ResourceKind::Buffer:
+//   case ResourceKind::RWBuffer:
+//   case ResourceKind::ByteAddressBuffer:
+//   case ResourceKind::RWByteAddressBuffer:
+//   case ResourceKind::StructuredBuffer:
+//   case ResourceKind::RWStructuredBuffer:
+//   case ResourceKind::ConstantBuffer:
+//   case ResourceKind::Sampler:
+//   case ResourceKind::AccelerationStructure:
+//     llvm_unreachable("Not an image view!");
+//   }
+//   llvm_unreachable("All cases handled");
+// }
 
-static VkImageType getVKImageType(const ResourceKind RK) {
-  switch (RK) {
-  case ResourceKind::Texture2D:
-  case ResourceKind::RWTexture2D:
-  case ResourceKind::SampledTexture2D:
-    return VK_IMAGE_TYPE_2D;
-  default:
-    llvm_unreachable("Unsupported image kind");
-  }
-  llvm_unreachable("All cases handled");
-}
+// static VkImageType getVKImageType(const ResourceKind RK) {
+//   switch (RK) {
+//   case ResourceKind::Texture2D:
+//   case ResourceKind::RWTexture2D:
+//   case ResourceKind::SampledTexture2D:
+//     return VK_IMAGE_TYPE_2D;
+//   default:
+//     llvm_unreachable("Unsupported image kind");
+//   }
+//   llvm_unreachable("All cases handled");
+// }
 
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
   switch (Stage) {
@@ -448,14 +412,16 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+  VkBufferView View;
 
   VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkBuffer CounterBuffer,
                VkDeviceMemory Memory, VkDeviceAddress DeviceAddress,
-               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes,
+               VkBufferView View)
       : offloadtest::Buffer(GPUAPI::Vulkan), Dev(Dev), Buffer(Buffer),
         CounterBuffer(CounterBuffer), Memory(Memory),
         DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
-        SizeInBytes(SizeInBytes) {}
+        SizeInBytes(SizeInBytes), View(View) {}
 
   VulkanBuffer(const VulkanBuffer &) = delete;
   VulkanBuffer(VulkanBuffer &&) = delete;
@@ -494,6 +460,8 @@ public:
   void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   ~VulkanBuffer() override {
+    if (View != nullptr)
+      vkDestroyBufferView(Dev, View, nullptr);
     if (CounterBuffer != nullptr)
       vkDestroyBuffer(Dev, CounterBuffer, nullptr);
     vkDestroyBuffer(Dev, Buffer, nullptr);
@@ -532,12 +500,12 @@ public:
   uint64_t SizeInBytes;
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
-                llvm::StringRef Name, TextureCreateDesc Desc,
+                VkImageView View, llvm::StringRef Name, TextureCreateDesc Desc,
                 VkImageLayout PreferredLayout,
                 VkImageSubresourceRange FullRange, VkImageTiling Tiling,
                 uint64_t SizeInBytes)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), Name(Name), Desc(Desc), Tiling(Tiling),
+        Memory(Memory), View(View), Name(Name), Desc(Desc), Tiling(Tiling),
         PreferredLayout(PreferredLayout), FullRange(FullRange),
         SizeInBytes(SizeInBytes) {}
 
@@ -567,6 +535,29 @@ public:
 
   static bool classof(const offloadtest::Texture *T) {
     return T->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+class VulkanSampler : public offloadtest::Sampler {
+public:
+  VkSampler Sampler;
+  VkDevice Device;
+  std::string Name;
+  SamplerCreateDesc Desc;
+
+  VulkanSampler(std::string Name, const SamplerCreateDesc &Desc,
+                VkSampler Sampler, VkDevice Device)
+      : offloadtest::Sampler(GPUAPI::Vulkan), Sampler(Sampler), Device(Device),
+        Name(std::move(Name)), Desc(Desc) {}
+  ~VulkanSampler() override {
+    if (Sampler)
+      vkDestroySampler(Device, Sampler, nullptr);
+  }
+
+  const SamplerCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Sampler *S) {
+    return S->getAPI() == GPUAPI::Vulkan;
   }
 };
 
@@ -1050,11 +1041,32 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
+    const VkImageAspectFlags AspectMask = isDepthFormat(VKDst.Desc.Fmt)
+                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                              : VK_IMAGE_ASPECT_COLOR_BIT;
+    const uint32_t ElementSize = getFormatSizeInBytes(VKDst.Desc.Fmt);
+    llvm::SmallVector<VkBufferImageCopy> Regions;
+    uint64_t CurrentOffset = 0;
+    for (uint32_t I = 0; I < VKDst.Desc.MipLevels; ++I) {
+      const uint32_t MipWidth = std::max(1u, VKDst.Desc.Width >> I);
+      const uint32_t MipHeight = std::max(1u, VKDst.Desc.Height >> I);
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = I;
+      Region.imageSubresource.baseArrayLayer = 0;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent = {MipWidth, MipHeight, 1};
+      Regions.push_back(Region);
+      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
+    }
+
     insertDebugSignpost(
-        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+        llvm::formatv("copyBufferToTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
     vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, Regions.size(),
+                           Regions.data());
 
     CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,               /*DstAccessMask*/
@@ -1081,6 +1093,8 @@ public:
     };
     addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     insertDebugSignpost("copyCounterToBuffer 4B");
+    assert(VKSrc.CounterBuffer != nullptr && "Counter buffer was nullptr >:(");
+    assert(VKDst.Buffer != nullptr && "Dst buffer was nullptr >:(");
     vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.CounterBuffer, VKDst.Buffer, 1,
                     &Region);
     return llvm::Error::success();
@@ -1106,9 +1120,20 @@ public:
     insertDebugSignpost(
         llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
+
+    VkBufferImageCopy Region = {};
+    Region.imageSubresource.aspectMask =
+        VKSrc.FullRange.aspectMask &
+        ~VK_IMAGE_ASPECT_STENCIL_BIT; // color or depth
+    Region.imageSubresource.mipLevel = 0;
+    Region.imageSubresource.baseArrayLayer = 0;
+    Region.imageSubresource.layerCount = 1;
+    Region.imageExtent.width = VKSrc.Desc.Width;
+    Region.imageExtent.height = VKSrc.Desc.Height;
+    Region.imageExtent.depth = 1;
     vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
-                           0, nullptr);
+                           1, &Region);
 
     CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,              /*DstAccessMask*/
@@ -1576,33 +1601,34 @@ private:
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
   };
 
-  struct InvocationState {
-    std::unique_ptr<VulkanCommandBuffer> CB;
-    VkDescriptorPool Pool = VK_NULL_HANDLE;
+  // struct InvocationState {
+  //   std::unique_ptr<VulkanCommandBuffer> CB;
 
-    std::unique_ptr<PipelineState> Pipeline;
-    // Lifetime-tied to the pipeline; only set for RT pipelines.
-    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
+  //   std::unique_ptr<PipelineState> Pipeline;
+  //   // Lifetime-tied to the pipeline; only set for RT pipelines.
+  //   std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
 
-    std::unique_ptr<offloadtest::RenderPass> RenderPass;
-    std::unique_ptr<offloadtest::Texture> RenderTarget;
-    std::unique_ptr<offloadtest::Buffer> RTReadback;
-    std::unique_ptr<offloadtest::Texture> DepthStencil;
-    std::unique_ptr<offloadtest::Buffer> VB;
+  //   std::unique_ptr<offloadtest::RenderPass> RenderPass;
+  //   std::unique_ptr<offloadtest::Texture> RenderTarget;
+  //   std::unique_ptr<offloadtest::Buffer> RTReadback;
+  //   std::unique_ptr<offloadtest::Texture> DepthStencil;
+  //   std::unique_ptr<offloadtest::Buffer> VB;
 
-    llvm::SmallVector<ResourceBundle> Resources;
-    llvm::SmallVector<VkDescriptorSet> DescriptorSets;
-    llvm::SmallVector<VkBufferView> BufferViews;
-    llvm::SmallVector<VkImageView> ImageViews;
+  //   llvm::SmallVector<ResourceBundle> Resources;
+  //   llvm::SmallVector<VkDescriptorSet> DescriptorSets;
+  //   llvm::SmallVector<VkBufferView> BufferViews;
+  //   llvm::SmallVector<VkImageView> ImageViews;
 
-    // Parallel-indexed to `P.AccelStructs.BLAS`.
-    llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
-        BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
-    // Vertex/index buffers consumed during AS builds; must outlive submission.
-    llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
-  };
+  //   // Parallel-indexed to `P.AccelStructs.BLAS`.
+  //   llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
+  //       BLASes;
+  //   // Keyed by `TLASDesc::Name`.
+  //   llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>>
+  //   TLASes;
+  //   // Vertex/index buffers consumed during AS builds; must outlive
+  //   submission. llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>>
+  //   ASInputBuffers;
+  // };
 
 public:
   static llvm::Expected<std::unique_ptr<VulkanDevice>>
@@ -2713,6 +2739,10 @@ public:
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
 
+    if (Desc.AccessType == BufferShaderAccessType::Typed)
+      BufInfo.usage |= VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT;
+
     VkBuffer BufferObject;
     if (auto Err = VK::toError(
             vkCreateBuffer(Device, &BufInfo, nullptr, &BufferObject),
@@ -2743,7 +2773,6 @@ public:
     VkMemoryRequirements CounterMemReqs = {};
     VkDeviceSize CounterOffsetInBytes = 0;
     if (Desc.HasCounter) {
-      VkBuffer CounterBuffer;
       VkBufferCreateInfo CounterBufferInfo = {};
       CounterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
       CounterBufferInfo.size = sizeof(uint32_t);
@@ -2808,9 +2837,28 @@ public:
       DevAddr = vkGetBufferDeviceAddress(Device, &AddrInfo);
     }
 
+    VkBufferView View = VK_NULL_HANDLE;
+    if (Desc.AccessType == BufferShaderAccessType::Typed) {
+      // Create buffer view
+      VkBufferViewCreateInfo BufferViewCI = {};
+      BufferViewCI.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+      BufferViewCI.buffer = BufferObject;
+      BufferViewCI.format = getVulkanFormat(Desc.AccessTypeParams.Fmt);
+      BufferViewCI.range = VK_WHOLE_SIZE;
+
+      if (auto Err = VK::toError(
+              vkCreateBufferView(Device, &BufferViewCI, nullptr, &View),
+              "Failed to create buffer view.")) {
+        if (CounterBuffer)
+          vkDestroyBuffer(Device, CounterBuffer, nullptr);
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        vkFreeMemory(Device, DeviceMemory, nullptr);
+      }
+    }
+
     return std::make_unique<VulkanBuffer>(Device, BufferObject, CounterBuffer,
                                           DeviceMemory, DevAddr, Name, Desc,
-                                          SizeInBytes);
+                                          SizeInBytes, View);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -2882,42 +2930,69 @@ public:
         1, /*layerCount*/
     };
 
+    VkImageViewCreateInfo ViewCi = {};
+    ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    ViewCi.image = Image;
+    ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    ViewCi.format = getVulkanFormat(Desc.Fmt);
+    ViewCi.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
+                         VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
+    ViewCi.subresourceRange.baseMipLevel = 0;
+    ViewCi.subresourceRange.levelCount = Desc.MipLevels;
+    ViewCi.subresourceRange.baseArrayLayer = 0;
+    ViewCi.subresourceRange.layerCount = 1;
+    ViewCi.subresourceRange.aspectMask = FullAspectMask;
+
+    VkImageView View = VK_NULL_HANDLE;
+    if (auto Err =
+            VK::toError(vkCreateImageView(Device, &ViewCi, nullptr, &View),
+                        "Failed to create image view.")) {
+      vkDestroyImage(Device, Image, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
+      return Err;
+    }
+
     VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     if ((Desc.Usage & TextureUsage::Storage))
       PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
 
     auto Tex = std::make_unique<VulkanTexture>(
-        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
-        ImageInfo.tiling, MemReqs.size);
-
-    const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
-    const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
-    if (IsRT || IsDS) {
-      VkImageViewCreateInfo ViewCi = {};
-      ViewCi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-      ViewCi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-      ViewCi.format = getVulkanFormat(Desc.Fmt);
-      ViewCi.subresourceRange.baseMipLevel = 0;
-      ViewCi.subresourceRange.levelCount = 1;
-      ViewCi.subresourceRange.baseArrayLayer = 0;
-      ViewCi.subresourceRange.layerCount = 1;
-      ViewCi.image = Image;
-      if (IsRT) {
-        ViewCi.components = {VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
-                             VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
-        ViewCi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      } else {
-        ViewCi.subresourceRange.aspectMask =
-            VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-      }
-      // Tex destructor will clean up Image + Memory on failure.
-      if (auto Err = VK::toError(
-              vkCreateImageView(Device, &ViewCi, nullptr, &Tex->View),
-              "Failed to create image view."))
-        return Err;
-    }
+        Device, Image, DeviceMemory, View, Name, Desc, PreferredLayout,
+        FullRange, ImageInfo.tiling, MemReqs.size);
 
     return Tex;
+  }
+
+  llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string Name, const SamplerCreateDesc &Desc) override {
+
+    VkSamplerCreateInfo SamplerInfo = {};
+    SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    SamplerInfo.magFilter = getVKFilter(Desc.MagFilter);
+    SamplerInfo.minFilter = getVKFilter(Desc.MinFilter);
+    SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    SamplerInfo.addressModeU = getVKAddressMode(Desc.Address);
+    SamplerInfo.addressModeV = getVKAddressMode(Desc.Address);
+    SamplerInfo.addressModeW = getVKAddressMode(Desc.Address);
+    SamplerInfo.mipLodBias = Desc.MipLODBias;
+    SamplerInfo.anisotropyEnable = VK_FALSE;
+    SamplerInfo.maxAnisotropy = 1.0f;
+    SamplerInfo.compareEnable =
+        Desc.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
+    SamplerInfo.compareOp = getVKCompareOp(Desc.ComparisonOp);
+    SamplerInfo.minLod = Desc.MinLOD;
+    SamplerInfo.maxLod = Desc.MaxLOD;
+    SamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+    SamplerInfo.unnormalizedCoordinates = VK_FALSE;
+
+    VkSampler Sampler;
+    if (auto Err = VK::toError(
+            vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler),
+            "Failed to create sampler."))
+      return Err;
+
+    return std::make_unique<VulkanSampler>(std::move(Name), Desc, Sampler,
+                                           Device);
   }
 
   uint32_t getTextureUploadRowStrideInBytes(
@@ -2926,6 +3001,12 @@ public:
         uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
     return static_cast<uint32_t>(llvm::alignTo(
         TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
+  }
+
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // copyBufferToTexture consumes a tightly-packed staging buffer.
+    return computeTightTextureUploadLayout(Desc);
   }
 
   const Capabilities &getCapabilities() override {
@@ -3317,7 +3398,8 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createTLAS(const AccelerationStructureSizes &Sizes) override {
+  createTLAS(const AccelerationStructureSizes &Sizes,
+             uint32_t /*InstanceCount*/) override {
     return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
                       "TLAS");
   }
@@ -3388,265 +3470,7 @@ public:
     return BufferRef{Buffer, Memory};
   }
 
-  llvm::Expected<ResourceRef> createImage(Resource &R, BufferRef &Host,
-                                          int UsageOverride = 0) {
-    const offloadtest::CPUBuffer &B = *R.BufferPtr;
-    if (B.Format == DataFormat::Depth32 && R.isReadWrite())
-      return llvm::createStringError(std::errc::invalid_argument,
-                                     "Image memory allocation failed.");
-    VkImageCreateInfo ImageCreateInfo = {};
-    ImageCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ImageCreateInfo.imageType = getVKImageType(R.Kind);
-    ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
-    ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
-    ImageCreateInfo.arrayLayers = 1;
-    ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    // Set initial layout of the image to undefined
-    ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
-                              static_cast<uint32_t>(B.OutputProps.Height), 1};
-    if (UsageOverride == 0) {
-      ImageCreateInfo.usage =
-          VK_IMAGE_USAGE_TRANSFER_DST_BIT |
-          (R.isReadWrite()
-               ? (VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
-               : VK_IMAGE_USAGE_SAMPLED_BIT);
-    } else {
-      ImageCreateInfo.usage = UsageOverride;
-    }
-
-    VkImage Image;
-    if (auto Err = VK::toError(
-            vkCreateImage(Device, &ImageCreateInfo, nullptr, &Image),
-            "Failed to create image."))
-      return Err;
-
-    VkSampler Sampler = 0;
-
-    VkMemoryRequirements MemReqs;
-    vkGetImageMemoryRequirements(Device, Image, &MemReqs);
-    VkMemoryAllocateInfo AllocInfo = {};
-    AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    AllocInfo.allocationSize = MemReqs.size;
-
-    VkDeviceMemory Memory;
-    if (auto Err =
-            VK::toError(vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory),
-                        "Image memory allocation failed."))
-      return Err;
-    if (auto Err = VK::toError(vkBindImageMemory(Device, Image, Memory, 0),
-                               "Image memory binding failed."))
-      return Err;
-
-    return ResourceRef(Host, ImageRef{Image, Sampler, Memory});
-  }
-
-  llvm::Expected<ResourceRef> createSampler(Resource &R, BufferRef &Host) {
-    VkSamplerCreateInfo SamplerInfo = {};
-    SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    const Sampler &S = *R.SamplerPtr;
-    SamplerInfo.magFilter = getVKFilter(S.MagFilter);
-    SamplerInfo.minFilter = getVKFilter(S.MinFilter);
-    SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    SamplerInfo.addressModeU = getVKAddressMode(S.Address);
-    SamplerInfo.addressModeV = getVKAddressMode(S.Address);
-    SamplerInfo.addressModeW = getVKAddressMode(S.Address);
-    SamplerInfo.mipLodBias = S.MipLODBias;
-    SamplerInfo.anisotropyEnable = VK_FALSE;
-    SamplerInfo.maxAnisotropy = 1.0f;
-    SamplerInfo.compareEnable =
-        S.Kind == SamplerKind::SamplerComparison ? VK_TRUE : VK_FALSE;
-    SamplerInfo.compareOp = getVKCompareOp(S.ComparisonOp);
-    SamplerInfo.minLod = S.MinLOD;
-    SamplerInfo.maxLod = S.MaxLOD;
-    SamplerInfo.borderColor = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
-    SamplerInfo.unnormalizedCoordinates = VK_FALSE;
-
-    VkSampler Sampler;
-    if (auto Err = VK::toError(
-            vkCreateSampler(Device, &SamplerInfo, nullptr, &Sampler),
-            "Failed to create sampler."))
-      return Err;
-
-    return ResourceRef(Host, ImageRef{0, Sampler, 0});
-  }
-
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
-    if (!SizesOrErr)
-      return SizesOrErr.takeError();
-    return createTLAS(*SizesOrErr);
-  }
-
-  llvm::Error createResource(Resource &R, InvocationState &IS) {
-    // Samplers don't have backing data buffers, so handle them separately
-    if (R.isSampler()) {
-      ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
-      BufferRef HostBuf = {0, 0};
-      auto ExSamplerRef = createSampler(R, HostBuf);
-      if (!ExSamplerRef)
-        return ExSamplerRef.takeError();
-      Bundle.ResourceRefs.push_back(*ExSamplerRef);
-      IS.Resources.push_back(Bundle);
-      return llvm::Error::success();
-    }
-
-    ResourceBundle Bundle{getDescriptorType(R.Kind), R.size(), R.BufferPtr};
-    for (auto &ResData : R.BufferPtr->Data) {
-      auto ExHostBuf = createBuffer(
-          VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, R.size(), ResData.get());
-      if (!ExHostBuf)
-        return ExHostBuf.takeError();
-
-      if (R.isTexture()) {
-        auto ExImageRef = createImage(R, *ExHostBuf);
-        if (!ExImageRef)
-          return ExImageRef.takeError();
-
-        // Sampled textures use combined-image-sampler descriptors and need
-        // both valid image and sampler handles.
-        if (R.isSampledTexture()) {
-          BufferRef NullHost = {0, 0};
-          auto ExSamplerRef = createSampler(R, NullHost);
-          if (!ExSamplerRef)
-            return ExSamplerRef.takeError();
-          ExImageRef->Image.Sampler = ExSamplerRef->Image.Sampler;
-        }
-
-        Bundle.ResourceRefs.push_back(*ExImageRef);
-      } else {
-        auto ExDeviceBuf = createBuffer(
-            getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, R.size());
-        if (!ExDeviceBuf)
-          return ExDeviceBuf.takeError();
-        VkBufferCopy Copy = {};
-        Copy.size = R.size();
-        vkCmdCopyBuffer(IS.CB->CmdBuffer, ExHostBuf->Buffer,
-                        ExDeviceBuf->Buffer, 1, &Copy);
-        Bundle.ResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
-      }
-    }
-    if (R.HasCounter) {
-      for (uint32_t I = 0; I < R.getArraySize(); ++I) {
-        uint32_t CounterValue = 0;
-        auto ExHostBuf = createBuffer(VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                                          VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-                                      sizeof(uint32_t), &CounterValue);
-        if (!ExHostBuf)
-          return ExHostBuf.takeError();
-
-        auto ExDeviceBuf = createBuffer(
-            getFlagBits(R.Kind) | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-                VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-            VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, sizeof(uint32_t));
-        if (!ExDeviceBuf)
-          return ExDeviceBuf.takeError();
-        VkBufferCopy Copy = {};
-        Copy.size = sizeof(uint32_t);
-        vkCmdCopyBuffer(IS.CB->CmdBuffer, ExHostBuf->Buffer,
-                        ExDeviceBuf->Buffer, 1, &Copy);
-        Bundle.CounterResourceRefs.emplace_back(*ExHostBuf, *ExDeviceBuf);
-      }
-    }
-    IS.Resources.push_back(Bundle);
-    return llvm::Error::success();
-  }
-
-  llvm::Error createRenderTarget(Pipeline &P, InvocationState &IS) {
-    if (!P.Bindings.RTargetBufferPtr)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "No render target bound for graphics pipeline.");
-    const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
-
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-
-    IS.RenderTarget = std::move(*TexOrErr);
-
-    // Create a host-visible staging buffer for readback.
-    BufferCreateDesc BufDesc = {};
-    BufDesc.Location = MemoryLocation::GpuToCpu;
-    BufDesc.Usage = BufferUsage::Storage;
-    auto BufOrErr = createBuffer("RTReadback", BufDesc, RTBuf.size());
-    if (!BufOrErr)
-      return BufOrErr.takeError();
-    IS.RTReadback = std::move(*BufOrErr);
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
-    auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
-        *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    if (!TexOrErr)
-      return TexOrErr.takeError();
-    IS.DepthStencil = std::move(*TexOrErr);
-    return llvm::Error::success();
-  }
-
-  llvm::Error createResources(Pipeline &P, InvocationState &IS) {
-    for (auto &D : P.Sets) {
-      for (auto &R : D.Resources) {
-        if (R.isAccelerationStructure()) {
-          auto ASOrErr = createAS(R);
-          if (!ASOrErr)
-            return ASOrErr.takeError();
-          auto *VkAS = llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
-          ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
-          Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
-          IS.Resources.push_back(std::move(Bundle));
-          auto Inserted =
-              IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
-          assert(Inserted.second && "TLAS bound to multiple resources NYI");
-          (void)Inserted;
-          continue;
-        }
-        if (auto Err = createResource(R, IS))
-          return Err;
-      }
-    }
-
-    if (P.isRaster()) {
-      if (auto Err = createRenderTarget(P, IS))
-        return Err;
-      // TODO: Always created for graphics pipelines. Consider making this
-      // conditional on the pipeline definition.
-      if (auto Err = createDepthStencil(P, IS))
-        return Err;
-    }
-
-    if (P.isTraditionalRaster() && P.Bindings.VertexBufferPtr) {
-      const CPUBuffer *VBuffer = P.Bindings.VertexBufferPtr;
-
-      BufferCreateDesc BufDesc = {};
-      BufDesc.Location = MemoryLocation::CpuToGpu;
-      BufDesc.Usage = BufferUsage::VertexBuffer;
-      auto BufOrErr = createBufferWithData(*this, "VertexBuffer", BufDesc,
-                                           VBuffer->Data[0].get(),
-                                           VBuffer->size(), nullptr, nullptr);
-      if (!BufOrErr)
-        return BufOrErr.takeError();
-      IS.VB = std::move(*BufOrErr);
-      llvm::outs() << "Vertex buffer created.\n";
-    }
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error createDescriptorPool(Pipeline &P, InvocationState &IS) {
-
+  llvm::Expected<VkDescriptorPool> createDescriptorPool(Pipeline &P) {
     constexpr VkDescriptorType DescriptorTypes[] = {
         VK_DESCRIPTOR_TYPE_SAMPLER,
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
@@ -3692,42 +3516,46 @@ public:
           {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, ASDescriptorCount});
     }
 
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
     if (P.Sets.size() > 0) {
       VkDescriptorPoolCreateInfo PoolCreateInfo = {};
       PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
-      if (auto Err = VK::toError(vkCreateDescriptorPool(Device, &PoolCreateInfo,
-                                                        nullptr, &IS.Pool),
-                                 "Failed to create descriptor pool."))
+      if (auto Err = VK::toError(
+              vkCreateDescriptorPool(Device, &PoolCreateInfo, nullptr, &Pool),
+              "Failed to create descriptor pool."))
         return Err;
     }
-    return llvm::Error::success();
+
+    return Pool;
   }
 
-  llvm::Error createDescriptorSets(Pipeline &P, InvocationState &IS) {
-    if (P.Sets.size() == 0)
-      return llvm::Error::success();
+  llvm::Error buildDescriptorTables(
+      PipelineState &Pipeline, llvm::ArrayRef<DescriptorTable> DescTables,
+      VkDescriptorPool Pool,
+      llvm::SmallVectorImpl<VkDescriptorSet> &DescriptorSets) {
 
     const VulkanPipelineState &VulkanPipeline =
-        llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
+        llvm::cast<VulkanPipelineState>(Pipeline);
+
+    if (VulkanPipeline.SetLayouts.empty())
+      return llvm::Error::success();
 
     VkDescriptorSetAllocateInfo DSAllocInfo = {};
     DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    DSAllocInfo.descriptorPool = IS.Pool;
+    DSAllocInfo.descriptorPool = Pool;
     DSAllocInfo.descriptorSetCount = VulkanPipeline.SetLayouts.size();
     DSAllocInfo.pSetLayouts = VulkanPipeline.SetLayouts.data();
-    assert(IS.DescriptorSets.empty());
-    IS.DescriptorSets.insert(IS.DescriptorSets.begin(),
-                             VulkanPipeline.SetLayouts.size(),
-                             VkDescriptorSet());
+    assert(DescriptorSets.empty());
+    DescriptorSets.insert(DescriptorSets.begin(),
+                          VulkanPipeline.SetLayouts.size(), VkDescriptorSet());
     llvm::outs() << "Num Descriptor sets: " << VulkanPipeline.SetLayouts.size()
                  << "\n";
-    if (auto Err =
-            VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
-                                                 IS.DescriptorSets.data()),
-                        "Failed to allocate descriptor sets."))
+    if (auto Err = VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
+                                                        DescriptorSets.data()),
+                               "Failed to allocate descriptor sets."))
       return Err;
 
     // Calculate the number of infos/views we are going to need for each type
@@ -3736,8 +3564,9 @@ public:
     uint32_t BufferViewCount = 0;
     uint32_t ASInfoCount = 0;
     uint32_t ASHandleCount = 0;
-    for (auto &D : P.Sets) {
-      for (auto &R : D.Resources) {
+    for (auto &Table : DescTables) {
+      for (auto &ResourcePair : Table.Resources) {
+        auto &R = *ResourcePair.first;
         if (R.isAccelerationStructure()) {
           ASInfoCount += 1;
           ASHandleCount += R.getArraySize();
@@ -3747,6 +3576,7 @@ public:
           ImageInfoCount += 1;
           continue;
         }
+
         const uint32_t Count = R.getArraySize();
         if (R.isTexture())
           ImageInfoCount += Count;
@@ -3775,17 +3605,21 @@ public:
     llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
     WriteDescriptors.reserve(ImageInfoCount + BufferInfoCount +
                              BufferViewCount + ASInfoCount);
-    assert(IS.BufferViews.empty());
 
-    uint32_t OverallResIdx = 0;
-    for (uint32_t SetIdx = 0; SetIdx < P.Sets.size(); ++SetIdx) {
-      for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
-           ++RIdx, ++OverallResIdx) {
-        const Resource &R = P.Sets[SetIdx].Resources[RIdx];
-        if (VulkanAccelerationStructure *VkAS =
-                IS.Resources[OverallResIdx].ResourceRefs[0].AS) {
+    for (size_t SetIdx = 0; SetIdx < DescTables.size(); ++SetIdx) {
+      const DescriptorTable &Table = DescTables[SetIdx];
+      for (auto &ResourcePair : Table.Resources) {
+        auto &R = *ResourcePair.first;
+
+        if (!ResourcePair.second.empty() &&
+            ResourcePair.second[0].AS != nullptr) {
+          const ResourceSet &RS = ResourcePair.second[0];
+
+          VulkanAccelerationStructure &VkAS =
+              llvm::cast<VulkanAccelerationStructure>(*RS.AS);
           const size_t HandleStart = ASHandles.size();
-          ASHandles.push_back(VkAS->AccelStruct);
+          ASHandles.push_back(VkAS.AccelStruct);
+
           VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
           ASWrite.sType =
               VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
@@ -3796,126 +3630,100 @@ public:
           VkWriteDescriptorSet WDS = {};
           WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
           WDS.pNext = &ASInfos.back();
-          WDS.dstSet = IS.DescriptorSets[SetIdx];
+          WDS.dstSet = DescriptorSets[SetIdx];
           WDS.dstBinding = R.VKBinding->Binding;
           WDS.descriptorCount = 1;
           WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-          llvm::outs() << "Updating AS Descriptor [" << OverallResIdx << "] { "
-                       << SetIdx << ", " << RIdx << " }\n";
           WriteDescriptors.push_back(WDS);
           continue;
         }
-        uint32_t IndexOfFirstBufferDataInArray;
-        if (R.isSampler()) {
-          IndexOfFirstBufferDataInArray = ImageInfos.size();
-          for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
+
+        const uint32_t ImageInfoBase = ImageInfos.size();
+        const uint32_t BufferViewBase = BufferViews.size();
+        const uint32_t BufferInfoBase = BufferInfos.size();
+        for (auto &RS : ResourcePair.second) {
+          if (RS.Buffer != nullptr) {
+            VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*RS.Buffer);
+
+            if (BufferVk.Desc.AccessType == BufferShaderAccessType::Typed) {
+              BufferViews.push_back(BufferVk.View);
+            } else {
+              const VkDescriptorBufferInfo BI = {BufferVk.Buffer, 0,
+                                                 VK_WHOLE_SIZE};
+              BufferInfos.push_back(BI);
+            }
+          } else if (RS.Texture != nullptr) {
+            // Combined Image Sampler
+            VkSampler SamplerHandle = VK_NULL_HANDLE;
+            if (RS.Sampler != nullptr)
+              SamplerHandle = llvm::cast<VulkanSampler>(*RS.Sampler).Sampler;
+
+            VulkanTexture &TextureVk = llvm::cast<VulkanTexture>(*RS.Texture);
             const VkDescriptorImageInfo ImageInfo = {
-                ResRef.Image.Sampler, 0,
+                SamplerHandle, TextureVk.View, TextureVk.PreferredLayout};
+            ImageInfos.push_back(ImageInfo);
+          } else if (RS.Sampler != nullptr) {
+            VulkanSampler &SamplerVk = llvm::cast<VulkanSampler>(*RS.Sampler);
+            const VkDescriptorImageInfo ImageInfo = {
+                SamplerVk.Sampler, VK_NULL_HANDLE,
                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             ImageInfos.push_back(ImageInfo);
-          }
-        } else if (R.isTexture()) {
-          VkImageViewCreateInfo ViewCreateInfo = {};
-          ViewCreateInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-          ViewCreateInfo.viewType = getImageViewType(R.Kind);
-          ViewCreateInfo.format =
-              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-          ViewCreateInfo.components = {
-              VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G,
-              VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A};
-          ViewCreateInfo.subresourceRange.aspectMask =
-              R.BufferPtr->Format == DataFormat::Depth32
-                  ? VK_IMAGE_ASPECT_DEPTH_BIT
-                  : VK_IMAGE_ASPECT_COLOR_BIT;
-          ViewCreateInfo.subresourceRange.baseMipLevel = 0;
-          ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-          ViewCreateInfo.subresourceRange.layerCount = 1;
-          ViewCreateInfo.subresourceRange.levelCount =
-              R.BufferPtr->OutputProps.MipLevels;
-          IndexOfFirstBufferDataInArray = ImageInfos.size();
-          for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
-            ViewCreateInfo.image = ResRef.Image.Image;
-            VkImageView View = {0};
-            if (auto Err = VK::toError(
-                    vkCreateImageView(Device, &ViewCreateInfo, nullptr, &View),
-                    "Failed to create image view."))
-              return Err;
-            const VkDescriptorImageInfo ImageInfo = {ResRef.Image.Sampler, View,
-                                                     VK_IMAGE_LAYOUT_GENERAL};
-            IS.ImageViews.push_back(View);
-            ImageInfos.push_back(ImageInfo);
-          }
-        } else if (R.isRaw()) {
-          IndexOfFirstBufferDataInArray = BufferInfos.size();
-          for (auto ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
-            const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
-                                               VK_WHOLE_SIZE};
-            BufferInfos.push_back(BI);
-          }
-        } else {
-          VkBufferViewCreateInfo ViewCreateInfo = {};
-          const VkFormat Format =
-              getVKFormat(R.BufferPtr->Format, R.BufferPtr->Channels);
-          ViewCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
-          ViewCreateInfo.format = Format;
-          ViewCreateInfo.range = VK_WHOLE_SIZE;
-          VkBufferView View = {0};
-          IndexOfFirstBufferDataInArray = BufferViews.size();
-          for (auto &ResRef : IS.Resources[OverallResIdx].ResourceRefs) {
-            ViewCreateInfo.buffer = ResRef.Device.Buffer;
-            if (auto Err = VK::toError(
-                    vkCreateBufferView(Device, &ViewCreateInfo, nullptr, &View),
-                    "Failed to create buffer view."))
-              return Err;
-            IS.BufferViews.push_back(View);
-            BufferViews.push_back(View);
+          } else {
+            return llvm::createStringError(
+                "ResourceSet was not a buffer, texture, or acceleration "
+                "structure.");
           }
         }
 
+        const uint32_t DescriptorCount = R.getArraySize();
+
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        WDS.dstSet = IS.DescriptorSets[SetIdx];
+        WDS.dstSet = DescriptorSets[SetIdx];
         WDS.dstBinding = R.VKBinding->Binding;
-        WDS.descriptorCount = R.getArraySize();
+        WDS.descriptorCount = DescriptorCount;
         WDS.descriptorType = getDescriptorType(R.Kind);
+
         if (R.isTexture() || R.isSampler())
-          WDS.pImageInfo = &ImageInfos[IndexOfFirstBufferDataInArray];
+          WDS.pImageInfo = &ImageInfos[ImageInfoBase];
         else if (R.isRaw())
-          WDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
+          WDS.pBufferInfo = &BufferInfos[BufferInfoBase];
         else
-          WDS.pTexelBufferView = &BufferViews[IndexOfFirstBufferDataInArray];
-        llvm::outs() << "Updating Descriptor [" << OverallResIdx << "] { "
-                     << SetIdx << ", " << RIdx << " }\n";
+          WDS.pTexelBufferView = &BufferViews[BufferViewBase];
         WriteDescriptors.push_back(WDS);
 
+        // Handle descriptors for counters
         if (R.HasCounter) {
-          IndexOfFirstBufferDataInArray = BufferInfos.size();
-          for (auto ResRef : IS.Resources[OverallResIdx].CounterResourceRefs) {
-            const VkDescriptorBufferInfo BI = {ResRef.Device.Buffer, 0,
-                                               VK_WHOLE_SIZE};
-            BufferInfos.push_back(BI);
+          const uint32_t CounterBufferInfoBase = BufferInfos.size();
+          for (auto &RS : ResourcePair.second) {
+            VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*RS.Buffer);
+            assert(BufferVk.Desc.HasCounter &&
+                   "Pipeline Resource says there is a counter, actual buffer "
+                   "is missing it.");
+            if (BufferVk.Desc.HasCounter) {
+              const VkDescriptorBufferInfo CBI = {BufferVk.CounterBuffer, 0,
+                                                  VK_WHOLE_SIZE};
+              BufferInfos.push_back(CBI);
+            }
           }
 
           VkWriteDescriptorSet CounterWDS = {};
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
+          CounterWDS.dstSet = DescriptorSets[SetIdx];
           CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
-          CounterWDS.descriptorCount = R.getArraySize();
+          CounterWDS.descriptorCount = DescriptorCount;
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
-          llvm::outs() << "Updating Counter Descriptor [" << OverallResIdx
-                       << "] { " << SetIdx << ", " << RIdx << " }\n";
-          llvm::outs() << "Binding = " << CounterWDS.dstBinding << "\n";
+          CounterWDS.pBufferInfo = &BufferInfos[CounterBufferInfoBase];
           WriteDescriptors.push_back(CounterWDS);
         }
       }
     }
+
     assert(ImageInfos.size() == ImageInfoCount &&
            BufferInfos.size() == BufferInfoCount &&
            BufferViews.size() == BufferViewCount &&
            "size of buffer infos does not match expected count");
 
-    llvm::outs() << "WriteDescriptors: " << WriteDescriptors.size() << "\n";
     vkUpdateDescriptorSets(Device, WriteDescriptors.size(),
                            WriteDescriptors.data(), 0, nullptr);
     return llvm::Error::success();
@@ -4054,275 +3862,9 @@ public:
     return llvm::Error::success();
   }
 
-  void copyResourceDataToDevice(InvocationState &IS, ResourceBundle &R) {
-    if (R.isSampler() || R.isAccelerationStructure())
-      return;
-    if (R.isImage()) {
-      const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      llvm::SmallVector<VkBufferImageCopy> Regions;
-      uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
-      }
-
-      VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
-      SubRange.baseMipLevel = 0;
-      SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
-
-      VkImageMemoryBarrier ImageBarrier = {};
-      ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-
-      ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask = 0;
-      ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      ImageBarrier.oldLayout = R.ImageLayout;
-      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-      R.ImageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-      for (auto &ResRef : R.ResourceRefs) {
-        ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &ImageBarrier);
-
-        vkCmdCopyBufferToImage(IS.CB->CmdBuffer, ResRef.Host.Buffer,
-                               ResRef.Image.Image, VK_IMAGE_LAYOUT_GENERAL,
-                               Regions.size(), Regions.data());
-      }
-
-      ImageBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      ImageBarrier.dstAccessMask =
-          VK_ACCESS_SHADER_READ_BIT |
-          (R.isReadWrite() ? VK_ACCESS_SHADER_WRITE_BIT : 0);
-      ImageBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-      for (auto &ResRef : R.ResourceRefs) {
-        ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0,
-                             nullptr, 0, nullptr, 1, &ImageBarrier);
-      }
-      return;
-    }
-    VkBufferMemoryBarrier Barrier = {};
-    Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    Barrier.size = VK_WHOLE_SIZE;
-    Barrier.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
-    Barrier.dstAccessMask = 0;
-    Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    for (auto &ResRef : R.ResourceRefs) {
-      Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_HOST_BIT,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr,
-                           1, &Barrier, 0, nullptr);
-    }
-  }
-
-  // Record commands to copy a texture into a readback buffer.
-  void copyTextureToReadback(VkCommandBuffer CmdBuffer,
-                             const VulkanTexture &Tex,
-                             const VulkanBuffer &Readback,
-                             VkImageLayout OldLayout,
-                             VkAccessFlags SrcAccessMask,
-                             VkPipelineStageFlags SrcStageMask) {
-    const VkImageAspectFlags AspectMask = isDepthFormat(Tex.Desc.Fmt)
-                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                              : VK_IMAGE_ASPECT_COLOR_BIT;
-
-    // Transition texture to transfer source.
-    VkImageSubresourceRange SubRange = {};
-    SubRange.aspectMask = AspectMask;
-    SubRange.baseMipLevel = 0;
-    SubRange.levelCount = 1;
-    SubRange.layerCount = 1;
-
-    VkImageMemoryBarrier ImageBarrier = {};
-    ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    ImageBarrier.subresourceRange = SubRange;
-    ImageBarrier.srcAccessMask = SrcAccessMask;
-    ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    ImageBarrier.oldLayout = OldLayout;
-    ImageBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    ImageBarrier.image = Tex.Image;
-    vkCmdPipelineBarrier(CmdBuffer, SrcStageMask,
-                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &ImageBarrier);
-
-    // Copy image to readback buffer.
-    VkBufferImageCopy Region = {};
-    Region.imageSubresource.aspectMask = AspectMask;
-    Region.imageSubresource.mipLevel = 0;
-    Region.imageSubresource.baseArrayLayer = 0;
-    Region.imageSubresource.layerCount = 1;
-    Region.imageExtent.width = Tex.Desc.Width;
-    Region.imageExtent.height = Tex.Desc.Height;
-    Region.imageExtent.depth = 1;
-    vkCmdCopyImageToBuffer(CmdBuffer, Tex.Image,
-                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           Readback.Buffer, 1, &Region);
-
-    // Barrier to make the readback buffer visible to the host.  These
-    // explicit HOST barriers are not managed by the encoder's barrier
-    // tracking — they are recorded directly on the command buffer.
-    VkBufferMemoryBarrier BufBarrier = {};
-    BufBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    BufBarrier.size = VK_WHOLE_SIZE;
-    BufBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    BufBarrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    BufBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    BufBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    BufBarrier.buffer = Readback.Buffer;
-    vkCmdPipelineBarrier(CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                         &BufBarrier, 0, nullptr);
-  }
-
-  void copyResourceDataToHost(InvocationState &IS, ResourceBundle &R) {
-    if (!R.isReadWrite())
-      return;
-    if (R.isImage()) {
-      const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
-      SubRange.baseMipLevel = 0;
-      SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
-
-      VkImageMemoryBarrier ImageBarrier = {};
-      ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-
-      ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask = 0;
-      ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-      ImageBarrier.oldLayout = R.ImageLayout;
-      ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-      R.ImageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-      for (auto &ResRef : R.ResourceRefs) {
-        ImageBarrier.image = ResRef.Image.Image;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer,
-                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                             VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
-                             nullptr, 1, &ImageBarrier);
-      }
-
-      llvm::SmallVector<VkBufferImageCopy> Regions;
-      uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
-      }
-
-      for (auto &ResRef : R.ResourceRefs)
-        vkCmdCopyImageToBuffer(IS.CB->CmdBuffer, ResRef.Image.Image,
-                               VK_IMAGE_LAYOUT_GENERAL, ResRef.Host.Buffer,
-                               Regions.size(), Regions.data());
-
-      VkBufferMemoryBarrier Barrier = {};
-      Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-      Barrier.size = VK_WHOLE_SIZE;
-      Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-      Barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-      Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-      for (auto &ResRef : R.ResourceRefs) {
-        Barrier.buffer = ResRef.Host.Buffer;
-        vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                             &Barrier, 0, nullptr);
-      }
-      return;
-    }
-    VkBufferMemoryBarrier Barrier = {};
-    Barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-    Barrier.size = VK_WHOLE_SIZE;
-    Barrier.srcAccessMask =
-        VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    Barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    for (auto &ResRef : R.ResourceRefs) {
-      Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CB->CmdBuffer,
-                           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 1,
-                           &Barrier, 0, nullptr);
-    }
-    VkBufferCopy CopyRegion = {};
-    CopyRegion.size = R.size();
-    for (auto &ResRef : R.ResourceRefs)
-      vkCmdCopyBuffer(IS.CB->CmdBuffer, ResRef.Device.Buffer,
-                      ResRef.Host.Buffer, 1, &CopyRegion);
-
-    VkBufferCopy CounterCopyRegion = {};
-    CounterCopyRegion.size = sizeof(uint32_t);
-    for (auto &ResRef : R.CounterResourceRefs)
-      vkCmdCopyBuffer(IS.CB->CmdBuffer, ResRef.Device.Buffer,
-                      ResRef.Host.Buffer, 1, &CounterCopyRegion);
-
-    Barrier.size = VK_WHOLE_SIZE;
-    Barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    Barrier.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-    Barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    Barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    for (auto &ResRef : R.ResourceRefs) {
-      Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                           &Barrier, 0, nullptr);
-    }
-    for (auto &ResRef : R.CounterResourceRefs) {
-      Barrier.buffer = ResRef.Host.Buffer;
-      vkCmdPipelineBarrier(IS.CB->CmdBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                           VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1,
-                           &Barrier, 0, nullptr);
-    }
-  }
-
-  llvm::Error createCommands(Pipeline &P, InvocationState &IS) {
-    for (auto &R : IS.Resources)
-      copyResourceDataToDevice(IS, R);
+  llvm::Error createCommands(Pipeline &P, SharedInvocationState &IS,
+                             llvm::ArrayRef<VkDescriptorSet> DescriptorSets) {
+    VulkanCommandBuffer &VKCB = llvm::cast<VulkanCommandBuffer>(*IS.CB);
 
     const VkPipelineBindPoint BindPoint =
         P.isTraditionalRaster() ? VK_PIPELINE_BIND_POINT_GRAPHICS
@@ -4330,15 +3872,15 @@ public:
                                 : VK_PIPELINE_BIND_POINT_COMPUTE;
     const VulkanPipelineState &VulkanPipeline =
         llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
-    if (IS.DescriptorSets.size() > 0)
-      vkCmdBindDescriptorSets(
-          IS.CB->CmdBuffer, BindPoint, VulkanPipeline.Layout, 0,
-          IS.DescriptorSets.size(), IS.DescriptorSets.data(), 0, 0);
+    if (DescriptorSets.size() > 0)
+      vkCmdBindDescriptorSets(VKCB.CmdBuffer, BindPoint, VulkanPipeline.Layout,
+                              0, DescriptorSets.size(), DescriptorSets.data(),
+                              0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
       PCB.getContent(Data);
-      vkCmdPushConstants(IS.CB->CmdBuffer, VulkanPipeline.Layout,
+      vkCmdPushConstants(VKCB.CmdBuffer, VulkanPipeline.Layout,
                          getShaderStageFlag(PCB.Stage), 0, Data.size(),
                          Data.data());
     }
@@ -4413,146 +3955,61 @@ public:
           return Err;
       }
       Encoder.endEncoding();
-
-      copyTextureToReadback(IS.CB->CmdBuffer,
-                            llvm::cast<VulkanTexture>(*IS.RenderTarget),
-                            llvm::cast<VulkanBuffer>(*IS.RTReadback),
-                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
     }
 
-    for (auto &R : IS.Resources)
-      copyResourceDataToHost(IS, R);
-    return llvm::Error::success();
-  }
+    auto EncoderOrErr = IS.CB->createComputeEncoder();
+    if (!EncoderOrErr)
+      return EncoderOrErr.takeError();
+    auto ReadbackEncoder = std::move(*EncoderOrErr);
 
-  llvm::Error readBackData(Pipeline &P, InvocationState &IS) {
-    uint32_t BufIdx = 0;
-    for (auto &S : P.Sets) {
-      for (int I = 0, E = S.Resources.size(); I < E; ++I, ++BufIdx) {
-        const Resource &R = S.Resources[I];
-        if (!R.isReadWrite())
-          continue;
-        VkMappedMemoryRange Range = {};
-        Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        Range.offset = 0;
-        Range.size = VK_WHOLE_SIZE;
-        auto &ResourceRef = IS.Resources[BufIdx].ResourceRefs;
-        auto &DataSet = R.BufferPtr->Data;
-        auto *ResRefIt = ResourceRef.begin();
-        auto *DataIt = DataSet.begin();
-        for (; ResRefIt != ResourceRef.end() && DataIt != DataSet.end();
-             ++ResRefIt, ++DataIt) {
-          void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-          vkMapMemory(Device, ResRefIt->Host.Memory, 0, VK_WHOLE_SIZE, 0,
-                      &Mapped);
-          Range.memory = ResRefIt->Host.Memory;
-          vkInvalidateMappedMemoryRanges(Device, 1, &Range);
-          memcpy(DataIt->get(), Mapped, R.size());
-          vkUnmapMemory(Device, ResRefIt->Host.Memory);
-        }
-        if (R.HasCounter) {
-          R.BufferPtr->Counters.clear();
-          for (uint32_t I = 0; I < R.getArraySize(); ++I) {
-            uint32_t *Mapped = nullptr; // NOLINT(misc-const-correctness)
-            auto &CounterRef = IS.Resources[BufIdx].CounterResourceRefs[I];
-            vkMapMemory(Device, CounterRef.Host.Memory, 0, VK_WHOLE_SIZE, 0,
-                        (void **)&Mapped);
-            Range.memory = CounterRef.Host.Memory;
-            vkInvalidateMappedMemoryRanges(Device, 1, &Range);
-            R.BufferPtr->Counters.push_back(*Mapped);
-            vkUnmapMemory(Device, CounterRef.Host.Memory);
-          }
-        }
-      }
-    }
-
-    // Copy back the frame buffer data if this was a graphics pipeline.
     if (P.isRaster()) {
-      auto &Readback = llvm::cast<VulkanBuffer>(*IS.RTReadback);
-
-      VkMappedMemoryRange Range = {};
-      Range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-      Range.offset = 0;
-      Range.size = VK_WHOLE_SIZE;
-      Range.memory = Readback.Memory;
-
-      void *Mapped = nullptr; // NOLINT(misc-const-correctness)
-      vkMapMemory(Device, Readback.Memory, 0, VK_WHOLE_SIZE, 0, &Mapped);
-      vkInvalidateMappedMemoryRanges(Device, 1, &Range);
-
-      auto *RT = P.Bindings.RTargetBufferPtr;
-      RT->copyFromTexture(Mapped, RT->getImageRowBytes());
-      vkUnmapMemory(Device, Readback.Memory);
+      if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
+                                                          *IS.RTReadback))
+        return Err;
     }
+
+    for (auto &Table : IS.DescTables)
+      for (auto &R : Table.Resources)
+        if (auto Err = copyBackResource(*ReadbackEncoder, R))
+          return Err;
+
+    for (auto &R : IS.RootResources)
+      if (auto Err = copyBackResource(*ReadbackEncoder, R))
+        return Err;
+
+    ReadbackEncoder->endEncoding();
+
     return llvm::Error::success();
-  }
-
-  void cleanup(InvocationState &IS) {
-    // Wait for all in-flight submissions to complete before destroying
-    // resources. On the happy path the caller already waited, but this
-    // handles early-return error paths.
-    llvm::consumeError(GraphicsQueue.SubmitFence->waitForCompletion(
-        GraphicsQueue.FenceCounter));
-    for (auto &V : IS.BufferViews)
-      vkDestroyBufferView(Device, V, nullptr);
-
-    for (auto &V : IS.ImageViews)
-      vkDestroyImageView(Device, V, nullptr);
-
-    for (auto &R : IS.Resources) {
-      // AS resources are owned by `IS.TLASes`; ResourceRef.AS is non-owning.
-      if (R.isAccelerationStructure())
-        continue;
-      for (auto &ResRef : R.ResourceRefs) {
-        if (R.isBuffer()) {
-          vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
-          vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
-        } else if (R.isSampler()) {
-          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
-        } else if (R.DescriptorType ==
-                   VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER) {
-          vkDestroySampler(Device, ResRef.Image.Sampler, nullptr);
-          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
-          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
-        } else {
-          assert(R.isImage());
-          vkDestroyImage(Device, ResRef.Image.Image, nullptr);
-          vkFreeMemory(Device, ResRef.Image.Memory, nullptr);
-        }
-        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
-      }
-      for (auto &ResRef : R.CounterResourceRefs) {
-        vkDestroyBuffer(Device, ResRef.Device.Buffer, nullptr);
-        vkFreeMemory(Device, ResRef.Device.Memory, nullptr);
-        vkDestroyBuffer(Device, ResRef.Host.Buffer, nullptr);
-        vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
-      }
-    }
-
-    if (IS.Pool)
-      vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
-    InvocationState State;
+    SharedInvocationState State;
+
+    llvm::SmallVector<VkDescriptorSet> DescriptorSets;
+    auto PoolOrErr = createDescriptorPool(P);
+    if (!PoolOrErr)
+      return PoolOrErr.takeError();
+    VkDescriptorPool Pool = *PoolOrErr;
+    llvm::outs() << "Descriptor pool created.\n";
+
     auto CleanupState = llvm::scope_exit([&]() {
-      cleanup(State);
+      if (!DescriptorSets.empty())
+        vkFreeDescriptorSets(Device, Pool,
+                             static_cast<uint32_t>(DescriptorSets.size()),
+                             DescriptorSets.data());
+
+      if (Pool)
+        vkDestroyDescriptorPool(Device, Pool, nullptr);
       llvm::outs() << "Cleanup complete.\n";
     });
 
-    auto CBOrErr = VulkanCommandBuffer::create(
-        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
+    auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
       return CBOrErr.takeError();
     State.CB = std::move(*CBOrErr);
-    State.CB->Dev = this;
     llvm::outs() << "Command buffer created.\n";
 
-    if (auto Err = createResources(P, State))
+    if (auto Err = createResources(*this, P, State))
       return Err;
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
@@ -4741,28 +4198,11 @@ public:
           "Pipeline was neither Compute nor Traditional Raster");
     }
 
-    llvm::outs() << "Memory buffers created.\n";
-    // No explicit wait: the next submit's GPU-side timeline semaphore
-    // dependency ensures the copy completes before the dispatch runs.
-    auto CopyResult = GraphicsQueue.submit(std::move(State.CB));
-    if (!CopyResult)
-      return CopyResult.takeError();
-    llvm::outs() << "Executed copy command buffer.\n";
-    auto DispatchCBOrErr = VulkanCommandBuffer::create(
-        Device, GraphicsQueue.QueueFamilyIdx, CmdBeginDebugUtilsLabel,
-        CmdEndDebugUtilsLabel, CmdInsertDebugUtilsLabel, MeshShaderFns);
-    if (!DispatchCBOrErr)
-      return DispatchCBOrErr.takeError();
-    State.CB = std::move(*DispatchCBOrErr);
-    State.CB->Dev = this;
-    llvm::outs() << "Execute command buffer created.\n";
-    if (auto Err = createDescriptorPool(P, State))
-      return Err;
-    llvm::outs() << "Descriptor pool created.\n";
-    if (auto Err = createDescriptorSets(P, State))
+    if (auto Err = buildDescriptorTables(*State.Pipeline, State.DescTables,
+                                         Pool, DescriptorSets))
       return Err;
     llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createCommands(P, State))
+    if (auto Err = createCommands(P, State, DescriptorSets))
       return Err;
     llvm::outs() << "Commands created.\n";
     auto DispatchResult = GraphicsQueue.submit(std::move(State.CB));
@@ -4771,9 +4211,9 @@ public:
     llvm::outs() << "Executed compute command buffer.\n";
     if (auto Err = DispatchResult->waitForCompletion())
       return Err;
-    if (auto Err = readBackData(P, State))
+    if (auto Err = readBack(*this, P, State))
       return Err;
-    llvm::outs() << "Compute pipeline created.\n";
+    llvm::outs() << "Read data back.\n";
 
     return llvm::Error::success();
   }

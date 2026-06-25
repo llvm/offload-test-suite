@@ -331,8 +331,8 @@ static void setCounters(IO &I, offloadtest::CPUBuffer &B) {
   }
 }
 
-void MappingTraits<offloadtest::Sampler>::mapping(IO &I,
-                                                  offloadtest::Sampler &S) {
+void MappingTraits<offloadtest::YAMLSampler>::mapping(
+    IO &I, offloadtest::YAMLSampler &S) {
   I.mapRequired("Name", S.Name);
   I.mapOptional("Kind", S.Kind);
   I.mapOptional("MinFilter", S.MinFilter);
