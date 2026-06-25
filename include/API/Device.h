@@ -392,7 +392,8 @@ public:
   createBLAS(const AccelerationStructureSizes &Sizes) = 0;
 
   virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
-  createTLAS(const AccelerationStructureSizes &Sizes) = 0;
+  createTLAS(const AccelerationStructureSizes &Sizes,
+             uint32_t InstanceCount) = 0;
 
   virtual ~Device() = 0;
 

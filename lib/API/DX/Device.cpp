@@ -2622,7 +2622,8 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createTLAS(const AccelerationStructureSizes &Sizes) override {
+  createTLAS(const AccelerationStructureSizes &Sizes,
+             uint32_t /*InstanceCount*/) override {
     auto TLASOrErr = allocateAS(Sizes, "TLAS");
     if (!TLASOrErr)
       return TLASOrErr.takeError();

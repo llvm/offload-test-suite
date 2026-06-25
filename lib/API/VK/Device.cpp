@@ -3398,7 +3398,8 @@ public:
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
-  createTLAS(const AccelerationStructureSizes &Sizes) override {
+  createTLAS(const AccelerationStructureSizes &Sizes,
+             uint32_t /*InstanceCount*/) override {
     return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
                       "TLAS");
   }

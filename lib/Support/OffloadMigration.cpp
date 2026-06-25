@@ -66,11 +66,12 @@ static llvm::Expected<std::unique_ptr<AccelerationStructure>>
 createAS(Device &Dev, Resource &R) {
   assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
   assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-  auto SizesOrErr =
-      Dev.getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+  const uint32_t InstanceCount =
+      static_cast<uint32_t>(R.TLASPtr->Instances.size());
+  auto SizesOrErr = Dev.getTLASBuildSizes(InstanceCount);
   if (!SizesOrErr)
     return SizesOrErr.takeError();
-  return Dev.createTLAS(*SizesOrErr);
+  return Dev.createTLAS(*SizesOrErr, InstanceCount);
 }
 
 llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
