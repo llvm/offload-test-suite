@@ -1736,30 +1736,28 @@ public:
       auto MarkASResident = [&](const AccelerationStructure &AS) {
         const MetalAccelerationStructure &MTLAS =
             llvm::cast<MetalAccelerationStructure>(AS);
-        NativeEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
+        CmdEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
 
         const MTLBuffer *HeaderMTL =
             llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
         if (HeaderMTL)
-          NativeEncoder->useResource(HeaderMTL->Resource,
-                                     MTL::ResourceUsageRead);
+          CmdEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
 
         const MTLBuffer *ContribMTL =
             llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
         if (ContribMTL)
-          NativeEncoder->useResource(ContribMTL->Resource,
-                                     MTL::ResourceUsageRead);
+          CmdEncoder->useResource(ContribMTL->Resource, MTL::ResourceUsageRead);
       };
 
       for (const auto &Table : IS.DescTables) {
         for (const auto &ResPair : Table.Resources) {
           for (const auto &ResSet : ResPair.second) {
             if (ResSet.Buffer != nullptr)
-              NativeEncoder->useResource(
+              CmdEncoder->useResource(
                   llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
                   MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
             else if (ResSet.Texture != nullptr)
-              NativeEncoder->useResource(
+              CmdEncoder->useResource(
                   llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
                   MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
             else if (ResSet.AS != nullptr)
