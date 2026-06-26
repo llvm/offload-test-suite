@@ -2883,7 +2883,6 @@ public:
 
       for (uint32_t I = 0, N = DXPipeline.Layout.size(); I < N; ++I) {
         const auto &Layout = DXPipeline.Layout[I];
-        llvm::outs() << "Layout.Count: " << Layout.Count << "\n";
         switch (Layout.ParameterType) {
         case RootParameterType::DescriptorTable:
           DXCB.CmdList->SetGraphicsRootDescriptorTable(I, Handle);
