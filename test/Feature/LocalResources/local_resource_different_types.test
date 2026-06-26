@@ -1,5 +1,6 @@
 #--- source.hlsl
-// Test that two different resource types (RWByteAddressBuffer and RWStructuredBuffer) can coexist in the same function.
+// Test that two different local resource types (RWByteAddressBuffer and
+// RWStructuredBuffer) can coexist in the same function.
 RWByteAddressBuffer gBuf : register(u0);
 RWStructuredBuffer<uint> gSB : register(u1);
 

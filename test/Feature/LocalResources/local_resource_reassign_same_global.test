@@ -1,7 +1,7 @@
 #--- source.hlsl
 // Test that reassigning a local resource to the same global it was
-// initialized with produces correct output. Both functions verify
-// that the resource still resolves to the original global.
+// initialized with is unambiguous: no binding warning, and the store
+// still resolves to the original global.
 
 RWByteAddressBuffer In : register(u0);
 RWByteAddressBuffer Out0 : register(u1);

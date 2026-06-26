@@ -9,6 +9,7 @@ struct ResHolder { RWByteAddressBuffer buf; };
 void main() {
     ResHolder h;
     h.buf = gBuf0;
+    h.buf.Store(0, 42);
     h.buf = gBuf1;
     h.buf.Store(0, 42);
 }
@@ -25,7 +26,7 @@ Buffers:
   - Name: ExpectedGBuf0
     Format: Int32
     Stride: 4
-    Data: [0]
+    Data: [42]
   - Name: gBuf1
     Format: Int32
     Stride: 4

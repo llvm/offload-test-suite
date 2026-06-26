@@ -1,0 +1,100 @@
+#--- source.hlsl
+// Test that a `continue` immediately before a reassignment short-circuits
+// the reassignment within the iteration that fires `continue`.
+//
+// Design:
+//   * The trailing `buf = gBuf0;` at the end of each non-continue iteration
+//     resets the binding, so that when `continue` fires in iter 2 `buf` is
+//     known to be `gBuf0` (carried over from iter 1's reset) rather than
+//     the sticky `gBuf1` it would otherwise hold.
+//   * Iter 2's in-branch `buf.Store(8, 7);` runs *before* the continue, so
+//     it writes through whatever `buf` is bound to at that point. Asserting
+//     `gBuf0[2] == 7` is a positive check that the iter-1 reset was honored
+//     and `buf` was still bound to `gBuf0` at iter 2's start.
+//   * `gBuf1[2]` is pre-seeded with the sentinel value 999. If a buggy
+//     compiler failed to honor `continue` in iter 2, the skipped
+//     `buf = gBuf1; buf.Store(8, 2);` sequence would overwrite the
+//     sentinel with 2. Asserting against a unique pre-seeded value makes
+//     "this store didn't happen" a positive check rather than a check
+//     against incidental zero.
+
+RWByteAddressBuffer gBuf0 : register(u0);
+RWByteAddressBuffer gBuf1 : register(u1);
+
+[numthreads(1,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer buf = gBuf0;
+
+    for (uint i = 0; i < 4; i++) {
+        if (i == 2) {
+            buf.Store(8, 7);
+            continue;
+        }
+        buf = gBuf1;
+        buf.Store(i * 4, i);
+        buf = gBuf0;
+    }
+
+    buf.Store(tid.x * 4, 99);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: gBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0, 0, 0, 0]
+  - Name: ExpectedGBuf0
+    Format: Int32
+    Stride: 4
+    Data: [99, 0, 7, 0]
+  - Name: gBuf1
+    Format: Int32
+    Stride: 4
+    Data: [0, 0, 999, 0]
+  - Name: ExpectedGBuf1
+    Format: Int32
+    Stride: 4
+    Data: [0, 1, 999, 3]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: gBuf0
+    Expected: ExpectedGBuf0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: gBuf1
+    Expected: ExpectedGBuf1
+DescriptorSets:
+  - Resources:
+    - Name: gBuf0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gBuf1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192542
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
