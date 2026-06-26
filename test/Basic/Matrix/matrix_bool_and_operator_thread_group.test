@@ -133,7 +133,7 @@ DescriptorSets:
 # XFAIL: Clang && Intel && Vulkan
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/696
-# XFAIL: Intel-Gen-Current && DirectX && Clang
+# XFAIL: Intel-Gen-Current && DirectX
 
 # Note: Metal does not support boolean matrix types. For
 # Vulkan KosmicKrisp and MoltenVK the output is always False.
