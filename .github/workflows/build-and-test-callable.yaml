@@ -266,6 +266,8 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
+            # Prevent stale extraction dirs from previous runs from persisting            
+            rm -rf "$GITHUB_WORKSPACE/install" "$GITHUB_WORKSPACE/dxc-dist"
             cd $GITHUB_WORKSPACE/llvm-project/build
             ninja install-distribution install-offload-tools install-offload-test-suite
             # Stage DXC into a portable bin/+lib/ tree at dxc-dist.
@@ -358,6 +360,7 @@ jobs:
         run: |
             set -euxo pipefail
             cd $GITHUB_WORKSPACE
+            rm -rf install dxc-dist
             mkdir -p install dxc-dist
             # Pipe the archive in via stdin and use a relative -C path so
             # tar doesn't try to parse the Windows drive letter or treat
