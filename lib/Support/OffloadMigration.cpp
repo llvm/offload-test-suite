@@ -184,6 +184,47 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
   return llvm::Error::success();
 }
 
+static llvm::Error createRenderTarget(Device &Dev, Pipeline &P,
+                                      SharedInvocationState &IS) {
+  if (!P.Bindings.RTargetBufferPtr)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "No render target bound for graphics pipeline.");
+  const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
+
+  auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(Dev, OutBuf);
+  if (!TexOrErr)
+    return TexOrErr.takeError();
+
+  IS.RenderTarget = std::move(*TexOrErr);
+
+  // Create readback buffer sized for the pixel data with row pitch padded
+  // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
+  // for the placed footprint used by CopyTextureRegion. The compaction
+  // back to a tight layout happens in readBack() via GetCopyableFootprints.
+  BufferCreateDesc BufDesc = {};
+  BufDesc.Location = MemoryLocation::GpuToCpu;
+  BufDesc.Usage = BufferUsage::Storage;
+  auto BufOrErr = Dev.createBuffer(
+      "RTReadback", BufDesc, IS.RenderTarget->calculateLinearSizeInBytes(Dev));
+  if (!BufOrErr)
+    return BufOrErr.takeError();
+  IS.RTReadback = std::move(*BufOrErr);
+
+  return llvm::Error::success();
+}
+
+static llvm::Error createDepthStencil(Device &Dev, Pipeline &P,
+                                      SharedInvocationState &IS) {
+  auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
+      Dev, P.Bindings.RTargetBufferPtr->OutputProps.Width,
+      P.Bindings.RTargetBufferPtr->OutputProps.Height);
+  if (!TexOrErr)
+    return TexOrErr.takeError();
+  IS.DepthStencil = std::move(*TexOrErr);
+  return llvm::Error::success();
+}
+
 llvm::Error createResources(Device &Dev, Pipeline &P,
                             SharedInvocationState &IS) {
   auto EncOrErr = IS.CB->createComputeEncoder();
@@ -418,46 +459,4 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
 
   return llvm::Error::success();
 }
-
-llvm::Error createRenderTarget(Device &Dev, Pipeline &P,
-                               SharedInvocationState &IS) {
-  if (!P.Bindings.RTargetBufferPtr)
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "No render target bound for graphics pipeline.");
-  const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
-
-  auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(Dev, OutBuf);
-  if (!TexOrErr)
-    return TexOrErr.takeError();
-
-  IS.RenderTarget = std::move(*TexOrErr);
-
-  // Create readback buffer sized for the pixel data with row pitch padded
-  // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
-  // for the placed footprint used by CopyTextureRegion. The compaction
-  // back to a tight layout happens in readBack() via GetCopyableFootprints.
-  BufferCreateDesc BufDesc = {};
-  BufDesc.Location = MemoryLocation::GpuToCpu;
-  BufDesc.Usage = BufferUsage::Storage;
-  auto BufOrErr = Dev.createBuffer(
-      "RTReadback", BufDesc, IS.RenderTarget->calculateLinearSizeInBytes(Dev));
-  if (!BufOrErr)
-    return BufOrErr.takeError();
-  IS.RTReadback = std::move(*BufOrErr);
-
-  return llvm::Error::success();
-}
-
-llvm::Error createDepthStencil(Device &Dev, Pipeline &P,
-                               SharedInvocationState &IS) {
-  auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
-      Dev, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-      P.Bindings.RTargetBufferPtr->OutputProps.Height);
-  if (!TexOrErr)
-    return TexOrErr.takeError();
-  IS.DepthStencil = std::move(*TexOrErr);
-  return llvm::Error::success();
-}
-
 } // namespace offloadtest

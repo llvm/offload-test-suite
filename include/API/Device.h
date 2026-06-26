@@ -70,6 +70,30 @@ struct DescriptorSetLayoutDesc {
   llvm::SmallVector<ResourceBindingDesc> ResourceBindings;
 };
 
+// enum class ResourceUnionType : uint32_t {
+//   Buffer,
+//   Texture,
+//   AccelerationStructure,
+//   Sampler,
+// } union ResourceUnion {
+//   const Buffer *B;
+//   const Texture *T;
+//   const AccelerationStruct *AS;
+// };
+// struct ResourceKaas {
+//   ResourceUnionType Type;
+//   ResourceUnion U;
+//   Sampler *S;
+// };
+// struct A {
+//   ResourceKind Kind;
+//   DirectXBinding DXBinding;
+//   std::optional<VulkanBinding> VKBinding;
+//   llvm::SmallVector<ResourceKaas> Resources;
+// };
+
+// class DescriptorSet {};
+
 struct PushConstantsRange {
   uint32_t OffsetInBytes; // Must be multiple of 4
   uint32_t SizeInBytes;   // Must be multiple of 4

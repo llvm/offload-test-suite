@@ -120,10 +120,6 @@ llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
 llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS);
 llvm::Error createResources(Device &Dev, Pipeline &P,
                             SharedInvocationState &IS);
-llvm::Error createRenderTarget(Device &Dev, Pipeline &P,
-                               SharedInvocationState &IS);
-llvm::Error createDepthStencil(Device &Dev, Pipeline &P,
-                               SharedInvocationState &IS);
 
 } // namespace offloadtest
 
