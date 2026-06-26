@@ -70,7 +70,7 @@ struct BufferCreateDesc {
                             false};
   }
 
-  static BufferCreateDesc scratchBuffer() {
+  static BufferCreateDesc gpuOnlyStorage() {
     return BufferCreateDesc{MemoryLocation::GpuOnly,
                             MemoryBacking::Automatic,
                             BufferUsage::Storage,
@@ -78,6 +78,8 @@ struct BufferCreateDesc {
                             {},
                             false};
   }
+
+  static BufferCreateDesc scratchBuffer() { return gpuOnlyStorage(); }
 };
 
 class Buffer {

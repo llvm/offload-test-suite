@@ -2681,9 +2681,11 @@ public:
 
     // TODO(manon): We would prefer these to live in GPUOnly memory in the
     // future.
-    const BufferCreateDesc BufferDesc = BufferCreateDesc::uploadBuffer();
-    auto ContribBufferOrErr = createBuffer("AS-Contributions", BufferDesc,
-                                           InstanceCount * sizeof(uint32_t));
+    const BufferCreateDesc ContribBufferDesc =
+        BufferCreateDesc::gpuOnlyStorage();
+    auto ContribBufferOrErr =
+        createBuffer("AS-Contributions", ContribBufferDesc,
+                     InstanceCount * sizeof(uint32_t));
     if (!ContribBufferOrErr)
       return ContribBufferOrErr.takeError();
     auto ContribBuffer = std::move(*ContribBufferOrErr);
@@ -2702,8 +2704,10 @@ public:
     Header.accelerationStructureID = AS->gpuResourceID()._impl;
     Header.addressOfInstanceContributions =
         ContribBufferMTL.getBufferPtr()->gpuAddress();
+
+    const BufferCreateDesc HeaderBufferDesc = BufferCreateDesc::uploadBuffer();
     auto HeaderBufOrErr =
-        createBufferWithData(*this, "AS-Header", BufferDesc, &Header,
+        createBufferWithData(*this, "AS-Header", HeaderBufferDesc, &Header,
                              sizeof(Header), nullptr, nullptr);
     if (!HeaderBufOrErr)
       return HeaderBufOrErr.takeError();
@@ -2970,9 +2974,6 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         std::errc::not_supported,
         "Ray tracing is not supported on this Metal device.");
 
-  if (auto Err = ensureASEncoder())
-    return Err;
-
   for (const auto &Item : Items) {
     MetalAccelerationStructure *AS = nullptr;
     MTL::AccelerationStructureDescriptor *Desc = nullptr;
@@ -3055,7 +3056,15 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         InstanceASIdx.push_back(Idx);
       }
 
-      auto ContribPtrOrErr = AS->ContribBuffer->map();
+      const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
+      const uint32_t ContribBufferSize = AS->ContribBuffer->getSizeInBytes();
+      auto ContribUploadBufferOrErr = CB->Dev->createBuffer(
+          "Contrib Upload Buffer", UploadDesc, ContribBufferSize);
+      if (!ContribUploadBufferOrErr)
+        return ContribUploadBufferOrErr.takeError();
+      auto ContribUploadBuffer = std::move(*ContribUploadBufferOrErr);
+
+      auto ContribPtrOrErr = ContribUploadBuffer->map();
       if (!ContribPtrOrErr)
         return ContribPtrOrErr.takeError();
       uint32_t *ContribPtr = static_cast<uint32_t *>(*ContribPtrOrErr);
@@ -3087,13 +3096,19 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         ContribPtr[I] = Src.InstanceContributionToHitGroupIndex &
                         0xffffff; // cut-off to 24-bit to match dx12 and vulkan.
       }
-      AS->ContribBuffer->unmap();
+      ContribUploadBuffer->unmap();
+
+      if (auto Err = this->copyBufferToBuffer(*ContribUploadBuffer.get(), 0,
+                                              *AS->ContribBuffer.get(), 0,
+                                              ContribBufferSize))
+        return Err;
+
+      CB->KeepAliveOwned.push_back(std::move(ContribUploadBuffer));
 
       const size_t InstByteSize =
           Native.size() *
           sizeof(MTL::AccelerationStructureUserIDInstanceDescriptor);
 
-      const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
       auto InstBufOrErr = offloadtest::createBufferWithData(
           *CB->Dev, "TLAS-Instances", UploadDesc, Native.data(), InstByteSize,
           nullptr, nullptr);
@@ -3115,6 +3130,9 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 
       CB->KeepAliveOwned.push_back(std::move(*InstBufOrErr));
     }
+
+    if (auto Err = ensureASEncoder())
+      return Err;
 
     const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
     auto ScratchOrErr =
