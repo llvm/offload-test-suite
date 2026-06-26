@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MTLTopLevelArgumentBuffer.h"
+#include "ResidencyTracker.h"
 
 using namespace offloadtest;
 
@@ -26,8 +27,9 @@ static llvm::StringRef getResourceTypeString(IRResourceType Type) {
 }
 
 llvm::Expected<std::unique_ptr<MTLTopLevelArgumentBuffer>>
-MTLTopLevelArgumentBuffer::create(MTL::Device *Device,
-                                  IRRootSignature *RootSig) {
+MTLTopLevelArgumentBuffer::create(
+    MTL::Device *Device, IRRootSignature *RootSig,
+    std::shared_ptr<MetalResidencyTracker> ResidencyTracker) {
   if (!Device)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "Invalid MTL::Device pointer.");
@@ -40,7 +42,8 @@ MTLTopLevelArgumentBuffer::create(MTL::Device *Device,
       IRRootSignatureGetResourceCount(RootSig));
   // Empty root signature is valid, bind methods will be no-ops
   if (ResourceLocs.empty()) {
-    return std::make_unique<MTLTopLevelArgumentBuffer>(ResourceLocs, nullptr);
+    return std::make_unique<MTLTopLevelArgumentBuffer>(ResourceLocs, nullptr,
+                                                       nullptr);
   }
 
   IRRootSignatureGetResourceLocations(RootSig, ResourceLocs.data());
@@ -64,13 +67,19 @@ MTLTopLevelArgumentBuffer::create(MTL::Device *Device,
     return llvm::createStringError(
         std::errc::not_enough_memory,
         "Failed to create top-level argument buffer.");
-  return std::make_unique<MTLTopLevelArgumentBuffer>(std::move(ResourceLocs),
-                                                     Buffer);
+
+  ResidencyTracker->withLock(
+      [&](MTL::ResidencySet *RS) { RS->addAllocation(Buffer); });
+  return std::make_unique<MTLTopLevelArgumentBuffer>(
+      std::move(ResourceLocs), Buffer, std::move(ResidencyTracker));
 }
 
 MTLTopLevelArgumentBuffer::~MTLTopLevelArgumentBuffer() {
-  if (Buffer)
+  if (Buffer) {
+    ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->removeAllocation(Buffer); });
     Buffer->release();
+  }
 }
 
 bool MTLTopLevelArgumentBuffer::checkIndex(uint32_t Index) const {
@@ -175,7 +184,6 @@ void MTLTopLevelArgumentBuffer::bind(MTL::RenderCommandEncoder *Encoder) const {
   if (!Buffer)
     return;
 
-  Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   Encoder->setVertexBuffer(Buffer, 0, kIRArgumentBufferBindPoint);
   Encoder->setFragmentBuffer(Buffer, 0, kIRArgumentBufferBindPoint);
 }
@@ -185,7 +193,6 @@ void MTLTopLevelArgumentBuffer::bind(
   if (!Buffer)
     return;
 
-  Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   Encoder->setBuffer(Buffer, 0, kIRArgumentBufferBindPoint);
 }
 

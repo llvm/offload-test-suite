@@ -22,6 +22,8 @@ class ComputeCommandEncoder;
 struct IRDescriptorTableEntry;
 
 namespace offloadtest {
+struct MetalResidencyTracker;
+
 struct MTLGPUDescriptorHandle {
   MTLGPUDescriptorHandle &addOffset(int32_t OffsetInDescriptors);
 
@@ -45,13 +47,17 @@ struct MTLDescriptorHeapDesc {
 class MTLDescriptorHeap {
   MTLDescriptorHeapDesc Desc;
   MTL::Buffer *Buffer;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
 public:
   static llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
-  create(MTL::Device *Device, const MTLDescriptorHeapDesc &Desc);
+  create(MTL::Device *Device, const MTLDescriptorHeapDesc &Desc,
+         std::shared_ptr<MetalResidencyTracker> ResidencyTracker);
 
-  MTLDescriptorHeap(const MTLDescriptorHeapDesc &Desc, MTL::Buffer *Buffer)
-      : Desc(Desc), Buffer(Buffer) {}
+  MTLDescriptorHeap(const MTLDescriptorHeapDesc &Desc, MTL::Buffer *Buffer,
+                    std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
+      : Desc(Desc), Buffer(Buffer),
+        ResidencyTracker(std::move(ResidencyTracker)) {}
   ~MTLDescriptorHeap();
 
   MTLGPUDescriptorHandle getGPUDescriptorHandleForHeapStart() const;

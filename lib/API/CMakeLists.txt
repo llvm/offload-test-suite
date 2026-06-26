@@ -21,7 +21,8 @@ endif()
 if (APPLE)
   list(APPEND api_sources MTL/MTLDevice.cpp
                           MTL/MTLDescriptorHeap.cpp
-                          MTL/MTLTopLevelArgumentBuffer.cpp)
+                          MTL/MTLTopLevelArgumentBuffer.cpp
+                          MTL/ResidencyTracker.cpp)
   list(APPEND api_libraries "-framework Metal"
                             "-framework MetalKit"
                             "-framework AppKit"

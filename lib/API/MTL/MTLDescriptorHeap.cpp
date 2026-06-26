@@ -8,6 +8,7 @@
 
 #include "MTLDescriptorHeap.h"
 #include "MetalIRConverter.h"
+#include "ResidencyTracker.h"
 
 using namespace offloadtest;
 
@@ -28,9 +29,9 @@ MTLGPUDescriptorHandle::addOffset(int32_t OffsetInDescriptors) {
   return *this;
 }
 
-llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
-MTLDescriptorHeap::create(MTL::Device *Device,
-                          const MTLDescriptorHeapDesc &Desc) {
+llvm::Expected<std::unique_ptr<MTLDescriptorHeap>> MTLDescriptorHeap::create(
+    MTL::Device *Device, const MTLDescriptorHeapDesc &Desc,
+    std::shared_ptr<MetalResidencyTracker> ResidencyTracker) {
   if (!Device)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "Invalid MTL::Device pointer.");
@@ -45,12 +46,18 @@ MTLDescriptorHeap::create(MTL::Device *Device,
   if (!Buf)
     return llvm::createStringError(std::errc::not_enough_memory,
                                    "Failed to create MTLDescriptorHeap.");
-  return std::make_unique<MTLDescriptorHeap>(Desc, Buf);
+  ResidencyTracker->withLock(
+      [&](MTL::ResidencySet *RS) { RS->addAllocation(Buf); });
+  return std::make_unique<MTLDescriptorHeap>(Desc, Buf,
+                                             std::move(ResidencyTracker));
 }
 
 MTLDescriptorHeap::~MTLDescriptorHeap() {
-  if (Buffer)
+  if (Buffer) {
+    ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->removeAllocation(Buffer); });
     Buffer->release();
+  }
 }
 
 MTLGPUDescriptorHandle
@@ -65,7 +72,6 @@ MTLDescriptorHeap::getEntryHandle(uint32_t Index) const {
 }
 
 void MTLDescriptorHeap::bind(MTL::RenderCommandEncoder *Encoder) {
-  Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   // Dynamic resource indexing
   const NS::UInteger BindPoint = getDescriptorHeapBindPoint(Desc.Type);
   Encoder->setVertexBuffer(Buffer, 0, BindPoint);
@@ -73,7 +79,6 @@ void MTLDescriptorHeap::bind(MTL::RenderCommandEncoder *Encoder) {
 }
 
 void MTLDescriptorHeap::bind(MTL::ComputeCommandEncoder *Encoder) {
-  Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   // Dynamic resource indexing
   const NS::UInteger BindPoint = getDescriptorHeapBindPoint(Desc.Type);
   Encoder->setBuffer(Buffer, 0, BindPoint);

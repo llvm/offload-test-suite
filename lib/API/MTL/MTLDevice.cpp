@@ -27,6 +27,7 @@
 #include "MTLDescriptorHeap.h"
 #include "MTLResources.h"
 #include "MTLTopLevelArgumentBuffer.h"
+#include "ResidencyTracker.h"
 #include "Support/Pipeline.h"
 
 #include "llvm/ADT/ScopeExit.h"
@@ -44,6 +45,10 @@
 #include <memory>
 
 using namespace offloadtest;
+
+static constexpr MTL::RenderStages AllRenderStages =
+    MTL::RenderStageVertex | MTL::RenderStageFragment | MTL::RenderStageTile |
+    MTL::RenderStageObject | MTL::RenderStageMesh;
 
 static llvm::Error toError(NS::Error *Err) {
   if (!Err)
@@ -205,6 +210,7 @@ public:
   MTL::CommandQueue *Queue;
   std::unique_ptr<MTLFence> SubmitFence;
   uint64_t FenceCounter = 0;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
   // Batches of command buffers submitted to the GPU that may still be
   // in-flight.  Each batch records the fence value it signals so we can
@@ -215,8 +221,12 @@ public:
   };
   llvm::SmallVector<InFlightBatch> InFlightBatches;
 
-  MTLQueue(MTL::CommandQueue *Queue, std::unique_ptr<MTLFence> SubmitFence)
-      : Queue(Queue), SubmitFence(std::move(SubmitFence)) {}
+  MTLQueue(MTL::CommandQueue *Queue, std::unique_ptr<MTLFence> SubmitFence,
+           std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
+      : Queue(Queue), SubmitFence(std::move(SubmitFence)),
+        ResidencyTracker(std::move(ResidencyTracker)) {
+    Queue->addResidencySet(this->ResidencyTracker->ResidencySet);
+  }
   ~MTLQueue() override {
     if (Queue)
       Queue->release();
@@ -336,6 +346,7 @@ public:
   // ResourceID-based callable tables wired into IRDispatchRaysArgument.
   MTL::VisibleFunctionTable *VFT = nullptr;
   MTL::IntersectionFunctionTable *IFT = nullptr;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
   // Per shader entry / hit-group: pre-built IRShaderIdentifier the SBT
   // builder memcpys into each record. Keys are EntryPoint strings for
@@ -347,12 +358,22 @@ public:
   llvm::SmallVector<MTL::Library *> Libraries;
   llvm::SmallVector<MTL::Function *> Functions;
 
-  MTLRayTracingPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
-                             std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuf)
+  MTLRayTracingPipelineState(
+      llvm::StringRef Name, IRRootSignaturePtr RootSig,
+      std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuf,
+      std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
       : MTLPipelineState(Name, std::move(RootSig), std::move(ArgBuf),
-                         /*IsRT=*/true) {}
+                         /*IsRT=*/true),
+        ResidencyTracker(std::move(ResidencyTracker)) {}
 
   ~MTLRayTracingPipelineState() override {
+    ResidencyTracker->withLock([&](MTL::ResidencySet *RS) {
+      if (VFT)
+        RS->removeAllocation(VFT);
+      if (IFT)
+        RS->removeAllocation(IFT);
+    });
+
     if (VFT)
       VFT->release();
     if (IFT)
@@ -383,18 +404,27 @@ public:
   IRVirtualAddressRangeAndStride MissRegion{};
   IRVirtualAddressRangeAndStride HitGroupRegion{};
   IRVirtualAddressRangeAndStride CallableRegion{};
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
   MTLShaderBindingTable(MTL::Buffer *Buf, IRVirtualAddressRange RG,
                         IRVirtualAddressRangeAndStride MS,
                         IRVirtualAddressRangeAndStride HG,
-                        IRVirtualAddressRangeAndStride CL)
+                        IRVirtualAddressRangeAndStride CL,
+                        std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
       : offloadtest::ShaderBindingTable(GPUAPI::Metal), Buffer(Buf),
         RayGenRegion(RG), MissRegion(MS), HitGroupRegion(HG),
-        CallableRegion(CL) {}
+        CallableRegion(CL), ResidencyTracker(std::move(ResidencyTracker)) {
+
+    this->ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->addAllocation(Buffer); });
+  }
 
   ~MTLShaderBindingTable() override {
-    if (Buffer)
+    if (Buffer) {
+      ResidencyTracker->withLock(
+          [&](MTL::ResidencySet *RS) { RS->removeAllocation(Buffer); });
       Buffer->release();
+    }
   }
 
   static bool classof(const offloadtest::ShaderBindingTable *S) {
@@ -409,11 +439,17 @@ public:
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
   MTLBuffer(MTL::Resource *Resource, llvm::StringRef Name,
-            BufferCreateDesc Desc, size_t SizeInBytes)
+            BufferCreateDesc Desc, size_t SizeInBytes,
+            std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
       : offloadtest::Buffer(GPUAPI::Metal), Resource(Resource), Name(Name),
-        Desc(Desc), SizeInBytes(SizeInBytes) {}
+        Desc(Desc), SizeInBytes(SizeInBytes),
+        ResidencyTracker(std::move(ResidencyTracker)) {
+    this->ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->addAllocation(Resource); });
+  }
   MTLBuffer(const MTLBuffer &) = delete;
   MTLBuffer(MTLBuffer &&) = delete;
   MTLBuffer &operator=(const MTLBuffer &) = delete;
@@ -456,8 +492,11 @@ public:
   }
 
   ~MTLBuffer() override {
-    if (Resource)
+    if (Resource) {
+      ResidencyTracker->withLock(
+          [&](MTL::ResidencySet *RS) { RS->removeAllocation(Resource); });
       Resource->release();
+    }
   }
 
   const BufferCreateDesc &getDesc() const override { return Desc; }
@@ -472,13 +511,22 @@ public:
   MTL::Texture *Tex;
   std::string Name;
   TextureCreateDesc Desc;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
-  MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc)
-      : offloadtest::Texture(GPUAPI::Metal), Tex(Tex), Name(Name), Desc(Desc) {}
+  MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc,
+             std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
+      : offloadtest::Texture(GPUAPI::Metal), Tex(Tex), Name(Name), Desc(Desc),
+        ResidencyTracker(std::move(ResidencyTracker)) {
+    this->ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->addAllocation(Tex); });
+  }
 
   ~MTLTexture() override {
-    if (Tex)
+    if (Tex) {
+      ResidencyTracker->withLock(
+          [&](MTL::ResidencySet *RS) { RS->removeAllocation(Tex); });
       Tex->release();
+    }
   }
 
   TileShape querySparseTileShape(const Device &Dev) const override;
@@ -522,6 +570,7 @@ class MTLDevice; // forward decl — defined below in this same anon ns
 class MTLCommandBuffer : public offloadtest::CommandBuffer {
 public:
   MTL::CommandBuffer *CmdBuffer = nullptr;
+  MTL::Fence *Fence = nullptr;
   /// Back-pointer to the owning device; used by encoders that need to
   /// allocate scratch / instance buffers for AS builds.
   MTLDevice *Dev = nullptr;
@@ -539,7 +588,12 @@ public:
     return CB;
   }
 
-  ~MTLCommandBuffer() override = default;
+  ~MTLCommandBuffer() override {
+    if (Fence)
+      Fence->release();
+  }
+
+  MTL::Fence *ensureFence();
 
   static bool classof(const CommandBuffer *CB) {
     return CB->getKind() == GPUAPI::Metal;
@@ -551,34 +605,49 @@ public:
   llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
   createRenderEncoder(const offloadtest::RenderPassBeginDesc &Desc) override;
 
-private:
   MTLCommandBuffer() : CommandBuffer(GPUAPI::Metal) {}
 };
 
 class MetalAccelerationStructure : public offloadtest::AccelerationStructure {
 public:
   MTL::AccelerationStructure *AccelStruct;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
   std::unique_ptr<offloadtest::Buffer> HeaderBuffer;  // TLAS Only
   std::unique_ptr<offloadtest::Buffer> ContribBuffer; // TLAS Only
 
   // BLAS
-  MetalAccelerationStructure(MTL::AccelerationStructure *AccelStruct,
-                             const AccelerationStructureSizes &Sizes)
+  MetalAccelerationStructure(
+      MTL::AccelerationStructure *AccelStruct,
+      const AccelerationStructureSizes &Sizes,
+      std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
       : offloadtest::AccelerationStructure(GPUAPI::Metal, Sizes),
-        AccelStruct(AccelStruct) {}
+        AccelStruct(AccelStruct),
+        ResidencyTracker(std::move(ResidencyTracker)) {
+    this->ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->addAllocation(AccelStruct); });
+  }
 
   // TLAS
-  MetalAccelerationStructure(MTL::AccelerationStructure *AccelStruct,
-                             const AccelerationStructureSizes &Sizes,
-                             std::unique_ptr<offloadtest::Buffer> HeaderBuffer,
-                             std::unique_ptr<offloadtest::Buffer> ContribBuffer)
+  MetalAccelerationStructure(
+      MTL::AccelerationStructure *AccelStruct,
+      const AccelerationStructureSizes &Sizes,
+      std::shared_ptr<MetalResidencyTracker> ResidencyTracker,
+      std::unique_ptr<offloadtest::Buffer> HeaderBuffer,
+      std::unique_ptr<offloadtest::Buffer> ContribBuffer)
       : offloadtest::AccelerationStructure(GPUAPI::Metal, Sizes),
-        AccelStruct(AccelStruct), HeaderBuffer(std::move(HeaderBuffer)),
-        ContribBuffer(std::move(ContribBuffer)) {}
+        AccelStruct(AccelStruct), ResidencyTracker(std::move(ResidencyTracker)),
+        HeaderBuffer(std::move(HeaderBuffer)),
+        ContribBuffer(std::move(ContribBuffer)) {
+    this->ResidencyTracker->withLock(
+        [&](MTL::ResidencySet *RS) { RS->addAllocation(AccelStruct); });
+  }
 
   ~MetalAccelerationStructure() override {
-    if (AccelStruct)
+    if (AccelStruct) {
+      ResidencyTracker->withLock(
+          [&](MTL::ResidencySet *RS) { RS->removeAllocation(AccelStruct); });
       AccelStruct->release();
+    }
   }
 
   static bool classof(const offloadtest::AccelerationStructure *AS) {
@@ -600,6 +669,16 @@ llvm::Expected<offloadtest::SubmitResult> MTLQueue::submit(
   // Metal serial queues guarantee that command buffers execute in commit order,
   // so no explicit wait on prior work is needed here.
   const uint64_t SignalValue = ++FenceCounter;
+
+  // Update residency.
+  // From a correctness perspective this is the least complex way
+  // From a performance perspective this is not ideal, because requestResidency
+  // may take some time to execute. Preferably this would be done earlier in the
+  // frame.
+  ResidencyTracker->withLock([&](MTL::ResidencySet *RS) {
+    RS->commit();
+    RS->requestResidency();
+  });
 
   for (size_t I = 0; I < CBs.size(); ++I) {
     auto &MCB = llvm::cast<MTLCommandBuffer>(*CBs[I].get());
@@ -627,12 +706,16 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
   /// Accumulated barrier scope from commands recorded since the last barrier.
   MTL::BarrierScope PendingScope = MTL::BarrierScope(0);
 
-  /// Record that a command touched the given resource types.  The accumulated
-  /// scope is flushed as a memoryBarrier before the next command.
+  // Commands that touch resources via descriptors require manual memory
+  // bariers. Use addBarrierScope on resource access, call flushBarrier before
+  // executing a command that accesses resources via descriptors.
+  // Note: This is only valid on ComputeEnc. BlitEnc and ASEnc track hazards
+  // automatically.
   void addBarrierScope(MTL::BarrierScope Scope) { PendingScope |= Scope; }
-
   void flushBarrier() {
-    if (ComputeEnc && PendingScope != MTL::BarrierScope(0)) {
+    assert(ComputeEnc &&
+           "flushBarrier must be called after ensureComputeEncoder");
+    if (PendingScope != MTL::BarrierScope(0)) {
       ComputeEnc->memoryBarrier(PendingScope);
       PendingScope = MTL::BarrierScope(0);
     }
@@ -649,6 +732,8 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
     if (!ComputeEnc)
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create Metal compute encoder.");
+    if (CB->Fence)
+      ComputeEnc->waitForFence(CB->Fence);
     ComputeEnc->pushDebugGroup(
         NS::String::string("ComputeEncoder", NS::UTF8StringEncoding));
     return llvm::Error::success();
@@ -663,14 +748,14 @@ class MTLComputeEncoder : public offloadtest::ComputeEncoder {
     if (!BlitEnc)
       return llvm::createStringError(std::errc::device_or_resource_busy,
                                      "Failed to create Metal blit encoder.");
+    if (CB->Fence)
+      BlitEnc->waitForFence(CB->Fence);
     return llvm::Error::success();
   }
 
 public:
-  MTLComputeEncoder(MTLCommandBuffer *CB, MTL::CommandBuffer *CmdBuffer,
-                    MTL::ComputeCommandEncoder *Encoder)
-      : ComputeEncoder(GPUAPI::Metal), CB(CB), CmdBuffer(CmdBuffer),
-        ComputeEnc(Encoder) {}
+  MTLComputeEncoder(MTLCommandBuffer *CB, MTL::CommandBuffer *CmdBuffer)
+      : ComputeEncoder(GPUAPI::Metal), CB(CB), CmdBuffer(CmdBuffer) {}
 
   ~MTLComputeEncoder() override { endEncoding(); }
 
@@ -678,12 +763,18 @@ public:
     return E->getAPI() == GPUAPI::Metal;
   }
 
-  MTL::ComputeCommandEncoder *getNative() const { return ComputeEnc; }
+  llvm::Expected<MTL::ComputeCommandEncoder *> getNative() {
+    if (auto Err = ensureComputeEncoder())
+      return Err;
+    return ComputeEnc;
+  }
 
   MTL::CommandEncoder *getActiveEncoder() const {
     if (ComputeEnc)
       return ComputeEnc;
-    return BlitEnc;
+    if (BlitEnc)
+      return BlitEnc;
+    return ASEnc;
   }
 
   void pushDebugGroup(llvm::StringRef Label) override {
@@ -773,8 +864,6 @@ public:
       BlitEnc->copyFromBuffer(MTLSrc.getBufferPtr(), SrcOffset,
                               MTLDst.getBufferPtr(), DstOffset, Size);
     }
-
-    addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
   }
 
@@ -808,8 +897,6 @@ public:
           /*destinationSlice=*/0, /*destinationLevel=*/I, MTL::Origin(0, 0, 0));
       CurrentOffset += ImageBytes;
     }
-    addBarrierScope(MTL::BarrierScopeTextures);
-
     return llvm::Error::success();
   }
 
@@ -843,7 +930,6 @@ public:
                              MTL::Origin(0, 0, 0), CopySize,
                              MTLDst.getBufferPtr(),
                              /*destinationOffset=*/0, RowBytes, ImageBytes);
-    addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
   }
 
@@ -897,21 +983,28 @@ public:
       return llvm::createStringError(
           std::errc::device_or_resource_busy,
           "Failed to create Metal acceleration-structure encoder.");
+    if (CB->Fence)
+      ASEnc->waitForFence(CB->Fence);
     return llvm::Error::success();
   }
 
   void endEncodingImpl() override {
     if (ComputeEnc) {
-      flushBarrier();
+      // Clear PendingScope, no actual barrier needed.
+      PendingScope = MTL::BarrierScope(0);
+
       ComputeEnc->popDebugGroup();
+      ComputeEnc->updateFence(CB->ensureFence());
       ComputeEnc->endEncoding();
       ComputeEnc = nullptr;
     }
     if (BlitEnc) {
+      BlitEnc->updateFence(CB->ensureFence());
       BlitEnc->endEncoding();
       BlitEnc = nullptr;
     }
     if (ASEnc) {
+      ASEnc->updateFence(CB->ensureFence());
       ASEnc->endEncoding();
       ASEnc = nullptr;
     }
@@ -920,15 +1013,7 @@ public:
 
 llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
 MTLCommandBuffer::createComputeEncoder() {
-  MTL::ComputeCommandEncoder *NativeEncoder =
-      CmdBuffer->computeCommandEncoder();
-  if (!NativeEncoder)
-    return llvm::createStringError(
-        std::errc::device_or_resource_busy,
-        "Failed to create Metal compute command encoder.");
-  NativeEncoder->pushDebugGroup(
-      NS::String::string("ComputeEncoder", NS::UTF8StringEncoding));
-  return std::make_unique<MTLComputeEncoder>(this, CmdBuffer, NativeEncoder);
+  return std::make_unique<MTLComputeEncoder>(this, CmdBuffer);
 }
 
 static MTL::LoadAction getMTLLoadAction(offloadtest::LoadAction Action) {
@@ -955,6 +1040,7 @@ static MTL::StoreAction getMTLStoreAction(offloadtest::StoreAction Action) {
 
 class MTLRenderEncoder : public offloadtest::RenderEncoder {
   MTL::RenderCommandEncoder *RenderEnc = nullptr;
+  MTLCommandBuffer *CB = nullptr;
 
   // Encoder contract: viewport and scissor must both be set before
   // drawInstanced().
@@ -962,8 +1048,8 @@ class MTLRenderEncoder : public offloadtest::RenderEncoder {
   bool ScissorSet = false;
 
 public:
-  MTLRenderEncoder(MTL::RenderCommandEncoder *Enc)
-      : RenderEncoder(GPUAPI::Metal), RenderEnc(Enc) {}
+  MTLRenderEncoder(MTL::RenderCommandEncoder *Enc, MTLCommandBuffer *CB)
+      : RenderEncoder(GPUAPI::Metal), RenderEnc(Enc), CB(CB) {}
   MTLRenderEncoder(const MTLRenderEncoder &CB) = delete;
   MTLRenderEncoder(MTLRenderEncoder &&CB) = delete;
   MTLRenderEncoder &operator=(MTLRenderEncoder &CB) = delete;
@@ -1100,6 +1186,9 @@ public:
 
   void endEncodingImpl() override {
     assert(RenderEnc);
+    // Perform worst-case sync, something that could be optimized in the future.
+    // Probably minimal perf impact.
+    RenderEnc->updateFence(CB->ensureFence(), AllRenderStages);
     RenderEnc->popDebugGroup();
     RenderEnc->endEncoding();
     RenderEnc = nullptr;
@@ -1206,15 +1295,22 @@ MTLCommandBuffer::createRenderEncoder(
     return llvm::createStringError(
         std::errc::device_or_resource_busy,
         "Failed to create Metal render command encoder.");
+
+  // Perform worst-case sync, something that could be optimized in the future.
+  // Probably minimal perf impact.
+  if (Fence)
+    NativeEncoder->waitForFence(Fence, AllRenderStages);
+
   NativeEncoder->pushDebugGroup(
       NS::String::string("RenderEncoder", NS::UTF8StringEncoding));
-  return std::make_unique<MTLRenderEncoder>(NativeEncoder);
+  return std::make_unique<MTLRenderEncoder>(NativeEncoder, this);
 }
 
 class MTLDevice : public offloadtest::Device {
 public:
   Capabilities Caps;
   MTL::Device *Device;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
   MTLQueue GraphicsQueue;
 
   llvm::Error createRootSignature(
@@ -1295,8 +1391,8 @@ public:
 
     OutRootSig = std::move(RootSig);
 
-    auto ArgBufferOrErr =
-        MTLTopLevelArgumentBuffer::create(Device, OutRootSig.get());
+    auto ArgBufferOrErr = MTLTopLevelArgumentBuffer::create(
+        Device, OutRootSig.get(), ResidencyTracker);
     if (!ArgBufferOrErr)
       return ArgBufferOrErr.takeError();
 
@@ -1315,7 +1411,8 @@ public:
     const MTLDescriptorHeapDesc HeapDesc = {MTLDescriptorHeapType::CBV_SRV_UAV,
                                             DescriptorCount};
 
-    auto DescHeapOrErr = MTLDescriptorHeap::create(Device, HeapDesc);
+    auto DescHeapOrErr =
+        MTLDescriptorHeap::create(Device, HeapDesc, ResidencyTracker);
     if (!DescHeapOrErr)
       return DescHeapOrErr.takeError();
 
@@ -1495,7 +1592,10 @@ public:
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
     auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
-    MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
+    auto NativeOrErr = Encoder.getNative();
+    if (!NativeOrErr)
+      return NativeOrErr.takeError();
+    MTL::ComputeCommandEncoder *NativeEncoder = *NativeOrErr;
 
     const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
     MTLGPUDescriptorHandle Handle = {};
@@ -1510,41 +1610,6 @@ public:
     }
 
     PS->ArgBuffer->bind(NativeEncoder);
-    auto MarkASResident = [&](const AccelerationStructure &AS) {
-      const MetalAccelerationStructure &MTLAS =
-          llvm::cast<MetalAccelerationStructure>(AS);
-      NativeEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
-
-      const MTLBuffer *HeaderMTL =
-          llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
-      if (HeaderMTL)
-        NativeEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
-
-      const MTLBuffer *ContribMTL =
-          llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
-      if (ContribMTL)
-        NativeEncoder->useResource(ContribMTL->Resource,
-                                   MTL::ResourceUsageRead);
-    };
-
-    for (const auto &Table : IS.DescTables) {
-      for (const auto &ResPair : Table.Resources) {
-        for (const auto &ResSet : ResPair.second) {
-          if (ResSet.Buffer != nullptr)
-            NativeEncoder->useResource(
-                llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
-                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-          else if (ResSet.Texture != nullptr)
-            NativeEncoder->useResource(
-                llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
-                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-          else if (ResSet.AS != nullptr)
-            MarkASResident(*ResSet.AS);
-        }
-      }
-    }
-    for (auto &AS : IS.BLASes)
-      MarkASResident(*AS.get());
 
     if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
                                     P.DispatchParameters.DispatchGroupCount[0],
@@ -1562,7 +1627,10 @@ public:
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
     auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
-    MTL::ComputeCommandEncoder *NativeEncoder = Encoder.getNative();
+    auto NativeOrErr = Encoder.getNative();
+    if (!NativeOrErr)
+      return NativeOrErr.takeError();
+    MTL::ComputeCommandEncoder *NativeEncoder = *NativeOrErr;
 
     const auto &RTPSO =
         llvm::cast<MTLRayTracingPipelineState>(*IS.Pipeline.get());
@@ -1620,51 +1688,6 @@ public:
 
     NativeEncoder->setBuffer(MTLArgsBuf->getBufferPtr(), 0,
                              kIRRayDispatchArgumentsBindPoint);
-    NativeEncoder->useResource(MTLArgsBuf->getBufferPtr(),
-                               MTL::ResourceUsageRead);
-
-    auto MarkASResident = [&](const AccelerationStructure &AS) {
-      const MetalAccelerationStructure &MTLAS =
-          llvm::cast<MetalAccelerationStructure>(AS);
-      NativeEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
-
-      const MTLBuffer *HeaderMTL =
-          llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
-      if (HeaderMTL)
-        NativeEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
-
-      const MTLBuffer *ContribMTL =
-          llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
-      if (ContribMTL)
-        NativeEncoder->useResource(ContribMTL->Resource,
-                                   MTL::ResourceUsageRead);
-    };
-
-    for (const auto &Table : IS.DescTables) {
-      for (const auto &ResPair : Table.Resources) {
-        for (const auto &ResSet : ResPair.second) {
-          if (ResSet.Buffer != nullptr)
-            NativeEncoder->useResource(
-                llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
-                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-          else if (ResSet.Texture != nullptr)
-            NativeEncoder->useResource(
-                llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
-                MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-          else if (ResSet.AS != nullptr)
-            MarkASResident(*ResSet.AS);
-        }
-      }
-    }
-    for (auto &AS : IS.BLASes)
-      MarkASResident(*AS.get());
-
-    if (SBT.Buffer)
-      NativeEncoder->useResource(SBT.Buffer, MTL::ResourceUsageRead);
-    if (RTPSO.VFT)
-      NativeEncoder->useResource(RTPSO.VFT, MTL::ResourceUsageRead);
-    if (RTPSO.IFT)
-      NativeEncoder->useResource(RTPSO.IFT, MTL::ResourceUsageRead);
 
     if (auto Err =
             Encoder.dispatchRays(*IS.Pipeline.get(), *IS.SBT.get(),
@@ -1704,41 +1727,6 @@ public:
             0, DescHeap->getGPUDescriptorHandleForHeapStart());
       }
       PS->ArgBuffer->bind(CmdEncoder);
-
-      auto MarkASResident = [&](const AccelerationStructure &AS) {
-        const MetalAccelerationStructure &MTLAS =
-            llvm::cast<MetalAccelerationStructure>(AS);
-        CmdEncoder->useResource(MTLAS.AccelStruct, MTL::ResourceUsageRead);
-
-        const MTLBuffer *HeaderMTL =
-            llvm::cast_if_present<MTLBuffer>(MTLAS.HeaderBuffer.get());
-        if (HeaderMTL)
-          CmdEncoder->useResource(HeaderMTL->Resource, MTL::ResourceUsageRead);
-
-        const MTLBuffer *ContribMTL =
-            llvm::cast_if_present<MTLBuffer>(MTLAS.ContribBuffer.get());
-        if (ContribMTL)
-          CmdEncoder->useResource(ContribMTL->Resource, MTL::ResourceUsageRead);
-      };
-
-      for (const auto &Table : IS.DescTables) {
-        for (const auto &ResPair : Table.Resources) {
-          for (const auto &ResSet : ResPair.second) {
-            if (ResSet.Buffer != nullptr)
-              CmdEncoder->useResource(
-                  llvm::cast<MTLBuffer>(*ResSet.Buffer.get()).Resource,
-                  MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-            else if (ResSet.Texture != nullptr)
-              CmdEncoder->useResource(
-                  llvm::cast<MTLTexture>(*ResSet.Texture.get()).Tex,
-                  MTL::ResourceUsageRead | MTL::ResourceUsageWrite);
-            else if (ResSet.AS != nullptr)
-              MarkASResident(*ResSet.AS);
-          }
-        }
-      }
-      for (auto &AS : IS.BLASes)
-        MarkASResident(*AS.get());
     }
 
     Viewport VP;
@@ -1776,7 +1764,9 @@ public:
 public:
   MTLDevice(MTL::Device *D, MTL::CommandQueue *Q,
             std::unique_ptr<MTLFence> SubmitFence)
-      : Device(D), GraphicsQueue(Q, std::move(SubmitFence)) {
+      : Device(D),
+        ResidencyTracker(llvm::cantFail(MetalResidencyTracker::create(D))),
+        GraphicsQueue(Q, std::move(SubmitFence), ResidencyTracker) {
     Description = Device->name()->utf8String();
   }
   const Capabilities &getCapabilities() override {
@@ -1834,7 +1824,7 @@ public:
         RTConfig.get(), IRIntersectionFunctionCompilationVisibleFunction);
 
     auto State = std::make_unique<MTLRayTracingPipelineState>(
-        Name, std::move(RootSig), std::move(ArgBuffer));
+        Name, std::move(RootSig), std::move(ArgBuffer), ResidencyTracker);
 
     // Compile each entry point. Raygen lands in `RaygenFn` (becomes the
     // compute function); everything else gets linked in via LinkedFunctions
@@ -1984,6 +1974,13 @@ public:
       State->VFT = VFT;
     }
 
+    ResidencyTracker->withLock([&](MTL::ResidencySet *RS) {
+      if (State->VFT)
+        RS->addAllocation(State->VFT);
+      if (State->IFT)
+        RS->addAllocation(State->IFT);
+    });
+
     State->ComputePipeline = PSO;
     State->ThreadsPerGroup = RaygenThreadsPerGroup;
     return State;
@@ -2071,7 +2068,7 @@ public:
     return std::make_unique<MTLShaderBindingTable>(
         Buffer, MakeRange(Layout.RayGen), MakeRangeAndStride(Layout.Miss),
         MakeRangeAndStride(Layout.HitGroup),
-        MakeRangeAndStride(Layout.Callable));
+        MakeRangeAndStride(Layout.Callable), ResidencyTracker);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
@@ -2121,7 +2118,8 @@ public:
                                        "Failed to create Metal buffer.");
     }
 
-    return std::make_unique<MTLBuffer>(Res, Name, Desc, SizeInBytes);
+    return std::make_unique<MTLBuffer>(Res, Name, Desc, SizeInBytes,
+                                       ResidencyTracker);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -2140,7 +2138,7 @@ public:
     if (!Tex)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
-    return std::make_unique<MTLTexture>(Tex, Name, Desc);
+    return std::make_unique<MTLTexture>(Tex, Name, Desc, ResidencyTracker);
   }
 
   llvm::Expected<std::unique_ptr<Sampler>>
@@ -2668,7 +2666,9 @@ public:
       return llvm::createStringError(
           std::make_error_code(std::errc::not_enough_memory),
           "Failed to create Metal BLAS.");
-    return std::make_unique<MetalAccelerationStructure>(AS, Sizes);
+
+    return std::make_unique<MetalAccelerationStructure>(AS, Sizes,
+                                                        ResidencyTracker);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
@@ -2709,12 +2709,15 @@ public:
     auto HeaderBufOrErr =
         createBufferWithData(*this, "AS-Header", HeaderBufferDesc, &Header,
                              sizeof(Header), nullptr, nullptr);
-    if (!HeaderBufOrErr)
+    if (!HeaderBufOrErr) {
+      AS->release();
       return HeaderBufOrErr.takeError();
+    }
     auto HeaderBuffer = std::move(*HeaderBufOrErr);
 
     return std::make_unique<MetalAccelerationStructure>(
-        AS, Sizes, std::move(HeaderBuffer), std::move(ContribBuffer));
+        AS, Sizes, ResidencyTracker, std::move(HeaderBuffer),
+        std::move(ContribBuffer));
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
@@ -3152,6 +3155,18 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 
   return llvm::Error::success();
 }
+
+MTL::Fence *MTLCommandBuffer::ensureFence() {
+  if (Fence)
+    return Fence;
+
+  Fence = Dev->Device->newFence();
+  if (!Fence)
+    llvm::report_fatal_error("Failed to create Metal fence.");
+
+  return Fence;
+}
+
 } // namespace
 
 llvm::Error offloadtest::initializeMetalDevices(

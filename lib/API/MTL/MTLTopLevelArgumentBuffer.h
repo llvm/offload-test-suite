@@ -14,11 +14,14 @@
 #include "llvm/ADT/SmallVector.h"
 
 namespace offloadtest {
+
+struct MetalResidencyTracker;
 // Manages a Metal buffer that serves as the top-level argument buffer for
 // shader resource binding with the explicit root signature layout.
 class MTLTopLevelArgumentBuffer {
   llvm::SmallVector<IRResourceLocation> ResourceLocs;
   MTL::Buffer *Buffer = nullptr;
+  std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
   bool checkIndex(uint32_t Index) const;
   bool checkResourceType(uint32_t Index, IRResourceType ExpectedType) const;
@@ -36,11 +39,14 @@ public:
   /// buffer.
   /// @return Created MTLTopLevelArgumentBuffer or error if creation failed.
   static llvm::Expected<std::unique_ptr<MTLTopLevelArgumentBuffer>>
-  create(MTL::Device *Device, IRRootSignature *RootSig);
+  create(MTL::Device *Device, IRRootSignature *RootSig,
+         std::shared_ptr<MetalResidencyTracker> ResidencyTracker);
 
-  MTLTopLevelArgumentBuffer(llvm::SmallVector<IRResourceLocation> ResourceLocs,
-                            MTL::Buffer *Buffer)
-      : ResourceLocs(std::move(ResourceLocs)), Buffer(Buffer) {}
+  MTLTopLevelArgumentBuffer(
+      llvm::SmallVector<IRResourceLocation> ResourceLocs, MTL::Buffer *Buffer,
+      std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
+      : ResourceLocs(std::move(ResourceLocs)), Buffer(Buffer),
+        ResidencyTracker(std::move(ResidencyTracker)) {}
   ~MTLTopLevelArgumentBuffer();
 
   // Binds 32-bit root constant(s) to the argument buffer.
