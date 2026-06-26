@@ -5,19 +5,19 @@ RWByteAddressBuffer gBuf1 : register(u1);
 uint Pass_EarlyReturn(bool cond, uint idx) {
     RWByteAddressBuffer buf = gBuf0;
 
-    if (cond)
-        buf.Store(idx * 4, 31);
+    if (cond) {
+        buf = gBuf1;
+        buf.Store(idx * 4, 42);
+        return 42;
+    }
 
-        return 31;
-    buf = gBuf1;
-    buf.Store(idx * 4, 31);
-
-    return 31;
+    buf.Store(idx * 4, 42);
+    return 42;
 }
 
-[numthreads(8,8,1)]
+[numthreads(4,4,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
-    uint idx = tid.x + tid.y * 8;
+    uint idx = tid.x + tid.y * 4;
     Pass_EarlyReturn(true, idx);
 }
 
@@ -31,19 +31,19 @@ Buffers:
   - Name: gBuf0
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   - Name: gBuf1
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
-    Data: [31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31, 31]
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
   - Name: ExpectedBuf1
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42]
 Results:
   - Result: Buf0Check
     Rule: BufferExact

@@ -1,7 +1,7 @@
 #--- source.hlsl
-// Test that a `static` local resource initialized from a global binds
-// once and persists across calls. Single-lane dispatch stores 1 at
-// offset 0 of `gBuf0`.
+// Test that the `static` qualifier on a local resource initialized
+// from a global doesn't break binding/codegen: a store through the
+// static handle reaches the global.
 
 RWByteAddressBuffer gBuf0 : register(u0);
 

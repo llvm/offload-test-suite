@@ -1,28 +1,22 @@
 #--- source.hlsl
-// Test that a local resource reassigned inside a wave-uniform branch
-// reaches the per-path global at the post-branch Store. The branch
-// condition is `WaveActiveAllTrue(true)`, which is uniformly true
-// across the wave on every active lane, so all lanes take the if
-// branch and `buf` becomes `gBuf1`. The compiler does not (and in
-// general cannot) recognise this as wave-uniform, so it still flags
-// the reassignment as binding-ambiguous.
+// Test that a reassignment of a local resource *immediately before* a
+// `break` is observed post-loop: the store after the loop should reach
+// `gBuf1` (the value assigned just before break), not the initial
+// binding to `gBuf0`.
 
 RWByteAddressBuffer gBuf0 : register(u0);
 RWByteAddressBuffer gBuf1 : register(u1);
 
-uint Fail_WaveUniform(uint offset, uint value) {
-    RWByteAddressBuffer buf = gBuf0;
-    if (WaveActiveAllTrue(true))
-        buf = gBuf1;
-    buf.Store(offset, value);
-
-    return value;
-}
-
-[numthreads(4,4,1)]
+[numthreads(1,1,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
-    uint idx = tid.x + tid.y * 4;
-    Fail_WaveUniform(idx * 4, 42);
+    RWByteAddressBuffer buf = gBuf0;
+    for (uint i = 0; i < 4; i++) {
+        if (i == tid.x) {
+            buf = gBuf1;
+            break;
+        }
+    }
+    buf.Store(tid.x * 4, 42);
 }
 
 //--- pipeline.yaml
@@ -35,19 +29,19 @@ Buffers:
   - Name: gBuf0
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [0]
   - Name: gBuf1
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [0]
   - Name: ExpectedBuf0
     Format: Int32
     Stride: 4
-    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    Data: [0]
   - Name: ExpectedBuf1
     Format: Int32
     Stride: 4
-    Data: [42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42]
+    Data: [42]
 Results:
   - Result: Buf0Check
     Rule: BufferExact
@@ -76,7 +70,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Clang: warning + codegen error ("Resource access is not guaranteed
+# Clang: codegen error after warning ("Resource access is not guaranteed
 # to map to a unique global resource").
 # XFAIL: Clang
 

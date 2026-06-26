@@ -1,0 +1,50 @@
+#--- source.hlsl
+// Test that a ternary with a runtime condition where both branches
+// resolve to the same global resource produces correct output. Even
+// though the condition is runtime (not folded at compile time), the
+// resolved global is unique (both arms are gBuf0), so no real ambiguity
+// exists. Regression guard versus the constant-condition sibling
+// local_resource_ternary_both_same_unambiguous.
+
+RWByteAddressBuffer gBuf0 : register(u0);
+
+[numthreads(8,8,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+    uint idx = tid.x + tid.y * 8;
+    RWByteAddressBuffer Out = (tid.x % 2 == 0) ? gBuf0 : gBuf0;
+    Out.Store(idx * 4, 42);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: gBuf0
+    Format: Int32
+    Stride: 4
+    Data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+  - Name: ExpectedGBuf0
+    Format: Int32
+    Stride: 4
+    Data: [42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42]
+Results:
+  - Result: Buf0Check
+    Rule: BufferExact
+    Actual: gBuf0
+    Expected: ExpectedGBuf0
+DescriptorSets:
+  - Resources:
+    - Name: gBuf0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

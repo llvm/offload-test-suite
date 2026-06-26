@@ -6,7 +6,7 @@ void HelperA(RWByteAddressBuffer buf) {
     buf.Store(0, 42);
 }
 void HelperB(RWByteAddressBuffer buf) {
-    buf.Store(0, 42);
+    buf.Store(4, 7);
 }
 
 [numthreads(1,1,1)]
@@ -24,11 +24,11 @@ Buffers:
   - Name: gBuf
     Format: Int32
     Stride: 4
-    Data: [0]
+    Data: [0, 0]
   - Name: ExpectedGBuf
     Format: Int32
     Stride: 4
-    Data: [42]
+    Data: [42, 7]
 Results:
   - Result: Test0
     Rule: BufferExact

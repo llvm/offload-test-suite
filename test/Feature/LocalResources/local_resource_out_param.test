@@ -2,14 +2,14 @@
 // Test that a local resource assigned via an out parameter works correctly.
 RWByteAddressBuffer gBuf : register(u0);
 
-void WriteThrough(out RWByteAddressBuffer buf) {
+void Assign(out RWByteAddressBuffer buf) {
     buf = gBuf;
 }
 
 [numthreads(1,1,1)]
 void main() {
     RWByteAddressBuffer local;
-    WriteThrough(local);
+    Assign(local);
     local.Store(0, 42);
 }
 //--- pipeline.yaml

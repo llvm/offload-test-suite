@@ -3,7 +3,7 @@ RWByteAddressBuffer gBuf0 : register(u0);
 RWByteAddressBuffer gBuf1 : register(u1);
 RWByteAddressBuffer gBuf2 : register(u2);
 
-uint Pass_SwitchDefault(int v, uint idx) {
+void Pass_SwitchDefault(int v, uint idx) {
     RWByteAddressBuffer buf = gBuf0;
 
     switch (v) {
@@ -11,9 +11,7 @@ uint Pass_SwitchDefault(int v, uint idx) {
         default: buf = gBuf2; break;
     }
 
-    buf.Store(idx * 4, 30);
-
-    return 30;
+    buf.Store(idx * 4, 42);
 }
 
 [numthreads(8,8,1)]
@@ -48,7 +46,7 @@ Buffers:
   - Name: ExpectedBuf1
     Format: Int32
     Stride: 4
-    Data: [30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30]
+    Data: [42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42]
   - Name: ExpectedBuf2
     Format: Int32
     Stride: 4
