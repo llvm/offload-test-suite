@@ -1,0 +1,127 @@
+#--- source.hlsl
+
+struct Payload {
+  uint Value;
+};
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[shader("raygeneration")]
+void RayGen() {
+  Payload P;
+  P.Value = 0;
+  RayDesc Ray;
+  // Origin far enough away from the triangle (which sits at z = 0) that any
+  // direction guarantees a miss — TMax keeps the ray short, so even a +z
+  // shoot doesn't accidentally find the BLAS.
+  Ray.Origin = float3(100, 100, 100);
+  Ray.Direction = float3(0, 0, 1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 1.0;
+  // Each lane picks a different MissShaderIndex via the second-to-last
+  // TraceRay argument.
+  const uint MissIdx = DispatchRaysIndex().x;
+  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, MissIdx, Ray, P);
+  Output[DispatchRaysIndex().x] = P.Value;
+}
+
+[shader("miss")]
+void Miss0(inout Payload P) {
+  P.Value = 0xAA;
+}
+
+[shader("miss")]
+void Miss1(inout Payload P) {
+  P.Value = 0xBB;
+}
+
+[shader("closesthit")]
+void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
+  // Sentinel that should never be observed in this test — every ray misses.
+  P.Value = 0xDEAD;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: RayGen
+  - Stage: Miss
+    Entry: Miss0
+  - Stage: Miss
+    Entry: Miss1
+  - Stage: ClosestHit
+    Entry: ClosestHitMain
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 0xAA, 0xBB ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+RayTracingPipelineConfig:
+  MaxTraceRecursionDepth: 1
+  MaxPayloadSizeInBytes: 4
+HitGroups:
+  - Name: TriangleHitGroup
+    Type: Triangles
+    ClosestHit: ClosestHitMain
+ShaderBindingTable:
+  RayGen:
+    ShaderName: RayGen
+  Miss:
+    - ShaderName: Miss0
+    - ShaderName: Miss1
+  HitGroup:
+    - ShaderName: TriangleHitGroup
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+DispatchParameters:
+  DispatchGroupCount: [ 2, 1, 1 ]
+Results:
+  - Result: MissShaderIndexRouting
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: raytracing-pipeline
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
