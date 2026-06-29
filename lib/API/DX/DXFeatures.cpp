@@ -10,73 +10,55 @@
 //===----------------------------------------------------------------------===//
 
 #include "DXFeatures.h"
-#include "llvm/Support/ScopedPrinter.h"
+#include "llvm/ADT/Enum.h"
 
 using namespace offloadtest;
 using namespace offloadtest::directx;
 using namespace llvm;
 
-#define SHADER_MODEL_ENUM(NewCase, Str, Value) {#Str, NewCase},
-static const EnumEntry<directx::ShaderModel> ShaderModelNames[]{
+#define SHADER_MODEL_ENUM(NewCase, Str, Value) {{#Str}, NewCase},
+static constexpr EnumStringDef<directx::ShaderModel> ShaderModelDefs[]{
 #include "DXFeatures.def"
 };
+static constexpr auto ShaderModelNames = BUILD_ENUM_STRINGS(ShaderModelDefs);
 
-static ArrayRef<EnumEntry<ShaderModel>> getShaderModels() {
-  return ArrayRef(ShaderModelNames);
-}
-
-#define ROOT_SIGNATURE_ENUM(NewCase, Str, Value) {#Str, NewCase},
-static const EnumEntry<directx::RootSignature> RootSignatureNames[]{
+#define ROOT_SIGNATURE_ENUM(NewCase, Str, Value) {{#Str}, NewCase},
+static constexpr EnumStringDef<directx::RootSignature> RootSignatureDefs[]{
 #include "DXFeatures.def"
 };
+static constexpr auto RootSignatureNames =
+    BUILD_ENUM_STRINGS(RootSignatureDefs);
 
-static ArrayRef<EnumEntry<RootSignature>> getRootSignatures() {
-  return ArrayRef(RootSignatureNames);
-}
-
-#define MESH_SHADER_TIER_ENUM(NewCase, Str, Value) {#Str, NewCase},
-static const EnumEntry<directx::MeshShaderTier> MeshShaderTierNames[]{
+#define MESH_SHADER_TIER_ENUM(NewCase, Str, Value) {{#Str}, NewCase},
+static constexpr EnumStringDef<directx::MeshShaderTier> MeshShaderTierDefs[]{
 #include "DXFeatures.def"
 };
+static constexpr auto MeshShaderTierNames =
+    BUILD_ENUM_STRINGS(MeshShaderTierDefs);
 
-static ArrayRef<EnumEntry<MeshShaderTier>> getMeshShaderTiers() {
-  return ArrayRef(MeshShaderTierNames);
-}
-
-#define RAYTRACING_TIER_ENUM(NewCase, Str, Value) {#Str, NewCase},
-static const EnumEntry<directx::RaytracingTier> RaytracingTierNames[]{
+#define RAYTRACING_TIER_ENUM(NewCase, Str, Value) {{#Str}, NewCase},
+static constexpr EnumStringDef<directx::RaytracingTier> RaytracingTierDefs[]{
 #include "DXFeatures.def"
 };
-
-static ArrayRef<EnumEntry<RaytracingTier>> getRaytracingTiers() {
-  return ArrayRef(RaytracingTierNames);
-}
-
-template <typename T>
-static std::string enumEntryToString(ArrayRef<EnumEntry<T>> EnumValues,
-                                     T Value) {
-  for (const EnumEntry<T> &I : EnumValues)
-    if (I.Value == Value)
-      return I.Name.str();
-  llvm_unreachable("All cases must be covered");
-}
+static constexpr auto RaytracingTierNames =
+    BUILD_ENUM_STRINGS(RaytracingTierDefs);
 
 std::string CapabilityPrinter<directx::ShaderModel>::toString(
     const directx::ShaderModel &V) {
-  return enumEntryToString(getShaderModels(), V);
+  return EnumStrings(ShaderModelNames).toString(V).str();
 }
 
 std::string CapabilityPrinter<directx::RootSignature>::toString(
     const directx::RootSignature &V) {
-  return enumEntryToString(getRootSignatures(), V);
+  return EnumStrings(RootSignatureNames).toString(V).str();
 }
 
 std::string CapabilityPrinter<directx::MeshShaderTier>::toString(
     const directx::MeshShaderTier &V) {
-  return enumEntryToString(getMeshShaderTiers(), V);
+  return EnumStrings(MeshShaderTierNames).toString(V).str();
 }
 
 std::string CapabilityPrinter<directx::RaytracingTier>::toString(
     const directx::RaytracingTier &V) {
-  return enumEntryToString(getRaytracingTiers(), V);
+  return EnumStrings(RaytracingTierNames).toString(V).str();
 }
