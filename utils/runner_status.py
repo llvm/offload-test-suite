@@ -153,6 +153,41 @@ def get_jobs(run_id):
     return api_get(path)["jobs"]
 
 
+def job_sku_vendor(job):
+    """Return the vendor implied by the matrix SKU in the job name, or None.
+
+    Matrix jobs embed their SKU (e.g. "windows-intel") in the job name, e.g.
+    "Exec-Tests-Windows (windows-intel, check-hlsl-vk) / build". Since the
+    split-build feature was enabled, the build phase runs on whatever generic
+    self-hosted Windows runner is free (its `runner_name` is empty while
+    queued and arbitrary while running), so the runner is no longer a reliable
+    vendor signal. The SKU baked into the job name always is.
+    """
+    name_lower = (job.get("name") or "").lower()
+    for v in VALID_VENDORS:
+        if f"windows-{v}" in name_lower:
+            return v
+    return None
+
+
+def job_matches_vendor(job, vendor, label):
+    """Decide whether a job belongs to the given vendor.
+
+    Prefer the SKU embedded in the job name: this correctly attributes
+    split-build jobs (which may run on, or be queued for, any runner) and
+    avoids misattributing them based on the runner they happen to land on.
+    Only when the job name carries no SKU do we fall back to the SKU runner
+    label or runner name (covers workflow_dispatch / older workflows that did
+    not embed the SKU in the job name).
+    """
+    sku_vendor = job_sku_vendor(job)
+    if sku_vendor is not None:
+        return sku_vendor == vendor
+    return label in job.get("labels", []) or vendor.lower() in (
+        job.get("runner_name") or ""
+    ).lower()
+
+
 def tz_abbrev(dt):
     """Get short timezone abbreviation, e.g. 'PDT' instead of 'Pacific Daylight Time'."""
     name = dt.strftime("%Z")
@@ -197,14 +232,10 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
             jobs_cache[run_id] = get_jobs(run_id)
         jobs = jobs_cache[run_id]
 
-        # Match by label OR by runner name containing the vendor (covers
-        # workflow_dispatch runs that didn't pin a vendor SKU label).
-        vendor_jobs = [
-            j
-            for j in jobs
-            if label in j.get("labels", [])
-            or vendor.lower() in (j.get("runner_name") or "").lower()
-        ]
+        # Match by SKU in the job name (reliable for split-build jobs), with
+        # a fallback to the SKU runner label / runner name for jobs that don't
+        # embed the SKU in their name.
+        vendor_jobs = [j for j in jobs if job_matches_vendor(j, vendor, label)]
         if not vendor_jobs:
             continue
 
