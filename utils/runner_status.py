@@ -183,9 +183,10 @@ def job_matches_vendor(job, vendor, label):
     sku_vendor = job_sku_vendor(job)
     if sku_vendor is not None:
         return sku_vendor == vendor
-    return label in job.get("labels", []) or vendor.lower() in (
-        job.get("runner_name") or ""
-    ).lower()
+    return (
+        label in job.get("labels", [])
+        or vendor.lower() in (job.get("runner_name") or "").lower()
+    )
 
 
 def tz_abbrev(dt):
