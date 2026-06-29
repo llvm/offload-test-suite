@@ -26,6 +26,7 @@
 
 namespace offloadtest {
 
+class DescriptorPool;
 class RenderPass;
 class Texture;
 
@@ -45,6 +46,8 @@ public:
   CommandBuffer &operator=(const CommandBuffer &) = delete;
 
   GPUAPI getKind() const { return Kind; }
+
+  virtual void bindPool(const DescriptorPool &Pool) {};
 
   /// Create a compute command encoder for recording dispatch commands.
   /// Barriers are automatically inserted between commands.

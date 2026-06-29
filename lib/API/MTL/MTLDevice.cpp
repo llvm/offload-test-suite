@@ -794,6 +794,11 @@ public:
           NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
+  void bindDescriptorSets(const PipelineState &PSO,
+                          const DescriptorSets &DSets) override {
+    assert(false && "bindDescriptorSets is not implemented on metal.");
+  }
+
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,
                        uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ) override {
@@ -1119,6 +1124,11 @@ public:
     } else {
       RenderEnc->setVertexBuffer(nullptr, 0, BufIdx);
     }
+  }
+
+  void bindDescriptorSets(const PipelineState &PSO,
+                          const DescriptorSets &DSets) override {
+    assert(false && "bindDescriptorSets is not implemented on metal.");
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
@@ -2718,6 +2728,19 @@ public:
     return std::make_unique<MetalAccelerationStructure>(
         AS, Sizes, ResidencyTracker, std::move(HeaderBuffer),
         std::move(ContribBuffer));
+  }
+
+  llvm::Expected<std::unique_ptr<DescriptorPool>>
+  createDescriptorPool() override {
+    return llvm::createStringError(
+        "createDescriptorPool is unimplemented on Vulkan");
+  }
+
+  llvm::Expected<std::unique_ptr<DescriptorSetsBuilder>>
+  createDescriptorSetsBuilder(DescriptorPool &,
+                              const PipelineState &) override {
+    return llvm::createStringError(
+        "createDescriptorSetsBuilder is unimplemented on Vulkan");
   }
 
   llvm::Error executeProgram(Pipeline &P) override {

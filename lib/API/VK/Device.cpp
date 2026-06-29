@@ -991,6 +991,11 @@ public:
     CB.insertDebugSignpost(Label);
   }
 
+  void bindDescriptorSets(const PipelineState &PSO,
+                          const DescriptorSets &DSets) override {
+    assert(false && "bindDescriptorSets is not implemented on vulkan.");
+  }
+
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,
                        uint32_t GroupCountX, uint32_t GroupCountY,
                        uint32_t GroupCountZ) override {
@@ -1278,6 +1283,10 @@ public:
       const VkDeviceSize Zero = 0;
       vkCmdBindVertexBuffers(CB.CmdBuffer, Slot, 1, &NullBuf, &Zero);
     }
+  }
+  void bindDescriptorSets(const PipelineState &PSO,
+                          const DescriptorSets &DSets) override {
+    assert(false && "bindDescriptorSets is not implemented on vulkan.");
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
@@ -3402,6 +3411,19 @@ public:
              uint32_t /*InstanceCount*/) override {
     return allocateAS(Sizes, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
                       "TLAS");
+  }
+
+  llvm::Expected<std::unique_ptr<DescriptorPool>>
+  createDescriptorPool() override {
+    return llvm::createStringError(
+        "createDescriptorPool is unimplemented on Vulkan");
+  }
+
+  llvm::Expected<std::unique_ptr<DescriptorSetsBuilder>>
+  createDescriptorSetsBuilder(DescriptorPool &,
+                              const PipelineState &) override {
+    return llvm::createStringError(
+        "createDescriptorSetsBuilder is unimplemented on Vulkan");
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,

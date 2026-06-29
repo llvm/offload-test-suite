@@ -25,6 +25,8 @@ class AccelerationStructure;
 class Buffer;
 class CommandBuffer;
 class ComputeEncoder;
+class DescriptorPool;
+class DescriptorSets;
 class Device;
 class MemoryHeap;
 class PipelineState;
@@ -120,6 +122,9 @@ llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
 llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS);
 llvm::Error createResources(Device &Dev, Pipeline &P,
                             SharedInvocationState &IS);
+llvm::Expected<std::unique_ptr<DescriptorSets>>
+buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
+                    llvm::ArrayRef<DescriptorTable> DescTables);
 
 } // namespace offloadtest
 

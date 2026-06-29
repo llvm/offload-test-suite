@@ -21,12 +21,13 @@
 
 namespace offloadtest {
 
-class Buffer;
-class Texture;
-class PipelineState;
-class Texture;
 class AccelerationStructure;
+class Buffer;
+class DescriptorSets;
+class PipelineState;
 class ShaderBindingTable;
+class Texture;
+
 struct BLASBuildRequest;
 struct TLASBuildRequest;
 
@@ -86,6 +87,9 @@ public:
 class ComputeEncoder : public CommandEncoder {
 public:
   using CommandEncoder::CommandEncoder;
+
+  virtual void bindDescriptorSets(const PipelineState &PSO,
+                                  const DescriptorSets &DSets) = 0;
 
   /// Dispatch a compute grid. GroupCount specifies how many workgroups to
   /// launch in each dimension. The workgroup size is derived from \p PSO
@@ -149,6 +153,9 @@ public:
 
   virtual void setVertexBuffer(uint32_t Slot, Buffer *VB, size_t Offset,
                                uint32_t Stride) = 0;
+
+  virtual void bindDescriptorSets(const PipelineState &PSO,
+                                  const DescriptorSets &DSets) = 0;
 
   virtual llvm::Error drawInstanced(const PipelineState &PSO,
                                     uint32_t VertexCount,

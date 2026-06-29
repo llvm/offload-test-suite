@@ -19,6 +19,7 @@
 #include "API/Buffer.h"
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
+#include "API/Descriptors.h"
 #include "API/RenderPass.h"
 #include "API/Sampler.h"
 #include "API/ShaderBindingTable.h"
@@ -69,30 +70,6 @@ struct ResourceBindingDesc {
 struct DescriptorSetLayoutDesc {
   llvm::SmallVector<ResourceBindingDesc> ResourceBindings;
 };
-
-// enum class ResourceUnionType : uint32_t {
-//   Buffer,
-//   Texture,
-//   AccelerationStructure,
-//   Sampler,
-// } union ResourceUnion {
-//   const Buffer *B;
-//   const Texture *T;
-//   const AccelerationStruct *AS;
-// };
-// struct ResourceKaas {
-//   ResourceUnionType Type;
-//   ResourceUnion U;
-//   Sampler *S;
-// };
-// struct A {
-//   ResourceKind Kind;
-//   DirectXBinding DXBinding;
-//   std::optional<VulkanBinding> VKBinding;
-//   llvm::SmallVector<ResourceKaas> Resources;
-// };
-
-// class DescriptorSet {};
 
 struct PushConstantsRange {
   uint32_t OffsetInBytes; // Must be multiple of 4
@@ -418,6 +395,12 @@ public:
   virtual llvm::Expected<std::unique_ptr<AccelerationStructure>>
   createTLAS(const AccelerationStructureSizes &Sizes,
              uint32_t InstanceCount) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<DescriptorPool>>
+  createDescriptorPool() = 0;
+  virtual llvm::Expected<std::unique_ptr<DescriptorSetsBuilder>>
+  createDescriptorSetsBuilder(DescriptorPool &Pool,
+                              const PipelineState &Pipeline) = 0;
 
   virtual ~Device() = 0;
 

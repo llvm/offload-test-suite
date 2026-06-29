@@ -459,4 +459,59 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
 
   return llvm::Error::success();
 }
+
+llvm::Expected<std::unique_ptr<DescriptorSets>>
+buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
+                    llvm::ArrayRef<DescriptorTable> DescTables) {
+  auto BuilderOrErr = Dev.createDescriptorSetsBuilder(Pool, Pipeline);
+  if (!BuilderOrErr)
+    return BuilderOrErr.takeError();
+  auto Builder = std::move(*BuilderOrErr);
+
+  uint32_t SetIndex = 0;
+  for (auto &T : DescTables) {
+    for (auto &R : T.Resources) {
+      // TODO(manon): handle vulkan counter bindings
+      VKBind BindVK = {};
+      if (R.first->VKBinding.has_value())
+        BindVK.Binding = (*R.first->VKBinding).Binding;
+
+      if (R.first->isAccelerationStructure()) {
+        assert(R.second[0].AS != nullptr &&
+               "Acceleration structure was nullptr ?!");
+        Builder->read(SetIndex, R.second[0].AS, BindVK);
+      } else if (R.first->isBuffer()) {
+        llvm::SmallVector<const Buffer *> Buffers;
+        for (const auto &Set : R.second)
+          Buffers.push_back(Set.Buffer.get());
+
+        if (R.first->Kind == ResourceKind::ConstantBuffer)
+          Builder->constant(SetIndex, Buffers, BindVK);
+        else if (R.first->isReadWrite())
+          Builder->write(SetIndex, Buffers, BindVK);
+        else
+          Builder->read(SetIndex, Buffers, BindVK);
+      } else if (R.first->isTexture()) {
+        llvm::SmallVector<const Texture *> Textures;
+        for (const auto &Set : R.second)
+          Textures.push_back(Set.Texture.get());
+
+        if (R.first->isReadWrite())
+          Builder->write(SetIndex, Textures, BindVK);
+        else
+          Builder->read(SetIndex, Textures, BindVK);
+      } else if (R.first->isSampler()) {
+        llvm::SmallVector<const Sampler *> Samplers;
+        for (const auto &Set : R.second)
+          Samplers.push_back(Set.Sampler.get());
+
+        Builder->sampler(SetIndex, Samplers, BindVK);
+      }
+    }
+    SetIndex += 1;
+  }
+
+  return Builder->build();
+}
+
 } // namespace offloadtest
