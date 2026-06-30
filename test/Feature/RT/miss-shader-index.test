@@ -12,22 +12,34 @@ void RayGen() {
   Payload P;
   P.Value = 0;
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, 1);
-  Ray.Direction = float3(0, 0, -1);
+  // Origin far enough away from the triangle (which sits at z = 0) that any
+  // direction guarantees a miss — TMax keeps the ray short, so even a +z
+  // shoot doesn't accidentally find the BLAS.
+  Ray.Origin = float3(100, 100, 100);
+  Ray.Direction = float3(0, 0, 1);
   Ray.TMin = 0.0;
-  Ray.TMax = 100.0;
-  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
+  Ray.TMax = 1.0;
+  // Each lane picks a different MissShaderIndex via the second-to-last
+  // TraceRay argument.
+  const uint MissIdx = DispatchRaysIndex().x;
+  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, MissIdx, Ray, P);
   Output[DispatchRaysIndex().x] = P.Value;
 }
 
 [shader("miss")]
-void MissMain(inout Payload P) {
-  P.Value = 0xDEAD;
+void Miss0(inout Payload P) {
+  P.Value = 0xAA;
+}
+
+[shader("miss")]
+void Miss1(inout Payload P) {
+  P.Value = 0xBB;
 }
 
 [shader("closesthit")]
 void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
-  P.Value = 0xBEEF;
+  // Sentinel that should never be observed in this test — every ray misses.
+  P.Value = 0xDEAD;
 }
 //--- pipeline.yaml
 ---
@@ -35,7 +47,9 @@ Shaders:
   - Stage: RayGeneration
     Entry: RayGen
   - Stage: Miss
-    Entry: MissMain
+    Entry: Miss0
+  - Stage: Miss
+    Entry: Miss1
   - Stage: ClosestHit
     Entry: ClosestHitMain
 Buffers:
@@ -46,11 +60,11 @@ Buffers:
   - Name: Output
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 8
   - Name: Expected
     Format: UInt32
     Stride: 4
-    Data: [ 0xBEEF ]
+    Data: [ 0xAA, 0xBB ]
 AccelerationStructures:
   BLAS:
     - Name: TriangleBLAS
@@ -66,7 +80,6 @@ AccelerationStructures:
 RayTracingPipelineConfig:
   MaxTraceRecursionDepth: 1
   MaxPayloadSizeInBytes: 4
-  MaxAttributeSizeInBytes: 8
 HitGroups:
   - Name: TriangleHitGroup
     Type: Triangles
@@ -75,7 +88,8 @@ ShaderBindingTable:
   RayGen:
     ShaderName: RayGen
   Miss:
-    - ShaderName: MissMain
+    - ShaderName: Miss0
+    - ShaderName: Miss1
   HitGroup:
     - ShaderName: TriangleHitGroup
 DescriptorSets:
@@ -95,9 +109,9 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 DispatchParameters:
-  DispatchGroupCount: [ 1, 1, 1 ]
+  DispatchGroupCount: [ 2, 1, 1 ]
 Results:
-  - Result: RaygenRoundtrip
+  - Result: MissShaderIndexRouting
     Rule: BufferExact
     Actual: Output
     Expected: Expected

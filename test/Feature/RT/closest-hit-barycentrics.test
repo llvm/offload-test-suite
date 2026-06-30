@@ -1,33 +1,54 @@
 #--- source.hlsl
 
 struct Payload {
-  uint Value;
+  float2 Bary;
 };
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<float> Output : register(u0);
 
 [shader("raygeneration")]
 void RayGen() {
+  // Each lane fires straight down at a clearly-interior point of the single
+  // triangle (vertices v0=(0,1,0), v1=(-1,-1,0), v2=(1,-1,0)). HLSL's
+  // closest-hit `barycentrics` attribute holds (u, v) with u + v + w == 1
+  // and w being vertex-0's weight, so a hit point at
+  //   P = w * v0 + u * v1 + v * v2
+  // reports bary = (u, v).
+  //   Lane 0 -> bary (0.25, 0.25), hit at 0.5*v0 + 0.25*v1 + 0.25*v2 = (0,    0,   0)
+  //   Lane 1 -> bary (0.5,  0.25), hit at 0.25*v0 + 0.5*v1 + 0.25*v2 = (-0.25,-0.5, 0)
+  //   Lane 2 -> bary (0.25, 0.5),  hit at 0.25*v0 + 0.25*v1 + 0.5*v2 = (0.25, -0.5, 0)
+  // All three points sit well inside the triangle so the watertight-
+  // traversal edge rules are not in play and the hits are deterministic
+  // across rasterizers. Each lane writes 2 floats (u, v) at output offsets
+  // [2*Index .. 2*Index+1].
+  const uint Idx = DispatchRaysIndex().x;
+  const float2 Targets[3] = {float2(0, 0), float2(-0.25, -0.5),
+                             float2(0.25, -0.5)};
+
   Payload P;
-  P.Value = 0;
+  P.Bary = float2(0, 0);
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, 1);
+  Ray.Origin = float3(Targets[Idx], 1);
   Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
   TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
-  Output[DispatchRaysIndex().x] = P.Value;
+
+  Output[2 * Idx + 0] = P.Bary.x;
+  Output[2 * Idx + 1] = P.Bary.y;
 }
 
 [shader("miss")]
 void MissMain(inout Payload P) {
-  P.Value = 0xDEAD;
+  // Sentinel — every ray hits the triangle in this test.
+  P.Bary = float2(-1, -1);
 }
 
 [shader("closesthit")]
-void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
-  P.Value = 0xBEEF;
+void ClosestHitMain(inout Payload P,
+                    in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Bary = Attr.barycentrics;
 }
 //--- pipeline.yaml
 ---
@@ -44,13 +65,13 @@ Buffers:
     Stride: 12
     Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
   - Name: Output
-    Format: UInt32
+    Format: Float32
     Stride: 4
-    FillSize: 4
+    FillSize: 24
   - Name: Expected
-    Format: UInt32
+    Format: Float32
     Stride: 4
-    Data: [ 0xBEEF ]
+    Data: [ 0.25, 0.25, 0.5, 0.25, 0.25, 0.5 ]
 AccelerationStructures:
   BLAS:
     - Name: TriangleBLAS
@@ -65,8 +86,7 @@ AccelerationStructures:
         - BLAS: TriangleBLAS
 RayTracingPipelineConfig:
   MaxTraceRecursionDepth: 1
-  MaxPayloadSizeInBytes: 4
-  MaxAttributeSizeInBytes: 8
+  MaxPayloadSizeInBytes: 8
 HitGroups:
   - Name: TriangleHitGroup
     Type: Triangles
@@ -95,9 +115,9 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 DispatchParameters:
-  DispatchGroupCount: [ 1, 1, 1 ]
+  DispatchGroupCount: [ 3, 1, 1 ]
 Results:
-  - Result: RaygenRoundtrip
+  - Result: ClosestHitBarycentrics
     Rule: BufferExact
     Actual: Output
     Expected: Expected

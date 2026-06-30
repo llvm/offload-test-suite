@@ -1,7 +1,7 @@
 #--- source.hlsl
 
 struct Payload {
-  uint Value;
+  uint Prim;
 };
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
@@ -9,25 +9,32 @@ struct Payload {
 
 [shader("raygeneration")]
 void RayGen() {
+  // Three triangles tiled along x at x = -3, 0, +3 in a single BLAS. Each
+  // lane shoots straight down at its own triangle's centroid; the closest-
+  // hit shader reports its `PrimitiveIndex()` and must match the lane index.
+  const float Centers[3] = {-3.0, 0.0, 3.0};
+  const uint Idx = DispatchRaysIndex().x;
+
   Payload P;
-  P.Value = 0;
+  P.Prim = 0xFFFFFFFF;
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, 1);
+  Ray.Origin = float3(Centers[Idx], 0, 1);
   Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
   TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
-  Output[DispatchRaysIndex().x] = P.Value;
+  Output[Idx] = P.Prim;
 }
 
 [shader("miss")]
 void MissMain(inout Payload P) {
-  P.Value = 0xDEAD;
+  P.Prim = 0xDEAD;
 }
 
 [shader("closesthit")]
-void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
-  P.Value = 0xBEEF;
+void ClosestHitMain(inout Payload P,
+                    in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Prim = PrimitiveIndex();
 }
 //--- pipeline.yaml
 ---
@@ -42,31 +49,35 @@ Buffers:
   - Name: Vertices
     Format: Float32
     Stride: 12
-    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+    # Three triangles in one BLAS, each ~1 unit wide, centroid x at -3 / 0 / +3.
+    Data: [
+      -3.0,  1.0, 0.0,  -4.0, -1.0, 0.0,  -2.0, -1.0, 0.0,
+       0.0,  1.0, 0.0,  -1.0, -1.0, 0.0,   1.0, -1.0, 0.0,
+       3.0,  1.0, 0.0,   2.0, -1.0, 0.0,   4.0, -1.0, 0.0,
+    ]
   - Name: Output
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 12
   - Name: Expected
     Format: UInt32
     Stride: 4
-    Data: [ 0xBEEF ]
+    Data: [ 0, 1, 2 ]
 AccelerationStructures:
   BLAS:
-    - Name: TriangleBLAS
+    - Name: ThreeTrianglesBLAS
       Triangles:
         - VertexBuffer: Vertices
           VertexFormat: RGB32Float
           VertexStride: 12
-          VertexCount: 3
+          VertexCount: 9
   TLAS:
     - Name: Scene
       Instances:
-        - BLAS: TriangleBLAS
+        - BLAS: ThreeTrianglesBLAS
 RayTracingPipelineConfig:
   MaxTraceRecursionDepth: 1
   MaxPayloadSizeInBytes: 4
-  MaxAttributeSizeInBytes: 8
 HitGroups:
   - Name: TriangleHitGroup
     Type: Triangles
@@ -95,9 +106,9 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 DispatchParameters:
-  DispatchGroupCount: [ 1, 1, 1 ]
+  DispatchGroupCount: [ 3, 1, 1 ]
 Results:
-  - Result: RaygenRoundtrip
+  - Result: ClosestHitPrimitiveIndex
     Rule: BufferExact
     Actual: Output
     Expected: Expected

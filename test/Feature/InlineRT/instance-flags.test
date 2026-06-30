@@ -1,43 +1,31 @@
 #--- source.hlsl
 
-struct Payload {
-  uint Value;
-};
-
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
 
-[shader("raygeneration")]
-void RayGen() {
-  Payload P;
-  P.Value = 0;
+[numthreads(2,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  // The triangle vertices wind CW from +z under the DX / VK / MTL ray-
+  // traversal convention. Two instances tiled along x: instance 0 has no
+  // flags (front-facing), instance 1 has TriangleFrontCounterclockwise
+  // (winding interpretation flips → back-facing).
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, 1);
+  Ray.Origin = float3((float(tid.x) - 0.5) * 4.0, 0, 1);
   Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
-  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
-  Output[DispatchRaysIndex().x] = P.Value;
-}
-
-[shader("miss")]
-void MissMain(inout Payload P) {
-  P.Value = 0xDEAD;
-}
-
-[shader("closesthit")]
-void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
-  P.Value = 0xBEEF;
+  RayQuery<RAY_FLAG_NONE> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  Q.Proceed();
+  Output[tid.x] = Q.CommittedStatus() == COMMITTED_TRIANGLE_HIT
+                      ? (uint)Q.CommittedTriangleFrontFace()
+                      : 0xFFFFFFFF;
 }
 //--- pipeline.yaml
 ---
 Shaders:
-  - Stage: RayGeneration
-    Entry: RayGen
-  - Stage: Miss
-    Entry: MissMain
-  - Stage: ClosestHit
-    Entry: ClosestHitMain
+  - Stage: Compute
+    Entry: main
 Buffers:
   - Name: Vertices
     Format: Float32
@@ -46,11 +34,13 @@ Buffers:
   - Name: Output
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 8
   - Name: Expected
     Format: UInt32
     Stride: 4
-    Data: [ 0xBEEF ]
+    # Instance 0: default winding → front face (1)
+    # Instance 1: TriangleFrontCounterclockwise flips → back face (0)
+    Data: [ 1, 0 ]
 AccelerationStructures:
   BLAS:
     - Name: TriangleBLAS
@@ -63,21 +53,10 @@ AccelerationStructures:
     - Name: Scene
       Instances:
         - BLAS: TriangleBLAS
-RayTracingPipelineConfig:
-  MaxTraceRecursionDepth: 1
-  MaxPayloadSizeInBytes: 4
-  MaxAttributeSizeInBytes: 8
-HitGroups:
-  - Name: TriangleHitGroup
-    Type: Triangles
-    ClosestHit: ClosestHitMain
-ShaderBindingTable:
-  RayGen:
-    ShaderName: RayGen
-  Miss:
-    - ShaderName: MissMain
-  HitGroup:
-    - ShaderName: TriangleHitGroup
+          Transform: [1, 0, 0, -2,  0, 1, 0, 0,  0, 0, 1, 0]
+        - BLAS: TriangleBLAS
+          Transform: [1, 0, 0, 2,  0, 1, 0, 0,  0, 0, 1, 0]
+          InstanceFlags: [TriangleFrontCounterclockwise]
 DescriptorSets:
   - Resources:
     - Name: Scene
@@ -94,20 +73,17 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 1
-DispatchParameters:
-  DispatchGroupCount: [ 1, 1, 1 ]
 Results:
-  - Result: RaygenRoundtrip
+  - Result: InstanceFlags
     Rule: BufferExact
     Actual: Output
     Expected: Expected
 ...
 #--- end
 
-# REQUIRES: raytracing-pipeline
-# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# REQUIRES: acceleration-structure
 # XFAIL: Clang
 
 # RUN: split-file %s %t
-# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

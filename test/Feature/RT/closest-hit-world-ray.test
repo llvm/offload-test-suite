@@ -1,33 +1,49 @@
 #--- source.hlsl
 
 struct Payload {
-  uint Value;
+  // Packed: (OriginZ, DirectionZ, RayTCurrent) per lane.
+  float3 Reading;
 };
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
-[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<float> Output : register(u0);
 
 [shader("raygeneration")]
 void RayGen() {
+  // Two lanes fire from different z heights at the single triangle (z=0).
+  //   Lane 0: Origin.z = 1   ->  ClosestHit sees Origin.z=1, Dir.z=-1, T=1.
+  //   Lane 1: Origin.z = 2   ->  ClosestHit sees Origin.z=2, Dir.z=-1, T=2.
+  // The ClosestHit reports WorldRayOrigin().z, WorldRayDirection().z, and
+  // RayTCurrent() through the payload.
+  const uint Idx = DispatchRaysIndex().x;
+  const float Origins[2] = {1.0, 2.0};
+
   Payload P;
-  P.Value = 0;
+  P.Reading = float3(0, 0, 0);
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, 1);
+  Ray.Origin = float3(0, 0, Origins[Idx]);
   Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
   TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
-  Output[DispatchRaysIndex().x] = P.Value;
+
+  Output[3 * Idx + 0] = P.Reading.x;
+  Output[3 * Idx + 1] = P.Reading.y;
+  Output[3 * Idx + 2] = P.Reading.z;
 }
 
 [shader("miss")]
 void MissMain(inout Payload P) {
-  P.Value = 0xDEAD;
+  // Sentinel — every ray hits the triangle.
+  P.Reading = float3(-1, -1, -1);
 }
 
 [shader("closesthit")]
-void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
-  P.Value = 0xBEEF;
+void ClosestHitMain(inout Payload P,
+                   in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Reading.x = WorldRayOrigin().z;
+  P.Reading.y = WorldRayDirection().z;
+  P.Reading.z = RayTCurrent();
 }
 //--- pipeline.yaml
 ---
@@ -44,13 +60,13 @@ Buffers:
     Stride: 12
     Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
   - Name: Output
-    Format: UInt32
+    Format: Float32
     Stride: 4
-    FillSize: 4
+    FillSize: 24
   - Name: Expected
-    Format: UInt32
+    Format: Float32
     Stride: 4
-    Data: [ 0xBEEF ]
+    Data: [ 1.0, -1.0, 1.0, 2.0, -1.0, 2.0 ]
 AccelerationStructures:
   BLAS:
     - Name: TriangleBLAS
@@ -65,8 +81,7 @@ AccelerationStructures:
         - BLAS: TriangleBLAS
 RayTracingPipelineConfig:
   MaxTraceRecursionDepth: 1
-  MaxPayloadSizeInBytes: 4
-  MaxAttributeSizeInBytes: 8
+  MaxPayloadSizeInBytes: 12
 HitGroups:
   - Name: TriangleHitGroup
     Type: Triangles
@@ -95,9 +110,9 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 DispatchParameters:
-  DispatchGroupCount: [ 1, 1, 1 ]
+  DispatchGroupCount: [ 2, 1, 1 ]
 Results:
-  - Result: RaygenRoundtrip
+  - Result: ClosestHitWorldRay
     Rule: BufferExact
     Actual: Output
     Expected: Expected

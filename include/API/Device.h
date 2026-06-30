@@ -20,6 +20,7 @@
 #include "API/Capabilities.h"
 #include "API/CommandBuffer.h"
 #include "API/RenderPass.h"
+#include "API/ShaderBindingTable.h"
 #include "API/Texture.h"
 
 #include "Support/Pipeline.h"
@@ -82,6 +83,21 @@ struct ShaderContainer {
   std::string EntryPoint;
   const llvm::MemoryBuffer *Shader;
   llvm::SmallVector<SpecializationConstant> SpecializationConstants;
+};
+
+struct RayTracingShader {
+  Stages Stage;
+  std::string EntryPoint;
+};
+
+struct RayTracingPipelineCreateDesc {
+  // All RT shaders are compiled into a single shader library.
+  // Every entry in `Shaders` references this same blob via the backend's
+  // library-loading path.
+  const llvm::MemoryBuffer *Library = nullptr;
+  llvm::SmallVector<RayTracingShader> Shaders;
+  llvm::SmallVector<HitGroup> HitGroups;
+  RayTracingPipelineConfig Config;
 };
 
 struct TraditionalRasterPipelineCreateDesc {
@@ -205,6 +221,49 @@ struct SubmitResult {
   llvm::Error waitForCompletion() const { return F->waitForCompletion(Value); }
 };
 
+class MemoryHeap {
+  GPUAPI API;
+
+public:
+  virtual ~MemoryHeap();
+
+  MemoryHeap(const MemoryHeap &) = delete;
+  MemoryHeap(MemoryHeap &&) = delete;
+  MemoryHeap &operator=(const MemoryHeap &) = delete;
+  MemoryHeap &operator=(MemoryHeap &&) = delete;
+
+  GPUAPI getAPI() const { return API; }
+
+protected:
+  explicit MemoryHeap(GPUAPI API) : API(API) {}
+};
+
+/// A region of a Sparse-backed resource, expressed in tiles (not bytes).
+/// For buffers, only TileOffsetX / NumTilesX are meaningful.
+/// Textures additionally use Subresource and the Y/Z extents.
+/// Query the backend tile shape to convert between texels and tiles
+/// (`Buffer::querySparseTileSizeInBytes(...)`,
+/// `Texture::querySparseTileShape(...)`)
+struct TileRegion {
+  uint32_t Subresource = 0;
+  uint32_t TileOffsetX = 0;
+  uint32_t TileOffsetY = 0;
+  uint32_t TileOffsetZ = 0;
+  uint32_t NumTilesX = 1;
+  uint32_t NumTilesY = 1;
+  uint32_t NumTilesZ = 1;
+};
+
+/// One tile-mapping operation: bind Region of a sparse resource to backing
+/// memory drawn from a MemoryHeap, or unbind it when Backing is null
+/// (DX NULL range / VK VK_NULL_HANDLE / Metal sparse-unmap), causing reads to
+/// return zero. BackingTileOffset is the start tile within Backing.
+struct TileMapping {
+  TileRegion Region;
+  MemoryHeap *Backing = nullptr;
+  uint64_t BackingTileOffset = 0;
+};
+
 class Queue {
 public:
   virtual ~Queue() = 0;
@@ -224,6 +283,16 @@ public:
     CBs.push_back(std::move(CB));
     return submit(std::move(CBs));
   }
+
+  /// Map (or unmap) tiles of a Sparse-backed resource onto backing memory.
+  /// Like submit(), this executes on the queue timeline and does not block;
+  /// order it against other queue work with the returned fence.
+  virtual llvm::Expected<SubmitResult>
+  updateTileMappings(Buffer &Resource,
+                     llvm::ArrayRef<TileMapping> Mappings) = 0;
+  virtual llvm::Expected<SubmitResult>
+  updateTileMappings(Texture &Resource,
+                     llvm::ArrayRef<TileMapping> Mappings) = 0;
 
 protected:
   Queue() = default;
@@ -259,6 +328,14 @@ public:
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) = 0;
 
+  virtual llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef Name, const BindingsDesc &BindingsDesc,
+                   const RayTracingPipelineCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &PSO,
+                           const ShaderBindingTableDesc &Desc) = 0;
+
   virtual llvm::Expected<std::unique_ptr<Fence>>
   createFence(llvm::StringRef Name) = 0;
 
@@ -268,6 +345,9 @@ public:
 
   virtual llvm::Expected<std::unique_ptr<Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) = 0;
+
+  virtual llvm::Expected<std::unique_ptr<MemoryHeap>>
+  createMemoryHeap(std::string Name, size_t SizeInBytes) = 0;
 
   // The row stride required when uploading data to (or reading back from) a
   // texture created with the given description, via an upload buffer.
@@ -346,6 +426,22 @@ createTextureWithData(Device &Dev, std::string Name,
                       const TextureCreateDesc &Desc, const void *Data,
                       size_t SizeInBytes, ComputeEncoder *Encoder,
                       std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer);
+
+// Create a sparse buffer with MappedTileCount tiles mapped.
+llvm::Expected<std::unique_ptr<offloadtest::Buffer>> createSparseBufferWithData(
+    Device &Dev, Queue &Q, std::string Name, const BufferCreateDesc &Desc,
+    size_t SparseSizeInBytes, std::optional<uint32_t> MappedTileCount,
+    const void *Data, size_t UploadSizeInBytes, ComputeEncoder &Encoder,
+    std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
+    std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap);
+
+// Create a sparse texture with all tiles mapped.
+llvm::Expected<std::unique_ptr<offloadtest::Texture>>
+createSparseTextureWithData(
+    Device &Dev, Queue &Q, std::string Name, const TextureCreateDesc &Desc,
+    const void *Data, size_t SizeInBytes, ComputeEncoder &Encoder,
+    std::unique_ptr<offloadtest::Buffer> &OutUploadBuffer,
+    std::unique_ptr<offloadtest::MemoryHeap> &OutBackingMemoryHeap);
 
 // TLAS handles come in pre-allocated because the caller's binding loop
 // stamps the AS pointer into descriptor bundles before this helper runs;

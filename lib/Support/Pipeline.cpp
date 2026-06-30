@@ -674,6 +674,7 @@ void MappingTraits<offloadtest::InstanceDesc>::mapping(
   D.InstanceMask = static_cast<uint8_t>(Mask);
   I.mapOptional("InstanceContributionToHitGroupIndex",
                 D.InstanceContributionToHitGroupIndex, 0u);
+  I.mapOptional("InstanceFlags", D.Flags, offloadtest::InstanceFlagNone);
 }
 
 void MappingTraits<offloadtest::TLASDesc>::mapping(IO &I,
@@ -721,8 +722,8 @@ void MappingTraits<offloadtest::SBTEntry>::mapping(IO &I,
   }
 }
 
-void MappingTraits<offloadtest::ShaderBindingTable>::mapping(
-    IO &I, offloadtest::ShaderBindingTable &S) {
+void MappingTraits<offloadtest::ShaderBindingTableDesc>::mapping(
+    IO &I, offloadtest::ShaderBindingTableDesc &S) {
   I.mapRequired("RayGen", S.RayGen);
   I.mapOptional("Miss", S.Miss);
   I.mapOptional("HitGroup", S.HitGroup);

@@ -16,18 +16,30 @@ void RayGen() {
   Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
-  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
+  // RayContributionToHitGroupIndex (4th TraceRay arg) selects which hit-group
+  // record the SBT routes to. Lane 0 picks hit-group 0 (writes 0xA1), lane 1
+  // picks hit-group 1 (writes 0xB2). MultiplierForGeometryContributionToHit-
+  // GroupIndex (5th arg) stays 1; the BLAS has a single geometry so it
+  // doesn't add anything to the index.
+  const uint HGIdx = DispatchRaysIndex().x;
+  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, HGIdx, 1, 0, Ray, P);
   Output[DispatchRaysIndex().x] = P.Value;
 }
 
 [shader("miss")]
 void MissMain(inout Payload P) {
+  // Sentinel — never observed in this test since every ray hits the triangle.
   P.Value = 0xDEAD;
 }
 
 [shader("closesthit")]
-void ClosestHitMain(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
-  P.Value = 0xBEEF;
+void CHA(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Value = 0xA1;
+}
+
+[shader("closesthit")]
+void CHB(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Value = 0xB2;
 }
 //--- pipeline.yaml
 ---
@@ -37,7 +49,9 @@ Shaders:
   - Stage: Miss
     Entry: MissMain
   - Stage: ClosestHit
-    Entry: ClosestHitMain
+    Entry: CHA
+  - Stage: ClosestHit
+    Entry: CHB
 Buffers:
   - Name: Vertices
     Format: Float32
@@ -46,11 +60,11 @@ Buffers:
   - Name: Output
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 8
   - Name: Expected
     Format: UInt32
     Stride: 4
-    Data: [ 0xBEEF ]
+    Data: [ 0xA1, 0xB2 ]
 AccelerationStructures:
   BLAS:
     - Name: TriangleBLAS
@@ -66,18 +80,21 @@ AccelerationStructures:
 RayTracingPipelineConfig:
   MaxTraceRecursionDepth: 1
   MaxPayloadSizeInBytes: 4
-  MaxAttributeSizeInBytes: 8
 HitGroups:
-  - Name: TriangleHitGroup
+  - Name: HitGroupA
     Type: Triangles
-    ClosestHit: ClosestHitMain
+    ClosestHit: CHA
+  - Name: HitGroupB
+    Type: Triangles
+    ClosestHit: CHB
 ShaderBindingTable:
   RayGen:
     ShaderName: RayGen
   Miss:
     - ShaderName: MissMain
   HitGroup:
-    - ShaderName: TriangleHitGroup
+    - ShaderName: HitGroupA
+    - ShaderName: HitGroupB
 DescriptorSets:
   - Resources:
     - Name: Scene
@@ -95,9 +112,9 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 DispatchParameters:
-  DispatchGroupCount: [ 1, 1, 1 ]
+  DispatchGroupCount: [ 2, 1, 1 ]
 Results:
-  - Result: RaygenRoundtrip
+  - Result: RayContributionRouting
     Rule: BufferExact
     Actual: Output
     Expected: Expected

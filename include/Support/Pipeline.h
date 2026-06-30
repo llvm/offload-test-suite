@@ -13,6 +13,7 @@
 #ifndef OFFLOADTEST_SUPPORT_PIPELINE_H
 #define OFFLOADTEST_SUPPORT_PIPELINE_H
 
+#include "API/AccelerationStructure.h"
 #include "API/Enums.h"
 #include "API/Resources.h"
 #include "llvm/ADT/SmallVector.h"
@@ -270,7 +271,7 @@ struct Resource {
   std::optional<VulkanBinding> VKBinding;
   CPUBuffer *BufferPtr = nullptr;
   Sampler *SamplerPtr = nullptr;
-  bool HasCounter;
+  bool HasCounter = false;
   std::optional<uint32_t> TilesMapped;
   bool IsReserved = false;
   TLASDesc *TLASPtr = nullptr;
@@ -310,6 +311,26 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+    case ResourceKind::SampledTexture2D:
+    case ResourceKind::AccelerationStructure:
+      return false;
+    }
+    llvm_unreachable("All cases handled");
+  }
+
+  bool isBuffer() const {
+    switch (Kind) {
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+      return true;
+    case ResourceKind::Sampler:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::SampledTexture2D:
@@ -554,6 +575,7 @@ struct InstanceDesc {
   uint32_t InstanceID = 0;
   uint8_t InstanceMask = 0xFF;
   uint32_t InstanceContributionToHitGroupIndex = 0;
+  AccelerationStructureInstanceFlags Flags = InstanceFlagNone;
 };
 
 struct TLASDesc {
@@ -593,7 +615,7 @@ struct SBTEntry {
   llvm::SmallVector<uint8_t> LocalRootData;
 };
 
-struct ShaderBindingTable {
+struct ShaderBindingTableDesc {
   SBTEntry RayGen;
   llvm::SmallVector<SBTEntry> Miss;
   llvm::SmallVector<SBTEntry> HitGroup;
@@ -615,7 +637,7 @@ struct Pipeline {
   AccelerationStructureDescs AccelStructs;
   std::optional<RayTracingPipelineConfig> RTConfig;
   llvm::SmallVector<HitGroup> HitGroups;
-  std::optional<ShaderBindingTable> SBT;
+  std::optional<ShaderBindingTableDesc> SBT;
 
   uint32_t getVertexCount() const {
     if (DispatchParameters.VertexCount)
@@ -826,8 +848,21 @@ template <> struct MappingTraits<offloadtest::SBTEntry> {
   static void mapping(IO &I, offloadtest::SBTEntry &E);
 };
 
-template <> struct MappingTraits<offloadtest::ShaderBindingTable> {
-  static void mapping(IO &I, offloadtest::ShaderBindingTable &S);
+template <> struct MappingTraits<offloadtest::ShaderBindingTableDesc> {
+  static void mapping(IO &I, offloadtest::ShaderBindingTableDesc &S);
+};
+
+template <>
+struct ScalarBitSetTraits<offloadtest::AccelerationStructureInstanceFlags> {
+  static void bitset(IO &I,
+                     offloadtest::AccelerationStructureInstanceFlags &V) {
+#define BIT_CASE(Val) I.bitSetCase(V, #Val, offloadtest::Val)
+    BIT_CASE(TriangleCullDisable);
+    BIT_CASE(TriangleFrontCounterclockwise);
+    BIT_CASE(ForceOpaque);
+    BIT_CASE(ForceNonOpaque);
+#undef BIT_CASE
+  }
 };
 
 template <> struct ScalarEnumerationTraits<offloadtest::Rule> {
@@ -1006,6 +1041,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
     ENUM_CASE(TriangleList);
     ENUM_CASE(PointList);
     ENUM_CASE(PatchList);
+    ENUM_CASE(LineList);
 #undef ENUM_CASE
   }
 };

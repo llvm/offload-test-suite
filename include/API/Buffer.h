@@ -20,7 +20,9 @@
 
 namespace offloadtest {
 
-enum class BufferShaderAccessType : uint32_t {
+class Device;
+
+enum class BufferShaderAccessType {
   Raw,
   Typed,
   Structured,
@@ -31,7 +33,7 @@ union BufferShaderAccessTypeParams {
   uint32_t StructureStride; // Structured Only
 };
 
-enum class BufferUsage : uint32_t {
+enum class BufferUsage {
   // Generic storage buffer (UAV/SSBO). Also covers acceleration-structure
   // build inputs (vertex/index/instance buffers): backends widen this with
   // any native AS-input flags they need.
@@ -85,6 +87,9 @@ public:
   virtual ~Buffer();
   virtual size_t getSizeInBytes() const = 0;
 
+  // The granularity, in bytes, of a single sparse tile for this buffer.
+  virtual size_t querySparseTileSizeInBytes(const Device &Dev) const = 0;
+
   // Maps the buffer's memory for host access. Only valid for CpuToGpu and
   // GpuToCpu buffers; returns an error for GpuOnly. Each successful map() must
   // be paired with a call to unmap() before the buffer is used on the GPU.
@@ -95,6 +100,7 @@ public:
   Buffer &operator=(const Buffer &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  virtual const BufferCreateDesc &getDesc() const = 0;
 
 protected:
   explicit Buffer(GPUAPI API) : API(API) {}
