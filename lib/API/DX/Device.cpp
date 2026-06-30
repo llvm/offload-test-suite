@@ -330,20 +330,20 @@ enum class RootParameterType : uint32_t {
   UAV,
 };
 
-struct RoogtSignatureLayout {
+struct RootSignatureLayout {
   RootParameterType ParameterType : 3;
   uint32_t Count : 29;
 
-  RoogtSignatureLayout(RootParameterType ParameterType, uint32_t Count)
+  RootSignatureLayout(RootParameterType ParameterType, uint32_t Count)
       : ParameterType(ParameterType), Count(Count) {}
-  RoogtSignatureLayout() = delete;
+  RootSignatureLayout() = delete;
 };
 
 class DXPipelineState : public offloadtest::PipelineState {
 public:
   std::string Name;
   ComPtr<ID3D12RootSignature> RootSig;
-  llvm::SmallVector<RoogtSignatureLayout> Layout;
+  llvm::SmallVector<RootSignatureLayout> Layout;
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
@@ -353,7 +353,7 @@ public:
   bool IsRayTracing = false;
 
   DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
-                  llvm::SmallVector<RoogtSignatureLayout> Layout,
+                  llvm::SmallVector<RootSignatureLayout> Layout,
                   ComPtr<ID3D12PipelineState> PSO,
                   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology,
                   bool IsRT = false)
@@ -378,7 +378,7 @@ public:
 
   DXRayTracingPipelineState(llvm::StringRef Name,
                             ComPtr<ID3D12RootSignature> RootSig,
-                            llvm::SmallVector<RoogtSignatureLayout> Layout,
+                            llvm::SmallVector<RootSignatureLayout> Layout,
                             ComPtr<ID3D12StateObject> SO,
                             ComPtr<ID3D12StateObjectProperties> Props)
       : DXPipelineState(Name, RootSig, std::move(Layout), /*PSO=*/nullptr,
@@ -1323,7 +1323,7 @@ public:
   llvm::Error createRootSignatureFromShader(
       llvm::StringRef Name, const ShaderContainer &Shader,
       ComPtr<ID3D12RootSignature> &OutRootSignature,
-      llvm::SmallVectorImpl<RoogtSignatureLayout> &Layout) {
+      llvm::SmallVectorImpl<RootSignatureLayout> &Layout) {
     // Try pulling a root signature from the DXIL first
     auto ExContainer =
         llvm::object::DXContainer::create(Shader.Shader->getMemBufferRef());
@@ -1377,25 +1377,25 @@ public:
           if (Parameter.DescriptorTable.NumDescriptorRanges > 0 &&
               Parameter.DescriptorTable.pDescriptorRanges[0].RangeType ==
                   D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
-            Layout.push_back(RoogtSignatureLayout(
+            Layout.push_back(RootSignatureLayout(
                 RootParameterType::SamplerTable, DescriptorCount));
           else
-            Layout.push_back(RoogtSignatureLayout(
+            Layout.push_back(RootSignatureLayout(
                 RootParameterType::DescriptorTable, DescriptorCount));
           break;
         }
         case D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS:
-          Layout.push_back(RoogtSignatureLayout(
+          Layout.push_back(RootSignatureLayout(
               RootParameterType::Constant, Parameter.Constants.Num32BitValues));
           break;
         case D3D12_ROOT_PARAMETER_TYPE_CBV:
-          Layout.push_back(RoogtSignatureLayout(RootParameterType::CBV, 1));
+          Layout.push_back(RootSignatureLayout(RootParameterType::CBV, 1));
           break;
         case D3D12_ROOT_PARAMETER_TYPE_SRV:
-          Layout.push_back(RoogtSignatureLayout(RootParameterType::SRV, 1));
+          Layout.push_back(RootSignatureLayout(RootParameterType::SRV, 1));
           break;
         case D3D12_ROOT_PARAMETER_TYPE_UAV:
-          Layout.push_back(RoogtSignatureLayout(RootParameterType::UAV, 1));
+          Layout.push_back(RootSignatureLayout(RootParameterType::UAV, 1));
           break;
         }
       }
@@ -1407,7 +1407,7 @@ public:
   llvm::Error createRootSignatureFromBindingsDesc(
       llvm::StringRef Name, const BindingsDesc &BndDesc, bool IsGraphics,
       ComPtr<ID3D12RootSignature> &OutRootSignature,
-      llvm::SmallVectorImpl<RoogtSignatureLayout> &Layout) {
+      llvm::SmallVectorImpl<RootSignatureLayout> &Layout) {
     uint32_t DescriptorCount = 0;
     for (auto &D : BndDesc.DescriptorSetDescs)
       DescriptorCount += D.ResourceBindings.size();
@@ -1454,8 +1454,8 @@ public:
                                  {D3D12_ROOT_DESCRIPTOR_TABLE{
                                      RangeCount, &Ranges.get()[StartRangeIdx]}},
                                  D3D12_SHADER_VISIBILITY_ALL});
-        Layout.push_back(RoogtSignatureLayout(
-            RootParameterType::DescriptorTable, DescriptorIdx));
+        Layout.push_back(RootSignatureLayout(RootParameterType::DescriptorTable,
+                                             DescriptorIdx));
       }
 
       uint32_t SamplerDescriptorIdx = 0;
@@ -1485,8 +1485,8 @@ public:
                 static_cast<uint32_t>(RangeIdx - SamplerStartRangeIdx),
                 &Ranges.get()[SamplerStartRangeIdx]}},
             D3D12_SHADER_VISIBILITY_ALL});
-        Layout.push_back(RoogtSignatureLayout(RootParameterType::SamplerTable,
-                                              SamplerDescriptorIdx));
+        Layout.push_back(RootSignatureLayout(RootParameterType::SamplerTable,
+                                             SamplerDescriptorIdx));
       }
     }
 
@@ -1528,7 +1528,7 @@ public:
   createRootSignature(llvm::StringRef Name, const BindingsDesc &BndDesc,
                       const ShaderContainer &Shader, bool IsGraphics,
                       ComPtr<ID3D12RootSignature> &OutRootSignature,
-                      llvm::SmallVectorImpl<RoogtSignatureLayout> &Layout) {
+                      llvm::SmallVectorImpl<RootSignatureLayout> &Layout) {
     assert(OutRootSignature.Get() == nullptr);
 
     if (auto Err = createRootSignatureFromShader(Name, Shader, OutRootSignature,
@@ -1546,7 +1546,7 @@ public:
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BndDesc,
                    ShaderContainer CS) override {
     ComPtr<ID3D12RootSignature> RootSig;
-    llvm::SmallVector<RoogtSignatureLayout> Layout;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, CS,
                                        /*IsGraphics=*/false, RootSig, Layout))
       return Err;
@@ -1579,7 +1579,7 @@ public:
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
-    llvm::SmallVector<RoogtSignatureLayout> Layout;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, Desc.VS,
                                        /*IsGraphics=*/true, RootSig, Layout))
       return Err;
@@ -1655,7 +1655,7 @@ public:
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
-    llvm::SmallVector<RoogtSignatureLayout> Layout;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BindingsDesc, Desc.MS,
                                        /*IsGraphics=*/true, RootSig, Layout))
       return Err;
@@ -1756,7 +1756,7 @@ public:
     ShaderContainer LibContainer = {};
     LibContainer.Shader = Desc.Library;
     ComPtr<ID3D12RootSignature> RootSig;
-    llvm::SmallVector<RoogtSignatureLayout> Layout;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, LibContainer,
                                        /*IsGraphics=*/false, RootSig, Layout))
       return Err;
