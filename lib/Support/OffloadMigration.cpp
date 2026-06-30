@@ -471,10 +471,13 @@ buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
   uint32_t SetIndex = 0;
   for (auto &T : DescTables) {
     for (auto &R : T.Resources) {
-      // TODO(manon): handle vulkan counter bindings
       VKBind BindVK = {};
-      if (R.first->VKBinding.has_value())
-        BindVK.Binding = (*R.first->VKBinding).Binding;
+      if (R.first->VKBinding.has_value()) {
+        const VulkanBinding &VKBinding = *R.first->VKBinding;
+        BindVK.Binding = VKBinding.Binding;
+        if (VKBinding.CounterBinding)
+          BindVK.CounterBinding = *VKBinding.CounterBinding;
+      }
 
       if (R.first->isAccelerationStructure()) {
         assert(R.second[0].AS != nullptr &&
@@ -493,8 +496,12 @@ buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
           Builder->read(SetIndex, Buffers, BindVK);
       } else if (R.first->isTexture()) {
         llvm::SmallVector<const Texture *> Textures;
-        for (const auto &Set : R.second)
+        for (const auto &Set : R.second) {
+          if (Set.Sampler.get() != nullptr)
+            return llvm::createStringError(
+                "Skipping support for combined image sampler for now.");
           Textures.push_back(Set.Texture.get());
+        }
 
         if (R.first->isReadWrite())
           Builder->write(SetIndex, Textures, BindVK);
