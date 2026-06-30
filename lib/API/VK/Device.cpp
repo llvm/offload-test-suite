@@ -847,9 +847,9 @@ public:
                                       llvm::ArrayRef<const Texture *> T,
                                       llvm::ArrayRef<const Sampler *> S,
                                       VKBind Bnd, bool IsRead) {
-    assert(S.empty() || S.size() == T.size() &&
-                            "Sampler list must either be empty or match "
-                            "texture list when binding descriptors.");
+    assert((S.empty() || S.size() == T.size()) &&
+           "Sampler list must either be empty or match "
+           "texture list when binding descriptors.");
 
     const size_t ImageInfosCapacity = ImageInfos.capacity();
     const size_t Offset = ImageInfos.size();
