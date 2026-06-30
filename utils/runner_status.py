@@ -123,6 +123,20 @@ def get_runs(vendors):
             seen.add(r["id"])
             unique.append(r)
 
+    # Collapse superseded runs: when a new commit is pushed, GitHub starts a
+    # fresh run and cancels the previous one, but both can be in our window at
+    # once (the old one mid-cancellation, the new one still spinning up jobs).
+    # They share the same workflow name and head branch, so keep only the most
+    # recently created run per (workflow, branch) to avoid reporting stale
+    # counts from an old commit's run.
+    latest_by_key = {}
+    for r in unique:
+        key = (r["name"], r.get("head_branch"))
+        current = latest_by_key.get(key)
+        if current is None or r["created_at"] > current["created_at"]:
+            latest_by_key[key] = r
+    unique = list(latest_by_key.values())
+
     # Pre-filter: if only one vendor requested, skip runs that clearly
     # belong to a different vendor (avoids fetching their jobs).
     if len(vendors) == 1:
@@ -189,6 +203,21 @@ def job_matches_vendor(job, vendor, label):
     )
 
 
+def is_test_job(job):
+    """A split-build matrix entry's test phase, named "<entry> / test"."""
+    return (job.get("name") or "").endswith(" / test")
+
+
+def short_job_name(job):
+    """Strip the "/ build" or "/ test" phase suffix and matrix prefix."""
+    name = job.get("name") or ""
+    for suffix in (" / build", " / test"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    return name.split(",")[-1].strip().rstrip(")")
+
+
 def tz_abbrev(dt):
     """Get short timezone abbreviation, e.g. 'PDT' instead of 'Pacific Daylight Time'."""
     name = dt.strftime("%Z")
@@ -241,15 +270,16 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
             continue
 
         title = run["display_title"]
-        workflow = run["name"]
         created = format_time(run["created_at"])
 
         done = len([j for j in vendor_jobs if j["status"] == "completed"])
         active = [j for j in vendor_jobs if j["status"] == "in_progress"]
-        queued = len([j for j in vendor_jobs if j["status"] == "queued"])
+        queued_jobs = [j for j in vendor_jobs if j["status"] == "queued"]
+        queued_tests = len([j for j in queued_jobs if is_test_job(j)])
+        queued_builds = len(queued_jobs) - queued_tests
 
         # Skip runs where all jobs are done (nothing active or queued)
-        if not active and queued == 0:
+        if not active and not queued_jobs:
             continue
 
         if run["event"] == "schedule":
@@ -259,11 +289,12 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
         else:
             prefix = f"[{run['event']}]"
         run_label = f"{prefix} {title} ({created})"
-        rows.append((run_label, workflow, done, len(active), queued))
+        rows.append((run_label, done, len(active), queued_builds, queued_tests))
 
         for j in active:
-            short = j["name"].split(",")[-1].strip().rstrip(") / build")
-            active_details.append((title, short, j.get("runner_name", "?")))
+            active_details.append(
+                (title, short_job_name(j), j.get("runner_name", "?"))
+            )
 
     header_text = f"=== {vendor.upper()} (runner: {label}{runner_info}) ==="
     print(colorize(vendor, header_text))
@@ -279,32 +310,36 @@ def print_vendor_table(vendor, runs, jobs_cache, runners_cache):
     timestamp = f"as of {local_str} / {utc_str}"
 
     col1_w = max(len(r[0]) for r in rows)
-    col2_w = max(max(len(r[1]) for r in rows), len("Workflow"))
     run_col_header = f"Run ({timestamp})"
     col1_w = max(col1_w, len(run_col_header))
+
+    done_h, active_h, qb_h, qt_h = "Done", "Active", "Queued Builds", "Queued Tests"
     header = (
-        f"{run_col_header:<{col1_w}}  {'Workflow':<{col2_w}}"
-        f"  {'Done':>6}  {'Active':>6}  {'Queued':>6}"
+        f"{run_col_header:<{col1_w}}"
+        f"  {done_h:>6}  {active_h:>6}  {qb_h:>{len(qb_h)}}  {qt_h:>{len(qt_h)}}"
     )
     sep = "=" * len(header)
 
     print(colorize(vendor, sep))
     print(header)
     print(colorize(vendor, sep))
-    for run_label, workflow, done, active, queued in rows:
+    for run_label, done, active, qbuilds, qtests in rows:
         active_str = str(active) if active == 0 else f"*{active}*"
         print(
-            f"{run_label:<{col1_w}}  {workflow:<{col2_w}}"
-            f"  {done:>6}  {active_str:>6}  {queued:>6}"
+            f"{run_label:<{col1_w}}"
+            f"  {done:>6}  {active_str:>6}"
+            f"  {qbuilds:>{len(qb_h)}}  {qtests:>{len(qt_h)}}"
         )
     print(colorize(vendor, sep))
 
-    total_done = sum(r[2] for r in rows)
-    total_active = sum(r[3] for r in rows)
-    total_queued = sum(r[4] for r in rows)
+    total_done = sum(r[1] for r in rows)
+    total_active = sum(r[2] for r in rows)
+    total_qbuilds = sum(r[3] for r in rows)
+    total_qtests = sum(r[4] for r in rows)
     print(
-        f"{'TOTAL':<{col1_w}}  {'':<{col2_w}}"
-        f"  {total_done:>6}  {total_active:>6}  {total_queued:>6}"
+        f"{'TOTAL':<{col1_w}}"
+        f"  {total_done:>6}  {total_active:>6}"
+        f"  {total_qbuilds:>{len(qb_h)}}  {total_qtests:>{len(qt_h)}}"
     )
     print()
 
