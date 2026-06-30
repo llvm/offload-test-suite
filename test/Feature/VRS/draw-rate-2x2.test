@@ -1,0 +1,84 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 position : POSITION;
+};
+
+struct VSOutput {
+    float4 position : SV_POSITION;
+};
+
+VSOutput main(VSInput input) {
+    VSOutput output;
+    output.position = input.position;
+    return output;
+}
+
+#--- pixel.hlsl
+// Encode the per-quad screen-space derivative of SV_Position into the output
+// color. Without VRS the derivative is 1 (one pixel per shading invocation)
+// and red == 1/4 == 0.25. With a 2x2 coarse rate, each shading invocation
+// covers 2x2 pixels, so the derivative across the shading quad is 2 fine
+// pixels and red == 2/4 == 0.5 (similarly for green from ddy).
+float4 main(float4 pos : SV_Position) : SV_Target {
+    return float4(ddx_coarse(pos.x) / 4.0,
+                  ddy_coarse(pos.y) / 4.0,
+                  0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [  0.0,  3.0, 0.0, 1.0,
+             3.0, -3.0, 0.0, 1.0,
+            -3.0, -3.0, 0.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256 # 4x4 @ 16 bytes per pixel
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+ShadingRate: 2x2
+...
+#--- end
+
+# Variable Rate Shading Tier 1 (per-draw RSSetShadingRate) is DirectX-only
+# today. WARP supports the API on Windows 10 1903+.
+# UNSUPPORTED: Vulkan || Metal
+# REQUIRES: VariableShadingRateTier1
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
+
+# All 16 output pixels share the (0.5, 0.5, 0, 1) value computed by the
+# coarse shading invocations, confirming the 2x2 rate took effect.
+# CHECK: Name: Output
+# CHECK-NEXT: Format: Float32
+# CHECK-NEXT: Channels: 4
+# CHECK-NEXT: Data: [ 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1,
+# CHECK-NEXT: 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1,
+# CHECK-NEXT: 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1,
+# CHECK-NEXT: 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1,
+# CHECK-NEXT: 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1, 0.5, 0.5, 0, 1,
+# CHECK-NEXT: 0.5, 0.5, 0, 1 ]

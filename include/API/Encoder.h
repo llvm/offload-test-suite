@@ -10,6 +10,7 @@
 #define OFFLOADTEST_API_ENCODER_H
 
 #include "API/API.h"
+#include "API/Enums.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerUnion.h"
@@ -149,6 +150,15 @@ public:
 
   virtual void setVertexBuffer(uint32_t Slot, Buffer *VB, size_t Offset,
                                uint32_t Stride) = 0;
+
+  /// Override the pipeline's default per-draw shading rate. Backends that do
+  /// not implement Variable Rate Shading are free to ignore this; tests that
+  /// depend on it should mark themselves UNSUPPORTED on those backends.
+  virtual void setShadingRate(ShadingRate Rate) {}
+
+  /// Enable the SV_ShadingRate per-primitive input. Backends that do not
+  /// implement Variable Rate Shading Tier 2 are free to ignore this.
+  virtual void enablePrimitiveShadingRate() {}
 
   virtual llvm::Error drawInstanced(const PipelineState &PSO,
                                     uint32_t VertexCount,

@@ -634,6 +634,8 @@ struct Pipeline {
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
+  std::optional<ShadingRate> ShadingRateOverride;
+  bool PrimitiveShadingRate = false;
   AccelerationStructureDescs AccelStructs;
   std::optional<RayTracingPipelineConfig> RTConfig;
   llvm::SmallVector<HitGroup> HitGroups;
@@ -1042,6 +1044,20 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
     ENUM_CASE(PointList);
     ENUM_CASE(PatchList);
     ENUM_CASE(LineList);
+#undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::ShadingRate> {
+  static void enumeration(IO &I, offloadtest::ShadingRate &V) {
+#define ENUM_CASE(Val, Yaml) I.enumCase(V, Yaml, offloadtest::ShadingRate::Val)
+    ENUM_CASE(Rate_1x1, "1x1");
+    ENUM_CASE(Rate_1x2, "1x2");
+    ENUM_CASE(Rate_2x1, "2x1");
+    ENUM_CASE(Rate_2x2, "2x2");
+    ENUM_CASE(Rate_2x4, "2x4");
+    ENUM_CASE(Rate_4x2, "4x2");
+    ENUM_CASE(Rate_4x4, "4x4");
 #undef ENUM_CASE
   }
 };
