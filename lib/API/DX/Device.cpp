@@ -1472,7 +1472,6 @@ public:
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
             SamplerDescriptorIdx;
 
-        assert(Binding.DescriptorCount == 1 && "Manon expected this to be 1.");
         RangeIdx++;
         SamplerDescriptorIdx += Binding.DescriptorCount;
       }
