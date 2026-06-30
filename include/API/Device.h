@@ -301,14 +301,13 @@ protected:
 };
 
 class Device {
-protected:
+public:
   std::string Description;
   std::string DriverName;
   std::string DriverVersion;
   std::string GPUGeneration;
   uint16_t FamilyPrefix = 0;
 
-public:
   virtual const Capabilities &getCapabilities() = 0;
   virtual llvm::StringRef getAPIName() const = 0;
   virtual GPUAPI getAPI() const = 0;

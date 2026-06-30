@@ -125,6 +125,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
 llvm::Expected<std::unique_ptr<DescriptorSets>>
 buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
                     llvm::ArrayRef<DescriptorTable> DescTables);
+llvm::Error executeUnitTest(Device &Dev, Pipeline &P);
 
 } // namespace offloadtest
 
