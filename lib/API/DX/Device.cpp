@@ -1084,7 +1084,7 @@ public:
   void insertDebugSignpost(llvm::StringRef Label) override {}
 
   void bindDescriptorSets(const PipelineState &PSO,
-                          const DescriptorSets &DSets) override {
+                          const DescriptorSets &DSets) {
     const auto &DXPSO = llvm::cast<DXPipelineState>(PSO);
     const DXDescriptorSets &DSetsDX = llvm::cast<DXDescriptorSets>(DSets);
     assert(DSetsDX.Sets.size() == DXPSO.Layout.Sets.size() &&
@@ -1112,6 +1112,16 @@ public:
         J += 1;
       }
     }
+  }
+
+  void bindComputeDescriptorSets(const PipelineState &PSO,
+                                 const DescriptorSets &DSets) override {
+    return bindDescriptorSets(PSO, DSets);
+  }
+
+  void bindRayTracingDescriptorSets(const PipelineState &PSO,
+                                    const DescriptorSets &DSets) override {
+    return bindDescriptorSets(PSO, DSets);
   }
 
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,
@@ -3076,21 +3086,24 @@ public:
       return EncoderOrErr.takeError();
     auto &Encoder = *EncoderOrErr.get();
 
-    if (DescSets && P.Settings.DX.RootParams.size() == 0)
-      Encoder.bindDescriptorSets(*IS.Pipeline, *DescSets);
-
     if (P.isRayTracing()) {
+      if (P.Settings.DX.RootParams.empty())
+        Encoder.bindRayTracingDescriptorSets(*IS.Pipeline, *DescSets);
+
       if (auto Err = Encoder.dispatchRays(
               *IS.Pipeline, *IS.SBT, P.DispatchParameters.DispatchGroupCount[0],
               P.DispatchParameters.DispatchGroupCount[1],
               P.DispatchParameters.DispatchGroupCount[2]))
         return Err;
-    } else if (auto Err = Encoder.dispatch(
-                   *IS.Pipeline.get(),
-                   P.DispatchParameters.DispatchGroupCount[0],
-                   P.DispatchParameters.DispatchGroupCount[1],
-                   P.DispatchParameters.DispatchGroupCount[2])) {
-      return Err;
+    } else {
+      if (P.Settings.DX.RootParams.empty())
+        Encoder.bindComputeDescriptorSets(*IS.Pipeline, *DescSets);
+
+      if (auto Err = Encoder.dispatch(
+              *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
+        return Err;
     }
     Encoder.endEncoding();
 

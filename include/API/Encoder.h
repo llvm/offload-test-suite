@@ -88,8 +88,11 @@ class ComputeEncoder : public CommandEncoder {
 public:
   using CommandEncoder::CommandEncoder;
 
-  virtual void bindDescriptorSets(const PipelineState &PSO,
-                                  const DescriptorSets &DSets) = 0;
+  virtual void bindComputeDescriptorSets(const PipelineState &PSO,
+                                         const DescriptorSets &DSets) = 0;
+
+  virtual void bindRayTracingDescriptorSets(const PipelineState &PSO,
+                                            const DescriptorSets &DSets) = 0;
 
   /// Dispatch a compute grid. GroupCount specifies how many workgroups to
   /// launch in each dimension. The workgroup size is derived from \p PSO

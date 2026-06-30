@@ -991,9 +991,15 @@ public:
     CB.insertDebugSignpost(Label);
   }
 
-  void bindDescriptorSets(const PipelineState &PSO,
-                          const DescriptorSets &DSets) override {
-    assert(false && "bindDescriptorSets is not implemented on vulkan.");
+  void bindComputeDescriptorSets(const PipelineState &PSO,
+                                 const DescriptorSets &DSets) override {
+    assert(false && "bindComputeDescriptorSets is not implemented on vulkan.");
+  }
+
+  void bindRayTracingDescriptorSets(const PipelineState &PSO,
+                                    const DescriptorSets &DSets) override {
+    assert(false &&
+           "bindRayTracingDescriptorSets is not implemented on vulkan.");
   }
 
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,

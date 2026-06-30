@@ -794,9 +794,15 @@ public:
           NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
-  void bindDescriptorSets(const PipelineState &PSO,
-                          const DescriptorSets &DSets) override {
-    assert(false && "bindDescriptorSets is not implemented on metal.");
+  void bindComputeDescriptorSets(const PipelineState &PSO,
+                                 const DescriptorSets &DSets) override {
+    assert(false && "bindComputeDescriptorSets is not implemented on metal.");
+  }
+
+  void bindRayTracingDescriptorSets(const PipelineState &PSO,
+                                    const DescriptorSets &DSets) override {
+    assert(false &&
+           "bindRayTracingDescriptorSets is not implemented on metal.");
   }
 
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,
