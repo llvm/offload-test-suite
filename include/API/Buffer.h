@@ -20,24 +20,63 @@
 
 namespace offloadtest {
 
+class Device;
+
+enum class BufferShaderAccessType {
+  Raw,
+  Typed,
+  Structured,
+};
+
+union BufferShaderAccessTypeParams {
+  Format Fmt;               // Typed Only
+  uint32_t StructureStride; // Structured Only
+};
+
 enum class BufferUsage {
   // Generic storage buffer (UAV/SSBO). Also covers acceleration-structure
   // build inputs (vertex/index/instance buffers): backends widen this with
   // any native AS-input flags they need.
   Storage,
+  ConstantBuffer,
+  IndexBuffer,
   VertexBuffer,
+  IndirectArgs,
 };
 
 struct BufferCreateDesc {
   MemoryLocation Location;
+  MemoryBacking Backing;
   BufferUsage Usage;
+  BufferShaderAccessType AccessType;
+  BufferShaderAccessTypeParams AccessTypeParams;
+  bool HasCounter;
 
   static BufferCreateDesc uploadBuffer() {
-    return BufferCreateDesc{MemoryLocation::CpuToGpu, BufferUsage::Storage};
+    return BufferCreateDesc{MemoryLocation::CpuToGpu,
+                            MemoryBacking::Automatic,
+                            BufferUsage::Storage,
+                            BufferShaderAccessType::Raw,
+                            {},
+                            false};
   }
 
   static BufferCreateDesc readbackBuffer() {
-    return BufferCreateDesc{MemoryLocation::GpuToCpu, BufferUsage::Storage};
+    return BufferCreateDesc{MemoryLocation::GpuToCpu,
+                            MemoryBacking::Automatic,
+                            BufferUsage::Storage,
+                            BufferShaderAccessType::Raw,
+                            {},
+                            false};
+  }
+
+  static BufferCreateDesc scratchBuffer() {
+    return BufferCreateDesc{MemoryLocation::GpuOnly,
+                            MemoryBacking::Automatic,
+                            BufferUsage::Storage,
+                            BufferShaderAccessType::Raw,
+                            {},
+                            false};
   }
 };
 
@@ -47,6 +86,9 @@ class Buffer {
 public:
   virtual ~Buffer();
   virtual size_t getSizeInBytes() const = 0;
+
+  // The granularity, in bytes, of a single sparse tile for this buffer.
+  virtual size_t querySparseTileSizeInBytes(const Device &Dev) const = 0;
 
   // Maps the buffer's memory for host access. Only valid for CpuToGpu and
   // GpuToCpu buffers; returns an error for GpuOnly. Each successful map() must
@@ -58,6 +100,7 @@ public:
   Buffer &operator=(const Buffer &) = delete;
 
   GPUAPI getAPI() const { return API; }
+  virtual const BufferCreateDesc &getDesc() const = 0;
 
 protected:
   explicit Buffer(GPUAPI API) : API(API) {}

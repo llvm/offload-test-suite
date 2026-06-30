@@ -128,7 +128,7 @@ void MTLTopLevelArgumentBuffer::setRoot32BitConstant(
 }
 
 void MTLTopLevelArgumentBuffer::setRoot32BitConstants(
-    uint32_t Index, uint32_t Num32BitValuesToSet, const void *pSrcData,
+    uint32_t Index, uint32_t Num32BitValuesToSet, const void *PSrcData,
     uint32_t DestOffsetIn32BitValues) const {
   if (!Buffer || !checkIndex(Index) ||
       !checkResourceType(Index, IRResourceTypeConstant))
@@ -148,7 +148,7 @@ void MTLTopLevelArgumentBuffer::setRoot32BitConstants(
   std::byte *Dst = static_cast<std::byte *>(Buffer->contents()) +
                    Loc.topLevelOffset +
                    DestOffsetIn32BitValues * sizeof(uint32_t);
-  memcpy(Dst, pSrcData, Num32BitValuesToSet * sizeof(uint32_t));
+  memcpy(Dst, PSrcData, Num32BitValuesToSet * sizeof(uint32_t));
 }
 
 void MTLTopLevelArgumentBuffer::setRootConstantBufferView(
@@ -187,4 +187,8 @@ void MTLTopLevelArgumentBuffer::bind(
 
   Encoder->useResource(Buffer, MTL::ResourceUsageRead);
   Encoder->setBuffer(Buffer, 0, kIRArgumentBufferBindPoint);
+}
+
+uint64_t MTLTopLevelArgumentBuffer::getGPUAddress() const {
+  return Buffer ? Buffer->gpuAddress() : 0;
 }

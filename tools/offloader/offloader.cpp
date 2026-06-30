@@ -113,16 +113,36 @@ static int run() {
   YIn >> PipelineDesc;
   ExitOnErr(llvm::errorCodeToError(YIn.error()));
 
-  // Read in the shaders
-  for (size_t I = 0; I < InputShader.size(); ++I) {
-    PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
-  }
+  // Read in the shaders.
+  //
+  // RayTracing pipelines compile every entry point — raygen, miss,
+  // closest-hit, any-hit, intersection, callable — into a single DXIL
+  // library via `dxc -T lib_6_x` / `clang-dxc -T lib_6_x`. That's the
+  // shape every real DXR app ships: D3D12's CreateStateObject requires a
+  // DXIL-library subobject anyway, and the driver fuses entry points
+  // across the whole library at link time. So when an RT pipeline is
+  // paired with a single input file, fan that one blob across every
+  // Shaders[] entry rather than asking the test author to duplicate the
+  // path N times on the offloader command line.
+  if (PipelineDesc.isRayTracing() && InputShader.size() == 1 &&
+      PipelineDesc.Shaders.size() > 1) {
+    const std::unique_ptr<MemoryBuffer> Lib = readFile(InputShader[0]);
+    const StringRef LibBytes = Lib->getBuffer();
+    const StringRef LibName = Lib->getBufferIdentifier();
+    for (size_t I = 0; I < PipelineDesc.Shaders.size(); ++I)
+      PipelineDesc.Shaders[I].Shader =
+          MemoryBuffer::getMemBufferCopy(LibBytes, LibName);
+  } else {
+    for (size_t I = 0; I < InputShader.size(); ++I) {
+      PipelineDesc.Shaders[I].Shader = readFile(InputShader[I]);
+    }
 
-  if (InputShader.size() != PipelineDesc.Shaders.size())
-    ExitOnErr(createStringError(
-        std::errc::invalid_argument,
-        "Pipeline description expects %d shader(s) %d provided",
-        PipelineDesc.Shaders.size(), InputShader.size()));
+    if (InputShader.size() != PipelineDesc.Shaders.size())
+      ExitOnErr(createStringError(
+          std::errc::invalid_argument,
+          "Pipeline description expects %d shader(s) %d provided",
+          PipelineDesc.Shaders.size(), InputShader.size()));
+  }
 
   // Try to guess the API by reading the shader binary.
   const StringRef Binary = PipelineDesc.Shaders[0].Shader->getBuffer();

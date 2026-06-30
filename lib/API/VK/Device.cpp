@@ -19,6 +19,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/MathExtras.h"
 
 #include "../Util.h"
 
@@ -223,6 +224,18 @@ static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
     return VK_SHADER_STAGE_TASK_BIT_EXT;
   case Stages::Mesh:
     return VK_SHADER_STAGE_MESH_BIT_EXT;
+  case Stages::RayGeneration:
+    return VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+  case Stages::Miss:
+    return VK_SHADER_STAGE_MISS_BIT_KHR;
+  case Stages::ClosestHit:
+    return VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+  case Stages::AnyHit:
+    return VK_SHADER_STAGE_ANY_HIT_BIT_KHR;
+  case Stages::Intersection:
+    return VK_SHADER_STAGE_INTERSECTION_BIT_KHR;
+  case Stages::Callable:
+    return VK_SHADER_STAGE_CALLABLE_BIT_KHR;
   }
   llvm_unreachable("All cases handled");
 }
@@ -235,6 +248,8 @@ static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
   case PrimitiveTopology::PatchList:
     return VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+  case PrimitiveTopology::LineList:
+    return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
@@ -427,20 +442,33 @@ class VulkanBuffer : public offloadtest::Buffer {
 public:
   VkDevice Dev; // Needed for clean-up
   VkBuffer Buffer;
+  VkBuffer CounterBuffer;
   VkDeviceMemory Memory;
   VkDeviceAddress DeviceAddress;
   std::string Name;
   BufferCreateDesc Desc;
   size_t SizeInBytes;
 
-  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
-               VkDeviceAddress DeviceAddress, llvm::StringRef Name,
-               BufferCreateDesc Desc, size_t SizeInBytes)
+  VulkanBuffer(VkDevice Dev, VkBuffer Buffer, VkBuffer CounterBuffer,
+               VkDeviceMemory Memory, VkDeviceAddress DeviceAddress,
+               llvm::StringRef Name, BufferCreateDesc Desc, size_t SizeInBytes)
       : offloadtest::Buffer(GPUAPI::Vulkan), Dev(Dev), Buffer(Buffer),
-        Memory(Memory), DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
+        CounterBuffer(CounterBuffer), Memory(Memory),
+        DeviceAddress(DeviceAddress), Name(Name), Desc(Desc),
         SizeInBytes(SizeInBytes) {}
 
+  VulkanBuffer(const VulkanBuffer &) = delete;
+  VulkanBuffer(VulkanBuffer &&) = delete;
+  VulkanBuffer &operator=(const VulkanBuffer &) = delete;
+  VulkanBuffer &operator=(VulkanBuffer &&) = delete;
+
   size_t getSizeInBytes() const override { return SizeInBytes; }
+
+  size_t querySparseTileSizeInBytes(const Device & /*Dev*/) const override {
+    VkMemoryRequirements MemReqs;
+    vkGetBufferMemoryRequirements(Dev, Buffer, &MemReqs);
+    return MemReqs.alignment;
+  }
 
   llvm::Expected<void *> map() override {
     if (Desc.Location == MemoryLocation::GpuOnly)
@@ -466,6 +494,8 @@ public:
   void unmap() override { vkUnmapMemory(Dev, Memory); }
 
   ~VulkanBuffer() override {
+    if (CounterBuffer != nullptr)
+      vkDestroyBuffer(Dev, CounterBuffer, nullptr);
     vkDestroyBuffer(Dev, Buffer, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
   }
@@ -473,6 +503,8 @@ public:
   // Only valid when the buffer was created with VK_BUFFER_USAGE_SHADER_DEVICE_
   // ADDRESS_BIT, which the device adds whenever ray tracing is supported.
   VkDeviceAddress getDeviceAddress() const { return DeviceAddress; }
+
+  const BufferCreateDesc &getDesc() const override { return Desc; }
 
   static bool classof(const offloadtest::Buffer *B) {
     return B->getAPI() == GPUAPI::Vulkan;
@@ -492,17 +524,43 @@ public:
   VkImageView View = VK_NULL_HANDLE;
   std::string Name;
   TextureCreateDesc Desc;
+  VkImageTiling Tiling = VK_IMAGE_TILING_OPTIMAL;
+
+  VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+  VkImageSubresourceRange FullRange;
+  bool IsInUndefinedLayout = true;
+  uint64_t SizeInBytes;
 
   VulkanTexture(VkDevice Dev, VkImage Image, VkDeviceMemory Memory,
-                llvm::StringRef Name, TextureCreateDesc Desc)
+                llvm::StringRef Name, TextureCreateDesc Desc,
+                VkImageLayout PreferredLayout,
+                VkImageSubresourceRange FullRange, VkImageTiling Tiling,
+                uint64_t SizeInBytes)
       : offloadtest::Texture(GPUAPI::Vulkan), Dev(Dev), Image(Image),
-        Memory(Memory), Name(Name), Desc(Desc) {}
+        Memory(Memory), Name(Name), Desc(Desc), Tiling(Tiling),
+        PreferredLayout(PreferredLayout), FullRange(FullRange),
+        SizeInBytes(SizeInBytes) {}
 
   ~VulkanTexture() override {
     if (View)
       vkDestroyImageView(Dev, View, nullptr);
     vkDestroyImage(Dev, Image, nullptr);
     vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  VkImageLayout preferredLayoutOrUndefined() {
+    return IsInUndefinedLayout ? VK_IMAGE_LAYOUT_UNDEFINED : PreferredLayout;
+  }
+
+  TileShape querySparseTileShape(const Device & /*Dev*/) const override {
+    uint32_t Count = 0;
+    vkGetImageSparseMemoryRequirements(Dev, Image, &Count, nullptr);
+    if (Count == 0)
+      return TileShape{};
+    llvm::SmallVector<VkSparseImageMemoryRequirements> Reqs(Count);
+    vkGetImageSparseMemoryRequirements(Dev, Image, &Count, Reqs.data());
+    const VkExtent3D G = Reqs[0].formatProperties.imageGranularity;
+    return TileShape{G.width, G.height, G.depth};
   }
 
   const TextureCreateDesc &getDesc() const override { return Desc; }
@@ -629,6 +687,22 @@ public:
   llvm::Expected<offloadtest::SubmitResult>
   submit(llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs)
       override;
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Buffer & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support tile mappings.");
+  }
+
+  llvm::Expected<offloadtest::SubmitResult>
+  updateTileMappings(offloadtest::Texture & /*Resource*/,
+                     llvm::ArrayRef<TileMapping> /*Mappings*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support tile mappings.");
+  }
 };
 
 class VulkanDevice; // forward decl — defined below in this same anon ns
@@ -704,6 +778,30 @@ public:
   VkAccessFlags PendingSrcAccess = VK_ACCESS_HOST_WRITE_BIT;
   VkPipelineStageFlags PendingDstStage = 0;
   VkAccessFlags PendingDstAccess = 0;
+  llvm::SmallVector<VkImageMemoryBarrier> PendingImageTransitions;
+
+  void addImageTransition(VkAccessFlags SrcAccessMask,
+                          VkAccessFlags DstAccessMask, VkImageLayout OldLayout,
+                          VkImageLayout NewLayout, VulkanTexture &Texture) {
+    assert(
+        NewLayout != VK_IMAGE_LAYOUT_UNDEFINED &&
+        "There should be no reason to ever transition to an undefined layout.");
+
+    PendingImageTransitions.push_back(VkImageMemoryBarrier{
+        VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, /*sType*/
+        nullptr,                                /*pNext*/
+        SrcAccessMask,
+        DstAccessMask,
+        OldLayout,
+        NewLayout,
+        0, /*srcQueueFamilyIndex*/
+        0, /*dstQueueFamilyIndex*/
+        Texture.Image,
+        Texture.FullRange,
+    });
+
+    Texture.IsInUndefinedLayout = false;
+  }
 
   void addPendingBarrier(VkPipelineStageFlags Stage, VkAccessFlags Access) {
     PendingDstStage |= Stage;
@@ -711,22 +809,20 @@ public:
   }
 
   void flushBarrier() {
-    if (PendingSrcStage == 0) {
-      // Nothing produced yet — no barrier needed, but carry dst forward as
-      // the next src (the command we're about to run will produce at these
-      // stages).
-      PendingSrcStage = PendingDstStage;
-      PendingSrcAccess = PendingDstAccess;
-      PendingDstStage = 0;
-      PendingDstAccess = 0;
-      return;
+    if (PendingSrcStage != 0 || !PendingImageTransitions.empty()) {
+      VkMemoryBarrier Barrier = {};
+      Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+      Barrier.srcAccessMask = PendingSrcAccess;
+      Barrier.dstAccessMask = PendingDstAccess;
+      vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
+                           &Barrier, 0, nullptr, PendingImageTransitions.size(),
+                           PendingImageTransitions.size() == 0
+                               ? nullptr
+                               : PendingImageTransitions.data());
+
+      PendingImageTransitions.clear();
     }
-    VkMemoryBarrier Barrier = {};
-    Barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-    Barrier.srcAccessMask = PendingSrcAccess;
-    Barrier.dstAccessMask = PendingDstAccess;
-    vkCmdPipelineBarrier(CmdBuffer, PendingSrcStage, PendingDstStage, 0, 1,
-                         &Barrier, 0, nullptr, 0, nullptr);
+
     PendingSrcStage = PendingDstStage;
     PendingSrcAccess = PendingDstAccess;
     PendingDstStage = 0;
@@ -789,12 +885,17 @@ public:
   VkPipeline Pipeline;
   VkPipelineLayout Layout;
   llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+  // True for pipelines created via createPipelineRT — used by SBT / dispatch
+  // code to safely downcast to VKRayTracingPipelineState.
+  bool IsRayTracing = false;
 
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
-                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+                      llvm::SmallVector<VkDescriptorSetLayout> SetLayouts,
+                      bool IsRT = false)
       : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
-        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)) {}
+        Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)),
+        IsRayTracing(IsRT) {}
 
   ~VulkanPipelineState() override {
     vkDestroyPipeline(Dev, Pipeline, nullptr);
@@ -805,6 +906,71 @@ public:
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+/// RT pipeline state with the extra metadata needed to build a shader binding
+/// table — the group-index mapping resolves SBT-record `ShaderName`s to the
+/// shader-group index in this pipeline, and the per-bucket counts allow the
+/// SBT builder to slice the contiguous handle blob returned by
+/// `vkGetRayTracingShaderGroupHandlesKHR` into raygen / miss / hit / callable
+/// regions.
+class VKRayTracingPipelineState : public VulkanPipelineState {
+public:
+  // Maps each raygen / miss / callable shader's `EntryPoint` and each
+  // hit group's `Name` to its index in the pipeline's
+  // `VkRayTracingShaderGroupCreateInfoKHR[]`.
+  llvm::StringMap<uint32_t> ShaderGroupIndices;
+
+  // Group counts laid out in pipeline order: raygen, miss, hit, callable.
+  uint32_t NumRaygenGroups = 0;
+  uint32_t NumMissGroups = 0;
+  uint32_t NumHitGroups = 0;
+  uint32_t NumCallableGroups = 0;
+
+  uint32_t totalGroupCount() const {
+    return NumRaygenGroups + NumMissGroups + NumHitGroups + NumCallableGroups;
+  }
+
+  VKRayTracingPipelineState(llvm::StringRef Name, VkDevice Dev,
+                            VkPipeline Pipeline, VkPipelineLayout Layout,
+                            llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+      : VulkanPipelineState(Name, Dev, Pipeline, Layout, std::move(SetLayouts),
+                            /*IsRT=*/true) {}
+
+  static bool classof(const offloadtest::PipelineState *B) {
+    if (B->getAPI() != GPUAPI::Vulkan)
+      return false;
+    return static_cast<const VulkanPipelineState *>(B)->IsRayTracing;
+  }
+};
+
+class VKShaderBindingTable : public offloadtest::ShaderBindingTable {
+public:
+  VkDevice Dev;
+  VkBuffer Buffer;
+  VkDeviceMemory Memory;
+  VkStridedDeviceAddressRegionKHR RaygenRegion{};
+  VkStridedDeviceAddressRegionKHR MissRegion{};
+  VkStridedDeviceAddressRegionKHR HitRegion{};
+  VkStridedDeviceAddressRegionKHR CallableRegion{};
+
+  VKShaderBindingTable(VkDevice Dev, VkBuffer Buffer, VkDeviceMemory Memory,
+                       VkStridedDeviceAddressRegionKHR Raygen,
+                       VkStridedDeviceAddressRegionKHR Miss,
+                       VkStridedDeviceAddressRegionKHR Hit,
+                       VkStridedDeviceAddressRegionKHR Callable)
+      : offloadtest::ShaderBindingTable(GPUAPI::Vulkan), Dev(Dev),
+        Buffer(Buffer), Memory(Memory), RaygenRegion(Raygen), MissRegion(Miss),
+        HitRegion(Hit), CallableRegion(Callable) {}
+
+  ~VKShaderBindingTable() override {
+    vkDestroyBuffer(Dev, Buffer, nullptr);
+    vkFreeMemory(Dev, Memory, nullptr);
+  }
+
+  static bool classof(const offloadtest::ShaderBindingTable *S) {
+    return S->getAPI() == GPUAPI::Vulkan;
   }
 };
 
@@ -855,8 +1021,8 @@ public:
   llvm::Error copyBufferToBuffer(offloadtest::Buffer &Src, size_t SrcOffset,
                                  offloadtest::Buffer &Dst, size_t DstOffset,
                                  size_t Size) override {
-    auto &VKSrc = static_cast<VulkanBuffer &>(Src);
-    auto &VKDst = static_cast<VulkanBuffer &>(Dst);
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
     VkBufferCopy Region = {};
     Region.srcOffset = SrcOffset;
     Region.dstOffset = DstOffset;
@@ -867,9 +1033,101 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error copyBufferToTexture(offloadtest::Buffer &Src,
+                                  offloadtest::Texture &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst);
+    VKDst.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst);
+
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyCounterToBuffer(offloadtest::Buffer &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanBuffer>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
+
+    if (!VKSrc.Desc.HasCounter)
+      return llvm::createStringError(
+          "Counter resource passed does not hvae a counter.");
+
+    const VkBufferCopy Region{
+        0,               /*srcOffset*/
+        0,               /*dstOffset*/
+        sizeof(uint32_t) /*size*/
+    };
+    addDstBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    insertDebugSignpost("copyCounterToBuffer 4B");
+    vkCmdCopyBuffer(CB.CmdBuffer, VKSrc.CounterBuffer, VKDst.Buffer, 1,
+                    &Region);
+    return llvm::Error::success();
+  }
+
+  llvm::Error copyTextureToBuffer(offloadtest::Texture &Src,
+                                  offloadtest::Buffer &Dst) override {
+    auto &VKSrc = llvm::cast<VulkanTexture>(Src);
+    auto &VKDst = llvm::cast<VulkanBuffer>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT,        /*DstAccessMask*/
+                          VKSrc.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
+                          VKSrc);
+    VKSrc.IsInUndefinedLayout = false;
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    insertDebugSignpost(
+        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
+                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
+                           0, nullptr);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,              /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
+                          VKSrc.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKSrc);
+
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs VulkanDevice's full type for access to
   // the device-loaded ray-tracing entry points and helpers.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
+
+  // Defined out-of-line below — needs VulkanDevice for the RT pipeline
+  // entry points and VKRayTracingPipelineState's full type.
+  llvm::Error dispatchRays(const PipelineState &PSO,
+                           const ShaderBindingTable &SBT, uint32_t Width,
+                           uint32_t Height, uint32_t Depth) override;
 
   void endEncodingImpl() override { popDebugGroup(); }
 };
@@ -926,14 +1184,16 @@ public:
 
 class VulkanRenderEncoder : public offloadtest::RenderEncoder {
   VulkanCommandBuffer &CB;
+  offloadtest::RenderPassBeginDesc Desc;
 
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
   bool ScissorSet = false;
 
 public:
-  VulkanRenderEncoder(VulkanCommandBuffer &CB)
-      : RenderEncoder(GPUAPI::Vulkan), CB(CB) {
+  VulkanRenderEncoder(VulkanCommandBuffer &CB,
+                      const offloadtest::RenderPassBeginDesc &Desc)
+      : RenderEncoder(GPUAPI::Vulkan), CB(CB), Desc(Desc) {
     pushDebugGroup("RenderEncoder");
   }
   VulkanRenderEncoder(const VulkanRenderEncoder &CB) = delete;
@@ -1034,6 +1294,29 @@ public:
 
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
+
+    for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+      CB.addImageTransition(
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                      /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                      /*NewLayout*/
+          Tex);
+    }
+
+    if (Desc.DepthStencil) {
+      auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+      CB.addImageTransition(
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*SrcAccessMask*/
+          CB.PendingSrcAccess,                              /*DstAccessMask*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*OldLayout*/
+          Tex.PreferredLayout,                              /*NewLayout*/
+          Tex);
+    }
+
     popDebugGroup();
   }
 };
@@ -1120,6 +1403,34 @@ VulkanCommandBuffer::createRenderEncoder(
     ClearValues.push_back(CV);
   }
 
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+
+    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
+        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
   VkFramebufferCreateInfo FBCI = {};
   FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
   FBCI.renderPass = VKPass.Handle;
@@ -1149,9 +1460,11 @@ VulkanCommandBuffer::createRenderEncoder(
   BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
   BeginInfo.pClearValues = ClearValues.data();
 
+  this->flushBarrier();
+
   vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-  return std::make_unique<VulkanRenderEncoder>(*this);
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
 }
 
 class VulkanDevice : public offloadtest::Device {
@@ -1180,15 +1493,23 @@ private:
   PFN_vkCmdInsertDebugUtilsLabelEXT CmdInsertDebugUtilsLabel = nullptr;
   MeshShaderFunctions MeshShaderFns;
 
-  bool HasRayTracingSupport = false;
-  struct RaytracingFunctions {
-    PFN_vkCreateAccelerationStructureKHR CreateAS = nullptr;
-    PFN_vkDestroyAccelerationStructureKHR DestroyAS = nullptr;
+  bool HasASSupport = false;
+  bool HasRTPipelineSupport = false;
+  struct ASFunctions {
+    PFN_vkCreateAccelerationStructureKHR Create = nullptr;
+    PFN_vkDestroyAccelerationStructureKHR Destroy = nullptr;
     PFN_vkGetAccelerationStructureBuildSizesKHR GetBuildSizes = nullptr;
     PFN_vkGetAccelerationStructureDeviceAddressKHR GetDeviceAddress = nullptr;
     PFN_vkCmdBuildAccelerationStructuresKHR CmdBuild = nullptr;
   };
-  RaytracingFunctions RT;
+  ASFunctions AS;
+  struct RTPipelineFunctions {
+    PFN_vkCreateRayTracingPipelinesKHR CreatePipelines = nullptr;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR GetGroupHandles = nullptr;
+    PFN_vkCmdTraceRaysKHR CmdTraceRays = nullptr;
+  };
+  RTPipelineFunctions RT;
+  VkPhysicalDeviceRayTracingPipelinePropertiesKHR RTPipelineProps{};
 
   struct BufferRef {
     VkBuffer Buffer;
@@ -1260,16 +1581,14 @@ private:
     VkDescriptorPool Pool = VK_NULL_HANDLE;
 
     std::unique_ptr<PipelineState> Pipeline;
+    // Lifetime-tied to the pipeline; only set for RT pipelines.
+    std::unique_ptr<offloadtest::ShaderBindingTable> SBT;
 
-    // FrameBuffer associated data for offscreen rendering.
-    VkFramebuffer FrameBuffer = VK_NULL_HANDLE;
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
-
-    uint32_t ShaderStageMask = 0;
 
     llvm::SmallVector<ResourceBundle> Resources;
     llvm::SmallVector<VkDescriptorSet> DescriptorSets;
@@ -1406,6 +1725,10 @@ public:
     const bool HasRayQueryExt =
         HasASExts && isExtensionSupported(AvailableDeviceExtensions,
                                           VK_KHR_RAY_QUERY_EXTENSION_NAME);
+    const bool HasRayTracingPipelineExt =
+        HasASExts &&
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
 
     VkPhysicalDeviceAccelerationStructureFeaturesKHR ASFeatures{};
     // On Vulkan 1.1 we need a separate BDA features struct; on 1.2+
@@ -1413,6 +1736,7 @@ public:
     // already in the chain, and adding a duplicate is a validation error.
     VkPhysicalDeviceBufferDeviceAddressFeatures BDAFeatures{};
     VkPhysicalDeviceRayQueryFeaturesKHR RayQueryFeatures{};
+    VkPhysicalDeviceRayTracingPipelineFeaturesKHR RTPipelineFeatures{};
     if (HasASExts) {
       ASFeatures.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR;
@@ -1429,6 +1753,12 @@ public:
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
         RayQueryFeatures.pNext = Features.pNext;
         Features.pNext = &RayQueryFeatures;
+      }
+      if (HasRayTracingPipelineExt) {
+        RTPipelineFeatures.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
+        RTPipelineFeatures.pNext = Features.pNext;
+        Features.pNext = &RTPipelineFeatures;
       }
     }
 
@@ -1510,6 +1840,22 @@ public:
               VK_KHR_RAY_QUERY_EXTENSION_NAME);
         EnabledDeviceExtensions.push_back(VK_KHR_RAY_QUERY_EXTENSION_NAME);
       }
+      if (HasRayTracingPipelineExt) {
+        if (!RTPipelineFeatures.rayTracingPipeline)
+          return llvm::createStringError(
+              std::errc::not_supported,
+              "Device advertises %s but reports rayTracingPipeline=0",
+              VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+        // Only the base feature is needed for DispatchRays. Capture-replay /
+        // trace-rays-indirect / chained-mode aren't used.
+        RTPipelineFeatures.rayTracingPipelineShaderGroupHandleCaptureReplay = 0;
+        RTPipelineFeatures
+            .rayTracingPipelineShaderGroupHandleCaptureReplayMixed = 0;
+        RTPipelineFeatures.rayTracingPipelineTraceRaysIndirect = 0;
+        RTPipelineFeatures.rayTraversalPrimitiveCulling = 0;
+        EnabledDeviceExtensions.push_back(
+            VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+      }
     }
 
     DeviceInfo.enabledExtensionCount =
@@ -1536,26 +1882,48 @@ public:
         Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
         std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
 
-    // Load ray tracing function pointers after device creation.
+    // Load acceleration-structure and ray-tracing-pipeline function pointers
+    // after device creation. These two feature sets are independent; the RT
+    // pipeline path needs AS as a prerequisite, but AS-only support (ray
+    // query in compute) is a complete configuration on its own.
     if (HasASExts) {
-      Dev->HasRayTracingSupport = true;
-      Dev->RT.CreateAS = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
+      Dev->HasASSupport = true;
+      Dev->AS.Create = reinterpret_cast<PFN_vkCreateAccelerationStructureKHR>(
           vkGetDeviceProcAddr(Device, "vkCreateAccelerationStructureKHR"));
-      Dev->RT.DestroyAS =
-          reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
-              vkGetDeviceProcAddr(Device, "vkDestroyAccelerationStructureKHR"));
-      Dev->RT.GetBuildSizes =
+      Dev->AS.Destroy = reinterpret_cast<PFN_vkDestroyAccelerationStructureKHR>(
+          vkGetDeviceProcAddr(Device, "vkDestroyAccelerationStructureKHR"));
+      Dev->AS.GetBuildSizes =
           reinterpret_cast<PFN_vkGetAccelerationStructureBuildSizesKHR>(
               vkGetDeviceProcAddr(Device,
                                   "vkGetAccelerationStructureBuildSizesKHR"));
-      Dev->RT.GetDeviceAddress =
+      Dev->AS.GetDeviceAddress =
           reinterpret_cast<PFN_vkGetAccelerationStructureDeviceAddressKHR>(
               vkGetDeviceProcAddr(
                   Device, "vkGetAccelerationStructureDeviceAddressKHR"));
-      Dev->RT.CmdBuild =
+      Dev->AS.CmdBuild =
           reinterpret_cast<PFN_vkCmdBuildAccelerationStructuresKHR>(
               vkGetDeviceProcAddr(Device,
                                   "vkCmdBuildAccelerationStructuresKHR"));
+      if (HasRayTracingPipelineExt) {
+        Dev->HasRTPipelineSupport = true;
+        Dev->RT.CreatePipelines =
+            reinterpret_cast<PFN_vkCreateRayTracingPipelinesKHR>(
+                vkGetDeviceProcAddr(Device, "vkCreateRayTracingPipelinesKHR"));
+        Dev->RT.GetGroupHandles =
+            reinterpret_cast<PFN_vkGetRayTracingShaderGroupHandlesKHR>(
+                vkGetDeviceProcAddr(Device,
+                                    "vkGetRayTracingShaderGroupHandlesKHR"));
+        Dev->RT.CmdTraceRays = reinterpret_cast<PFN_vkCmdTraceRaysKHR>(
+            vkGetDeviceProcAddr(Device, "vkCmdTraceRaysKHR"));
+
+        // Cache SBT handle size / alignments for the lifetime of the device.
+        VkPhysicalDeviceProperties2 Props2{};
+        Props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        Dev->RTPipelineProps.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+        Props2.pNext = &Dev->RTPipelineProps;
+        vkGetPhysicalDeviceProperties2(PhysicalDevice, &Props2);
+      }
     }
 
     return Dev;
@@ -1641,6 +2009,10 @@ public:
 
   llvm::StringRef getAPIName() const override { return "Vulkan"; }
   GPUAPI getAPI() const override { return GPUAPI::Vulkan; }
+
+  static bool classof(const offloadtest::Device *D) {
+    return D->getAPI() == GPUAPI::Vulkan;
+  }
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
@@ -2279,9 +2651,26 @@ public:
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
+  // Defined out-of-line below — needs VKRayTracingPipelineState's full type
+  // and the device-loaded ray-tracing pipeline entry points.
+  llvm::Expected<std::unique_ptr<PipelineState>>
+  createPipelineRT(llvm::StringRef Name, const BindingsDesc &BndDesc,
+                   const RayTracingPipelineCreateDesc &Desc) override;
+
+  llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+  createShaderBindingTable(const PipelineState &PSO,
+                           const ShaderBindingTableDesc &Desc) override;
+
   llvm::Expected<std::unique_ptr<offloadtest::Fence>>
   createFence(llvm::StringRef Name) override {
     return VulkanFence::create(Device, Name);
+  }
+
+  llvm::Expected<std::unique_ptr<offloadtest::MemoryHeap>>
+  createMemoryHeap(std::string /*Name*/, size_t /*SizeInBytes*/) override {
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Vulkan backend does not yet support memory heaps.");
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
@@ -2292,32 +2681,46 @@ public:
     BufInfo.size = SizeInBytes;
     BufInfo.usage =
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
     switch (Desc.Usage) {
     case BufferUsage::Storage:
       BufInfo.usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::ConstantBuffer:
+      BufInfo.usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
+    case BufferUsage::IndexBuffer:
+      BufInfo.usage |=
+          VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       break;
     case BufferUsage::VertexBuffer:
       BufInfo.usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
                        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
       break;
+    case BufferUsage::IndirectArgs:
+      BufInfo.usage |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+      break;
     }
+
     // When ray tracing is supported, every buffer is eligible to act as an
     // acceleration-structure build input and to expose a device address. The
     // shared AS build helper assumes Storage buffers carry these flags.
-    if (HasRayTracingSupport)
+    if (HasASSupport)
       BufInfo.usage |=
           VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
           VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-    BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkBuffer DeviceBuffer;
+    VkBuffer BufferObject;
     if (auto Err = VK::toError(
-            vkCreateBuffer(Device, &BufInfo, nullptr, &DeviceBuffer),
+            vkCreateBuffer(Device, &BufInfo, nullptr, &BufferObject),
             "Failed to create device buffer."))
       return Err;
 
     VkMemoryRequirements MemReqs;
-    vkGetBufferMemoryRequirements(Device, DeviceBuffer, &MemReqs);
+    vkGetBufferMemoryRequirements(Device, BufferObject, &MemReqs);
 
     VkMemoryAllocateFlagsInfo AllocFlagsInfo = {};
     AllocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
@@ -2325,35 +2728,89 @@ public:
 
     VkMemoryAllocateInfo AllocInfo = {};
     AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    if (HasRayTracingSupport)
+    if (HasASSupport)
       AllocInfo.pNext = &AllocFlagsInfo;
     AllocInfo.allocationSize = MemReqs.size;
     auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
                                  getVulkanMemoryFlags(Desc.Location));
-    if (!MemIdx)
+    if (!MemIdx) {
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return MemIdx.takeError();
+    }
     AllocInfo.memoryTypeIndex = *MemIdx;
+
+    VkBuffer CounterBuffer = nullptr;
+    VkMemoryRequirements CounterMemReqs = {};
+    VkDeviceSize CounterOffsetInBytes = 0;
+    if (Desc.HasCounter) {
+      VkBuffer CounterBuffer;
+      VkBufferCreateInfo CounterBufferInfo = {};
+      CounterBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+      CounterBufferInfo.size = sizeof(uint32_t);
+      CounterBufferInfo.usage = BufInfo.usage;
+      CounterBufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      if (auto Err = VK::toError(vkCreateBuffer(Device, &CounterBufferInfo,
+                                                nullptr, &CounterBuffer),
+                                 "Could not create counter buffer.")) {
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        return Err;
+      }
+
+      vkGetBufferMemoryRequirements(Device, CounterBuffer, &CounterMemReqs);
+
+      CounterOffsetInBytes =
+          llvm::alignTo(AllocInfo.allocationSize, CounterMemReqs.alignment);
+      AllocInfo.allocationSize = CounterOffsetInBytes + CounterMemReqs.size;
+
+      assert(MemReqs.memoryTypeBits == CounterMemReqs.memoryTypeBits &&
+             "We are expecting the main resource and counter resource to have "
+             "the same memory type.");
+    }
 
     VkDeviceMemory DeviceMemory;
     if (auto Err = VK::toError(
             vkAllocateMemory(Device, &AllocInfo, nullptr, &DeviceMemory),
-            "Failed to allocate device memory."))
+            "Failed to allocate device memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
       return Err;
+    }
+
     if (auto Err = VK::toError(
-            vkBindBufferMemory(Device, DeviceBuffer, DeviceMemory, 0),
-            "Failed to bind device buffer memory."))
+            vkBindBufferMemory(Device, BufferObject, DeviceMemory, 0),
+            "Failed to bind device buffer memory.")) {
+      if (CounterBuffer)
+        vkDestroyBuffer(Device, CounterBuffer, nullptr);
+      vkDestroyBuffer(Device, BufferObject, nullptr);
+      vkFreeMemory(Device, DeviceMemory, nullptr);
       return Err;
+    }
+
+    if (CounterBuffer != nullptr) {
+      if (auto Err = VK::toError(vkBindBufferMemory(Device, CounterBuffer,
+                                                    DeviceMemory,
+                                                    CounterOffsetInBytes),
+                                 "Failed to bind counter buffer memory.")) {
+        if (CounterBuffer)
+          vkDestroyBuffer(Device, CounterBuffer, nullptr);
+        vkDestroyBuffer(Device, BufferObject, nullptr);
+        vkFreeMemory(Device, DeviceMemory, nullptr);
+        return Err;
+      }
+    }
 
     VkDeviceAddress DevAddr = 0;
-    if (HasRayTracingSupport) {
+    if (HasASSupport) {
       VkBufferDeviceAddressInfo AddrInfo = {};
       AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-      AddrInfo.buffer = DeviceBuffer;
+      AddrInfo.buffer = BufferObject;
       DevAddr = vkGetBufferDeviceAddress(Device, &AddrInfo);
     }
 
-    return std::make_unique<VulkanBuffer>(Device, DeviceBuffer, DeviceMemory,
-                                          DevAddr, Name, Desc, SizeInBytes);
+    return std::make_unique<VulkanBuffer>(Device, BufferObject, CounterBuffer,
+                                          DeviceMemory, DevAddr, Name, Desc,
+                                          SizeInBytes);
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
@@ -2369,7 +2826,9 @@ public:
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = 1;
     ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    ImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
+                           ? VK_IMAGE_TILING_OPTIMAL
+                           : VK_IMAGE_TILING_LINEAR;
     ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
     ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -2409,8 +2868,27 @@ public:
       return Err;
     }
 
-    auto Tex = std::make_unique<VulkanTexture>(Device, Image, DeviceMemory,
-                                               Name, Desc);
+    VkImageAspectFlags FullAspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    if (isDepthFormat(Desc.Fmt)) {
+      FullAspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+      if (isStencilFormat(Desc.Fmt))
+        FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    const VkImageSubresourceRange FullRange{
+        FullAspectMask,
+        0, /*baseMipLevel*/
+        Desc.MipLevels,
+        0, /*baseArrayLayer*/
+        1, /*layerCount*/
+    };
+
+    VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    if ((Desc.Usage & TextureUsage::Storage))
+      PreferredLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    auto Tex = std::make_unique<VulkanTexture>(
+        Device, Image, DeviceMemory, Name, Desc, PreferredLayout, FullRange,
+        ImageInfo.tiling, MemReqs.size);
 
     const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
     const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -2440,6 +2918,14 @@ public:
     }
 
     return Tex;
+  }
+
+  uint32_t getTextureUploadRowStrideInBytes(
+      const TextureCreateDesc &Desc) const override {
+    const uint64_t TightRow =
+        uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
+    return static_cast<uint32_t>(llvm::alignTo(
+        TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
   }
 
   const Capabilities &getCapabilities() override {
@@ -2750,7 +3236,7 @@ private:
     SizesInfo.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
-    RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+    AS.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                      &BuildInfo, MaxPrimCounts.data(), &SizesInfo);
 
     return {SizesInfo.accelerationStructureSize, SizesInfo.buildScratchSize,
@@ -2760,7 +3246,7 @@ private:
   llvm::Expected<std::unique_ptr<offloadtest::AccelerationStructure>>
   allocateAS(const AccelerationStructureSizes &Sizes,
              VkAccelerationStructureTypeKHR Type, const char *Kind) {
-    if (!HasRayTracingSupport)
+    if (!HasASSupport)
       return llvm::createStringError(
           std::errc::not_supported,
           "Ray tracing is not supported on this device.");
@@ -2779,7 +3265,7 @@ private:
 
     VkAccelerationStructureKHR AccelStruct = VK_NULL_HANDLE;
     if (auto Err =
-            VK::toError(RT.CreateAS(Device, &CreateInfo, nullptr, &AccelStruct),
+            VK::toError(AS.Create(Device, &CreateInfo, nullptr, &AccelStruct),
                         "Failed to create " + llvm::Twine(Kind) + ".")) {
       vkDestroyBuffer(Device, BufOrErr->Buffer, nullptr);
       vkFreeMemory(Device, BufOrErr->Memory, nullptr);
@@ -2789,11 +3275,11 @@ private:
     AddrInfo.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     AddrInfo.accelerationStructure = AccelStruct;
-    const VkDeviceAddress DevAddr = RT.GetDeviceAddress(Device, &AddrInfo);
+    const VkDeviceAddress DevAddr = AS.GetDeviceAddress(Device, &AddrInfo);
 
     return std::make_unique<VulkanAccelerationStructure>(
         Device, AccelStruct, BufOrErr->Buffer, BufOrErr->Memory, DevAddr,
-        RT.DestroyAS, Sizes);
+        AS.Destroy, Sizes);
   }
 
 public:
@@ -2816,7 +3302,7 @@ public:
     SizesInfo.sType =
         VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
 
-    RT.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
+    AS.GetBuildSizes(Device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR,
                      &BuildInfo, &InstanceCount, &SizesInfo);
 
     return AccelerationStructureSizes{SizesInfo.accelerationStructureSize,
@@ -3435,29 +3921,6 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createFrameBuffer(InvocationState &IS) {
-    auto &RT = llvm::cast<VulkanTexture>(*IS.RenderTarget);
-    auto &DS = llvm::cast<VulkanTexture>(*IS.DepthStencil);
-
-    std::array<VkImageView, 2> Views = {RT.View, DS.View};
-
-    VkFramebufferCreateInfo FbufCreateInfo = {};
-    FbufCreateInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    FbufCreateInfo.renderPass =
-        llvm::cast<VulkanRenderPass>(*IS.RenderPass).Handle;
-    FbufCreateInfo.attachmentCount = Views.size();
-    FbufCreateInfo.pAttachments = Views.data();
-    FbufCreateInfo.width = RT.Desc.Width;
-    FbufCreateInfo.height = RT.Desc.Height;
-    FbufCreateInfo.layers = 1;
-
-    if (auto Err = VK::toError(vkCreateFramebuffer(Device, &FbufCreateInfo,
-                                                   nullptr, &IS.FrameBuffer),
-                               "Failed to create frame buffer."))
-      return Err;
-    return llvm::Error::success();
-  }
-
   static llvm::Expected<VkSpecializationMapEntry>
   parseSpecializationConstant(const SpecializationConstant &SpecConst,
                               llvm::SmallVectorImpl<char> &SpecData) {
@@ -3861,9 +4324,10 @@ public:
     for (auto &R : IS.Resources)
       copyResourceDataToDevice(IS, R);
 
-    const VkPipelineBindPoint BindPoint = P.isTraditionalRaster()
-                                              ? VK_PIPELINE_BIND_POINT_GRAPHICS
-                                              : VK_PIPELINE_BIND_POINT_COMPUTE;
+    const VkPipelineBindPoint BindPoint =
+        P.isTraditionalRaster() ? VK_PIPELINE_BIND_POINT_GRAPHICS
+        : P.isRayTracing()      ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
+                                : VK_PIPELINE_BIND_POINT_COMPUTE;
     const VulkanPipelineState &VulkanPipeline =
         llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
     if (IS.DescriptorSets.size() > 0)
@@ -3891,6 +4355,21 @@ public:
         return Err;
       Encoder.endEncoding();
       llvm::outs() << "Dispatched compute shader: { "
+                   << P.DispatchParameters.DispatchGroupCount[0] << ", "
+                   << P.DispatchParameters.DispatchGroupCount[1] << ", "
+                   << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
+    } else if (P.isRayTracing()) {
+      auto EncoderOrErr = IS.CB->createComputeEncoder();
+      if (!EncoderOrErr)
+        return EncoderOrErr.takeError();
+      auto &Encoder = *EncoderOrErr.get();
+      if (auto Err = Encoder.dispatchRays(
+              *IS.Pipeline, *IS.SBT, P.DispatchParameters.DispatchGroupCount[0],
+              P.DispatchParameters.DispatchGroupCount[1],
+              P.DispatchParameters.DispatchGroupCount[2]))
+        return Err;
+      Encoder.endEncoding();
+      llvm::outs() << "DispatchRays: { "
                    << P.DispatchParameters.DispatchGroupCount[0] << ", "
                    << P.DispatchParameters.DispatchGroupCount[1] << ", "
                    << P.DispatchParameters.DispatchGroupCount[2] << " }\n";
@@ -4052,9 +4531,6 @@ public:
         vkFreeMemory(Device, ResRef.Host.Memory, nullptr);
       }
     }
-
-    if (IS.FrameBuffer)
-      vkDestroyFramebuffer(Device, IS.FrameBuffer, nullptr);
 
     if (IS.Pool)
       vkDestroyDescriptorPool(Device, IS.Pool, nullptr);
@@ -4230,10 +4706,36 @@ public:
         State.Pipeline = std::move(*PipelineStateOrErr);
         llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
+    } else if (P.isRayTracing()) {
+      if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "RayTracing pipeline requires Shaders, "
+            "ShaderBindingTable, and RayTracingPipelineConfig.");
 
-      if (auto Err = createFrameBuffer(State))
-        return Err;
-      llvm::outs() << "Frame buffer created.\n";
+      RayTracingPipelineCreateDesc RTDesc{};
+      // All RT shader entries share the single DXIL library blob loaded by
+      // the offloader. validatePipelineKind already enforced ≥1 RayGen and
+      // rejected mixing RT with compute/vertex/mesh stages.
+      RTDesc.Library = P.Shaders.front().Shader.get();
+      RTDesc.HitGroups = P.HitGroups;
+      RTDesc.Config = *P.RTConfig;
+      RTDesc.Shaders.reserve(P.Shaders.size());
+      for (const auto &Sh : P.Shaders)
+        RTDesc.Shaders.push_back({Sh.Stage, Sh.Entry});
+
+      auto PSOOrErr =
+          createPipelineRT("RayTracing Pipeline State", BindingsDesc, RTDesc);
+      if (!PSOOrErr)
+        return PSOOrErr.takeError();
+      State.Pipeline = std::move(*PSOOrErr);
+      llvm::outs() << "RayTracing Pipeline created.\n";
+
+      auto SBTOrErr = createShaderBindingTable(*State.Pipeline, *P.SBT);
+      if (!SBTOrErr)
+        return SBTOrErr.takeError();
+      State.SBT = std::move(*SBTOrErr);
+      llvm::outs() << "Shader Binding Table created.\n";
     } else {
       return llvm::createStringError(
           "Pipeline was neither Compute nor Traditional Raster");
@@ -4280,7 +4782,7 @@ public:
 llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
   if (Items.empty())
     return llvm::Error::success();
-  if (!CB.Dev || !CB.Dev->RT.CmdBuild)
+  if (!CB.Dev || !CB.Dev->AS.CmdBuild)
     return llvm::createStringError(
         std::errc::not_supported,
         "Ray tracing not supported on this command buffer's device.");
@@ -4296,7 +4798,7 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
                     VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR);
 
   const size_t N = Items.size();
-  // Per-item arrays must outlive the RT.CmdBuild() call.
+  // Per-item arrays must outlive the AS.CmdBuild() call.
   llvm::SmallVector<llvm::SmallVector<VkAccelerationStructureGeometryKHR>>
       Geoms(N);
   llvm::SmallVector<llvm::SmallVector<VkAccelerationStructureBuildRangeInfoKHR>>
@@ -4397,8 +4899,11 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
         memcpy(&NI.transform.matrix, Inst.Transform, sizeof(Inst.Transform));
         NI.instanceCustomIndex = Inst.InstanceID & 0xFFFFFFu;
         NI.mask = Inst.InstanceMask;
-        NI.instanceShaderBindingTableRecordOffset = 0;
-        NI.flags = 0;
+        NI.instanceShaderBindingTableRecordOffset =
+            Inst.InstanceContributionToHitGroupIndex & 0xFFFFFFu;
+        // Bits in AccelerationStructureInstanceFlags match
+        // VkGeometryInstanceFlagBitsKHR by design.
+        NI.flags = static_cast<VkGeometryInstanceFlagsKHR>(Inst.Flags);
         auto *BLASPtr = llvm::cast<VulkanAccelerationStructure>(Inst.BLAS);
         NI.accelerationStructureReference = BLASPtr->getDeviceAddress();
         Native.push_back(NI);
@@ -4408,8 +4913,7 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 
       // Upload the instance array. Storage + CpuToGpu now carries device
       // address and AS-build-input flags (because RT is supported).
-      const BufferCreateDesc Desc{MemoryLocation::CpuToGpu,
-                                  BufferUsage::Storage};
+      const BufferCreateDesc Desc = BufferCreateDesc::uploadBuffer();
       auto InstBufOrErr = offloadtest::createBufferWithData(
           *Dev, "TLAS-Instances", Desc, Native.data(), Bytes, nullptr, nullptr);
       if (!InstBufOrErr)
@@ -4438,12 +4942,7 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
       CB.KeepAliveOwned.push_back(std::move(*InstBufOrErr));
     }
 
-    // Allocate scratch (one per item; non-overlapping ranges as required).
-    // createBuffer() applies SHADER_DEVICE_ADDRESS + storage usage when ray
-    // tracing is supported, so we can re-use the same Buffer wrapper as the
-    // TLAS instance allocation and drop the raw-handle keep-alive bookkeeping.
-    const BufferCreateDesc ScratchDesc{MemoryLocation::GpuOnly,
-                                       BufferUsage::Storage};
+    const BufferCreateDesc ScratchDesc = BufferCreateDesc::scratchBuffer();
     auto ScratchOrErr =
         Dev->createBuffer("AS-Scratch", ScratchDesc, ScratchSize);
     if (!ScratchOrErr)
@@ -4457,8 +4956,330 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 
   insertDebugSignpost(
       llvm::formatv("BuildAccelerationStructures x{0}", N).str());
-  Dev->RT.CmdBuild(CB.CmdBuffer, static_cast<uint32_t>(N), BuildInfos.data(),
+  Dev->AS.CmdBuild(CB.CmdBuffer, static_cast<uint32_t>(N), BuildInfos.data(),
                    RangePtrs.data());
+  return llvm::Error::success();
+}
+
+// === Ray tracing pipeline + SBT + DispatchRays ============================
+
+static VkRayTracingShaderGroupTypeKHR getRTGroupType(HitGroupType T) {
+  switch (T) {
+  case HitGroupType::Triangles:
+    return VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+  case HitGroupType::Procedural:
+    return VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+  }
+  llvm_unreachable("All HitGroupType cases handled");
+}
+
+llvm::Expected<std::unique_ptr<PipelineState>>
+VulkanDevice::createPipelineRT(llvm::StringRef Name, const BindingsDesc &BD,
+                               const RayTracingPipelineCreateDesc &Desc) {
+  if (!HasRTPipelineSupport)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Device does not support VK_KHR_ray_tracing_pipeline");
+  if (!Desc.Library)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RayTracingPipelineCreateDesc.Library is "
+                                   "null — backend needs a DXIL/SPIR-V blob.");
+
+  // Single shader module backs every RT entry point — the DXIL library
+  // compiles to one SPIR-V module with multiple OpEntryPoints.
+  auto ModOrErr = createShaderModule(Desc.Library, "raytracing library");
+  if (!ModOrErr)
+    return ModOrErr.takeError();
+  VkShaderModule Module = *ModOrErr;
+  auto ModuleCleanup =
+      llvm::scope_exit([&] { vkDestroyShaderModule(Device, Module, nullptr); });
+
+  // Pipeline layout: every RT stage may consume any binding from the global
+  // descriptor sets (mirrors a DX12 global root signature).
+  const VkShaderStageFlags AllRTStages =
+      VK_SHADER_STAGE_RAYGEN_BIT_KHR | VK_SHADER_STAGE_MISS_BIT_KHR |
+      VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR | VK_SHADER_STAGE_ANY_HIT_BIT_KHR |
+      VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR;
+  llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+  VkPipelineLayout Layout = VK_NULL_HANDLE;
+  if (auto Err = createPipelineLayout(BD, AllRTStages, SetLayouts, Layout))
+    return Err;
+  auto LayoutCleanup = llvm::scope_exit([&] {
+    if (Layout != VK_NULL_HANDLE)
+      vkDestroyPipelineLayout(Device, Layout, nullptr);
+    for (auto *L : SetLayouts)
+      vkDestroyDescriptorSetLayout(Device, L, nullptr);
+  });
+
+  llvm::SmallVector<VkPipelineShaderStageCreateInfo> StageCIs;
+  StageCIs.reserve(Desc.Shaders.size());
+  llvm::StringMap<uint32_t> EntryToStageIdx;
+  for (const auto &Sh : Desc.Shaders) {
+    VkPipelineShaderStageCreateInfo CI{};
+    CI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    CI.stage = getShaderStageFlag(Sh.Stage);
+    CI.module = Module;
+    CI.pName = Sh.EntryPoint.c_str();
+    EntryToStageIdx[Sh.EntryPoint] = static_cast<uint32_t>(StageCIs.size());
+    StageCIs.push_back(CI);
+  }
+
+  llvm::SmallVector<VkRayTracingShaderGroupCreateInfoKHR> Groups;
+  llvm::StringMap<uint32_t> NameToGroup;
+  auto AddGeneralGroup = [&](llvm::StringRef Key, uint32_t StageIdx) {
+    VkRayTracingShaderGroupCreateInfoKHR G{};
+    G.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    G.type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    G.generalShader = StageIdx;
+    G.closestHitShader = VK_SHADER_UNUSED_KHR;
+    G.anyHitShader = VK_SHADER_UNUSED_KHR;
+    G.intersectionShader = VK_SHADER_UNUSED_KHR;
+    NameToGroup[Key] = static_cast<uint32_t>(Groups.size());
+    Groups.push_back(G);
+  };
+
+  uint32_t NumRG = 0, NumMS = 0, NumHG = 0, NumCL = 0;
+  for (const auto &Sh : Desc.Shaders)
+    if (Sh.Stage == Stages::RayGeneration) {
+      AddGeneralGroup(Sh.EntryPoint, EntryToStageIdx[Sh.EntryPoint]);
+      ++NumRG;
+    }
+  for (const auto &Sh : Desc.Shaders)
+    if (Sh.Stage == Stages::Miss) {
+      AddGeneralGroup(Sh.EntryPoint, EntryToStageIdx[Sh.EntryPoint]);
+      ++NumMS;
+    }
+  for (const auto &HG : Desc.HitGroups) {
+    VkRayTracingShaderGroupCreateInfoKHR G{};
+    G.sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    G.type = getRTGroupType(HG.Type);
+    G.generalShader = VK_SHADER_UNUSED_KHR;
+    auto FindIdx = [&](const std::string &Entry) -> uint32_t {
+      auto It = EntryToStageIdx.find(Entry);
+      return It == EntryToStageIdx.end() ? VK_SHADER_UNUSED_KHR : It->second;
+    };
+    G.closestHitShader = FindIdx(HG.ClosestHit);
+    G.anyHitShader = HG.AnyHit ? FindIdx(*HG.AnyHit) : VK_SHADER_UNUSED_KHR;
+    G.intersectionShader =
+        HG.Intersection ? FindIdx(*HG.Intersection) : VK_SHADER_UNUSED_KHR;
+    NameToGroup[HG.Name] = static_cast<uint32_t>(Groups.size());
+    Groups.push_back(G);
+    ++NumHG;
+  }
+  for (const auto &Sh : Desc.Shaders)
+    if (Sh.Stage == Stages::Callable) {
+      AddGeneralGroup(Sh.EntryPoint, EntryToStageIdx[Sh.EntryPoint]);
+      ++NumCL;
+    }
+
+  VkRayTracingPipelineCreateInfoKHR PipelineCI{};
+  PipelineCI.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+  PipelineCI.stageCount = static_cast<uint32_t>(StageCIs.size());
+  PipelineCI.pStages = StageCIs.data();
+  PipelineCI.groupCount = static_cast<uint32_t>(Groups.size());
+  PipelineCI.pGroups = Groups.data();
+  PipelineCI.maxPipelineRayRecursionDepth = Desc.Config.MaxTraceRecursionDepth;
+  PipelineCI.layout = Layout;
+
+  VkPipeline Pipeline = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(RT.CreatePipelines(Device, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                         1, &PipelineCI, nullptr, &Pipeline),
+                      "Failed to create ray tracing pipeline."))
+    return Err;
+
+  auto State = std::make_unique<VKRayTracingPipelineState>(
+      Name, Device, Pipeline, Layout, std::move(SetLayouts));
+  State->ShaderGroupIndices = std::move(NameToGroup);
+  State->NumRaygenGroups = NumRG;
+  State->NumMissGroups = NumMS;
+  State->NumHitGroups = NumHG;
+  State->NumCallableGroups = NumCL;
+  // Ownership transferred — disable cleanup.
+  Layout = VK_NULL_HANDLE;
+  SetLayouts.clear();
+  return State;
+}
+
+llvm::Expected<std::unique_ptr<ShaderBindingTable>>
+VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
+                                       const ShaderBindingTableDesc &Desc) {
+  if (!HasRTPipelineSupport)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Device does not support VK_KHR_ray_tracing_pipeline");
+  if (!llvm::isa<VKRayTracingPipelineState>(&PSO))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "createShaderBindingTable requires a RayTracing PipelineState");
+  const auto &VKPSO = llvm::cast<VKRayTracingPipelineState>(PSO);
+
+  const uint32_t HandleSize = RTPipelineProps.shaderGroupHandleSize;
+  const SBTLayout Layout =
+      computeSBTLayout(HandleSize, RTPipelineProps.shaderGroupHandleAlignment,
+                       RTPipelineProps.shaderGroupBaseAlignment, Desc);
+  const VkDeviceSize TotalSize = Layout.TotalSize;
+  // Vulkan dispatches a single raygen per vkCmdTraceRaysKHR; the descriptor
+  // only carries one raygen entry, so its region holds exactly one record.
+  const llvm::ArrayRef<SBTEntry> RGEntries(&Desc.RayGen, 1);
+
+  // Pull all shader group handles at once. Vulkan returns them in pipeline
+  // order matching the order groups were given to vkCreateRayTracingPipelines.
+  llvm::SmallVector<uint8_t> AllHandles(VKPSO.totalGroupCount() * HandleSize);
+  if (auto Err = VK::toError(
+          RT.GetGroupHandles(Device, VKPSO.Pipeline, 0, VKPSO.totalGroupCount(),
+                             AllHandles.size(), AllHandles.data()),
+          "vkGetRayTracingShaderGroupHandlesKHR failed."))
+    return Err;
+
+  // Allocate the SBT in a host-visible coherent buffer (PR2 simplification —
+  // a staging-copy to a device-local buffer is a follow-up optimization).
+  VkBufferCreateInfo BufInfo{};
+  BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  BufInfo.size = TotalSize;
+  BufInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
+                  VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                  VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+  BufInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+  VkBuffer Buffer = VK_NULL_HANDLE;
+  if (auto Err = VK::toError(vkCreateBuffer(Device, &BufInfo, nullptr, &Buffer),
+                             "Failed to create SBT buffer."))
+    return Err;
+
+  VkMemoryRequirements MemReqs;
+  vkGetBufferMemoryRequirements(Device, Buffer, &MemReqs);
+  VkMemoryAllocateFlagsInfo AllocFlagsInfo{};
+  AllocFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+  AllocFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+  VkMemoryAllocateInfo AllocInfo{};
+  AllocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  AllocInfo.pNext = &AllocFlagsInfo;
+  AllocInfo.allocationSize = MemReqs.size;
+  auto MemIdx = getMemoryIndex(PhysicalDevice, MemReqs.memoryTypeBits,
+                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  if (!MemIdx) {
+    vkDestroyBuffer(Device, Buffer, nullptr);
+    return MemIdx.takeError();
+  }
+  AllocInfo.memoryTypeIndex = *MemIdx;
+  VkDeviceMemory Memory = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(vkAllocateMemory(Device, &AllocInfo, nullptr, &Memory),
+                      "Failed to allocate SBT memory.")) {
+    vkDestroyBuffer(Device, Buffer, nullptr);
+    return Err;
+  }
+  if (auto Err = VK::toError(vkBindBufferMemory(Device, Buffer, Memory, 0),
+                             "Failed to bind SBT memory.")) {
+    vkFreeMemory(Device, Memory, nullptr);
+    vkDestroyBuffer(Device, Buffer, nullptr);
+    return Err;
+  }
+
+  void *MappedRaw = nullptr;
+  if (auto Err = VK::toError(
+          vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &MappedRaw),
+          "Failed to map SBT memory.")) {
+    vkFreeMemory(Device, Memory, nullptr);
+    vkDestroyBuffer(Device, Buffer, nullptr);
+    return Err;
+  }
+  auto *Mapped = static_cast<uint8_t *>(MappedRaw);
+  std::memset(Mapped, 0, TotalSize);
+
+  // Resolve each SBT entry's ShaderName → shader-group index, then write
+  // [handle][localRootData][pad] into the region at the right offset.
+  auto WriteEntries = [&](uint8_t *Region, llvm::ArrayRef<SBTEntry> Entries,
+                          uint32_t Stride) -> llvm::Error {
+    for (size_t I = 0; I < Entries.size(); ++I) {
+      const auto &E = Entries[I];
+      auto It = VKPSO.ShaderGroupIndices.find(E.ShaderName);
+      if (It == VKPSO.ShaderGroupIndices.end())
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "SBT references unknown shader/hit-group name: '%s'",
+            E.ShaderName.c_str());
+      uint8_t *Dst = Region + I * Stride;
+      std::memcpy(Dst, AllHandles.data() + It->second * HandleSize, HandleSize);
+      if (!E.LocalRootData.empty())
+        std::memcpy(Dst + HandleSize, E.LocalRootData.data(),
+                    E.LocalRootData.size());
+    }
+    return llvm::Error::success();
+  };
+
+  auto WriteRegion = [&](const SBTRegionLayout &R,
+                         llvm::ArrayRef<SBTEntry> Entries) -> llvm::Error {
+    return WriteEntries(Mapped + R.Offset, Entries, R.Stride);
+  };
+  auto CleanupAndReturn = [&](llvm::Error Err) {
+    vkUnmapMemory(Device, Memory);
+    vkFreeMemory(Device, Memory, nullptr);
+    vkDestroyBuffer(Device, Buffer, nullptr);
+    return Err;
+  };
+  if (auto Err = WriteRegion(Layout.RayGen, RGEntries))
+    return CleanupAndReturn(std::move(Err));
+  if (auto Err = WriteRegion(Layout.Miss, Desc.Miss))
+    return CleanupAndReturn(std::move(Err));
+  if (auto Err = WriteRegion(Layout.HitGroup, Desc.HitGroup))
+    return CleanupAndReturn(std::move(Err));
+  if (auto Err = WriteRegion(Layout.Callable, Desc.Callable))
+    return CleanupAndReturn(std::move(Err));
+  vkUnmapMemory(Device, Memory);
+
+  VkBufferDeviceAddressInfo AddrInfo{};
+  AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  AddrInfo.buffer = Buffer;
+  const VkDeviceAddress Base = vkGetBufferDeviceAddress(Device, &AddrInfo);
+
+  // VkStridedDeviceAddressRegionKHR uses a zero deviceAddress to signal an
+  // empty region — matching what the SBT layout helper records as Size == 0.
+  auto MakeRegion = [&](const SBTRegionLayout &R) {
+    return VkStridedDeviceAddressRegionKHR{R.Size ? Base + R.Offset : 0,
+                                           R.Stride, R.Size};
+  };
+  const VkStridedDeviceAddressRegionKHR RG = MakeRegion(Layout.RayGen);
+  const VkStridedDeviceAddressRegionKHR MS = MakeRegion(Layout.Miss);
+  const VkStridedDeviceAddressRegionKHR HG = MakeRegion(Layout.HitGroup);
+  const VkStridedDeviceAddressRegionKHR CL = MakeRegion(Layout.Callable);
+  return std::make_unique<VKShaderBindingTable>(Device, Buffer, Memory, RG, MS,
+                                                HG, CL);
+}
+
+llvm::Error VKComputeEncoder::dispatchRays(const PipelineState &PSO,
+                                           const ShaderBindingTable &SBT,
+                                           uint32_t Width, uint32_t Height,
+                                           uint32_t Depth) {
+  if (!CB.Dev || !CB.Dev->RT.CmdTraceRays)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "vkCmdTraceRaysKHR entry point not loaded on this device.");
+  if (!llvm::isa<VKRayTracingPipelineState>(&PSO))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "dispatchRays requires a RayTracing PipelineState.");
+  if (!llvm::isa<VKShaderBindingTable>(&SBT))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "dispatchRays requires a Vulkan ShaderBindingTable.");
+  const auto &VKPSO = llvm::cast<VKRayTracingPipelineState>(PSO);
+  const auto &VKSBT = llvm::cast<VKShaderBindingTable>(SBT);
+
+  // Outgoing access from prior pipeline stages must complete before the RT
+  // pipeline reads the AS, SBT, and bound resources.
+  addDstBarrier(VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+                VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                    VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+
+  insertDebugSignpost(
+      llvm::formatv("TraceRays {0}x{1}x{2}", Width, Height, Depth).str());
+  vkCmdBindPipeline(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR,
+                    VKPSO.Pipeline);
+  CB.Dev->RT.CmdTraceRays(CB.CmdBuffer, &VKSBT.RaygenRegion, &VKSBT.MissRegion,
+                          &VKSBT.HitRegion, &VKSBT.CallableRegion, Width,
+                          Height, Depth);
   return llvm::Error::success();
 }
 } // namespace

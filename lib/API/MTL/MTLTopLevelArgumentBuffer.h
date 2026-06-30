@@ -64,6 +64,12 @@ public:
   void bind(MTL::RenderCommandEncoder *Encoder) const;
   // Bind the argument buffer to the compute command encoder.
   void bind(MTL::ComputeCommandEncoder *Encoder) const;
+
+  // GPU address of the underlying buffer. Returns 0 when the root signature is
+  // empty and no buffer was allocated. Needed by the ray-tracing path so the
+  // synthesized IRDispatchRaysArgument can point shader-record callees back at
+  // the GRS (global root signature top-level argument buffer).
+  uint64_t getGPUAddress() const;
 };
 } // namespace offloadtest
 

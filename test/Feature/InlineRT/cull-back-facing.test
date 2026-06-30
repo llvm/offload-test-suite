@@ -1,0 +1,87 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[numthreads(2,1,1)]
+void main(uint3 tid : SV_DispatchThreadID) {
+  // The triangle vertices (0,1,0), (-1,-1,0), (1,-1,0) wind CW from +z and
+  // CCW from -z (per the DX / VK / MTL convention all three backends share
+  // for ray-traversal winding, which is the inverse of the math-CCW signed
+  // area when viewing along the ray direction). With CCW = back-face by
+  // default:
+  //   - lane 0 fires from +z toward -z → sees CW → FRONT face (must hit)
+  //   - lane 1 fires from -z toward +z → sees CCW → BACK face (must miss
+  //     under RAY_FLAG_CULL_BACK_FACING_TRIANGLES)
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, tid.x == 0 ? 1.0 : -1.0);
+  Ray.Direction = float3(0, 0, tid.x == 0 ? -1.0 : 1.0);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  RayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES> Q;
+  Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+  Q.Proceed();
+  Output[tid.x] = (uint)Q.CommittedStatus();
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    # Lane 0: front face → COMMITTED_TRIANGLE_HIT (1)
+    # Lane 1: back face → COMMITTED_NOTHING (0)
+    Data: [ 1, 0 ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: CullBackFacing
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

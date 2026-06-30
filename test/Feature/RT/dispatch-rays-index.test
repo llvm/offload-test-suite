@@ -1,0 +1,56 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[shader("raygeneration")]
+void RayGen() {
+  // Each lane writes its own x-coordinate. With a 4x1x1 dispatch the four
+  // lanes must end up with Output[0..3] = {0, 1, 2, 3}.
+  Output[DispatchRaysIndex().x] = DispatchRaysIndex().x;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: RayGen
+Buffers:
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 0, 1, 2, 3 ]
+RayTracingPipelineConfig:
+  MaxTraceRecursionDepth: 1
+  MaxPayloadSizeInBytes: 0
+ShaderBindingTable:
+  RayGen:
+    ShaderName: RayGen
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+DispatchParameters:
+  DispatchGroupCount: [ 4, 1, 1 ]
+Results:
+  - Result: DispatchRaysIndexX
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: raytracing-pipeline
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

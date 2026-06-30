@@ -13,11 +13,6 @@
 #define OFFLOADTEST_API_DXFEATURES_H
 
 #include "API/Capabilities.h"
-#include "llvm/ADT/ArrayRef.h"
-
-namespace llvm {
-template <typename T> struct EnumEntry;
-} // namespace llvm
 
 namespace offloadtest {
 namespace directx {

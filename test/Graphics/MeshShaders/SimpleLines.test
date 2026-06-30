@@ -1,0 +1,83 @@
+#--- mesh.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float3 hueToRgb(in float hue) {
+    return saturate(float3(
+        abs(hue * 6.0 - 3.0) - 1.0,
+        2.0 - abs(hue * 6.0 - 2.0),
+        2.0 - abs(hue * 6.0 - 4.0)
+    ));
+}
+
+[outputtopology("line")]
+[numthreads(32, 1, 1)]
+void main(uint groupThreadID: SV_GroupThreadID, out vertices PSInput verts[32], out indices uint2 lines[32]) {
+    SetMeshOutputCounts(32, 32);
+
+    const float radius = 0.5;
+    const float angle = float(groupThreadID) / 32.0f;
+    const float tau = 2.0 * 3.14159265359;
+    const float x = cos(angle * tau) * radius;
+    const float y = sin(angle * tau) * radius;
+
+    const float3 color = hueToRgb(angle);
+
+    verts[groupThreadID].position = float4(x, y, 0.0, 1.0);
+    verts[groupThreadID].color = float4(color, 1.0);
+
+    lines[groupThreadID] = uint2(groupThreadID, (groupThreadID + 1) % 32);
+}
+
+#--- pixel.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return saturate(input.color);
+}
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Mesh
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 1048576 # 256x256 @ 16 bytes per pixel
+    OutputProps:
+      Height: 256
+      Width: 256
+      Depth: 1
+Bindings:
+  Topology: LineList # Only care about the line part
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- rules.yaml
+---
+- Type: PixelPercent
+  Val: 0.2 # No more than 0.2% of pixels may be visibly different.
+...
+#--- end
+
+REQUIRES: MeshShader
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/136966
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
+# RUN: %dxc_target -T ps_6_5 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-mesh.o %t-pixel.o -r Output -o %t/Output.png
+# RUN: imgdiff %t/Output.png %goldenimage_dir/hlsl/Graphics/MeshShaders/SimpleLines.png -rules %t/rules.yaml
