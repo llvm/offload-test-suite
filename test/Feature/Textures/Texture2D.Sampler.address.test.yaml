@@ -160,7 +160,8 @@ Results:
 #--- end
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
-# XFAIL: DirectX || Metal
+# XFAIL: Metal
+# XFAIL: Clang && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl

@@ -498,6 +498,17 @@ public:
   }
 };
 
+class MTLSampler : public offloadtest::Sampler {
+public:
+  SamplerCreateDesc Desc;
+
+  const SamplerCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Sampler *S) {
+    return S->getAPI() == GPUAPI::Metal;
+  }
+};
+
 /// Metal has no standalone render-pass object: render pass info lives on
 /// MTLRenderPassDescriptor and is consumed when a render command encoder
 /// is created. We therefore just stash the descriptor for the encoder to
@@ -2395,6 +2406,11 @@ public:
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
     return std::make_unique<MTLTexture>(Tex, Name, Desc);
+  }
+
+  llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string, const SamplerCreateDesc &) override {
+    return llvm::createStringError("createSampler is unimplemented on Metal.");
   }
 
   uint32_t getTextureUploadRowStrideInBytes(
