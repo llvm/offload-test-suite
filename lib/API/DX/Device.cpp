@@ -2731,6 +2731,17 @@ public:
         D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     if (P.Settings.DX.RootParams.size() > 0) {
+
+      // Samplers are not supported in RootParams, error if we do find any.
+      for (const auto &Set : P.Sets) {
+        for (const auto &R : Set.Resources) {
+          if (R.isSampler())
+            return llvm::createStringError(
+                "Descriptor tables containing samplers are not yet supported "
+                "with explicit RootParameters.");
+        }
+      }
+
       uint32_t ConstantOffset = 0u;
       uint32_t RootParamIndex = 0u;
       uint32_t DescriptorTableIndex = 0u;
@@ -2752,7 +2763,6 @@ public:
           break;
         }
         case dx::RootParamKind::DescriptorTable:
-          // TODO(manon): Add support for descriptor tables containing samplers
           DXCB.CmdList->SetComputeRootDescriptorTable(RootParamIndex++, Handle);
           Handle.Offset(P.Sets[DescriptorTableIndex++].Resources.size(), Inc);
           break;
