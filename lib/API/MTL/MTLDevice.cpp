@@ -172,6 +172,60 @@ struct MetalIR {
   IRShaderReflectionPtr Reflection;
 };
 
+struct MetalDescriptorSet {
+  IRDescriptorTableEntry *CSUHandle;
+  MTLGPUDescriptorHandle CSUHandleGPU;
+};
+
+class MetalDescriptorPool : public DescriptorPool {
+public:
+  std::unique_ptr<MTLDescriptorHeap> CSUHeap;
+  std::atomic<uint32_t> CSUAllocator = 0;
+
+  MetalDescriptorPool(std::unique_ptr<MTLDescriptorHeap> CSUHeap)
+      : DescriptorPool(GPUAPI::Metal), CSUHeap(std::move(CSUHeap)) {}
+
+  static llvm::Expected<std::unique_ptr<DescriptorPool>>
+  create(MTL::Device *Dev,
+         const std::shared_ptr<MetalResidencyTracker> &ResidencyTracker) {
+    const uint32_t DescriptorCount = 4096;
+
+    const MTLDescriptorHeapDesc HeapDesc = {MTLDescriptorHeapType::CBV_SRV_UAV,
+                                            DescriptorCount};
+
+    auto DescHeapOrErr =
+        MTLDescriptorHeap::create(Dev, HeapDesc, ResidencyTracker);
+    if (!DescHeapOrErr)
+      return DescHeapOrErr.takeError();
+
+    return std::make_unique<MetalDescriptorPool>(std::move(*DescHeapOrErr));
+  }
+
+  void allocateDescriptors(uint32_t Count, IRDescriptorTableEntry *&CPU,
+                           MTLGPUDescriptorHandle &GPU) {
+    const uint32_t Offset = CSUAllocator.fetch_add(Count);
+    CPU = CSUHeap->getEntryHandle(Offset);
+    GPU = CSUHeap->getGPUDescriptorHandleForHeapStart().addOffset(Offset);
+  }
+
+  void reset() override { CSUAllocator.store(0); }
+
+  static bool classof(const DescriptorPool *P) {
+    return P->getAPI() == GPUAPI::Metal;
+  }
+};
+
+class MetalDescriptorSets : public DescriptorSets {
+public:
+  llvm::SmallVector<MetalDescriptorSet> Sets;
+  MetalDescriptorSets(llvm::SmallVector<MetalDescriptorSet> Sets)
+      : DescriptorSets(GPUAPI::Metal), Sets(std::move(Sets)) {}
+
+  static bool classof(const DescriptorSets *S) {
+    return S->getAPI() == GPUAPI::Metal;
+  }
+};
+
 class MTLFence : public offloadtest::Fence {
 public:
   MTLFence(MTL::SharedEvent *Event, llvm::StringRef Name)
@@ -253,11 +307,31 @@ public:
   }
 };
 
+struct RootSignatureLayout {
+  uint32_t IsSampler : 1;
+  uint32_t Count : 31;
+
+  RootSignatureLayout(bool IsSampler, uint32_t Count)
+      : IsSampler(IsSampler), Count(Count) {}
+  RootSignatureLayout() = delete;
+};
+
+struct DescriptorCountPair {
+  uint32_t DescriptorCount;
+  uint32_t SamplerCount;
+};
+
+struct DescriptorSetsLayout {
+  llvm::SmallVector<RootSignatureLayout> RSigLayout;
+  llvm::SmallVector<DescriptorCountPair> Sets;
+};
+
 class MTLPipelineState : public offloadtest::PipelineState {
 public:
   std::string Name;
   IRRootSignaturePtr RootSig;
   std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+  DescriptorSetsLayout Layout;
   MTL::ComputePipelineState *ComputePipeline = nullptr;
   MTL::RenderPipelineState *RenderPipeline = nullptr;
 
@@ -282,14 +356,17 @@ public:
 
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
+                   DescriptorSetsLayout Layout,
                    MTL::ComputePipelineState *ComputePipeline,
                    MTL::Size ThreadsPerGroup)
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
         RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
-        ComputePipeline(ComputePipeline), ThreadsPerGroup(ThreadsPerGroup) {}
+        Layout(std::move(Layout)), ComputePipeline(ComputePipeline),
+        ThreadsPerGroup(ThreadsPerGroup) {}
 
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
+                   DescriptorSetsLayout Layout,
                    MTL::RenderPipelineState *RenderPipeline,
                    MTL::DepthStencilState *DepthStencilState,
                    MTL::CullMode CullMode,
@@ -297,8 +374,8 @@ public:
                    MTL::Size ObjectThreadsPerThreadgroup = {1, 1, 1})
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
         RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
-        RenderPipeline(RenderPipeline), DepthStencilState(DepthStencilState),
-        CullMode(CullMode),
+        Layout(std::move(Layout)), RenderPipeline(RenderPipeline),
+        DepthStencilState(DepthStencilState), CullMode(CullMode),
         MeshThreadsPerThreadgroup(MeshThreadsPerThreadgroup),
         ObjectThreadsPerThreadgroup(ObjectThreadsPerThreadgroup) {}
 
@@ -320,10 +397,10 @@ protected:
   // the rest of the layout (Name, root signature, argument buffer).
   MTLPipelineState(llvm::StringRef Name, IRRootSignaturePtr RootSig,
                    std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer,
-                   bool IsRT)
+                   DescriptorSetsLayout Layout, bool IsRT)
       : offloadtest::PipelineState(GPUAPI::Metal), Name(Name),
         RootSig(std::move(RootSig)), ArgBuffer(std::move(ArgBuffer)),
-        IsRayTracing(IsRT) {}
+        Layout(std::move(Layout)), IsRayTracing(IsRT) {}
 };
 
 /// Ray tracing pipeline state. Layered on top of MTLPipelineState so the
@@ -361,8 +438,10 @@ public:
   MTLRayTracingPipelineState(
       llvm::StringRef Name, IRRootSignaturePtr RootSig,
       std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuf,
+      DescriptorSetsLayout Layout,
       std::shared_ptr<MetalResidencyTracker> ResidencyTracker)
       : MTLPipelineState(Name, std::move(RootSig), std::move(ArgBuf),
+                         std::move(Layout),
                          /*IsRT=*/true),
         ResidencyTracker(std::move(ResidencyTracker)) {}
 
@@ -578,6 +657,8 @@ public:
   /// and TLAS instance buffers used during builds).
   llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> KeepAliveOwned;
 
+  MTL::Buffer *BoundCSUHeapBuffer = nullptr;
+
   static llvm::Expected<std::unique_ptr<MTLCommandBuffer>>
   create(MTL::CommandQueue *Queue) {
     auto CB = std::unique_ptr<MTLCommandBuffer>(new MTLCommandBuffer());
@@ -597,6 +678,11 @@ public:
 
   static bool classof(const CommandBuffer *CB) {
     return CB->getKind() == GPUAPI::Metal;
+  }
+
+  void bindPool(const DescriptorPool &Pool) override {
+    const MetalDescriptorPool &PoolMTL = llvm::cast<MetalDescriptorPool>(Pool);
+    BoundCSUHeapBuffer = PoolMTL.CSUHeap->Buffer;
   }
 
   llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
@@ -652,6 +738,120 @@ public:
 
   static bool classof(const offloadtest::AccelerationStructure *AS) {
     return AS->getAPI() == GPUAPI::Metal;
+  }
+};
+
+class MetalDescriptorSetsBuilder : public DescriptorSetsBuilder {
+public:
+  llvm::SmallVector<MetalDescriptorSet> Sets;
+  llvm::SmallVector<IRDescriptorTableEntry *> SetStates;
+
+  MetalDescriptorSetsBuilder(llvm::SmallVector<MetalDescriptorSet> Sets)
+      : DescriptorSetsBuilder(GPUAPI::Metal), Sets(std::move(Sets)) {
+    SetStates.reserve(this->Sets.size());
+    for (const auto &Set : this->Sets) {
+      SetStates.push_back(Set.CSUHandle);
+    }
+  }
+
+  DescriptorSetsBuilder &bindBuffers(uint32_t SetIndex,
+                                     llvm::ArrayRef<const Buffer *> B) {
+    IRDescriptorTableEntry *EntryPtr = SetStates[SetIndex];
+    SetStates[SetIndex] += B.size();
+
+    for (size_t I = 0, N = B.size(); I < N; ++I) {
+      const MTLBuffer &BufferMTL = llvm::cast<MTLBuffer>(*B[I]);
+      if (BufferMTL.Desc.AccessType != BufferShaderAccessType::Typed) {
+        IRBufferView View = {};
+        View.buffer = BufferMTL.getBufferPtr();
+        View.bufferSize = BufferMTL.SizeInBytes;
+        IRDescriptorTableSetBufferView(EntryPtr + I, &View);
+      } else {
+        IRDescriptorTableSetTexture(EntryPtr + I, BufferMTL.getTexturePtr(), 0,
+                                    0);
+      }
+    }
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &bindTextures(uint32_t SetIndex,
+                                      llvm::ArrayRef<const Texture *> T,
+                                      llvm::ArrayRef<const Sampler *> S) {
+    assert((S.empty() || S.size() == T.size()) &&
+           "Sampler list must either be empty or match "
+           "texture list when binding descriptors.");
+
+    IRDescriptorTableEntry *EntryPtr = SetStates[SetIndex];
+    SetStates[SetIndex] += T.size();
+
+    for (size_t I = 0, N = T.size(); I < N; ++I) {
+      assert((S.empty() || S[I] == nullptr) &&
+             "Metal does not support combined image samplers.");
+
+      const MTLTexture &TextureMTL = llvm::cast<MTLTexture>(*T[I]);
+      IRDescriptorTableSetTexture(EntryPtr + I, TextureMTL.Tex, 0, 0);
+    }
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &constant(uint32_t SetIndex,
+                                  llvm::ArrayRef<const Buffer *> B,
+                                  VKBind) override {
+    return bindBuffers(SetIndex, B);
+  }
+
+  DescriptorSetsBuilder &
+  read(uint32_t SetIndex, llvm::ArrayRef<const Buffer *> B, VKBind) override {
+    return bindBuffers(SetIndex, B);
+  }
+  DescriptorSetsBuilder &read(uint32_t SetIndex,
+                              llvm::ArrayRef<const Texture *> T,
+                              llvm::ArrayRef<const Sampler *> S,
+                              VKBind) override {
+    return bindTextures(SetIndex, T, S);
+  }
+  DescriptorSetsBuilder &read(uint32_t SetIndex,
+                              llvm::ArrayRef<const AccelerationStructure *> A,
+                              VKBind) override {
+    IRDescriptorTableEntry *EntryPtr = SetStates[SetIndex];
+    SetStates[SetIndex] += A.size();
+
+    for (size_t I = 0, N = A.size(); I < N; ++I) {
+      const MetalAccelerationStructure &AccelStructMTL =
+          llvm::cast<MetalAccelerationStructure>(*A[I]);
+      const MTLBuffer &HeaderBufferMTL =
+          llvm::cast<MTLBuffer>(*AccelStructMTL.HeaderBuffer.get());
+      IRDescriptorTableSetAccelerationStructure(
+          EntryPtr + I, HeaderBufferMTL.getBufferPtr()->gpuAddress());
+    }
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &
+  write(uint32_t SetIndex, llvm::ArrayRef<const Buffer *> B, VKBind) override {
+    return bindBuffers(SetIndex, B);
+  }
+  DescriptorSetsBuilder &
+  write(uint32_t SetIndex, llvm::ArrayRef<const Texture *> T, VKBind) override {
+    return bindTextures(SetIndex, T, {});
+  }
+
+  DescriptorSetsBuilder &sampler(uint32_t SetIndex,
+                                 llvm::ArrayRef<const Sampler *> S,
+                                 VKBind) override {
+    assert(false && "Samplers are not implemented on Metal.");
+    return *this;
+  }
+
+  std::unique_ptr<DescriptorSets> build() override {
+    return std::make_unique<MetalDescriptorSets>(std::move(Sets));
+  }
+
+  static bool classof(const DescriptorSetsBuilder *B) {
+    return B->getAPI() == GPUAPI::Metal;
   }
 };
 
@@ -794,15 +994,39 @@ public:
           NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
+  void bindDescriptorSets(const PipelineState &PSO,
+                          const DescriptorSets &DSets) {
+    const auto &MTLPSO = llvm::cast<MTLPipelineState>(PSO);
+    const MetalDescriptorSets &DSetsMTL =
+        llvm::cast<MetalDescriptorSets>(DSets);
+
+    if (auto Err = ensureComputeEncoder())
+      llvm::report_fatal_error(std::move(Err));
+
+    ComputeEnc->setBuffer(CB->BoundCSUHeapBuffer, 0,
+                          kIRDescriptorHeapBindPoint);
+
+    // NOTE(manon): This is a problem when we dispatch the same pipeline
+    // multiple times. This buffer should not be living in the PSO.
+    for (uint32_t I = 0, N = DSetsMTL.Sets.size(); I < N; ++I) {
+      assert(!MTLPSO.Layout.RSigLayout[I].IsSampler &&
+             "Descriptor layout doesn't match root signature.");
+      MTLPSO.ArgBuffer->setRootDescriptorTable(I,
+                                               DSetsMTL.Sets[I].CSUHandleGPU);
+    }
+
+    ComputeEnc->setBuffer(MTLPSO.ArgBuffer->Buffer, 0,
+                          kIRArgumentBufferBindPoint);
+  }
+
   void bindComputeDescriptorSets(const PipelineState &PSO,
                                  const DescriptorSets &DSets) override {
-    assert(false && "bindComputeDescriptorSets is not implemented on metal.");
+    return bindDescriptorSets(PSO, DSets);
   }
 
   void bindRayTracingDescriptorSets(const PipelineState &PSO,
                                     const DescriptorSets &DSets) override {
-    assert(false &&
-           "bindRayTracingDescriptorSets is not implemented on metal.");
+    return bindDescriptorSets(PSO, DSets);
   }
 
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,
@@ -954,35 +1178,9 @@ public:
   // and the SBT buffer) must already be set on the active compute encoder by
   // the caller — this method only binds the pipeline state and issues the
   // dispatch.
-  llvm::Error dispatchRays(const PipelineState &PSO, const ShaderBindingTable &,
-                           uint32_t Width, uint32_t Height,
-                           uint32_t Depth) override {
-    if (!llvm::isa<MTLRayTracingPipelineState>(&PSO))
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "dispatchRays requires a RayTracing PipelineState.");
-    const auto &RTPSO = llvm::cast<MTLRayTracingPipelineState>(PSO);
-    if (!RTPSO.ComputePipeline)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RayTracing PipelineState has no compute pipeline state.");
-    if (auto Err = ensureComputeEncoder())
-      return Err;
-    flushBarrier();
-    insertDebugSignpost(
-        llvm::formatv("DispatchRays [{0},{1},{2}]", Width, Height, Depth)
-            .str());
-    ComputeEnc->setComputePipelineState(RTPSO.ComputePipeline);
-
-    // DispatchRays(W, H, D) launches W*H*D rays; tid in the irconverter raygen
-    // kernel is the per-ray index. Pass grid as raw (W, H, D) and let Metal
-    // ceil-divide by ThreadsPerGroup to compute threadgroup count.
-    const MTL::Size GridSize(Width, Height, Depth);
-    ComputeEnc->dispatchThreads(GridSize, RTPSO.ThreadsPerGroup);
-    addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
-    return llvm::Error::success();
-  }
-
+  llvm::Error dispatchRays(const PipelineState &PSO,
+                           const ShaderBindingTable &SBT, uint32_t Width,
+                           uint32_t Height, uint32_t Depth) override;
   /// Lazily transition into an AccelerationStructureCommandEncoder; mirrors
   /// the existing compute↔blit lazy switch.
   llvm::Error ensureASEncoder() {
@@ -1134,7 +1332,28 @@ public:
 
   void bindDescriptorSets(const PipelineState &PSO,
                           const DescriptorSets &DSets) override {
-    assert(false && "bindDescriptorSets is not implemented on metal.");
+    const auto &MTLPSO = llvm::cast<MTLPipelineState>(PSO);
+    const MetalDescriptorSets &DSetsMTL =
+        llvm::cast<MetalDescriptorSets>(DSets);
+
+    RenderEnc->setVertexBuffer(CB->BoundCSUHeapBuffer, 0,
+                               kIRDescriptorHeapBindPoint);
+    RenderEnc->setFragmentBuffer(CB->BoundCSUHeapBuffer, 0,
+                                 kIRDescriptorHeapBindPoint);
+
+    // NOTE(manon): This is a problem when we dispatch the same pipeline
+    // multiple times. This buffer should not be living in the PSO.
+    for (uint32_t I = 0, N = DSetsMTL.Sets.size(); I < N; ++I) {
+      assert(!MTLPSO.Layout.RSigLayout[I].IsSampler &&
+             "Descriptor layout doesn't match root signature.");
+      MTLPSO.ArgBuffer->setRootDescriptorTable(I,
+                                               DSetsMTL.Sets[I].CSUHandleGPU);
+    }
+
+    RenderEnc->setVertexBuffer(MTLPSO.ArgBuffer->Buffer, 0,
+                               kIRArgumentBufferBindPoint);
+    RenderEnc->setFragmentBuffer(MTLPSO.ArgBuffer->Buffer, 0,
+                                 kIRArgumentBufferBindPoint);
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
@@ -1329,10 +1548,11 @@ public:
   std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
   MTLQueue GraphicsQueue;
 
-  llvm::Error createRootSignature(
-      const BindingsDesc &BindingsDesc, bool IsGraphics,
-      IRRootSignaturePtr &OutRootSig,
-      std::unique_ptr<MTLTopLevelArgumentBuffer> &OutArgBuffer) {
+  llvm::Error
+  createRootSignature(const BindingsDesc &BindingsDesc, bool IsGraphics,
+                      IRRootSignaturePtr &OutRootSig,
+                      std::unique_ptr<MTLTopLevelArgumentBuffer> &OutArgBuffer,
+                      DescriptorSetsLayout &Layout) {
     uint32_t DescriptorCount = 0;
     for (auto &D : BindingsDesc.DescriptorSetDescs)
       DescriptorCount += D.ResourceBindings.size();
@@ -1384,6 +1604,13 @@ public:
           static_cast<uint32_t>(Set.ResourceBindings.size());
       Param.DescriptorTable.pDescriptorRanges = &Ranges.get()[StartRangeIdx];
       Param.ShaderVisibility = IRShaderVisibilityAll;
+
+      Layout.RSigLayout.push_back(RootSignatureLayout(false, DescriptorIdx));
+
+      Layout.Sets.push_back({
+          DescriptorIdx, // DescriptorCount
+          0              // SamplerCount
+      });
     }
 
     // NOTE: Attempting to create a RS with version 1.0 seems to fail
@@ -1414,27 +1641,6 @@ public:
 
     OutArgBuffer = std::move(*ArgBufferOrErr);
     return llvm::Error::success();
-  }
-
-  llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
-  createDescriptorHeap(Pipeline &P) {
-    if (P.getDescriptorCount() == 0) {
-      llvm::outs()
-          << "No descriptors found, skipping descriptor heap creation.\n";
-      return nullptr;
-    }
-    const uint32_t DescriptorCount = P.getDescriptorCountWithFlattenedArrays();
-    const MTLDescriptorHeapDesc HeapDesc = {MTLDescriptorHeapType::CBV_SRV_UAV,
-                                            DescriptorCount};
-
-    auto DescHeapOrErr =
-        MTLDescriptorHeap::create(Device, HeapDesc, ResidencyTracker);
-    if (!DescHeapOrErr)
-      return DescHeapOrErr.takeError();
-
-    llvm::outs() << "Descriptor heap created with " << DescriptorCount
-                 << " descriptors.\n";
-    return std::move(*DescHeapOrErr);
   }
 
   llvm::Expected<MetalIR> convertToMetalIR(Stages Stage, bool IsGraphics,
@@ -1548,176 +1754,69 @@ public:
     return MetalIR{std::move(MetalLib), std::move(Reflection)};
   }
 
-  llvm::Error buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
-                                    const MTLDescriptorHeap &DescHeap) {
+  llvm::Error createComputeCommands(Pipeline &P, SharedInvocationState &IS,
+                                    DescriptorPool &Pool) {
+    IS.CB->bindPool(Pool);
 
-    uint32_t HeapIdx = 0;
-    for (auto &T : DescTables) {
-      for (auto &R : T.Resources) {
-        for (const auto &Set : R.second) {
-          if (Set.Buffer != nullptr) {
-            const MTLBuffer &BufferMTL =
-                llvm::cast<MTLBuffer>(*Set.Buffer.get());
-            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
+    auto DescSetsOrErr =
+        buildDescriptorSets(*this, Pool, *IS.Pipeline, IS.DescTables);
+    if (!DescSetsOrErr)
+      return DescSetsOrErr.takeError();
+    auto DescSets = std::move(*DescSetsOrErr);
 
-            if (BufferMTL.Desc.AccessType != BufferShaderAccessType::Typed) {
-              IRBufferView View = {};
-              View.buffer = BufferMTL.getBufferPtr();
-              View.bufferSize = BufferMTL.SizeInBytes;
-              IRDescriptorTableSetBufferView(Entry, &View);
-            } else {
-              IRDescriptorTableSetTexture(Entry, BufferMTL.getTexturePtr(), 0,
-                                          0);
-            }
-            HeapIdx += 1;
-          } else if (Set.Texture != nullptr) {
-            if (Set.Sampler != nullptr)
-              return llvm::createStringError(
-                  "Metal does not support Combined Image Samplers.");
-
-            const MTLTexture &TextureMTL =
-                llvm::cast<MTLTexture>(*Set.Texture.get());
-            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
-            IRDescriptorTableSetTexture(Entry, TextureMTL.Tex, 0, 0);
-            HeapIdx += 1;
-          } else if (Set.AS != nullptr) {
-            const MetalAccelerationStructure &AccelStructMTL =
-                llvm::cast<MetalAccelerationStructure>(*Set.AS);
-            const MTLBuffer &HeaderBufferMTL =
-                llvm::cast<MTLBuffer>(*AccelStructMTL.HeaderBuffer.get());
-            IRDescriptorTableEntry *Entry = DescHeap.getEntryHandle(HeapIdx);
-            IRDescriptorTableSetAccelerationStructure(
-                Entry, HeaderBufferMTL.getBufferPtr()->gpuAddress());
-            HeapIdx += 1;
-          } else if (Set.Sampler != nullptr) {
-            return llvm::createStringError("Samplers are unsupported in Metal");
-          } else {
-            return llvm::createStringError("Unrecognized Resource Type");
-          }
-        }
-      }
-    }
-
-    return llvm::Error::success();
-  }
-
-  llvm::Error
-  createComputeCommands(Pipeline &P, SharedInvocationState &IS,
-                        const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
-    auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
-    auto NativeOrErr = Encoder.getNative();
-    if (!NativeOrErr)
-      return NativeOrErr.takeError();
-    MTL::ComputeCommandEncoder *NativeEncoder = *NativeOrErr;
+    auto Encoder = std::move(*EncoderOrErr);
 
-    const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
-    MTLGPUDescriptorHandle Handle = {};
-    if (DescHeap) {
-      DescHeap->bind(NativeEncoder);
-      Handle = DescHeap->getGPUDescriptorHandleForHeapStart();
-    }
+    Encoder->bindComputeDescriptorSets(*IS.Pipeline, *DescSets);
 
-    for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-      PS->ArgBuffer->setRootDescriptorTable(Idx, Handle);
-      Handle.addOffset(P.Sets[Idx].Resources.size());
-    }
-
-    PS->ArgBuffer->bind(NativeEncoder);
-
-    if (auto Err = Encoder.dispatch(*IS.Pipeline.get(),
-                                    P.DispatchParameters.DispatchGroupCount[0],
-                                    P.DispatchParameters.DispatchGroupCount[1],
-                                    P.DispatchParameters.DispatchGroupCount[2]))
+    if (auto Err = Encoder->dispatch(
+            *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
+            P.DispatchParameters.DispatchGroupCount[1],
+            P.DispatchParameters.DispatchGroupCount[2]))
       return Err;
-    Encoder.endEncoding();
+    Encoder->endEncoding();
     return llvm::Error::success();
   }
 
-  llvm::Error
-  createRayTracingCommands(Pipeline &P, SharedInvocationState &IS,
-                           const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
+  llvm::Error createRayTracingCommands(Pipeline &P, SharedInvocationState &IS,
+                                       DescriptorPool &Pool) {
+    IS.CB->bindPool(Pool);
+
+    auto DescSetsOrErr =
+        buildDescriptorSets(*this, Pool, *IS.Pipeline, IS.DescTables);
+    if (!DescSetsOrErr)
+      return DescSetsOrErr.takeError();
+    auto DescSets = std::move(*DescSetsOrErr);
+
     auto EncoderOrErr = IS.CB->createComputeEncoder();
     if (!EncoderOrErr)
       return EncoderOrErr.takeError();
-    auto &Encoder = llvm::cast<MTLComputeEncoder>(*EncoderOrErr.get());
-    auto NativeOrErr = Encoder.getNative();
-    if (!NativeOrErr)
-      return NativeOrErr.takeError();
-    MTL::ComputeCommandEncoder *NativeEncoder = *NativeOrErr;
+    auto Encoder = std::move(*EncoderOrErr);
 
-    const auto &RTPSO =
-        llvm::cast<MTLRayTracingPipelineState>(*IS.Pipeline.get());
-    const auto &SBT = llvm::cast<MTLShaderBindingTable>(*IS.SBT.get());
-
-    // Bind the global descriptor heap + top-level argument buffer the same
-    // way the compute path does; the raygen kernel and any visible-function
-    // callees consume them at the same slots (kIRDescriptorHeapBindPoint and
-    // kIRArgumentBufferBindPoint).
-    MTLGPUDescriptorHandle Handle = {};
-    if (DescHeap) {
-      DescHeap->bind(NativeEncoder);
-      Handle = DescHeap->getGPUDescriptorHandleForHeapStart();
-    }
-    for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-      RTPSO.ArgBuffer->setRootDescriptorTable(Idx, Handle);
-      Handle.addOffset(P.Sets[Idx].Resources.size());
-    }
-    RTPSO.ArgBuffer->bind(NativeEncoder);
-
-    // Populate the per-dispatch IRDispatchRaysArgument: SBT region addresses
-    // (RayGen / Miss / HitGroup / Callable), GPU pointers to the global
-    // root-signature argument buffer + descriptor heaps, plus resource IDs
-    // for the visible / intersection function tables. The raygen kernel
-    // reads this struct from the buffer bound at kIRRayDispatchArgumentsBind-
-    // Point and any visible-function callees inherit it through the same
-    // pointer.
-    IRDispatchRaysArgument Args{};
-    Args.DispatchRaysDesc.RayGenerationShaderRecord = SBT.RayGenRegion;
-    Args.DispatchRaysDesc.MissShaderTable = SBT.MissRegion;
-    Args.DispatchRaysDesc.HitGroupTable = SBT.HitGroupRegion;
-    Args.DispatchRaysDesc.CallableShaderTable = SBT.CallableRegion;
-    Args.DispatchRaysDesc.Width = P.DispatchParameters.DispatchGroupCount[0];
-    Args.DispatchRaysDesc.Height = P.DispatchParameters.DispatchGroupCount[1];
-    Args.DispatchRaysDesc.Depth = P.DispatchParameters.DispatchGroupCount[2];
-    Args.GRS = RTPSO.ArgBuffer->getGPUAddress();
-    Args.ResDescHeap =
-        DescHeap ? DescHeap->getGPUDescriptorHandleForHeapStart().Ptr : 0;
-    Args.SmpDescHeap = 0;
-    Args.VisibleFunctionTable =
-        RTPSO.VFT ? RTPSO.VFT->gpuResourceID() : MTL::ResourceID{0};
-    Args.IntersectionFunctionTable =
-        RTPSO.IFT ? RTPSO.IFT->gpuResourceID() : MTL::ResourceID{0};
-    Args.IntersectionFunctionTables = 0;
-
-    const BufferCreateDesc ArgsBufDesc = BufferCreateDesc::uploadBuffer();
-    auto ArgsBufOrErr = offloadtest::createBufferWithData(
-        *this, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
-        sizeof(IRDispatchRaysArgument), nullptr, nullptr);
-    if (!ArgsBufOrErr)
-      return ArgsBufOrErr.takeError();
-
-    auto *MTLArgsBuf = llvm::cast<MTLBuffer>(ArgsBufOrErr->get());
-    IS.KeepAliveBuffers.push_back(std::move(*ArgsBufOrErr));
-
-    NativeEncoder->setBuffer(MTLArgsBuf->getBufferPtr(), 0,
-                             kIRRayDispatchArgumentsBindPoint);
+    Encoder->bindRayTracingDescriptorSets(*IS.Pipeline, *DescSets);
 
     if (auto Err =
-            Encoder.dispatchRays(*IS.Pipeline.get(), *IS.SBT.get(),
-                                 P.DispatchParameters.DispatchGroupCount[0],
-                                 P.DispatchParameters.DispatchGroupCount[1],
-                                 P.DispatchParameters.DispatchGroupCount[2]))
+            Encoder->dispatchRays(*IS.Pipeline.get(), *IS.SBT.get(),
+                                  P.DispatchParameters.DispatchGroupCount[0],
+                                  P.DispatchParameters.DispatchGroupCount[1],
+                                  P.DispatchParameters.DispatchGroupCount[2]))
       return Err;
-    Encoder.endEncoding();
+    Encoder->endEncoding();
     return llvm::Error::success();
   }
 
-  llvm::Error
-  createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
-                         const std::unique_ptr<MTLDescriptorHeap> &DescHeap) {
+  llvm::Error createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
+                                     DescriptorPool &Pool) {
+    IS.CB->bindPool(Pool);
+
+    auto DescSetsOrErr =
+        buildDescriptorSets(*this, Pool, *IS.Pipeline, IS.DescTables);
+    if (!DescSetsOrErr)
+      return DescSetsOrErr.takeError();
+    auto DescSets = std::move(*DescSetsOrErr);
+
     const uint64_t Width = IS.RenderTarget->getDesc().Width;
     const uint64_t Height = IS.RenderTarget->getDesc().Height;
 
@@ -1729,50 +1828,38 @@ public:
     auto EncOrErr = IS.CB->createRenderEncoder(BeginDesc);
     if (!EncOrErr)
       return EncOrErr.takeError();
-    auto &Encoder = *EncOrErr.get();
+    auto Encoder = std::move(*EncOrErr);
 
-    {
-      auto &MTLEncoder = llvm::cast<MTLRenderEncoder>(Encoder);
-      const auto &PS = llvm::cast<MTLPipelineState>(IS.Pipeline.get());
-      auto *CmdEncoder = MTLEncoder.getNative();
-      if (DescHeap) {
-        DescHeap->bind(CmdEncoder);
-        // NOTE: This code assumes 1 descriptor set (D3D12 backend also assumes
-        // this)
-        PS->ArgBuffer->setRootDescriptorTable(
-            0, DescHeap->getGPUDescriptorHandleForHeapStart());
-      }
-      PS->ArgBuffer->bind(CmdEncoder);
-    }
+    Encoder->bindDescriptorSets(*IS.Pipeline, *DescSets);
 
     Viewport VP;
     VP.Width = static_cast<float>(Width);
     VP.Height = static_cast<float>(Height);
-    Encoder.setViewport(VP);
+    Encoder->setViewport(VP);
 
     ScissorRect Scissor;
     Scissor.Width = static_cast<uint32_t>(Width);
     Scissor.Height = static_cast<uint32_t>(Height);
-    Encoder.setScissor(Scissor);
+    Encoder->setScissor(Scissor);
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)
-        Encoder.setVertexBuffer(0, IS.VB.get(), 0,
-                                P.Bindings.getVertexStride());
+        Encoder->setVertexBuffer(0, IS.VB.get(), 0,
+                                 P.Bindings.getVertexStride());
 
       if (auto Err =
-              Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
-                                    /*InstanceCount=*/1))
+              Encoder->drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
+                                     /*InstanceCount=*/1))
         return Err;
     } else {
-      if (auto Err = Encoder.dispatchMesh(
+      if (auto Err = Encoder->dispatchMesh(
               *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
               P.DispatchParameters.DispatchGroupCount[1],
               P.DispatchParameters.DispatchGroupCount[2]))
         return Err;
     }
 
-    Encoder.endEncoding();
+    Encoder->endEncoding();
 
     return llvm::Error::success();
   }
@@ -1814,8 +1901,9 @@ public:
 
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
-    if (auto Err =
-            createRootSignature(BD, /*IsGraphics=*/false, RootSig, ArgBuffer))
+    DescriptorSetsLayout Layout;
+    if (auto Err = createRootSignature(BD, /*IsGraphics=*/false, RootSig,
+                                       ArgBuffer, Layout))
       return Err;
 
     // Configure the irconverter ray tracing pipeline. Raygen is compiled as a
@@ -1840,7 +1928,8 @@ public:
         RTConfig.get(), IRIntersectionFunctionCompilationVisibleFunction);
 
     auto State = std::make_unique<MTLRayTracingPipelineState>(
-        Name, std::move(RootSig), std::move(ArgBuffer), ResidencyTracker);
+        Name, std::move(RootSig), std::move(ArgBuffer), std::move(Layout),
+        ResidencyTracker);
 
     // Compile each entry point. Raygen lands in `RaygenFn` (becomes the
     // compute function); everything else gets linked in via LinkedFunctions
@@ -2192,8 +2281,9 @@ public:
                    ShaderContainer CS) override {
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    DescriptorSetsLayout Layout;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/false,
-                                       RootSig, ArgBuffer))
+                                       RootSig, ArgBuffer, Layout))
       return Err;
 
     auto MetalIR = convertToMetalIR(Stages::Compute, /*IsGraphics=*/false,
@@ -2235,7 +2325,8 @@ public:
     IRShaderReflectionReleaseComputeInfo(&Info);
 
     return std::make_unique<MTLPipelineState>(
-        Name, std::move(RootSig), std::move(ArgBuffer), PSO, ThreadsPerGroup);
+        Name, std::move(RootSig), std::move(ArgBuffer), std::move(Layout), PSO,
+        ThreadsPerGroup);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -2263,8 +2354,9 @@ public:
 
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    DescriptorSetsLayout Layout;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
-                                       RootSig, ArgBuffer))
+                                       RootSig, ArgBuffer, Layout))
       return Err;
 
     NS::Error *Error = nullptr;
@@ -2422,9 +2514,9 @@ public:
     MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
     DSDesc->release();
 
-    return std::make_unique<MTLPipelineState>(Name, std::move(RootSig),
-                                              std::move(ArgBuffer), PSO,
-                                              DSState, MTL::CullModeNone);
+    return std::make_unique<MTLPipelineState>(
+        Name, std::move(RootSig), std::move(ArgBuffer), std::move(Layout), PSO,
+        DSState, MTL::CullModeNone);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
@@ -2432,8 +2524,9 @@ public:
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
+    DescriptorSetsLayout Layout;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
-                                       RootSig, ArgBuffer))
+                                       RootSig, ArgBuffer, Layout))
       return Err;
 
     NS::Error *Error = nullptr;
@@ -2552,8 +2645,8 @@ public:
     }
 
     return std::make_unique<MTLPipelineState>(
-        Name, std::move(RootSig), std::move(ArgBuffer), PSO, DSState,
-        MTL::CullModeNone, MeshTGSize, ObjectTGSize);
+        Name, std::move(RootSig), std::move(ArgBuffer), std::move(Layout), PSO,
+        DSState, MTL::CullModeNone, MeshTGSize, ObjectTGSize);
   }
 
   llvm::Expected<AccelerationStructureSizes>
@@ -2738,27 +2831,37 @@ public:
 
   llvm::Expected<std::unique_ptr<DescriptorPool>>
   createDescriptorPool() override {
-    return llvm::createStringError(
-        "createDescriptorPool is unimplemented on Vulkan");
+    return MetalDescriptorPool::create(Device, ResidencyTracker);
   }
 
   llvm::Expected<std::unique_ptr<DescriptorSetsBuilder>>
-  createDescriptorSetsBuilder(DescriptorPool &,
-                              const PipelineState &) override {
-    return llvm::createStringError(
-        "createDescriptorSetsBuilder is unimplemented on Vulkan");
+  createDescriptorSetsBuilder(DescriptorPool &Pool,
+                              const PipelineState &Pipeline) override {
+    MetalDescriptorPool &PoolMTL = llvm::cast<MetalDescriptorPool>(Pool);
+    const MTLPipelineState &PipelineMTL =
+        llvm::cast<MTLPipelineState>(Pipeline);
+
+    llvm::SmallVector<MetalDescriptorSet> Sets;
+    for (const auto &Counts : PipelineMTL.Layout.Sets) {
+      MetalDescriptorSet Set = {};
+      if (Counts.DescriptorCount > 0)
+        PoolMTL.allocateDescriptors(Counts.DescriptorCount, Set.CSUHandle,
+                                    Set.CSUHandleGPU);
+      Sets.push_back(Set);
+    }
+    return std::make_unique<MetalDescriptorSetsBuilder>(std::move(Sets));
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
+    auto DescriptorPoolOrErr = createDescriptorPool();
+    if (!DescriptorPoolOrErr)
+      return DescriptorPoolOrErr.takeError();
+    auto DescriptorPool = std::move(*DescriptorPoolOrErr);
+
     SharedInvocationState IS;
 
     NS::AutoreleasePool *Pool = NS::AutoreleasePool::alloc()->init();
     auto PoolScope = llvm::scope_exit([&] { Pool->release(); });
-
-    auto DescHeapOrErr = createDescriptorHeap(P);
-    if (!DescHeapOrErr)
-      return DescHeapOrErr.takeError();
-    auto DescHeap = std::move(*DescHeapOrErr);
 
     auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
@@ -2766,9 +2869,6 @@ public:
     IS.CB = std::move(*CBOrErr);
 
     if (auto Err = createResources(*this, P, IS))
-      return Err;
-
-    if (auto Err = buildDescriptorTables(IS.DescTables, *DescHeap))
       return Err;
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
@@ -2813,7 +2913,7 @@ public:
       IS.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
 
-      if (auto Err = createComputeCommands(P, IS, DescHeap))
+      if (auto Err = createComputeCommands(P, IS, *DescriptorPool))
         return Err;
     } else if (P.isRaster()) {
       auto FormatOrErr = toFormat(P.Bindings.RTargetBufferPtr->Format,
@@ -2894,7 +2994,7 @@ public:
         return RenderPassOrErr.takeError();
       IS.RenderPass = std::move(*RenderPassOrErr);
 
-      if (auto Err = createGraphicsCommands(P, IS, DescHeap))
+      if (auto Err = createGraphicsCommands(P, IS, *DescriptorPool))
         return Err;
     } else if (P.isRayTracing()) {
       if (P.Shaders.empty() || !P.SBT || !P.RTConfig)
@@ -2926,7 +3026,7 @@ public:
       IS.SBT = std::move(*SBTOrErr);
       llvm::outs() << "Shader Binding Table created.\n";
 
-      if (auto Err = createRayTracingCommands(P, IS, DescHeap))
+      if (auto Err = createRayTracingCommands(P, IS, *DescriptorPool))
         return Err;
     }
 
@@ -3194,6 +3294,66 @@ MTL::Fence *MTLCommandBuffer::ensureFence() {
     llvm::report_fatal_error("Failed to create Metal fence.");
 
   return Fence;
+}
+
+llvm::Error MTLComputeEncoder::dispatchRays(const PipelineState &PSO,
+                                            const ShaderBindingTable &SBT,
+                                            uint32_t Width, uint32_t Height,
+                                            uint32_t Depth) {
+  if (!llvm::isa<MTLRayTracingPipelineState>(&PSO))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "dispatchRays requires a RayTracing PipelineState.");
+  const auto &RTPSO = llvm::cast<MTLRayTracingPipelineState>(PSO);
+  const auto &MTLSBT = llvm::cast<MTLShaderBindingTable>(SBT);
+  if (!RTPSO.ComputePipeline)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RayTracing PipelineState has no compute pipeline state.");
+  if (auto Err = ensureComputeEncoder())
+    return Err;
+  flushBarrier();
+  insertDebugSignpost(
+      llvm::formatv("DispatchRays [{0},{1},{2}]", Width, Height, Depth).str());
+
+  // Per-dispatch ray arguments, consumed at kIRRayDispatchArgumentsBindPoint.
+  IRDispatchRaysArgument Args{};
+  Args.DispatchRaysDesc.RayGenerationShaderRecord = MTLSBT.RayGenRegion;
+  Args.DispatchRaysDesc.MissShaderTable = MTLSBT.MissRegion;
+  Args.DispatchRaysDesc.HitGroupTable = MTLSBT.HitGroupRegion;
+  Args.DispatchRaysDesc.CallableShaderTable = MTLSBT.CallableRegion;
+  Args.DispatchRaysDesc.Width = Width;
+  Args.DispatchRaysDesc.Height = Height;
+  Args.DispatchRaysDesc.Depth = Depth;
+  Args.GRS = RTPSO.ArgBuffer->getGPUAddress();
+  Args.ResDescHeap =
+      CB->BoundCSUHeapBuffer ? CB->BoundCSUHeapBuffer->gpuAddress() : 0;
+  Args.SmpDescHeap = 0;
+  Args.VisibleFunctionTable =
+      RTPSO.VFT ? RTPSO.VFT->gpuResourceID() : MTL::ResourceID{0};
+  Args.IntersectionFunctionTable =
+      RTPSO.IFT ? RTPSO.IFT->gpuResourceID() : MTL::ResourceID{0};
+  Args.IntersectionFunctionTables = 0;
+
+  const BufferCreateDesc ArgsBufDesc = BufferCreateDesc::uploadBuffer();
+  auto ArgsBufOrErr = offloadtest::createBufferWithData(
+      *CB->Dev, "MTL Dispatch Rays Arguments", ArgsBufDesc, &Args,
+      sizeof(IRDispatchRaysArgument), nullptr, nullptr);
+  if (!ArgsBufOrErr)
+    return ArgsBufOrErr.takeError();
+  auto *MTLArgsBuf = llvm::cast<MTLBuffer>(ArgsBufOrErr->get());
+  CB->KeepAliveOwned.push_back(std::move(*ArgsBufOrErr));
+
+  ComputeEnc->setBuffer(MTLArgsBuf->getBufferPtr(), 0,
+                        kIRRayDispatchArgumentsBindPoint);
+
+  ComputeEnc->setComputePipelineState(RTPSO.ComputePipeline);
+
+  // dispatchThreads automatically takes care of bounds checking.
+  const MTL::Size GridSize(Width, Height, Depth);
+  ComputeEnc->dispatchThreads(GridSize, RTPSO.ThreadsPerGroup);
+  addBarrierScope(MTL::BarrierScopeBuffers | MTL::BarrierScopeTextures);
+  return llvm::Error::success();
 }
 
 } // namespace

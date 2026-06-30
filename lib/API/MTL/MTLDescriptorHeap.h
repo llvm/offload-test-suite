@@ -45,11 +45,11 @@ struct MTLDescriptorHeapDesc {
 // by the argument buffer for shader resource binding with the explicit root
 // signature layout.
 class MTLDescriptorHeap {
+public:
   MTLDescriptorHeapDesc Desc;
   MTL::Buffer *Buffer;
   std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
 
-public:
   static llvm::Expected<std::unique_ptr<MTLDescriptorHeap>>
   create(MTL::Device *Device, const MTLDescriptorHeapDesc &Desc,
          std::shared_ptr<MetalResidencyTracker> ResidencyTracker);

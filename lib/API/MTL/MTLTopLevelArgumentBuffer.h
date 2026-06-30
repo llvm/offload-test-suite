@@ -19,6 +19,7 @@ struct MetalResidencyTracker;
 // Manages a Metal buffer that serves as the top-level argument buffer for
 // shader resource binding with the explicit root signature layout.
 class MTLTopLevelArgumentBuffer {
+public:
   llvm::SmallVector<IRResourceLocation> ResourceLocs;
   MTL::Buffer *Buffer = nullptr;
   std::shared_ptr<MetalResidencyTracker> ResidencyTracker;
@@ -30,7 +31,6 @@ class MTLTopLevelArgumentBuffer {
   template <IRResourceType ResourceType, typename T>
   void setResource(uint32_t Index, T Resource) const;
 
-public:
   /// @brief Creates a MTLTopLevelArgumentBuffer based on the given root
   /// signature. Empty root signature (zero resources) is allowed, bind methods
   /// will be no-op in that case.
