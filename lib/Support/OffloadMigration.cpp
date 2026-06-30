@@ -496,17 +496,20 @@ buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
           Builder->read(SetIndex, Buffers, BindVK);
       } else if (R.first->isTexture()) {
         llvm::SmallVector<const Texture *> Textures;
+        llvm::SmallVector<const Sampler *> Samplers;
         for (const auto &Set : R.second) {
           if (Set.Sampler.get() != nullptr)
-            return llvm::createStringError(
-                "Skipping support for combined image sampler for now.");
+            Samplers.push_back(Set.Sampler.get());
           Textures.push_back(Set.Texture.get());
         }
 
-        if (R.first->isReadWrite())
+        if (R.first->isReadWrite()) {
+          assert(Samplers.empty() &&
+                 "Combined image samplers cannot be bound as write");
           Builder->write(SetIndex, Textures, BindVK);
-        else
-          Builder->read(SetIndex, Textures, BindVK);
+        } else {
+          Builder->read(SetIndex, Textures, Samplers, BindVK);
+        }
       } else if (R.first->isSampler()) {
         llvm::SmallVector<const Sampler *> Samplers;
         for (const auto &Set : R.second)

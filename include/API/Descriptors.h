@@ -66,8 +66,10 @@ public:
 
   virtual DescriptorSetsBuilder &
   read(uint32_t SetIndex, llvm::ArrayRef<const Buffer *>, VKBind) = 0;
-  virtual DescriptorSetsBuilder &
-  read(uint32_t SetIndex, llvm::ArrayRef<const Texture *>, VKBind) = 0;
+  virtual DescriptorSetsBuilder &read(uint32_t SetIndex,
+                                      llvm::ArrayRef<const Texture *>,
+                                      llvm::ArrayRef<const Sampler *>,
+                                      VKBind) = 0;
   virtual DescriptorSetsBuilder &
   read(uint32_t SetIndex, llvm::ArrayRef<const AccelerationStructure *>,
        VKBind) = 0;
