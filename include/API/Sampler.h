@@ -1,11 +1,8 @@
-//===- Sampler.h - Offload API Texture ------------------------------------===//
+//===- Sampler.h - Offload API Sampler ------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
-//
-//===----------------------------------------------------------------------===//
-//
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,9 +48,7 @@ class Sampler {
 public:
   virtual ~Sampler();
   Sampler(const Sampler &) = delete;
-  // Sampler(Sampler &&) = delete;
   Sampler &operator=(const Sampler &) = delete;
-  // Sampler &operator=(Sampler &&) = delete;
 
   GPUAPI getAPI() const { return API; }
   virtual const SamplerCreateDesc &getDesc() const = 0;
