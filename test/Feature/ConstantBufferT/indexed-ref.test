@@ -1,0 +1,71 @@
+#--- source.hlsl
+struct S {
+  int a;
+  float4 b;
+};
+
+RWStructuredBuffer<S> Buf : register(u0);
+ConstantBuffer<S> CBs[2] : register(b4);
+
+[numthreads(4,1,1)]
+void main(uint GID : SV_GroupIndex) {
+    ConstantBuffer<S> cb = CBs[NonUniformResourceIndex(GID % 2)];
+    Buf[GID] = cb;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: CBS
+    Format: Hex32
+    ArraySize: 2
+    Data:
+      - [0x1,        0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a,
+         0x3f800000, 0x40000000, 0x40400000, 0x40800000]
+      - [0xffffffff, 0x5a5a5a5a, 0x5a5a5a5a, 0x5a5a5a5a,
+         0xbf800000, 0xc0000000, 0xc0400000, 0xc0800000]
+  - Name: Out
+    Format: Hex32
+    Stride: 20
+    FillSize: 80
+  - Name: ExpectedOut
+    Format: Hex32
+    Data: [
+      0x1,        0x3f800000, 0x40000000, 0x40400000, 0x40800000,
+      0xffffffff, 0xbf800000, 0xc0000000, 0xc0400000, 0xc0800000,
+      0x1,        0x3f800000, 0x40000000, 0x40400000, 0x40800000,
+      0xffffffff, 0xbf800000, 0xc0000000, 0xc0400000, 0xc0800000,
+    ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: CBS
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/195093
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
