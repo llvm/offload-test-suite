@@ -789,15 +789,20 @@ public:
                                D3D12_RESOURCE_STATE_COPY_DEST);
     CB.flushBarrier();
 
-    const uint32_t ElementSize = getFormatSizeInBytes(DXDst.Desc.Fmt);
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXGIFormat(DXDst.Desc.Fmt), DXDst.Desc.Width, DXDst.Desc.Height,
-            1, getAlignedTexturePitch(DXDst.Desc.Width, ElementSize))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), 0);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(), Footprint);
-    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    const D3D12_RESOURCE_DESC TexDesc = DXDst.Resource->GetDesc();
+    const uint32_t NumSubresources = TexDesc.MipLevels;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Layouts(
+        NumSubresources);
+    ComPtr<ID3D12DeviceX> Device;
+    DXDst.Resource->GetDevice(IID_PPV_ARGS(&Device));
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Layouts.data(), nullptr, nullptr, nullptr);
+    for (uint32_t Sub = 0; Sub < NumSubresources; ++Sub) {
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), Sub);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(),
+                                                 Layouts[Sub]);
+      CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
       CB.addResourceTransition(DXSrc.Buffer.Get(),
@@ -2047,6 +2052,43 @@ public:
   uint32_t getTextureUploadRowStrideInBytes(
       const TextureCreateDesc &Desc) const override {
     return getAlignedTexturePitch(Desc.Width, getFormatSizeInBytes(Desc.Fmt));
+  }
+
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // Only the fields GetCopyableFootprints consults are needed here; layout,
+    // flags, and clear value do not affect the copyable footprint.
+    D3D12_RESOURCE_DESC TexDesc = {};
+    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    TexDesc.Width = Desc.Width;
+    TexDesc.Height = Desc.Height;
+    TexDesc.DepthOrArraySize = 1;
+    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
+    TexDesc.Format = getDXGIFormat(Desc.Fmt);
+    TexDesc.SampleDesc.Count = 1;
+
+    const uint32_t NumSubresources = Desc.MipLevels;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints(
+        NumSubresources);
+    llvm::SmallVector<UINT> NumRows(NumSubresources);
+    llvm::SmallVector<UINT64> RowSizes(NumSubresources);
+    UINT64 TotalBytes = 0;
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Footprints.data(), NumRows.data(),
+                                  RowSizes.data(), &TotalBytes);
+
+    TextureUploadLayout Layout;
+    Layout.TotalSizeInBytes = TotalBytes;
+    Layout.Subresources.reserve(NumSubresources);
+    for (uint32_t I = 0; I < NumSubresources; ++I) {
+      SubresourceFootprint Sub;
+      Sub.Offset = Footprints[I].Offset;
+      Sub.RowPitchInBytes = Footprints[I].Footprint.RowPitch;
+      Sub.RowSizeInBytes = static_cast<uint32_t>(RowSizes[I]);
+      Sub.NumRows = NumRows[I];
+      Layout.Subresources.push_back(Sub);
+    }
+    return Layout;
   }
 
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
