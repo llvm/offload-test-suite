@@ -2614,7 +2614,7 @@ public:
                              const ComPtr<ID3D12DescriptorHeap> &DescHeap,
                              const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     // Bind descriptors in descriptor tables.
-    if (!DescHeap && !SamplerHeap)
+    if (!DescHeap)
       return;
 
     uint32_t HeapIndex = 0;
