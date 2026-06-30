@@ -1,14 +1,17 @@
 #--- source.hlsl
+// Reassign a local resource handle to a different global, then Store.
+// Verifies last-write-wins semantics: the pre-reassignment Store writes
+// to gBuf0, the post-reassignment Store writes to gBuf1, and both
+// buffers end up populated with their respective sentinel values.
+
 RWByteAddressBuffer gBuf0 : register(u0);
 RWByteAddressBuffer gBuf1 : register(u1);
 
-uint Pass_Reassign(uint idx) {
+void Pass_Reassign(uint idx) {
     RWByteAddressBuffer buf = gBuf0;
     buf.Store(idx * 4, 7);
     buf = gBuf1;
     buf.Store(idx * 4, 13);
-
-    return 13;
 }
 
 [numthreads(8,8,1)]
