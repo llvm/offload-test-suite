@@ -10,7 +10,6 @@
 #define OFFLOADTEST_API_DX_COMMON_H
 
 #include <d3d12.h>
-#include <d3dx12.h>
 #include <dxcore.h>
 #include <wrl/client.h>
 

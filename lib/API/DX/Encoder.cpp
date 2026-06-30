@@ -1,9 +1,22 @@
-#include "API/DX/Encoder.h"
+//===- DX/Encoder.cpp - DirectX Encoder API -------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+//
+//
+//===----------------------------------------------------------------------===//
+
+#include <d3dx12.h>
+
 #include "API/DX/AccelerationStructure.h"
 #include "API/DX/Buffer.h"
 #include "API/DX/CommandBuffer.h"
 #include "API/DX/Descriptors.h"
 #include "API/DX/Device.h"
+#include "API/DX/Encoder.h"
 #include "API/DX/PipelineState.h"
 #include "API/DX/SBT.h"
 #include "API/DX/Texture.h"
