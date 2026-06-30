@@ -725,18 +725,17 @@ public:
                               llvm::ArrayRef<const Texture *> T,
                               llvm::ArrayRef<const Sampler *> S,
                               VKBind) override {
-    assert(S.empty() || S.size() == T.size() &&
-                            "Sampler list must either be empty or match "
-                            "texture list when binding descriptors.");
+    assert((S.empty() || S.size() == T.size()) &&
+           "Sampler list must either be empty or match "
+           "texture list when binding descriptors.");
 
     if (SetIndex >= SetStates.size())
       return *this;
     SetState &State = SetStates[SetIndex];
     for (size_t I = 0, N = T.size(); I < N; ++I) {
       const DXTexture &TextureDX = llvm::cast<DXTexture>(*T[I]);
-      assert(S.empty() ||
-             S[I] == nullptr &&
-                 "DirectX 12 does not support combined image samplers.");
+      assert((S.empty() || S[I] == nullptr) &&
+             "DirectX 12 does not support combined image samplers.");
       Dev->CopyDescriptorsSimple(1, State.CSUHandle, TextureDX.SRVHandle,
                                  D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
       State.CSUHandle.ptr += CSUIncSize;
