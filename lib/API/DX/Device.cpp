@@ -2822,7 +2822,7 @@ public:
         default:
           return llvm::createStringError(
               "Root Signatures that contain constants and inline descriptors "
-              "require custom RootParamters to be defined.");
+              "require custom RootParameters to be defined.");
         }
       }
     }
@@ -2904,7 +2904,7 @@ public:
         default:
           return llvm::createStringError(
               "Root Signatures that contain constants and inline descriptors "
-              "require custom RootParamters to be defined.");
+              "require custom RootParameters to be defined.");
         }
       }
     }
