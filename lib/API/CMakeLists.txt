@@ -5,7 +5,7 @@ if (OFFLOADTEST_ENABLE_VULKAN)
 endif()
 
 if (OFFLOADTEST_ENABLE_D3D12)
-  list(APPEND api_sources DX/Device.cpp DX/DXFeatures.cpp)
+  list(APPEND api_sources DX/Buffer.cpp DX/CommandBuffer.cpp DX/Descriptors.cpp DX/Device.cpp DX/DXFeatures.cpp DX/Encoder.cpp DX/MemoryHeap.cpp DX/PipelineState.cpp DX/Queue.cpp DX/Sampler.cpp DX/Texture.cpp)
   list(APPEND api_headers PRIVATE
     ${DIRECTX_HEADERS_PATH}/include/directx
     ${DIRECTX_HEADERS_PATH}/include/dxguids

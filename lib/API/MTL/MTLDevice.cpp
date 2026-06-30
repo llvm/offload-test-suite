@@ -24,6 +24,7 @@
 #include "API/Device.h"
 #include "API/Encoder.h"
 #include "API/FormatConversion.h"
+#include "API/Util.h"
 #include "MTLDescriptorHeap.h"
 #include "MTLResources.h"
 #include "MTLTopLevelArgumentBuffer.h"
@@ -36,8 +37,6 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
-
-#include "../Util.h"
 
 #include "../Support/OffloadMigration.h"
 

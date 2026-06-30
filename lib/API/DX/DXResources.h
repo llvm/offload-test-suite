@@ -115,6 +115,15 @@ inline DXGI_FORMAT getDXGIIndexFormat(IndexFormat Fmt) {
   llvm_unreachable("All IndexFormat cases handled");
 }
 
+// D3D12 requires the RowPitch in a placed subresource footprint (used for
+// texture <-> buffer copies via CopyTextureRegion) to be a multiple of
+// D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256 bytes). For textures whose natural
+// row size (Width * elementSize) is already a multiple of 256, this is a
+// no-op; for smaller rows it pads up.
+inline uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
+  return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
+}
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_DXRESOURCES_H

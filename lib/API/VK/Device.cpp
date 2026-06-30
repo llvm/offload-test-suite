@@ -12,6 +12,7 @@
 #include "API/Device.h"
 #include "API/Encoder.h"
 #include "API/FormatConversion.h"
+#include "API/Util.h"
 #include "Support/Pipeline.h"
 #include "Support/VkError.h"
 #include "VKResources.h"
@@ -20,8 +21,6 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/MathExtras.h"
-
-#include "../Util.h"
 
 #include "../Support/OffloadMigration.h"
 
