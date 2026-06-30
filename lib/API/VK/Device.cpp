@@ -34,6 +34,20 @@
 
 using namespace offloadtest;
 
+struct DescriptorCounts {
+  // Counters to determine how many infos and counts to allocate in the builder.
+  // Must match for builder to function correctly.
+  uint32_t ImageInfoCount = 0;
+  uint32_t BufferInfoCount = 0;
+  uint32_t BufferViewCount = 0;
+  uint32_t ASInfoCount = 0;
+  uint32_t ASHandleCount = 0;
+
+  // Size hint for how many write commands to allocate in the builder, doesn't
+  // need to be correct, but will prevent (re)allocations if guessed correctly
+  uint32_t DescriptorWriteHint = 0;
+};
+
 static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
@@ -367,6 +381,72 @@ static bool isExtensionSupported(
   return false;
 }
 
+class VulkanDescriptorPool : public DescriptorPool {
+public:
+  VkDevice Dev;
+  VkDescriptorPool Pool;
+
+  VulkanDescriptorPool(VkDevice Dev, VkDescriptorPool Pool)
+      : DescriptorPool(GPUAPI::Vulkan), Dev(Dev), Pool(Pool) {}
+
+  ~VulkanDescriptorPool() override {
+    vkDestroyDescriptorPool(Dev, Pool, nullptr);
+  }
+
+  static llvm::Expected<std::unique_ptr<DescriptorPool>> create(VkDevice Dev) {
+    constexpr VkDescriptorType DescriptorTypes[] = {
+        VK_DESCRIPTOR_TYPE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+        VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR};
+
+    llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
+    for (const VkDescriptorType Type : DescriptorTypes) {
+      VkDescriptorPoolSize PoolSize = {};
+      PoolSize.type = Type;
+      PoolSize.descriptorCount = 1024; // Just allocate enough
+      PoolSizes.push_back(PoolSize);
+    }
+
+    VkDescriptorPoolCreateInfo PoolCreateInfo = {};
+    PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    PoolCreateInfo.poolSizeCount = PoolSizes.size();
+    PoolCreateInfo.pPoolSizes = PoolSizes.data();
+    PoolCreateInfo.maxSets = 64; // Just allocate enough
+
+    VkDescriptorPool Pool = VK_NULL_HANDLE;
+    if (auto Err = VK::toError(
+            vkCreateDescriptorPool(Dev, &PoolCreateInfo, nullptr, &Pool),
+            "Failed to create descriptor pool."))
+      return Err;
+
+    return std::make_unique<VulkanDescriptorPool>(Dev, Pool);
+  }
+
+  void reset() override { vkResetDescriptorPool(Dev, Pool, 0); }
+
+  static bool classof(const DescriptorPool *P) {
+    return P->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
+class VulkanDescriptorSets : public DescriptorSets {
+public:
+  llvm::SmallVector<VkDescriptorSet> Sets;
+
+  VulkanDescriptorSets(llvm::SmallVector<VkDescriptorSet> Sets)
+      : DescriptorSets(GPUAPI::Vulkan), Sets(std::move(Sets)) {}
+
+  static bool classof(const DescriptorSets *S) {
+    return S->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
 struct VulkanInstance {
   VkInstance Instance;
   VkDebugUtilsMessengerEXT DebugMessenger;
@@ -649,6 +729,287 @@ public:
   }
 };
 
+class VulkanDescriptorSetsBuilder : public DescriptorSetsBuilder {
+public:
+  VkDevice Dev;
+  llvm::SmallVector<VkDescriptorSet> Sets;
+
+  llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
+  llvm::SmallVector<VkDescriptorBufferInfo> BufferInfos;
+  llvm::SmallVector<VkBufferView> BufferViews;
+  llvm::SmallVector<VkWriteDescriptorSetAccelerationStructureKHR> ASInfos;
+  llvm::SmallVector<VkAccelerationStructureKHR> ASHandles;
+
+  llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
+
+  VulkanDescriptorSetsBuilder(VkDevice Dev,
+                              llvm::SmallVector<VkDescriptorSet> Sets,
+                              const DescriptorCounts &DescCounts)
+      : DescriptorSetsBuilder(GPUAPI::Vulkan), Dev(Dev), Sets(std::move(Sets)) {
+    ImageInfos.reserve(DescCounts.ImageInfoCount);
+    BufferInfos.reserve(DescCounts.BufferInfoCount);
+    BufferViews.reserve(DescCounts.BufferViewCount);
+    ASInfos.reserve(DescCounts.ASInfoCount);
+    ASHandles.reserve(DescCounts.ASHandleCount);
+  }
+
+  DescriptorSetsBuilder &bindBuffers(uint32_t SetIndex,
+                                     llvm::ArrayRef<const Buffer *> B,
+                                     VKBind Bnd, bool IsRead) {
+    const size_t BufferInfosCapacity = BufferInfos.capacity();
+    const size_t BufferViewsCapacity = BufferViews.capacity();
+
+    const size_t Offset = BufferInfos.size();
+    const size_t OffsetTyped = BufferViews.size();
+
+    uint32_t NumRawBuffers = 0;
+    uint32_t NumTypedBuffers = 0;
+
+    for (const Buffer *Buf : B) {
+      const VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*Buf);
+      if (BufferVk.Desc.AccessType == BufferShaderAccessType::Typed) {
+        BufferViews.push_back(BufferVk.View);
+        NumTypedBuffers += 1;
+      } else {
+        const VkDescriptorBufferInfo BI = {BufferVk.Buffer, 0, VK_WHOLE_SIZE};
+        BufferInfos.push_back(BI);
+        NumRawBuffers += 1;
+      }
+    }
+
+    assert(
+        (NumRawBuffers == 0 || NumTypedBuffers == 0) &&
+        "Cannot bind a mix of typed and raw buffers to a single bind point.");
+
+    const size_t CountersOffset = BufferInfos.size();
+
+    uint32_t NumCounters = 0;
+
+    for (const Buffer *Buf : B) {
+      const VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*Buf);
+      if (BufferVk.Desc.HasCounter) {
+        assert(BufferVk.Desc.AccessType != BufferShaderAccessType::Typed);
+
+        const VkDescriptorBufferInfo BI = {BufferVk.CounterBuffer, 0,
+                                           VK_WHOLE_SIZE};
+        BufferInfos.push_back(BI);
+        NumCounters += 1;
+      }
+    }
+
+    if (NumCounters > 0)
+      assert((NumRawBuffers == NumCounters) &&
+             "Cannot bind a mix of buffers with and without a counter to the "
+             "same bind point.");
+
+    // Builder relies on no reallocations happening
+    assert(BufferInfos.size() <= BufferInfosCapacity &&
+           "Too many BufferInfos inserted into DescriptorSets");
+    assert(BufferViews.size() <= BufferViewsCapacity &&
+           "Too many BufferViews inserted into DescriptorSets");
+
+    if (NumRawBuffers > 0) {
+      VkWriteDescriptorSet WDS = {};
+      WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      WDS.dstSet = Sets[SetIndex];
+      WDS.dstBinding = Bnd.Binding;
+      WDS.descriptorCount = NumRawBuffers;
+      WDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+      WDS.pBufferInfo = &BufferInfos[Offset];
+      WriteDescriptors.push_back(WDS);
+
+      if (NumCounters > 0) {
+        VkWriteDescriptorSet WDS = {};
+        WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        WDS.dstSet = Sets[SetIndex];
+        WDS.dstBinding = Bnd.CounterBinding;
+        WDS.descriptorCount = NumCounters;
+        WDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        WDS.pBufferInfo = &BufferInfos[CountersOffset];
+        WriteDescriptors.push_back(WDS);
+      }
+    } else if (NumTypedBuffers > 0) {
+      VkWriteDescriptorSet WDS = {};
+      WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+      WDS.dstSet = Sets[SetIndex];
+      WDS.dstBinding = Bnd.Binding;
+      WDS.descriptorCount = NumTypedBuffers;
+      WDS.descriptorType = IsRead ? VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER
+                                  : VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
+      WDS.pTexelBufferView = &BufferViews[OffsetTyped];
+      WriteDescriptors.push_back(WDS);
+    }
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &bindTextures(uint32_t SetIndex,
+                                      llvm::ArrayRef<const Texture *> T,
+                                      llvm::ArrayRef<const Sampler *> S,
+                                      VKBind Bnd, bool IsRead) {
+    assert(S.empty() || S.size() == T.size() &&
+                            "Sampler list must either be empty or match "
+                            "texture list when binding descriptors.");
+
+    const size_t ImageInfosCapacity = ImageInfos.capacity();
+    const size_t Offset = ImageInfos.size();
+
+    for (size_t I = 0, N = T.size(); I < N; ++I) {
+      const VulkanTexture &TextureVk = llvm::cast<VulkanTexture>(*T[I]);
+      VkSampler SamplerHandle = VK_NULL_HANDLE;
+      if (!S.empty() && S[I] != nullptr) {
+        const VulkanSampler &SamplerVk = llvm::cast<VulkanSampler>(*S[I]);
+        SamplerHandle = SamplerVk.Sampler;
+      }
+      const VkDescriptorImageInfo ImageInfo = {SamplerHandle, TextureVk.View,
+                                               TextureVk.PreferredLayout};
+      ImageInfos.push_back(ImageInfo);
+    }
+
+    assert(ImageInfos.size() <= ImageInfosCapacity &&
+           "Too many ImageInfos inserted into DescriptorSets");
+
+    VkWriteDescriptorSet WDS = {};
+    WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    WDS.dstSet = Sets[SetIndex];
+    WDS.dstBinding = Bnd.Binding;
+    WDS.descriptorCount = T.size();
+    WDS.descriptorType = IsRead ? VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE
+                                : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    WDS.pImageInfo = &ImageInfos[Offset];
+    WriteDescriptors.push_back(WDS);
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &constant(uint32_t SetIndex,
+                                  llvm::ArrayRef<const Buffer *> B,
+                                  VKBind Bnd) override {
+    const size_t BufferInfosCapacity = BufferInfos.capacity();
+    const size_t Offset = BufferInfos.size();
+    for (const Buffer *Buf : B) {
+      const VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*Buf);
+      const VkDescriptorBufferInfo BI = {BufferVk.Buffer, 0, VK_WHOLE_SIZE};
+      BufferInfos.push_back(BI);
+    }
+
+    assert(BufferInfos.size() <= BufferInfosCapacity &&
+           "Too many BufferInfos inserted into DescriptorSets");
+
+    VkWriteDescriptorSet WDS = {};
+    WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    WDS.dstSet = Sets[SetIndex];
+    WDS.dstBinding = Bnd.Binding;
+    WDS.descriptorCount = B.size();
+    WDS.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    WDS.pBufferInfo = &BufferInfos[Offset];
+    WriteDescriptors.push_back(WDS);
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &read(uint32_t SetIndex,
+                              llvm::ArrayRef<const Buffer *> B,
+                              VKBind Bnd) override {
+    return bindBuffers(SetIndex, B, Bnd, /*isRead=*/true);
+  }
+  DescriptorSetsBuilder &read(uint32_t SetIndex,
+                              llvm::ArrayRef<const Texture *> T,
+                              llvm::ArrayRef<const Sampler *> S,
+                              VKBind Bnd) override {
+    return bindTextures(SetIndex, T, S, Bnd, /*IsRead=*/true);
+  }
+  DescriptorSetsBuilder &read(uint32_t SetIndex,
+                              llvm::ArrayRef<const AccelerationStructure *> A,
+                              VKBind Bnd) override {
+    const size_t ASHandlesCapacity = ASHandles.capacity();
+    const size_t ASInfosCapacity = ASInfos.capacity();
+    const size_t HandleStart = ASHandles.size();
+
+    for (const AccelerationStructure *AS : A) {
+      const VulkanAccelerationStructure &AccelStructVulkan =
+          llvm::cast<VulkanAccelerationStructure>(*AS);
+      ASHandles.push_back(AccelStructVulkan.AccelStruct);
+    }
+
+    VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
+    ASWrite.sType =
+        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    ASWrite.accelerationStructureCount = A.size();
+    ASWrite.pAccelerationStructures = &ASHandles[HandleStart];
+    ASInfos.push_back(ASWrite);
+
+    // Builder relies on no reallocations happening
+    assert(
+        ASHandles.size() <= ASHandlesCapacity &&
+        "Too many Acceleration Structure Handles inserted into DescriptorSets");
+    assert(
+        ASInfos.size() <= ASInfosCapacity &&
+        "Too many Acceleration Structure Writes inserted into DescriptorSets");
+
+    VkWriteDescriptorSet WDS = {};
+    WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    WDS.pNext = &ASInfos.back();
+    WDS.dstSet = Sets[SetIndex];
+    WDS.dstBinding = Bnd.Binding;
+    WDS.descriptorCount = A.size();
+    WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    WriteDescriptors.push_back(WDS);
+
+    return *this;
+  }
+
+  DescriptorSetsBuilder &write(uint32_t SetIndex,
+                               llvm::ArrayRef<const Buffer *> B,
+                               VKBind Bnd) override {
+    return bindBuffers(SetIndex, B, Bnd, /*isRead=*/false);
+  }
+  DescriptorSetsBuilder &write(uint32_t SetIndex,
+                               llvm::ArrayRef<const Texture *> T,
+                               VKBind Bnd) override {
+    return bindTextures(SetIndex, T, {}, Bnd, /*IsRead=*/false);
+  }
+
+  DescriptorSetsBuilder &sampler(uint32_t SetIndex,
+                                 llvm::ArrayRef<const Sampler *> S,
+                                 VKBind Bnd) override {
+    const size_t ImageInfosCapacity = ImageInfos.capacity();
+    const size_t Offset = ImageInfos.size();
+
+    for (const Sampler *Sampl : S) {
+      const VulkanSampler &SamplerVk = llvm::cast<VulkanSampler>(*Sampl);
+      const VkDescriptorImageInfo ImageInfo = {
+          SamplerVk.Sampler, VK_NULL_HANDLE,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+      ImageInfos.push_back(ImageInfo);
+    }
+
+    assert(ImageInfos.size() <= ImageInfosCapacity &&
+           "Too many ImageInfos inserted into DescriptorSets");
+
+    VkWriteDescriptorSet WDS = {};
+    WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    WDS.dstSet = Sets[SetIndex];
+    WDS.dstBinding = Bnd.Binding;
+    WDS.descriptorCount = S.size();
+    WDS.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+    WDS.pImageInfo = &ImageInfos[Offset];
+    WriteDescriptors.push_back(WDS);
+
+    return *this;
+  }
+
+  std::unique_ptr<DescriptorSets> build() override {
+    vkUpdateDescriptorSets(Dev, WriteDescriptors.size(),
+                           WriteDescriptors.data(), 0, nullptr);
+    return std::make_unique<VulkanDescriptorSets>(std::move(Sets));
+  }
+
+  static bool classof(const DescriptorSetsBuilder *B) {
+    return B->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
 class VulkanQueue : public offloadtest::Queue {
 public:
   using Queue::submit;
@@ -876,6 +1237,7 @@ public:
   VkPipeline Pipeline;
   VkPipelineLayout Layout;
   llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
+  DescriptorCounts DescCounts;
   // True for pipelines created via createPipelineRT — used by SBT / dispatch
   // code to safely downcast to VKRayTracingPipelineState.
   bool IsRayTracing = false;
@@ -883,10 +1245,10 @@ public:
   VulkanPipelineState(llvm::StringRef Name, VkDevice Dev, VkPipeline Pipeline,
                       VkPipelineLayout Layout,
                       llvm::SmallVector<VkDescriptorSetLayout> SetLayouts,
-                      bool IsRT = false)
+                      const DescriptorCounts &DescCounts, bool IsRT = false)
       : offloadtest::PipelineState(GPUAPI::Vulkan), Name(Name.str()), Dev(Dev),
         Pipeline(Pipeline), Layout(Layout), SetLayouts(std::move(SetLayouts)),
-        IsRayTracing(IsRT) {}
+        DescCounts(DescCounts), IsRayTracing(IsRT) {}
 
   ~VulkanPipelineState() override {
     vkDestroyPipeline(Dev, Pipeline, nullptr);
@@ -925,8 +1287,10 @@ public:
 
   VKRayTracingPipelineState(llvm::StringRef Name, VkDevice Dev,
                             VkPipeline Pipeline, VkPipelineLayout Layout,
-                            llvm::SmallVector<VkDescriptorSetLayout> SetLayouts)
+                            llvm::SmallVector<VkDescriptorSetLayout> SetLayouts,
+                            const DescriptorCounts &DescCounts)
       : VulkanPipelineState(Name, Dev, Pipeline, Layout, std::move(SetLayouts),
+                            DescCounts,
                             /*IsRT=*/true) {}
 
   static bool classof(const offloadtest::PipelineState *B) {
@@ -991,15 +1355,28 @@ public:
     CB.insertDebugSignpost(Label);
   }
 
+  void bindDescriptorSets(const PipelineState &PSO, const DescriptorSets &DSets,
+                          VkPipelineBindPoint BindPoint) {
+    const VulkanPipelineState &VulkanPipeline =
+        llvm::cast<VulkanPipelineState>(PSO);
+    const VulkanDescriptorSets &VulkanDSets =
+        llvm::cast<VulkanDescriptorSets>(DSets);
+
+    if (!VulkanDSets.Sets.empty())
+      vkCmdBindDescriptorSets(CB.CmdBuffer, BindPoint, VulkanPipeline.Layout, 0,
+                              VulkanDSets.Sets.size(), VulkanDSets.Sets.data(),
+                              0, 0);
+  }
+
   void bindComputeDescriptorSets(const PipelineState &PSO,
                                  const DescriptorSets &DSets) override {
-    assert(false && "bindComputeDescriptorSets is not implemented on vulkan.");
+    return bindDescriptorSets(PSO, DSets, VK_PIPELINE_BIND_POINT_COMPUTE);
   }
 
   void bindRayTracingDescriptorSets(const PipelineState &PSO,
                                     const DescriptorSets &DSets) override {
-    assert(false &&
-           "bindRayTracingDescriptorSets is not implemented on vulkan.");
+    return bindDescriptorSets(PSO, DSets,
+                              VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR);
   }
 
   llvm::Error dispatch(const offloadtest::PipelineState &PSO,
@@ -1292,7 +1669,15 @@ public:
   }
   void bindDescriptorSets(const PipelineState &PSO,
                           const DescriptorSets &DSets) override {
-    assert(false && "bindDescriptorSets is not implemented on vulkan.");
+    const VulkanPipelineState &VulkanPipeline =
+        llvm::cast<VulkanPipelineState>(PSO);
+    const VulkanDescriptorSets &VulkanDSets =
+        llvm::cast<VulkanDescriptorSets>(DSets);
+
+    if (!VulkanDSets.Sets.empty())
+      vkCmdBindDescriptorSets(CB.CmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                              VulkanPipeline.Layout, 0, VulkanDSets.Sets.size(),
+                              VulkanDSets.Sets.data(), 0, 0);
   }
 
   llvm::Error drawInstanced(const offloadtest::PipelineState &PSO,
@@ -2057,12 +2442,12 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
-  llvm::Error
-  createPipelineLayout(const BindingsDesc &BindingsDesc,
-                       VkShaderStageFlags StageFlags,
-                       llvm::SmallVectorImpl<VkDescriptorSetLayout> &SetLayouts,
-                       VkPipelineLayout &PipelineLayout) {
+  llvm::Error createPipelineLayout(
+      const BindingsDesc &BindingsDesc, VkShaderStageFlags StageFlags,
+      llvm::SmallVectorImpl<VkDescriptorSetLayout> &SetLayouts,
+      VkPipelineLayout &PipelineLayout, DescriptorCounts &DescCounts) {
     assert(SetLayouts.empty() && "Output vector SetLayouts must be empty.");
+    DescCounts = {};
 
     // Build descriptor set layouts from BindingsDesc.
     for (const DescriptorSetLayoutDesc &SetDesc :
@@ -2070,6 +2455,35 @@ public:
       std::vector<VkDescriptorSetLayoutBinding> Binds;
       for (const ResourceBindingDesc &RB : SetDesc.ResourceBindings) {
         const VulkanBinding VKBinding = RB.VKBinding.value();
+
+        switch (RB.Kind) {
+        case ResourceKind::Buffer:
+        case ResourceKind::RWBuffer:
+          DescCounts.BufferViewCount += RB.DescriptorCount;
+          break;
+        case ResourceKind::StructuredBuffer:
+        case ResourceKind::RWStructuredBuffer:
+        case ResourceKind::ByteAddressBuffer:
+        case ResourceKind::RWByteAddressBuffer:
+        case ResourceKind::ConstantBuffer:
+          DescCounts.BufferInfoCount += RB.DescriptorCount;
+          break;
+        case ResourceKind::Texture2D:
+        case ResourceKind::RWTexture2D:
+        case ResourceKind::Sampler:
+        case ResourceKind::SampledTexture2D:
+          DescCounts.ImageInfoCount += RB.DescriptorCount;
+          break;
+        case ResourceKind::AccelerationStructure:
+          DescCounts.ASHandleCount += RB.DescriptorCount;
+
+          // This will end up being to high if the user uses the
+          // `DescriptorSetsBuilder` efficiently, but will always be correct
+          // this way. Alternatively, the `DescriptorSetsBuilder` could patch
+          // pointers on reallocation instead.
+          DescCounts.ASInfoCount += RB.DescriptorCount;
+          break;
+        }
 
         VkDescriptorSetLayoutBinding B = {};
         B.binding = VKBinding.Binding;
@@ -2079,6 +2493,8 @@ public:
         Binds.push_back(B);
 
         if (VKBinding.CounterBinding) {
+          DescCounts.BufferInfoCount += RB.DescriptorCount;
+
           VkDescriptorSetLayoutBinding CB = {};
           CB.binding = *VKBinding.CounterBinding;
           CB.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -2087,6 +2503,9 @@ public:
           Binds.push_back(CB);
         }
       }
+
+      DescCounts.DescriptorWriteHint += static_cast<uint32_t>(Binds.size());
+
       VkDescriptorSetLayoutCreateInfo SetCI = {};
       SetCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
       SetCI.bindingCount = static_cast<uint32_t>(Binds.size());
@@ -2162,9 +2581,10 @@ public:
 
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    DescriptorCounts DescCounts = {};
     if (auto Err =
             createPipelineLayout(BindingsDesc, VK_SHADER_STAGE_COMPUTE_BIT,
-                                 SetLayouts, PipelineLayout))
+                                 SetLayouts, PipelineLayout, DescCounts))
       return Err;
 
     auto CleanupState = llvm::scope_exit([&]() {
@@ -2194,7 +2614,8 @@ public:
     }
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
+        DescCounts);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -2375,8 +2796,9 @@ public:
 
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    DescriptorCounts DescCounts;
     if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
-                                        PipelineLayout))
+                                        PipelineLayout, DescCounts))
       return Err;
 
     // Build vertex input attribute and binding descriptions from InputLayout.
@@ -2499,7 +2921,8 @@ public:
     }
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
+        DescCounts);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
@@ -2616,8 +3039,9 @@ public:
 
     llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
     VkPipelineLayout PipelineLayout = VK_NULL_HANDLE;
+    DescriptorCounts DescCounts = {};
     if (auto Err = createPipelineLayout(BindingsDesc, GraphicsFlags, SetLayouts,
-                                        PipelineLayout))
+                                        PipelineLayout, DescCounts))
       return Err;
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
@@ -2689,7 +3113,8 @@ public:
     }
 
     return std::make_unique<VulkanPipelineState>(
-        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
+        Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts),
+        DescCounts);
   }
 
   // Defined out-of-line below — needs VKRayTracingPipelineState's full type
@@ -3421,15 +3846,36 @@ public:
 
   llvm::Expected<std::unique_ptr<DescriptorPool>>
   createDescriptorPool() override {
-    return llvm::createStringError(
-        "createDescriptorPool is unimplemented on Vulkan");
+    return VulkanDescriptorPool::create(Device);
   }
 
   llvm::Expected<std::unique_ptr<DescriptorSetsBuilder>>
-  createDescriptorSetsBuilder(DescriptorPool &,
-                              const PipelineState &) override {
-    return llvm::createStringError(
-        "createDescriptorSetsBuilder is unimplemented on Vulkan");
+  createDescriptorSetsBuilder(DescriptorPool &Pool,
+                              const PipelineState &PSO) override {
+    const VulkanDescriptorPool &PoolVK = llvm::cast<VulkanDescriptorPool>(Pool);
+    const VulkanPipelineState &PipelineVK =
+        llvm::cast<VulkanPipelineState>(PSO);
+
+    llvm::SmallVector<VkDescriptorSet> DescriptorSets;
+    if (!PipelineVK.SetLayouts.empty()) {
+      VkDescriptorSetAllocateInfo DSAllocInfo = {};
+      DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      DSAllocInfo.descriptorPool = PoolVK.Pool;
+      DSAllocInfo.descriptorSetCount = PipelineVK.SetLayouts.size();
+      DSAllocInfo.pSetLayouts = PipelineVK.SetLayouts.data();
+      assert(DescriptorSets.empty());
+
+      DescriptorSets.insert(DescriptorSets.begin(),
+                            PipelineVK.SetLayouts.size(), VkDescriptorSet());
+      if (auto Err =
+              VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
+                                                   DescriptorSets.data()),
+                          "Failed to allocate descriptor sets."))
+        return Err;
+    }
+
+    return std::make_unique<VulkanDescriptorSetsBuilder>(
+        Device, std::move(DescriptorSets), PipelineVK.DescCounts);
   }
 
   llvm::Expected<BufferRef> createBuffer(VkBufferUsageFlags Usage,
@@ -3496,265 +3942,6 @@ public:
       return Err;
 
     return BufferRef{Buffer, Memory};
-  }
-
-  llvm::Expected<VkDescriptorPool> createDescriptorPool(Pipeline &P) {
-    constexpr VkDescriptorType DescriptorTypes[] = {
-        VK_DESCRIPTOR_TYPE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER,
-        VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER,
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER};
-    constexpr size_t DescriptorTypesSize =
-        sizeof(DescriptorTypes) / sizeof(VkDescriptorType);
-    uint32_t DescriptorCounts[DescriptorTypesSize] = {0};
-    // VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR has an out-of-range enum
-    // value (1000150000), so it can't share the indexed array above.
-    uint32_t ASDescriptorCount = 0;
-    for (const auto &S : P.Sets) {
-      for (const auto &R : S.Resources) {
-        if (R.isAccelerationStructure()) {
-          ASDescriptorCount += R.getArraySize();
-          continue;
-        }
-        DescriptorCounts[getDescriptorType(R.Kind)] += R.getArraySize();
-        if (R.HasCounter)
-          DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] +=
-              R.getArraySize();
-      }
-    }
-    llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
-    for (const VkDescriptorType Type : DescriptorTypes) {
-      if (DescriptorCounts[Type] > 0) {
-        llvm::outs() << "Descriptors: { type = " << Type
-                     << ", count = " << DescriptorCounts[Type] << " }\n";
-        VkDescriptorPoolSize PoolSize = {};
-        PoolSize.type = Type;
-        PoolSize.descriptorCount = DescriptorCounts[Type];
-        PoolSizes.push_back(PoolSize);
-      }
-    }
-    if (ASDescriptorCount > 0) {
-      llvm::outs() << "Descriptors: { type = ACCELERATION_STRUCTURE_KHR"
-                   << ", count = " << ASDescriptorCount << " }\n";
-      PoolSizes.push_back(
-          {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, ASDescriptorCount});
-    }
-
-    VkDescriptorPool Pool = VK_NULL_HANDLE;
-    if (P.Sets.size() > 0) {
-      VkDescriptorPoolCreateInfo PoolCreateInfo = {};
-      PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-      PoolCreateInfo.poolSizeCount = PoolSizes.size();
-      PoolCreateInfo.pPoolSizes = PoolSizes.data();
-      PoolCreateInfo.maxSets = P.Sets.size();
-      if (auto Err = VK::toError(
-              vkCreateDescriptorPool(Device, &PoolCreateInfo, nullptr, &Pool),
-              "Failed to create descriptor pool."))
-        return Err;
-    }
-
-    return Pool;
-  }
-
-  llvm::Error buildDescriptorTables(
-      PipelineState &Pipeline, llvm::ArrayRef<DescriptorTable> DescTables,
-      VkDescriptorPool Pool,
-      llvm::SmallVectorImpl<VkDescriptorSet> &DescriptorSets) {
-
-    const VulkanPipelineState &VulkanPipeline =
-        llvm::cast<VulkanPipelineState>(Pipeline);
-
-    if (VulkanPipeline.SetLayouts.empty())
-      return llvm::Error::success();
-
-    VkDescriptorSetAllocateInfo DSAllocInfo = {};
-    DSAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    DSAllocInfo.descriptorPool = Pool;
-    DSAllocInfo.descriptorSetCount = VulkanPipeline.SetLayouts.size();
-    DSAllocInfo.pSetLayouts = VulkanPipeline.SetLayouts.data();
-    assert(DescriptorSets.empty());
-    DescriptorSets.insert(DescriptorSets.begin(),
-                          VulkanPipeline.SetLayouts.size(), VkDescriptorSet());
-    llvm::outs() << "Num Descriptor sets: " << VulkanPipeline.SetLayouts.size()
-                 << "\n";
-    if (auto Err = VK::toError(vkAllocateDescriptorSets(Device, &DSAllocInfo,
-                                                        DescriptorSets.data()),
-                               "Failed to allocate descriptor sets."))
-      return Err;
-
-    // Calculate the number of infos/views we are going to need for each type
-    uint32_t ImageInfoCount = 0;
-    uint32_t BufferInfoCount = 0;
-    uint32_t BufferViewCount = 0;
-    uint32_t ASInfoCount = 0;
-    uint32_t ASHandleCount = 0;
-    for (auto &Table : DescTables) {
-      for (auto &ResourcePair : Table.Resources) {
-        auto &R = *ResourcePair.first;
-        if (R.isAccelerationStructure()) {
-          ASInfoCount += 1;
-          ASHandleCount += R.getArraySize();
-          continue;
-        }
-        if (R.isSampler()) {
-          ImageInfoCount += 1;
-          continue;
-        }
-
-        const uint32_t Count = R.getArraySize();
-        if (R.isTexture())
-          ImageInfoCount += Count;
-        else if (R.isRaw())
-          BufferInfoCount += Count;
-        else
-          BufferViewCount += Count;
-        if (R.HasCounter)
-          BufferInfoCount += Count;
-      }
-    }
-
-    // reserve enough space for the descriptor infos so it never needs to be
-    // resized (we need the memory fixed in place)
-    llvm::SmallVector<VkDescriptorImageInfo> ImageInfos;
-    llvm::SmallVector<VkDescriptorBufferInfo> BufferInfos;
-    llvm::SmallVector<VkBufferView> BufferViews;
-    llvm::SmallVector<VkWriteDescriptorSetAccelerationStructureKHR> ASInfos;
-    llvm::SmallVector<VkAccelerationStructureKHR> ASHandles;
-    ImageInfos.reserve(ImageInfoCount);
-    BufferInfos.reserve(BufferInfoCount);
-    BufferViews.reserve(BufferViewCount);
-    ASInfos.reserve(ASInfoCount);
-    ASHandles.reserve(ASHandleCount);
-
-    llvm::SmallVector<VkWriteDescriptorSet> WriteDescriptors;
-    WriteDescriptors.reserve(ImageInfoCount + BufferInfoCount +
-                             BufferViewCount + ASInfoCount);
-
-    for (size_t SetIdx = 0; SetIdx < DescTables.size(); ++SetIdx) {
-      const DescriptorTable &Table = DescTables[SetIdx];
-      for (auto &ResourcePair : Table.Resources) {
-        auto &R = *ResourcePair.first;
-
-        if (!ResourcePair.second.empty() &&
-            ResourcePair.second[0].AS != nullptr) {
-          const ResourceSet &RS = ResourcePair.second[0];
-
-          VulkanAccelerationStructure &VkAS =
-              llvm::cast<VulkanAccelerationStructure>(*RS.AS);
-          const size_t HandleStart = ASHandles.size();
-          ASHandles.push_back(VkAS.AccelStruct);
-
-          VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
-          ASWrite.sType =
-              VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-          ASWrite.accelerationStructureCount = 1;
-          ASWrite.pAccelerationStructures = &ASHandles[HandleStart];
-          ASInfos.push_back(ASWrite);
-
-          VkWriteDescriptorSet WDS = {};
-          WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          WDS.pNext = &ASInfos.back();
-          WDS.dstSet = DescriptorSets[SetIdx];
-          WDS.dstBinding = R.VKBinding->Binding;
-          WDS.descriptorCount = 1;
-          WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-          WriteDescriptors.push_back(WDS);
-          continue;
-        }
-
-        const uint32_t ImageInfoBase = ImageInfos.size();
-        const uint32_t BufferViewBase = BufferViews.size();
-        const uint32_t BufferInfoBase = BufferInfos.size();
-        for (auto &RS : ResourcePair.second) {
-          if (RS.Buffer != nullptr) {
-            VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*RS.Buffer);
-
-            if (BufferVk.Desc.AccessType == BufferShaderAccessType::Typed) {
-              BufferViews.push_back(BufferVk.View);
-            } else {
-              const VkDescriptorBufferInfo BI = {BufferVk.Buffer, 0,
-                                                 VK_WHOLE_SIZE};
-              BufferInfos.push_back(BI);
-            }
-          } else if (RS.Texture != nullptr) {
-            // Combined Image Sampler
-            VkSampler SamplerHandle = VK_NULL_HANDLE;
-            if (RS.Sampler != nullptr)
-              SamplerHandle = llvm::cast<VulkanSampler>(*RS.Sampler).Sampler;
-
-            VulkanTexture &TextureVk = llvm::cast<VulkanTexture>(*RS.Texture);
-            const VkDescriptorImageInfo ImageInfo = {
-                SamplerHandle, TextureVk.View, TextureVk.PreferredLayout};
-            ImageInfos.push_back(ImageInfo);
-          } else if (RS.Sampler != nullptr) {
-            VulkanSampler &SamplerVk = llvm::cast<VulkanSampler>(*RS.Sampler);
-            const VkDescriptorImageInfo ImageInfo = {
-                SamplerVk.Sampler, VK_NULL_HANDLE,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-            ImageInfos.push_back(ImageInfo);
-          } else {
-            return llvm::createStringError(
-                "ResourceSet was not a buffer, texture, or acceleration "
-                "structure.");
-          }
-        }
-
-        const uint32_t DescriptorCount = R.getArraySize();
-
-        VkWriteDescriptorSet WDS = {};
-        WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        WDS.dstSet = DescriptorSets[SetIdx];
-        WDS.dstBinding = R.VKBinding->Binding;
-        WDS.descriptorCount = DescriptorCount;
-        WDS.descriptorType = getDescriptorType(R.Kind);
-
-        if (R.isTexture() || R.isSampler())
-          WDS.pImageInfo = &ImageInfos[ImageInfoBase];
-        else if (R.isRaw())
-          WDS.pBufferInfo = &BufferInfos[BufferInfoBase];
-        else
-          WDS.pTexelBufferView = &BufferViews[BufferViewBase];
-        WriteDescriptors.push_back(WDS);
-
-        // Handle descriptors for counters
-        if (R.HasCounter) {
-          const uint32_t CounterBufferInfoBase = BufferInfos.size();
-          for (auto &RS : ResourcePair.second) {
-            VulkanBuffer &BufferVk = llvm::cast<VulkanBuffer>(*RS.Buffer);
-            assert(BufferVk.Desc.HasCounter &&
-                   "Pipeline Resource says there is a counter, actual buffer "
-                   "is missing it.");
-            if (BufferVk.Desc.HasCounter) {
-              const VkDescriptorBufferInfo CBI = {BufferVk.CounterBuffer, 0,
-                                                  VK_WHOLE_SIZE};
-              BufferInfos.push_back(CBI);
-            }
-          }
-
-          VkWriteDescriptorSet CounterWDS = {};
-          CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          CounterWDS.dstSet = DescriptorSets[SetIdx];
-          CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
-          CounterWDS.descriptorCount = DescriptorCount;
-          CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CounterWDS.pBufferInfo = &BufferInfos[CounterBufferInfoBase];
-          WriteDescriptors.push_back(CounterWDS);
-        }
-      }
-    }
-
-    assert(ImageInfos.size() == ImageInfoCount &&
-           BufferInfos.size() == BufferInfoCount &&
-           BufferViews.size() == BufferViewCount &&
-           "size of buffer infos does not match expected count");
-
-    vkUpdateDescriptorSets(Device, WriteDescriptors.size(),
-                           WriteDescriptors.data(), 0, nullptr);
-    return llvm::Error::success();
   }
 
   static llvm::Expected<VkSpecializationMapEntry>
@@ -3891,19 +4078,16 @@ public:
   }
 
   llvm::Error createCommands(Pipeline &P, SharedInvocationState &IS,
-                             llvm::ArrayRef<VkDescriptorSet> DescriptorSets) {
-    VulkanCommandBuffer &VKCB = llvm::cast<VulkanCommandBuffer>(*IS.CB);
+                             DescriptorPool &Pool) {
+    auto DescSetsOrErr =
+        buildDescriptorSets(*this, Pool, *IS.Pipeline, IS.DescTables);
+    if (!DescSetsOrErr)
+      return DescSetsOrErr.takeError();
+    auto DescSets = std::move(*DescSetsOrErr);
 
-    const VkPipelineBindPoint BindPoint =
-        P.isTraditionalRaster() ? VK_PIPELINE_BIND_POINT_GRAPHICS
-        : P.isRayTracing()      ? VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR
-                                : VK_PIPELINE_BIND_POINT_COMPUTE;
+    VulkanCommandBuffer &VKCB = llvm::cast<VulkanCommandBuffer>(*IS.CB);
     const VulkanPipelineState &VulkanPipeline =
         llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
-    if (DescriptorSets.size() > 0)
-      vkCmdBindDescriptorSets(VKCB.CmdBuffer, BindPoint, VulkanPipeline.Layout,
-                              0, DescriptorSets.size(), DescriptorSets.data(),
-                              0, 0);
 
     for (const auto &PCB : P.PushConstants) {
       llvm::SmallVector<uint8_t, 4> Data;
@@ -3918,6 +4102,9 @@ public:
       if (!EncoderOrErr)
         return EncoderOrErr.takeError();
       auto &Encoder = *EncoderOrErr.get();
+
+      Encoder.bindComputeDescriptorSets(*IS.Pipeline, *DescSets);
+
       if (auto Err = Encoder.dispatch(
               *IS.Pipeline.get(), P.DispatchParameters.DispatchGroupCount[0],
               P.DispatchParameters.DispatchGroupCount[1],
@@ -3933,6 +4120,9 @@ public:
       if (!EncoderOrErr)
         return EncoderOrErr.takeError();
       auto &Encoder = *EncoderOrErr.get();
+
+      Encoder.bindRayTracingDescriptorSets(*IS.Pipeline, *DescSets);
+
       if (auto Err = Encoder.dispatchRays(
               *IS.Pipeline, *IS.SBT, P.DispatchParameters.DispatchGroupCount[0],
               P.DispatchParameters.DispatchGroupCount[1],
@@ -3965,6 +4155,8 @@ public:
       Scissor.Width = static_cast<uint32_t>(VP.Width);
       Scissor.Height = static_cast<uint32_t>(VP.Height);
       Encoder.setScissor(Scissor);
+
+      Encoder.bindDescriptorSets(*IS.Pipeline, *DescSets);
 
       if (P.isTraditionalRaster()) {
         if (IS.VB)
@@ -4013,23 +4205,10 @@ public:
   llvm::Error executeProgram(Pipeline &P) override {
     SharedInvocationState State;
 
-    llvm::SmallVector<VkDescriptorSet> DescriptorSets;
-    auto PoolOrErr = createDescriptorPool(P);
-    if (!PoolOrErr)
-      return PoolOrErr.takeError();
-    VkDescriptorPool Pool = *PoolOrErr;
-    llvm::outs() << "Descriptor pool created.\n";
-
-    auto CleanupState = llvm::scope_exit([&]() {
-      if (!DescriptorSets.empty())
-        vkFreeDescriptorSets(Device, Pool,
-                             static_cast<uint32_t>(DescriptorSets.size()),
-                             DescriptorSets.data());
-
-      if (Pool)
-        vkDestroyDescriptorPool(Device, Pool, nullptr);
-      llvm::outs() << "Cleanup complete.\n";
-    });
+    auto DescriptorPoolOrErr = createDescriptorPool();
+    if (!DescriptorPoolOrErr)
+      return DescriptorPoolOrErr.takeError();
+    auto DescriptorPool = std::move(*DescriptorPoolOrErr);
 
     auto CBOrErr = createCommandBuffer();
     if (!CBOrErr)
@@ -4226,11 +4405,7 @@ public:
           "Pipeline was neither Compute nor Traditional Raster");
     }
 
-    if (auto Err = buildDescriptorTables(*State.Pipeline, State.DescTables,
-                                         Pool, DescriptorSets))
-      return Err;
-    llvm::outs() << "Descriptor sets created.\n";
-    if (auto Err = createCommands(P, State, DescriptorSets))
+    if (auto Err = createCommands(P, State, *DescriptorPool))
       return Err;
     llvm::outs() << "Commands created.\n";
     auto DispatchResult = GraphicsQueue.submit(std::move(State.CB));
@@ -4470,7 +4645,9 @@ VulkanDevice::createPipelineRT(llvm::StringRef Name, const BindingsDesc &BD,
       VK_SHADER_STAGE_INTERSECTION_BIT_KHR | VK_SHADER_STAGE_CALLABLE_BIT_KHR;
   llvm::SmallVector<VkDescriptorSetLayout> SetLayouts;
   VkPipelineLayout Layout = VK_NULL_HANDLE;
-  if (auto Err = createPipelineLayout(BD, AllRTStages, SetLayouts, Layout))
+  DescriptorCounts DescCounts = {};
+  if (auto Err =
+          createPipelineLayout(BD, AllRTStages, SetLayouts, Layout, DescCounts))
     return Err;
   auto LayoutCleanup = llvm::scope_exit([&] {
     if (Layout != VK_NULL_HANDLE)
@@ -4557,7 +4734,7 @@ VulkanDevice::createPipelineRT(llvm::StringRef Name, const BindingsDesc &BD,
     return Err;
 
   auto State = std::make_unique<VKRayTracingPipelineState>(
-      Name, Device, Pipeline, Layout, std::move(SetLayouts));
+      Name, Device, Pipeline, Layout, std::move(SetLayouts), DescCounts);
   State->ShaderGroupIndices = std::move(NameToGroup);
   State->NumRaygenGroups = NumRG;
   State->NumMissGroups = NumMS;
