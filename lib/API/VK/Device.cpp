@@ -4848,6 +4848,17 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
           } else {
             Tri.indexType = VK_INDEX_TYPE_NONE_KHR;
           }
+          if (T.Transform) {
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
+            auto XformOrErr = offloadtest::createBufferWithData(
+                *Dev, "AS-Geom-Transform", XformDesc, T.Transform->data(),
+                T.Transform->size() * sizeof(float), nullptr, nullptr);
+            if (!XformOrErr)
+              return XformOrErr.takeError();
+            auto *XformBuf = llvm::cast<VulkanBuffer>(XformOrErr->get());
+            Tri.transformData.deviceAddress = XformBuf->getDeviceAddress();
+            CB.KeepAliveOwned.push_back(std::move(*XformOrErr));
+          }
           Geoms[I].push_back(G);
 
           VkAccelerationStructureBuildRangeInfoKHR R = {};

@@ -3067,6 +3067,18 @@ llvm::Error MTLComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
             TD->setIndexType(getMetalIndexType(T.IdxFormat));
           }
           TD->setOpaque(T.Opaque);
+          if (T.Transform) {
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
+            auto XformBufOrErr = offloadtest::createBufferWithData(
+                *CB->Dev, "BLAS-Transform", XformDesc, T.Transform->data(),
+                T.Transform->size() * sizeof(float), nullptr, nullptr);
+            if (!XformBufOrErr)
+              return XformBufOrErr.takeError();
+            auto *MTLXform = llvm::cast<MTLBuffer>(XformBufOrErr->get());
+            TD->setTransformationMatrixBuffer(MTLXform->Buf);
+            TD->setTransformationMatrixLayout(MTL::MatrixLayoutRowMajor);
+            CB->KeepAliveOwned.push_back(std::move(*XformBufOrErr));
+          }
           Geoms.push_back(TD);
         }
       } else {
