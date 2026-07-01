@@ -1,5 +1,5 @@
 if (OFFLOADTEST_ENABLE_VULKAN)
-  list(APPEND api_sources VK/Device.cpp)
+  list(APPEND api_sources VK/AccelerationStructure.cpp VK/Buffer.cpp VK/CommandBuffer.cpp VK/Descriptors.cpp VK/Device.cpp VK/Encoder.cpp VK/PipelineState.cpp VK/Queue.cpp VK/RenderPass.cpp VK/Sampler.cpp VK/SBT.cpp VK/Texture.cpp)
   list(APPEND api_libraries ${Vulkan_LIBRARIES})
   list(APPEND api_headers PRIVATE ${Vulkan_INCLUDE_DIRS})
 endif()
