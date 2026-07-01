@@ -37,7 +37,8 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
         toFormat(Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
     if (!FmtOrErr) {
       printf("Invalid format! FMT: %d, CHANNELS: %d\n",
-             Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
+             static_cast<int>(Resource.BufferPtr->Format),
+             Resource.BufferPtr->Channels);
       assert(false && "Invalid format.");
     }
     OutParams.Fmt = *FmtOrErr;
@@ -80,8 +81,7 @@ llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
       if (RS.Readback == nullptr)
         continue;
 
-      if (auto Err =
-              ReadbackEncoder.copyTextureToBuffer(*RS.Texture, *RS.Readback))
+      if (auto Err = ReadbackEncoder.copyTextureToBuffer(*RS.Tex, *RS.Readback))
         return Err;
     }
   } else if (R.first->isBuffer()) {
@@ -90,14 +90,14 @@ llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
         continue;
 
       if (auto Err = ReadbackEncoder.copyBufferToBuffer(
-              *RS.Buffer, 0, *RS.Readback, 0, RS.Buffer->getSizeInBytes()))
+              *RS.Buf, 0, *RS.Readback, 0, RS.Buf->getSizeInBytes()))
         return Err;
 
-      if (!RS.Buffer->getDesc().HasCounter)
+      if (!RS.Buf->getDesc().HasCounter)
         continue;
 
-      if (auto Err = ReadbackEncoder.copyCounterToBuffer(*RS.Buffer,
-                                                         *RS.CounterReadback))
+      if (auto Err =
+              ReadbackEncoder.copyCounterToBuffer(*RS.Buf, *RS.CounterReadback))
         return Err;
     }
   }
@@ -121,7 +121,7 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
       const void *DataPtr = *DataPtrOrErr;
 
       if (R.first->isTexture()) {
-        const TextureCreateDesc &Desc = RSIt->Texture->getDesc();
+        const TextureCreateDesc &Desc = RSIt->Tex->getDesc();
         const uint32_t SrcStrideInBytes =
             Dev.getTextureUploadRowStrideInBytes(Desc);
         const uint32_t DstStrideInBytes =
