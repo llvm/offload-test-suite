@@ -3,11 +3,14 @@
 #include "API/Device.h"
 #include "API/FormatConversion.h"
 
+
+#ifdef OFFLOADTEST_ENABLE_D3D12
 // Needed for direct Root Signature binding
 #include "API/DX/Buffer.h"
 #include "API/DX/CommandBuffer.h"
 #include "API/DX/Descriptors.h"
 #include "API/DX/PipelineState.h"
+#endif
 
 namespace offloadtest {
 
@@ -530,6 +533,7 @@ buildDescriptorSets(Device &Dev, DescriptorPool &Pool, PipelineState &Pipeline,
   return Builder->build();
 }
 
+#ifdef OFFLOADTEST_ENABLE_D3D12
 static llvm::Error bindDXComputeRootSignature(Pipeline &P,
                                               SharedInvocationState &IS,
                                               DescriptorPool &Pool) {
@@ -607,6 +611,7 @@ static llvm::Error bindDXComputeRootSignature(Pipeline &P,
 
   return llvm::Error::success();
 }
+#endif // OFFLOADTEST_ENABLE_D3D12
 
 static llvm::Error createComputeCommands(Pipeline &P, SharedInvocationState &IS,
                                          Device &Dev, DescriptorPool &Pool) {
@@ -619,8 +624,12 @@ static llvm::Error createComputeCommands(Pipeline &P, SharedInvocationState &IS,
   auto DescSets = std::move(*DescSetsOrErr);
 
   if (P.Settings.DX.RootParams.size() > 0) {
+    #ifdef OFFLOADTEST_ENABLE_D3D12
     if (auto Err = bindDXComputeRootSignature(P, IS, Pool))
       return Err;
+    #else
+    return llvm::createStringError(std::errc::not_supported,, "RootParams are only supported on DX12, but API is not compiled in.");
+    #endif
   }
 
   auto EncoderOrErr = IS.CB->createComputeEncoder();
