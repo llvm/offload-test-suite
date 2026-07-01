@@ -164,7 +164,6 @@ private:
     llvm::SmallVector<ResourceRef> CounterResourceRefs;
   };
 
-
 public:
   static llvm::Expected<std::unique_ptr<VulkanDevice>>
   create(std::shared_ptr<VulkanInstance> Instance,

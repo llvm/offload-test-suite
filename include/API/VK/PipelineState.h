@@ -22,6 +22,8 @@
 
 namespace offloadtest {
 
+VkShaderStageFlagBits getShaderStageFlag(Stages Stage);
+
 class VulkanPipelineState : public offloadtest::PipelineState {
 public:
   std::string Name;

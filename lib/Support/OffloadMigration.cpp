@@ -9,6 +9,11 @@
 #include "API/DX/Descriptors.h"
 #include "API/DX/PipelineState.h"
 
+#ifdef OFFLOADTEST_ENABLE_VULKAN
+#include "API/VK/CommandBuffer.h"
+#include "API/VK/PipelineState.h"
+#endif
+
 namespace offloadtest {
 
 static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
@@ -608,6 +613,22 @@ static llvm::Error bindDXComputeRootSignature(Pipeline &P,
   return llvm::Error::success();
 }
 
+#ifdef OFFLOADTEST_ENABLE_VULKAN
+static void setVkPushConstants(Pipeline &P, SharedInvocationState &IS) {
+  VulkanCommandBuffer &VKCB = llvm::cast<VulkanCommandBuffer>(*IS.CB);
+  const VulkanPipelineState &VulkanPipeline =
+      llvm::cast<VulkanPipelineState>(*IS.Pipeline.get());
+
+  for (const auto &PCB : P.PushConstants) {
+    llvm::SmallVector<uint8_t, 4> Data;
+    PCB.getContent(Data);
+    vkCmdPushConstants(VKCB.CmdBuffer, VulkanPipeline.Layout,
+                       getShaderStageFlag(PCB.Stage), 0, Data.size(),
+                       Data.data());
+  }
+}
+#endif
+
 static llvm::Error createComputeCommands(Pipeline &P, SharedInvocationState &IS,
                                          Device &Dev, DescriptorPool &Pool) {
   IS.CB->bindPool(Pool);
@@ -622,6 +643,10 @@ static llvm::Error createComputeCommands(Pipeline &P, SharedInvocationState &IS,
     if (auto Err = bindDXComputeRootSignature(P, IS, Pool))
       return Err;
   }
+
+#ifdef OFFLOADTEST_ENABLE_VULKAN
+  setVkPushConstants(P, IS);
+#endif
 
   auto EncoderOrErr = IS.CB->createComputeEncoder();
   if (!EncoderOrErr)
@@ -661,6 +686,10 @@ static llvm::Error createGraphicsCommands(Pipeline &P,
   if (!DescSetsOrErr)
     return DescSetsOrErr.takeError();
   auto DescSets = std::move(*DescSetsOrErr);
+
+#ifdef OFFLOADTEST_ENABLE_VULKAN
+  setVkPushConstants(P, IS);
+#endif
 
   RenderPassBeginDesc BeginDesc = {};
   BeginDesc.Pass = IS.RenderPass.get();
@@ -748,9 +777,22 @@ llvm::Error executeUnitTest(Device &Dev, Pipeline &P) {
       ResourceBinding.DescriptorCount = R.getArraySize();
 
       Layout.ResourceBindings.push_back(ResourceBinding);
+
+      if (R.HasCounter && !R.VKBinding->CounterBinding)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "No CounterBinding provided for resource '%s' with a counter",
+            R.Name.c_str());
     }
 
     BndDesc.DescriptorSetDescs.push_back(Layout);
+  }
+
+  for (const auto &PCB : P.PushConstants) {
+    PushConstantsRange Range = {};
+    Range.OffsetInBytes = 0;
+    Range.SizeInBytes = PCB.size();
+    BndDesc.PushConstantRanges.push_back(Range);
   }
 
   if (P.isCompute()) {
@@ -763,6 +805,7 @@ llvm::Error executeUnitTest(Device &Dev, Pipeline &P) {
     ShaderContainer CS = {};
     CS.EntryPoint = P.Shaders[0].Entry;
     CS.Shader = P.Shaders[0].Shader.get();
+    CS.SpecializationConstants = P.Shaders[0].SpecializationConstants;
 
     auto PipelineStateOrErr =
         Dev.createPipelineCs("Compute Pipeline State", BndDesc, CS);
