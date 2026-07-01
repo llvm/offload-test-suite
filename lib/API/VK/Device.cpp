@@ -1598,8 +1598,11 @@ private:
     // Parallel-indexed to `P.AccelStructs.BLAS`.
     llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
         BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
+    // Keyed by `TLASDesc::Name`; each value holds `TLASDesc::ArraySize`
+    // handles (one per descriptor-array element).
+    llvm::StringMap<
+        llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>>
+        TLASes;
     // Vertex/index buffers consumed during AS builds; must outlive submission.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
@@ -3473,11 +3476,9 @@ public:
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
 
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+  llvm::Expected<std::unique_ptr<AccelerationStructure>>
+  createAS(uint32_t InstanceCount) {
+    auto SizesOrErr = getTLASBuildSizes(InstanceCount);
     if (!SizesOrErr)
       return SizesOrErr.takeError();
     return createTLAS(*SizesOrErr);
@@ -3600,15 +3601,23 @@ public:
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         if (R.isAccelerationStructure()) {
-          auto ASOrErr = createAS(R);
-          if (!ASOrErr)
-            return ASOrErr.takeError();
-          auto *VkAS = llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
+          assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+          const TLASDesc &TD = *R.TLASPtr;
           ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
-          Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+          llvm::SmallVector<std::unique_ptr<AccelerationStructure>> Handles;
+          Handles.reserve(TD.ArraySize);
+          for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+            auto ASOrErr =
+                createAS(static_cast<uint32_t>(TD.Instances[Elt].size()));
+            if (!ASOrErr)
+              return ASOrErr.takeError();
+            auto *VkAS =
+                llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
+            Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+            Handles.push_back(std::move(*ASOrErr));
+          }
           IS.Resources.push_back(std::move(Bundle));
-          auto Inserted =
-              IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+          auto Inserted = IS.TLASes.try_emplace(TD.Name, std::move(Handles));
           assert(Inserted.second && "TLAS bound to multiple resources NYI");
           (void)Inserted;
           continue;
@@ -3782,14 +3791,19 @@ public:
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
-        if (VulkanAccelerationStructure *VkAS =
-                IS.Resources[OverallResIdx].ResourceRefs[0].AS) {
+        if (R.isAccelerationStructure()) {
+          const auto &Refs = IS.Resources[OverallResIdx].ResourceRefs;
+          assert(Refs.size() == R.getArraySize() &&
+                 "AS bundle must hold one ResourceRef per array element");
           const size_t HandleStart = ASHandles.size();
-          ASHandles.push_back(VkAS->AccelStruct);
+          for (const auto &Ref : Refs) {
+            assert(Ref.AS && "AS ResourceRef missing AS handle");
+            ASHandles.push_back(Ref.AS->AccelStruct);
+          }
           VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
           ASWrite.sType =
               VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-          ASWrite.accelerationStructureCount = 1;
+          ASWrite.accelerationStructureCount = R.getArraySize();
           ASWrite.pAccelerationStructures = &ASHandles[HandleStart];
           ASInfos.push_back(ASWrite);
 
@@ -3798,10 +3812,11 @@ public:
           WDS.pNext = &ASInfos.back();
           WDS.dstSet = IS.DescriptorSets[SetIdx];
           WDS.dstBinding = R.VKBinding->Binding;
-          WDS.descriptorCount = 1;
+          WDS.descriptorCount = R.getArraySize();
           WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
           llvm::outs() << "Updating AS Descriptor [" << OverallResIdx << "] { "
-                       << SetIdx << ", " << RIdx << " }\n";
+                       << SetIdx << ", " << RIdx
+                       << " } count = " << R.getArraySize() << "\n";
           WriteDescriptors.push_back(WDS);
           continue;
         }
