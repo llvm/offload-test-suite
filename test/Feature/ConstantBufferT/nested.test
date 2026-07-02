@@ -1,0 +1,107 @@
+#--- source.hlsl
+
+struct X {
+  int a1;
+};
+
+struct Y : X {
+  int2 a2;
+};
+
+struct Z {
+  X xs[2];
+  Y y;
+};
+
+struct CBStructs {
+  X x1;
+  X x2;
+  Y y;
+  Z zs[2];
+};
+
+ConstantBuffer<CBStructs> CB : register(b0);
+RWStructuredBuffer<CBStructs> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0].x1.a1 = CB.x1.a1;
+  Out[0].x2.a1 = CB.x2.a1;
+  Out[0].y.a1 = CB.y.a1;
+  Out[0].y.a2 = CB.y.a2;
+  Out[0].zs[0].xs[0].a1 = CB.zs[0].xs[0].a1;
+  Out[0].zs[0].xs[1].a1 = CB.zs[0].xs[1].a1;
+  Out[0].zs[0].y.a1 = CB.zs[0].y.a1;
+  Out[0].zs[0].y.a2 = CB.zs[0].y.a2;
+  Out[0].zs[1].xs[0].a1 = CB.zs[1].xs[0].a1;
+  Out[0].zs[1].xs[1].a1 = CB.zs[1].xs[1].a1;
+  Out[0].zs[1].y.a1 = CB.zs[1].y.a1;
+  Out[0].zs[1].y.a2 = CB.zs[1].y.a2;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: CB
+    Format: Hex32
+    Data: [
+      0x1, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x2, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x3, 0x4, 0x5, 0x5A5A5A5A,
+      0x6, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x7, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0x8, 0x9, 0xA, 0x5A5A5A5A,
+      0xB, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xC, 0x5A5A5A5A, 0x5A5A5A5A, 0x5A5A5A5A,
+      0xD, 0xE, 0xF, 0x5A5A5A5A,
+    ]
+  - Name: Out
+    Format: Hex32
+    Stride: 60
+    FillSize: 60
+  - Name: ExpectedOut
+    Format: Hex32
+    Data: [
+      0x1,
+      0x2,
+      0x3, 0x4, 0x5,
+      0x6,
+      0x7,
+      0x8, 0x9, 0xA,
+      0xB,
+      0xC,
+      0xD, 0xE, 0xF,
+    ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: CB
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/180600
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fvk-use-dx-layout -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

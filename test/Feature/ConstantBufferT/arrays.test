@@ -1,12 +1,5 @@
 #--- source.hlsl
 
-cbuffer CBArrays : register(b0) {
-  float c1[2];
-  int4 c2[2][2];
-  bool c3[2];
-  int3 c4[2][2];
-}
-
 struct Arrays {
   float c1[2];
   int4 c2[2][2];
@@ -14,18 +7,18 @@ struct Arrays {
   int3 c4[2][2];
 };
 
+ConstantBuffer<Arrays> CBArrays : register(b0);
 RWStructuredBuffer<Arrays> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out[0].c1 = c1;
-  Out[0].c2 = c2;
-  Out[0].c3 = c3;
-  Out[0].c4 = c4;
+  Out[0].c1 = CBArrays.c1;
+  Out[0].c2 = CBArrays.c2;
+  Out[0].c3 = CBArrays.c3;
+  Out[0].c4 = CBArrays.c4;
 }
 
 //--- pipeline.yaml
-
 ---
 Shaders:
   - Stage: Compute
@@ -45,7 +38,7 @@ Buffers:
       0x00000010, 0x00000011, 0x00000012, 0x5A5A5A5A,
       0x00000013, 0x00000014, 0x00000015, 0x5A5A5A5A,
       0x00000016, 0x00000017, 0x00000018, 0x5A5A5A5A,
-      0x00000019, 0x0000001A, 0x0000001B, 0x5A5A5A5A
+      0x00000019, 0x0000001A, 0x0000001B, 0x5A5A5A5A,
     ]
   - Name: Out
     Format: Hex32
