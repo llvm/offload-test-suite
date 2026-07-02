@@ -123,12 +123,7 @@ def get_runs(vendors):
             seen.add(r["id"])
             unique.append(r)
 
-    # Collapse superseded runs: when a new commit is pushed, GitHub starts a
-    # fresh run and cancels the previous one, but both can be in our window at
-    # once (the old one mid-cancellation, the new one still spinning up jobs).
-    # They share the same workflow name and head branch, so keep only the most
-    # recently created run per (workflow, branch) to avoid reporting stale
-    # counts from an old commit's run.
+    # Collapse superseded runs, runs that have been pre-empted by newer commits
     latest_by_key = {}
     for r in unique:
         key = (r["name"], r.get("head_branch"))
@@ -168,15 +163,7 @@ def get_jobs(run_id):
 
 
 def job_sku_vendor(job):
-    """Return the vendor implied by the matrix SKU in the job name, or None.
-
-    Matrix jobs embed their SKU (e.g. "windows-intel") in the job name, e.g.
-    "Exec-Tests-Windows (windows-intel, check-hlsl-vk) / build". Since the
-    split-build feature was enabled, the build phase runs on whatever generic
-    self-hosted Windows runner is free (its `runner_name` is empty while
-    queued and arbitrary while running), so the runner is no longer a reliable
-    vendor signal. The SKU baked into the job name always is.
-    """
+    # Return the vendor implied by the matrix SKU in the job name, or None.
     name_lower = (job.get("name") or "").lower()
     for v in VALID_VENDORS:
         if f"windows-{v}" in name_lower:
@@ -185,15 +172,8 @@ def job_sku_vendor(job):
 
 
 def job_matches_vendor(job, vendor, label):
-    """Decide whether a job belongs to the given vendor.
+    # Decide whether a job belongs to the given vendor.
 
-    Prefer the SKU embedded in the job name: this correctly attributes
-    split-build jobs (which may run on, or be queued for, any runner) and
-    avoids misattributing them based on the runner they happen to land on.
-    Only when the job name carries no SKU do we fall back to the SKU runner
-    label or runner name (covers workflow_dispatch / older workflows that did
-    not embed the SKU in the job name).
-    """
     sku_vendor = job_sku_vendor(job)
     if sku_vendor is not None:
         return sku_vendor == vendor
