@@ -1,0 +1,27 @@
+name: Windows ARM64 Lavapipe Clang
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *' # run every 6 hours
+  pull_request:
+    paths:
+     - .github/workflows/windows-qc-clang-lavapipe.yaml
+
+jobs:
+  Windows-ARM64-Lavapipe-Clang:
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-qc
+      BuildType: Debug
+      TestTarget: check-hlsl-clang-vk-lavapipe
+      OffloadTest-branch: ${{ github.ref }}
+      SplitBuild: true
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

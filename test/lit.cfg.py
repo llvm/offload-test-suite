@@ -41,6 +41,30 @@ config.test_exec_root = os.path.join(
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
+# lit runs tests in a scrubbed environment, so the Vulkan loader's driver and
+# layer discovery variables are not inherited by the offloader unless we
+# forward them explicitly. Without this, a driver selected through the
+# environment is invisible at test-execution time even though the config-time
+# `api-query` (which runs in lit's own, unscrubbed environment) can see it.
+# This is essential for lavapipe (Mesa's software rasterizer): its ICD manifest
+# is pointed at by VK_DRIVER_FILES / VK_ICD_FILENAMES rather than being
+# registered system-wide, so without forwarding these the offloader enumerates
+# no `llvmpipe` adapter and every test fails. `with_system_environment` only
+# copies variables that are actually set, so this is a no-op for
+# registry-based hardware Vulkan setups.
+llvm_config.with_system_environment(
+    [
+        "VK_ICD_FILENAMES",
+        "VK_DRIVER_FILES",
+        "VK_ADD_DRIVER_FILES",
+        "VK_LAYER_PATH",
+        "VK_ADD_LAYER_PATH",
+        "VK_INSTANCE_LAYERS",
+        "VK_LOADER_DRIVERS_SELECT",
+        "VK_LOADER_DEBUG",
+    ]
+)
+
 # Environment equivalents (useful for ninja):
 #   OFFLOADTEST_GPU_NAME
 GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
@@ -238,6 +262,12 @@ def setDeviceFeatures(config, device, compiler):
 offloader_args = []
 if config.offloadtest_test_warp:
     offloader_args.append("-warp")
+if config.offloadtest_test_lavapipe:
+    # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as
+    # "llvmpipe (LLVM ...)". Pin the offloader to that adapter so the test
+    # runs against the software device rather than any hardware Vulkan
+    # driver that may also be present on the machine.
+    offloader_args.append("-adapter-regex=llvmpipe")
 if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
 if config.offloadtest_enable_validation:
@@ -325,6 +355,7 @@ target_device = None
 pattern = re.compile(GPUName, re.IGNORECASE)
 for device in devices.get("Devices", []):
     is_warp = "Microsoft Basic Render Driver" in device["Description"]
+    is_lavapipe = "llvmpipe" in device["Description"].lower()
     is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:
         if ShouldSearchByGPuName and is_gpu_name_match:
@@ -342,7 +373,13 @@ for device in devices.get("Devices", []):
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
         if ShouldSearchByGPuName and is_gpu_name_match:
             target_device = device
-        elif not ShouldSearchByGPuName:
+        elif is_lavapipe and config.offloadtest_test_lavapipe:
+            target_device = device
+        elif (
+            not ShouldSearchByGPuName
+            and not is_lavapipe
+            and not config.offloadtest_test_lavapipe
+        ):
             target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:

@@ -90,6 +90,7 @@ set(TEST_vk False)
 set(TEST_mtl False)
 set(FORCE_CLANG False)
 set(FORCE_WARP False)
+set(FORCE_LAVAPIPE False)
 
 if (OFFLOADTEST_ENABLE_D3D12)
   list(APPEND platforms_to_test d3d12)
@@ -193,6 +194,22 @@ if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
   endif()
 
   set(TEST_d3d12 False)
+  set(FORCE_WARP False)
+endif()
+
+if (SUPPORTS_SPIRV AND OFFLOADTEST_ENABLE_VULKAN AND WIN32)
+  set(TEST_vk True)
+  set(FORCE_LAVAPIPE True)
+  add_offloadtest_lit_suite(vk-lavapipe)
+
+  if (OFFLOADTEST_TEST_CLANG)
+    set(FORCE_CLANG True)
+    add_offloadtest_lit_suite(clang-vk-lavapipe)
+    set(FORCE_CLANG False)
+  endif()
+
+  set(TEST_vk False)
+  set(FORCE_LAVAPIPE False)
 endif()
 
 umbrella_lit_testsuite_end(check-hlsl)

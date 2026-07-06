@@ -221,6 +221,28 @@ jobs:
             cd llvm-project
             cd build
             ./bin/api-query
+      - name: Setup Lavapipe
+        if: inputs.SplitBuild != true && contains(inputs.TestTarget, 'lavapipe')
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # Lavapipe (Mesa's software Vulkan rasterizer) is pre-installed on
+            # the runner. The runner image exposes the ICD manifest path via
+            # LAVAPIPE_ICD_JSON. Point the Vulkan loader at *only* that ICD so
+            # the test runs against the software device instead of any hardware
+            # Vulkan driver also present on the machine.
+            if [ -z "${LAVAPIPE_ICD_JSON:-}" ]; then
+              echo "::error::LAVAPIPE_ICD_JSON is not set on this runner; cannot locate the lavapipe ICD manifest."
+              exit 1
+            fi
+            if [ ! -f "$LAVAPIPE_ICD_JSON" ]; then
+              echo "::error::LAVAPIPE_ICD_JSON points to a missing file: $LAVAPIPE_ICD_JSON"
+              exit 1
+            fi
+            # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
+            # the legacy fallback for older loaders. Set both for portability.
+            echo "VK_DRIVER_FILES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
       - name: Run HLSL Tests
         if: inputs.SplitBuild != true
         run: |
@@ -456,6 +478,28 @@ jobs:
               --suite "${{ steps.suite.outputs.suite }}" \
               --dxc-path "$dxc_path" \
               "${warp_arch_args[@]}"
+      - name: Setup Lavapipe
+        if: contains(inputs.TestTarget, 'lavapipe')
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # Lavapipe (Mesa's software Vulkan rasterizer) is pre-installed on
+            # the runner. The runner image exposes the ICD manifest path via
+            # LAVAPIPE_ICD_JSON. Point the Vulkan loader at *only* that ICD so
+            # the test runs against the software device instead of any hardware
+            # Vulkan driver also present on the machine.
+            if [ -z "${LAVAPIPE_ICD_JSON:-}" ]; then
+              echo "::error::LAVAPIPE_ICD_JSON is not set on this runner; cannot locate the lavapipe ICD manifest."
+              exit 1
+            fi
+            if [ ! -f "$LAVAPIPE_ICD_JSON" ]; then
+              echo "::error::LAVAPIPE_ICD_JSON points to a missing file: $LAVAPIPE_ICD_JSON"
+              exit 1
+            fi
+            # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
+            # the legacy fallback for older loaders. Set both for portability.
+            echo "VK_DRIVER_FILES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
       - name: Run HLSL Tests
         shell: bash
         run: |
