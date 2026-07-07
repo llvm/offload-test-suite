@@ -6,7 +6,8 @@
 //
 // Both the 2-argument and 3-argument overloads are covered for int and uint.
 //
-// Atomicity is verified two independent ways:
+// Atomicity is verified for these interlockedmin intrinsics
+// two independent ways:
 //
 //   1. Final value. Each counter's deterministic final value is the minimum
 //      over all participating threads (and the initial value). A non-atomic

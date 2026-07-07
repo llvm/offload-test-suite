@@ -7,28 +7,6 @@
 //
 // Both the 2-argument and 3-argument overloads are covered for int64_t
 // and uint64_t.
-//
-// Atomicity is verified two independent ways:
-//
-//   1. Final value. Each counter's deterministic final value is the minimum
-//      over all participating threads (and the initial value). A non-atomic
-//      read-modify-write can lose the lowest write: a thread reads the
-//      pre-minimum value, then stores its larger proposal *after* the
-//      minimum was written, clobbering it. So the final value can only equal
-//      the true minimum if no atomic min update is lost.
-//
-//   2. Monotonicity (3-argument form). Under correct atomic semantics the
-//      counter is monotonically non-increasing: once a value is written it
-//      can only get smaller. So immediately after this thread's atomic min
-//      returns `orig`, a fresh re-read of the counter must be <= `orig` --
-//      the counter can never climb back above the value this thread observed.
-//      A racy implementation can transiently *raise* the counter (a thread
-//      reads an old value, then writes its larger min back after a smaller
-//      value was already stored); a thread whose `orig` sits below that
-//      bumped-up value would then observe re-read > `orig`. Unlike a
-//      predicate on `orig` alone, this correlates `orig` with a fresh
-//      observation of shared memory and checks every thread, so a correct
-//      implementation yields all-ones.
 
 RWStructuredBuffer<uint> OutMonoInt : register(u0);
 RWStructuredBuffer<uint> OutMonoUInt : register(u1);
