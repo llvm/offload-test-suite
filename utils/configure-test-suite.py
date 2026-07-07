@@ -31,7 +31,15 @@ import sys
 
 # Suite name -> (d3d12, vk, mtl, clang, warp, lavapipe, description).
 SUITES = {
-    "d3d12": (True,False,False,False,False,False,"DXC-compiled shaders on DirectX 12"),
+    "d3d12": (
+        True,
+        False,
+        False,
+        False,
+        False,
+        False,
+        "DXC-compiled shaders on DirectX 12",
+    ),
     "vk": (False, True, False, False, False, False, "DXC-compiled shaders on Vulkan"),
     "mtl": (False, False, True, False, False, False, "DXC-compiled shaders on Metal"),
     "clang-d3d12": (
