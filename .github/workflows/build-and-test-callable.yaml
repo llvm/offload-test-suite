@@ -226,23 +226,48 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
-            # Lavapipe (Mesa's software Vulkan rasterizer) is pre-installed on
-            # the runner. The runner image exposes the ICD manifest path via
-            # LAVAPIPE_ICD_JSON. Point the Vulkan loader at *only* that ICD so
-            # the test runs against the software device instead of any hardware
-            # Vulkan driver also present on the machine.
-            if [ -z "${LAVAPIPE_ICD_JSON:-}" ]; then
-              echo "::error::LAVAPIPE_ICD_JSON is not set on this runner; cannot locate the lavapipe ICD manifest."
-              exit 1
+            # Lavapipe (Mesa's software Vulkan rasterizer) provides a
+            # hardware-independent Vulkan device. lit.cfg.py already pins the
+            # offloader to the llvmpipe device via -adapter-regex, so shadowing
+            # the hardware driver is optional. When we can resolve the lavapipe
+            # ICD manifest, point the loader at *only* that ICD so api-query and
+            # the offloader never touch the hardware Vulkan driver -- this
+            # insulates the lavapipe lane from hardware-Vulkan instability under
+            # the CI service account. Resolution order:
+            #   1. LAVAPIPE_ICD_JSON, if the runner image exposes it.
+            #   2. The machine-wide registration under
+            #      HKLM\SOFTWARE\Khronos\Vulkan\Drivers (value name = ICD path).
+            # If neither resolves to an existing file, skip shadowing and rely
+            # on lit.cfg.py selecting the llvmpipe device by name.
+            icd=""
+            if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then
+              fs=$(printf '%s' "$LAVAPIPE_ICD_JSON" | sed 's|\\|/|g')
+              if [ -f "$fs" ]; then
+                icd="$LAVAPIPE_ICD_JSON"
+              else
+                echo "::warning::LAVAPIPE_ICD_JSON is set but does not point to an existing file: $LAVAPIPE_ICD_JSON"
+              fi
             fi
-            if [ ! -f "$LAVAPIPE_ICD_JSON" ]; then
-              echo "::error::LAVAPIPE_ICD_JSON points to a missing file: $LAVAPIPE_ICD_JSON"
-              exit 1
+            if [ -z "$icd" ]; then
+              matches=$(MSYS_NO_PATHCONV=1 reg query "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" /reg:64 2>/dev/null | grep -i "lvp_icd") || matches=""
+              line=${matches%%$'\n'*}
+              cand=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+REG_[A-Z_]+[[:space:]]+0x[0-9A-Fa-f]+[[:space:]]*$//')
+              if [ -n "$cand" ]; then
+                fs=$(printf '%s' "$cand" | sed 's|\\|/|g')
+                if [ -f "$fs" ]; then
+                  icd="$cand"
+                fi
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
+              exit 0
             fi
             # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
-            # the legacy fallback for older loaders. Set both for portability.
-            echo "VK_DRIVER_FILES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
-            echo "VK_ICD_FILENAMES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
+            # the legacy fallback for older loaders. Point both at only lavapipe.
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "Using lavapipe ICD: $icd"
       - name: Run HLSL Tests
         if: inputs.SplitBuild != true
         run: |
@@ -483,23 +508,48 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
-            # Lavapipe (Mesa's software Vulkan rasterizer) is pre-installed on
-            # the runner. The runner image exposes the ICD manifest path via
-            # LAVAPIPE_ICD_JSON. Point the Vulkan loader at *only* that ICD so
-            # the test runs against the software device instead of any hardware
-            # Vulkan driver also present on the machine.
-            if [ -z "${LAVAPIPE_ICD_JSON:-}" ]; then
-              echo "::error::LAVAPIPE_ICD_JSON is not set on this runner; cannot locate the lavapipe ICD manifest."
-              exit 1
+            # Lavapipe (Mesa's software Vulkan rasterizer) provides a
+            # hardware-independent Vulkan device. lit.cfg.py already pins the
+            # offloader to the llvmpipe device via -adapter-regex, so shadowing
+            # the hardware driver is optional. When we can resolve the lavapipe
+            # ICD manifest, point the loader at *only* that ICD so api-query and
+            # the offloader never touch the hardware Vulkan driver -- this
+            # insulates the lavapipe lane from hardware-Vulkan instability under
+            # the CI service account. Resolution order:
+            #   1. LAVAPIPE_ICD_JSON, if the runner image exposes it.
+            #   2. The machine-wide registration under
+            #      HKLM\SOFTWARE\Khronos\Vulkan\Drivers (value name = ICD path).
+            # If neither resolves to an existing file, skip shadowing and rely
+            # on lit.cfg.py selecting the llvmpipe device by name.
+            icd=""
+            if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then
+              fs=$(printf '%s' "$LAVAPIPE_ICD_JSON" | sed 's|\\|/|g')
+              if [ -f "$fs" ]; then
+                icd="$LAVAPIPE_ICD_JSON"
+              else
+                echo "::warning::LAVAPIPE_ICD_JSON is set but does not point to an existing file: $LAVAPIPE_ICD_JSON"
+              fi
             fi
-            if [ ! -f "$LAVAPIPE_ICD_JSON" ]; then
-              echo "::error::LAVAPIPE_ICD_JSON points to a missing file: $LAVAPIPE_ICD_JSON"
-              exit 1
+            if [ -z "$icd" ]; then
+              matches=$(MSYS_NO_PATHCONV=1 reg query "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" /reg:64 2>/dev/null | grep -i "lvp_icd") || matches=""
+              line=${matches%%$'\n'*}
+              cand=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+REG_[A-Z_]+[[:space:]]+0x[0-9A-Fa-f]+[[:space:]]*$//')
+              if [ -n "$cand" ]; then
+                fs=$(printf '%s' "$cand" | sed 's|\\|/|g')
+                if [ -f "$fs" ]; then
+                  icd="$cand"
+                fi
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
+              exit 0
             fi
             # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
-            # the legacy fallback for older loaders. Set both for portability.
-            echo "VK_DRIVER_FILES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
-            echo "VK_ICD_FILENAMES=$LAVAPIPE_ICD_JSON" >> "$GITHUB_ENV"
+            # the legacy fallback for older loaders. Point both at only lavapipe.
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "Using lavapipe ICD: $icd"
       - name: Run HLSL Tests
         shell: bash
         run: |

@@ -262,21 +262,22 @@ def setDeviceFeatures(config, device, compiler):
 offloader_args = []
 if config.offloadtest_test_warp:
     offloader_args.append("-warp")
-if config.offloadtest_test_lavapipe:
-    # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as
-    # "llvmpipe (LLVM ...)". Pin the offloader to that adapter so the test
-    # runs against the software device rather than any hardware Vulkan
-    # driver that may also be present on the machine.
-    offloader_args.append("-adapter-regex=llvmpipe")
 if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
-if ShouldSearchByGPuName:
+if config.offloadtest_test_lavapipe:
+    # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as
+    # "llvmpipe (LLVM ...)". Lavapipe suites always target it, even on a
+    # machine that also exposes a hardware Vulkan GPU (and even if
+    # OFFLOADTEST_GPU_NAME is set to select that hardware GPU). Pin the
+    # offloader to llvmpipe and ignore OFFLOADTEST_GPU_NAME.
+    offloader_args.append("-adapter-regex=llvmpipe")
+elif ShouldSearchByGPuName:
     offloader_args.extend([f'-adapter-regex="{GPUName}"'])
-tools.append(
-    ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
-)
+# The %offloader substitution is registered after device selection below so
+# a plain Vulkan suite can pin the offloader to the exact device lit picked
+# when the llvmpipe software rasterizer is also present on the machine.
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
@@ -371,23 +372,61 @@ for device in devices.get("Devices", []):
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
-        if ShouldSearchByGPuName and is_gpu_name_match:
+        if config.offloadtest_test_lavapipe:
+            # Lavapipe suites select the llvmpipe software device and ignore
+            # OFFLOADTEST_GPU_NAME (which selects a hardware GPU).
+            if is_lavapipe:
+                target_device = device
+        elif ShouldSearchByGPuName and is_gpu_name_match:
             target_device = device
-        elif is_lavapipe and config.offloadtest_test_lavapipe:
-            target_device = device
-        elif (
-            not ShouldSearchByGPuName
-            and not is_lavapipe
-            and not config.offloadtest_test_lavapipe
-        ):
+        elif not ShouldSearchByGPuName and not is_lavapipe:
             target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
         break
 
 if not target_device:
-    config.fatal("No target device found!")
+    enumerated = [
+        "{} [{}]".format(d.get("Description", "<no description>"), d.get("API", "?"))
+        for d in devices.get("Devices", [])
+    ]
+    lit_config.fatal(
+        "No target device found for suite '{}'! api-query enumerated "
+        "{} device(s): {}".format(
+            config.offloadtest_suite,
+            len(enumerated),
+            ", ".join(enumerated) if enumerated else "(none)",
+        )
+    )
 setDeviceFeatures(config, target_device, HLSLCompiler)
+
+# On a machine where a hardware Vulkan GPU and llvmpipe (lavapipe) coexist,
+# a plain (non-lavapipe) Vulkan suite must not let the offloader fall back to
+# whichever Vulkan device the loader happens to enumerate first -- that could
+# be llvmpipe. Pin it to the same hardware device lit selected above. This
+# only kicks in when llvmpipe is actually present and no explicit GPU name
+# filter is already in effect, so single-Vulkan-device runners are unaffected.
+vulkan_has_lavapipe = any(
+    d.get("API") == "Vulkan" and "llvmpipe" in d.get("Description", "").lower()
+    for d in devices.get("Devices", [])
+)
+if (
+    not config.offloadtest_test_lavapipe
+    and not ShouldSearchByGPuName
+    and target_device["API"] == "Vulkan"
+    and vulkan_has_lavapipe
+):
+    # Escape POSIX ERE metacharacters (offloader uses llvm::Regex) so the
+    # device description matches literally, while leaving spaces intact to
+    # match the existing OFFLOADTEST_GPU_NAME quoting style.
+    escaped_desc = re.sub(
+        r"([\\.\[\](){}*+?^$|])", r"\\\1", target_device["Description"]
+    )
+    offloader_args.append('-adapter-regex="{}"'.format(escaped_desc))
+llvm_config.add_tool_substitutions(
+    [ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)],
+    config.llvm_tools_dir,
+)
 
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
