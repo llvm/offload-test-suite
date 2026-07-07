@@ -39,7 +39,7 @@ groupshared int  MinIntNoOrig;    // 2-arg form, signed
 groupshared uint MinUIntNoOrig;   // 2-arg form, unsigned
 groupshared int  SignedCounter;   // 2-arg form reaching a negative minimum
 
-[numthreads(64, 1, 1)]
+[numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     MinInt = 1000;
@@ -63,7 +63,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
   uint afterU = MinUInt;
   OutMonoUInt[GTID.x] = (afterU <= origU) ? 1u : 0u;
 
-  // 2-argument form. Proposals span 0..-63, min = -63.
+  // 2-argument form. Proposals span 0..-255, min = -255.
   InterlockedMin(MinIntNoOrig, -(int)GTID.x);
   // 2-argument form, unsigned. Proposals span 100..163, min = 100.
   InterlockedMin(MinUIntNoOrig, GTID.x + 100u);
@@ -75,7 +75,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     OutFinal[0] = MinInt;             // -32
     OutFinal[1] = (int)MinUInt;       // 0
-    OutFinal[2] = MinIntNoOrig;       // -63
+    OutFinal[2] = MinIntNoOrig;       // -255
     OutFinal[3] = (int)MinUIntNoOrig; // 100
     OutFinal[4] = SignedCounter;      // -1000
   }
@@ -91,22 +91,46 @@ Buffers:
   - Name: OutMonoInt
     Format: UInt32
     Stride: 4
-    FillSize: 256
+    FillSize: 1024
   - Name: ExpectedMonoInt
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutMonoUInt
     Format: UInt32
     Stride: 4
-    FillSize: 256
+    FillSize: 1024
   - Name: ExpectedMonoUInt
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
@@ -117,7 +141,7 @@ Buffers:
   - Name: ExpectedFinal
     Format: Int32
     Stride: 4
-    Data: [ -32, 0, -63, 100, -1000 ]
+    Data: [ -32, 0, -255, 100, -1000 ]
 Results:
   - Result: TestMonoInt
     Rule: BufferExact

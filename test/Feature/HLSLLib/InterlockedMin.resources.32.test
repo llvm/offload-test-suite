@@ -9,7 +9,7 @@
 //   * RWTexture2D<uint>[coord]             (free function on typed UAV)
 //   * RWByteAddressBuffer::InterlockedMin  (method, 2-arg and 3-arg)
 //
-// For each destination, 32 threads of a single threadgroup atomically take
+// For each destination, 256 threads of a single threadgroup atomically take
 // the minimum of their per-thread proposal and a single accumulator slot.
 
 RWStructuredBuffer<uint> SBufU : register(u0);
@@ -21,7 +21,7 @@ RWByteAddressBuffer      BABuf : register(u4);
 RWStructuredBuffer<uint> OutMonoSBufI : register(u5);
 RWStructuredBuffer<uint> OutMonoBABuf : register(u6);
 
-[numthreads(32, 1, 1)]
+[numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     SBufU[0] = 0xFFFFFFFFu;
@@ -33,12 +33,12 @@ void main(uint3 GTID : SV_GroupThreadID) {
   }
   DeviceMemoryBarrierWithGroupSync();
 
-  // RWStructuredBuffer<uint>: 2-argument free function. Proposals 0..31,
+  // RWStructuredBuffer<uint>: 2-argument free function. Proposals 0..255,
   // min = 0.
   InterlockedMin(SBufU[0], GTID.x);
 
   // RWStructuredBuffer<int>: 3-argument free function (signed). Proposals
-  // -31..0, min = -31. The concurrent re-read must never exceed the observed
+  // -31..224, min = -31. The concurrent re-read must never exceed the observed
   // original (monotonic non-increase).
   int OrigI;
   InterlockedMin(SBufI[0], (int)GTID.x - 31, OrigI);
@@ -119,16 +119,30 @@ Buffers:
   - Name: OutMonoSBufI
     Format: UInt32
     Stride: 4
-    FillSize: 128
+    FillSize: 1024
   - Name: ExpectedMono
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutMonoBABuf
     Format: UInt32
     Stride: 4
-    FillSize: 128
+    FillSize: 1024
 Results:
   - Result: TestSBufU
     Rule: BufferExact
