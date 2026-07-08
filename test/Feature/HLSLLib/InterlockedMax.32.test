@@ -1,83 +1,83 @@
 #--- source.hlsl
 
-// This test exercises InterlockedMin against non-resource (groupshared)
+// This test exercises InterlockedMax against non-resource (groupshared)
 // destinations. A set of 256 threads concurrently updates shared counters,
 // so the test actually exercises atomic behavior.
 //
 // Both the 2-argument and 3-argument overloads are covered for int and uint.
 //
-// Atomicity is verified for these interlockedmin intrinsics
-// two independent ways:
+// Atomicity is verified two independent ways for all interlocked max tests:
 //
-//   1. Final value. Each counter's deterministic final value is the minimum
+//   1. Final value. Each counter's deterministic final value is the maximum
 //      over all participating threads (and the initial value). A non-atomic
-//      read-modify-write can lose the lowest write: a thread reads the
-//      pre-minimum value, then stores its larger proposal *after* the
-//      minimum was written, clobbering it. So the final value can only equal
-//      the true minimum if no atomic min update is lost.
+//      read-modify-write can lose the highest write: a thread reads the
+//      pre-maximum value, then stores its smaller proposal *after* the
+//      maximum was written, clobbering it. So the final value can only equal
+//      the true maximum if no atomic max update is lost.
 //
 //   2. Monotonicity (3-argument form). Under correct atomic semantics the
-//      counter is monotonically non-increasing: once a value is written it
-//      can only get smaller. So immediately after this thread's atomic min
-//      returns `orig`, a fresh re-read of the counter must be <= `orig` --
-//      the counter can never climb back above the value this thread observed.
-//      A racy implementation can transiently *raise* the counter (a thread
-//      reads an old value, then writes its larger min back after a smaller
-//      value was already stored); a thread whose `orig` sits below that
-//      bumped-up value would then observe re-read > `orig`. Unlike a
-//      predicate on `orig` alone, this correlates `orig` with a fresh
-//      observation of shared memory and checks every thread, so a correct
-//      implementation yields all-ones.
+//      counter is monotonically non-decreasing: once a value is written it
+//      can only get larger. So immediately after this thread's atomic max
+//      returns `orig`, a fresh re-read of the counter must be >= `orig` --
+//      the counter can never drop back below the value this thread observed.
+//      A racy implementation can transiently *lower* the counter (a thread
+//      reads an old value, then writes its smaller max back after a larger
+//      value was already stored); a thread whose `orig` sits above that
+//      dropped value would then observe re-read < `orig`. Unlike a predicate
+//      on `orig` alone, this correlates `orig` with a fresh observation of
+//      shared memory and checks every thread, so a correct implementation
+//      yields all-ones.
 
 RWStructuredBuffer<uint> OutMonoInt : register(u0);
 RWStructuredBuffer<uint> OutMonoUInt : register(u1);
 RWStructuredBuffer<int> OutFinal : register(u2);
 
-groupshared int  MinInt;          // 3-arg form, signed
-groupshared uint MinUInt;         // 3-arg form, unsigned
-groupshared int  MinIntNoOrig;    // 2-arg form, signed
-groupshared uint MinUIntNoOrig;   // 2-arg form, unsigned
-groupshared int  SignedCounter;   // 2-arg form reaching a negative minimum
+groupshared int  MaxInt;          // 3-arg form, signed
+groupshared uint MaxUInt;         // 3-arg form, unsigned
+groupshared int  MaxIntNoOrig;    // 2-arg form, signed
+groupshared uint MaxUIntNoOrig;   // 2-arg form, unsigned
+groupshared int  SignedCounter;   // 2-arg form reaching a positive maximum
 
 [numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
-    MinInt = 1000;
-    MinUInt = 1000u;
-    MinIntNoOrig = 1000;
-    MinUIntNoOrig = 1000u;
-    SignedCounter = 1000;
+    MaxInt = -1000;
+    MaxUInt = 0u;
+    MaxIntNoOrig = -1000;
+    MaxUIntNoOrig = 0u;
+    SignedCounter = -1000;
   }
   GroupMemoryBarrierWithGroupSync();
 
-  // 3-argument form. Proposals span -32..31, min = -32. The concurrent
-  // re-read must never exceed the observed original (monotonic non-increase).
+  // 3-argument form. Proposals span -32..223, max = 223. The concurrent
+  // re-read must never fall below the observed original (monotonic
+  // non-decrease).
   int origI;
-  InterlockedMin(MinInt, (int)GTID.x - 32, origI);
-  int afterI = MinInt;
-  OutMonoInt[GTID.x] = (afterI <= origI) ? 1u : 0u;
+  InterlockedMax(MaxInt, (int)GTID.x - 32, origI);
+  int afterI = MaxInt;
+  OutMonoInt[GTID.x] = (afterI >= origI) ? 1u : 0u;
 
-  // 3-argument form, unsigned. Proposals span 0..63, min = 0.
+  // 3-argument form, unsigned. Proposals span 0..255, max = 255.
   uint origU;
-  InterlockedMin(MinUInt, GTID.x, origU);
-  uint afterU = MinUInt;
-  OutMonoUInt[GTID.x] = (afterU <= origU) ? 1u : 0u;
+  InterlockedMax(MaxUInt, GTID.x, origU);
+  uint afterU = MaxUInt;
+  OutMonoUInt[GTID.x] = (afterU >= origU) ? 1u : 0u;
 
-  // 2-argument form. Proposals span 0..-255, min = -255.
-  InterlockedMin(MinIntNoOrig, -(int)GTID.x);
-  // 2-argument form, unsigned. Proposals span 100..163, min = 100.
-  InterlockedMin(MinUIntNoOrig, GTID.x + 100u);
-  // 2-argument form reaching a negative minimum. Proposals span -1000..-937.
-  InterlockedMin(SignedCounter, (int)GTID.x - 1000);
+  // 2-argument form. Proposals span 0..-255, max = 0.
+  InterlockedMax(MaxIntNoOrig, -(int)GTID.x);
+  // 2-argument form, unsigned. Proposals span 100..355, max = 355.
+  InterlockedMax(MaxUIntNoOrig, GTID.x + 100u);
+  // 2-argument form reaching a positive maximum. Proposals span 937..1192.
+  InterlockedMax(SignedCounter, (int)GTID.x + 937);
 
   GroupMemoryBarrierWithGroupSync();
 
   if (GTID.x == 0) {
-    OutFinal[0] = MinInt;             // -32
-    OutFinal[1] = (int)MinUInt;       // 0
-    OutFinal[2] = MinIntNoOrig;       // -255
-    OutFinal[3] = (int)MinUIntNoOrig; // 100
-    OutFinal[4] = SignedCounter;      // -1000
+    OutFinal[0] = MaxInt;             // 223
+    OutFinal[1] = (int)MaxUInt;       // 255
+    OutFinal[2] = MaxIntNoOrig;       // 0
+    OutFinal[3] = (int)MaxUIntNoOrig; // 355
+    OutFinal[4] = SignedCounter;      // 1192
   }
 }
 
@@ -141,7 +141,7 @@ Buffers:
   - Name: ExpectedFinal
     Format: Int32
     Stride: 4
-    Data: [ -32, 0, -255, 100, -1000 ]
+    Data: [ 223, 255, 0, 355, 1192 ]
 Results:
   - Result: TestMonoInt
     Rule: BufferExact
@@ -181,7 +181,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99123
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99124
 # XFAIL: Clang
 
 # RUN: split-file %s %t

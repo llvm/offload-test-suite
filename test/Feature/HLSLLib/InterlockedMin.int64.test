@@ -1,9 +1,9 @@
 #--- source.hlsl
 
 // This test exercises InterlockedMin against non-resource (groupshared)
-// destinations using 64-bit integer types. A single threadgroup of 64
-// threads concurrently updates shared counters, so the test actually
-// exercises atomic behavior.
+// destinations using 64-bit integer types. A set of 256 threads
+// concurrently updates shared counters, so the test actually exercises
+// atomic behavior.
 //
 // Both the 2-argument and 3-argument overloads are covered for int64_t
 // and uint64_t.
