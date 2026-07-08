@@ -68,7 +68,7 @@ llvm_config.with_system_environment(
 # Environment equivalents (useful for ninja):
 #   OFFLOADTEST_GPU_NAME
 GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
-ShouldSearchByGPuName = len(GPUName) > 0
+ShouldSearchByGPUName = len(GPUName) > 0
 
 tools = [
     ToolSubst("FileCheck", FindTool("FileCheck")),
@@ -273,7 +273,7 @@ if config.offloadtest_test_lavapipe:
     # OFFLOADTEST_GPU_NAME is set to select that hardware GPU). Pin the
     # offloader to llvmpipe and ignore OFFLOADTEST_GPU_NAME.
     offloader_args.append("-adapter-regex=llvmpipe")
-elif ShouldSearchByGPuName:
+elif ShouldSearchByGPUName:
     offloader_args.extend([f'-adapter-regex="{GPUName}"'])
 # The %offloader substitution is registered after device selection below so
 # a plain Vulkan suite can pin the offloader to the exact device lit picked
@@ -359,12 +359,12 @@ for device in devices.get("Devices", []):
     is_lavapipe = "llvmpipe" in device["Description"].lower()
     is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:
-        if ShouldSearchByGPuName and is_gpu_name_match:
+        if ShouldSearchByGPUName and is_gpu_name_match:
             target_device = device
         elif is_warp and config.offloadtest_test_warp:
             target_device = device
         elif (
-            not ShouldSearchByGPuName
+            not ShouldSearchByGPUName
             and not is_warp
             and not config.offloadtest_test_warp
         ):
@@ -377,9 +377,9 @@ for device in devices.get("Devices", []):
             # OFFLOADTEST_GPU_NAME (which selects a hardware GPU).
             if is_lavapipe:
                 target_device = device
-        elif ShouldSearchByGPuName and is_gpu_name_match:
+        elif ShouldSearchByGPUName and is_gpu_name_match:
             target_device = device
-        elif not ShouldSearchByGPuName and not is_lavapipe:
+        elif not ShouldSearchByGPUName and not is_lavapipe:
             target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
@@ -412,7 +412,7 @@ vulkan_has_lavapipe = any(
 )
 if (
     not config.offloadtest_test_lavapipe
-    and not ShouldSearchByGPuName
+    and not ShouldSearchByGPUName
     and target_device["API"] == "Vulkan"
     and vulkan_has_lavapipe
 ):
