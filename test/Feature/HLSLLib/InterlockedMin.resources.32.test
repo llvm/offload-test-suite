@@ -1,0 +1,237 @@
+#--- source.hlsl
+
+// This test exercises InterlockedMin against the full set of HLSL-legal
+// non-groupshared (resource) destination types:
+//
+//   * RWStructuredBuffer<uint>[i]          (free function, 2-arg)
+//   * RWStructuredBuffer<int>[i]           (free function, 3-arg, signed)
+//   * RWBuffer<uint>[i]                    (free function on typed UAV)
+//   * RWTexture2D<uint>[coord]             (free function on typed UAV)
+//   * RWByteAddressBuffer::InterlockedMin  (method, 2-arg and 3-arg)
+//
+// For each destination, 256 threads of a single threadgroup atomically take
+// the minimum of their per-thread proposal and a single accumulator slot.
+
+RWStructuredBuffer<uint> SBufU : register(u0);
+RWStructuredBuffer<int>  SBufI : register(u1);
+RWBuffer<uint>           TBufU : register(u2);
+RWTexture2D<uint>        Tex2D : register(u3);
+RWByteAddressBuffer      BABuf : register(u4);
+
+RWStructuredBuffer<uint> OutMonoSBufI : register(u5);
+RWStructuredBuffer<uint> OutMonoBABuf : register(u6);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufU[0] = 0xFFFFFFFFu;
+    SBufI[0] = 1000;
+    TBufU[0] = 0xFFFFFFFFu;
+    Tex2D[uint2(0, 0)] = 0xFFFFFFFFu;
+    BABuf.Store(0, 0xFFFFFFFFu); // accumulator for 2-arg method form
+    BABuf.Store(4, 1000u);       // accumulator for 3-arg method form
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint>: 2-argument free function. Proposals 0..255,
+  // min = 0.
+  InterlockedMin(SBufU[0], GTID.x);
+
+  // RWStructuredBuffer<int>: 3-argument free function (signed). Proposals
+  // -31..224, min = -31. The concurrent re-read must never exceed the observed
+  // original (monotonic non-increase).
+  int OrigI;
+  InterlockedMin(SBufI[0], (int)GTID.x - 31, OrigI);
+  int AfterI = SBufI[0];
+  OutMonoSBufI[GTID.x] = (AfterI <= OrigI) ? 1u : 0u;
+
+  // RWBuffer<uint> (typed buffer UAV): 2-argument free function.
+  InterlockedMin(TBufU[0], GTID.x);
+
+  // RWTexture2D<uint>: 2-argument free function.
+  InterlockedMin(Tex2D[uint2(0, 0)], GTID.x);
+
+  // RWByteAddressBuffer method: 2-argument form.
+  BABuf.InterlockedMin(0, GTID.x);
+
+  // RWByteAddressBuffer method: 3-argument form.
+  uint OrigBA;
+  BABuf.InterlockedMin(4, GTID.x, OrigBA);
+  uint AfterBA = BABuf.Load(4);
+  OutMonoBABuf[GTID.x] = (AfterBA <= OrigBA) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedSBufU
+    Format: UInt32
+    Stride: 4
+    Data: [ 0 ]
+  - Name: SBufI
+    Format: Int32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedSBufI
+    Format: Int32
+    Stride: 4
+    Data: [ -31 ]
+  - Name: TBufU
+    Format: UInt32
+    Channels: 1
+    FillSize: 4
+  - Name: ExpectedTBufU
+    Format: UInt32
+    Channels: 1
+    Data: [ 0 ]
+  - Name: Tex2D
+    Format: UInt32
+    Channels: 1
+    FillSize: 4
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: ExpectedTex2D
+    Format: UInt32
+    Channels: 1
+    Data: [ 0 ]
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: BABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: ExpectedBABuf
+    Format: UInt32
+    Stride: 4
+    Data: [ 0, 0 ]
+  - Name: OutMonoSBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMono
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestTBufU
+    Rule: BufferExact
+    Actual: TBufU
+    Expected: ExpectedTBufU
+  - Result: TestTex2D
+    Rule: BufferExact
+    Actual: Tex2D
+    Expected: ExpectedTex2D
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestMonoSBufI
+    Rule: BufferExact
+    Actual: OutMonoSBufI
+    Expected: ExpectedMono
+  - Result: TestMonoBABuf
+    Rule: BufferExact
+    Actual: OutMonoBABuf
+    Expected: ExpectedMono
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: TBufU
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Tex2D
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutMonoSBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutMonoBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99123
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

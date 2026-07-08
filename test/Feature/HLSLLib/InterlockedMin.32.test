@@ -1,0 +1,189 @@
+#--- source.hlsl
+
+// This test exercises InterlockedMin against non-resource (groupshared)
+// destinations. A single threadgroup of 64 threads concurrently updates
+// shared counters, so the test actually exercises atomic behavior.
+//
+// Both the 2-argument and 3-argument overloads are covered for int and uint.
+//
+// Atomicity is verified for these interlockedmin intrinsics
+// two independent ways:
+//
+//   1. Final value. Each counter's deterministic final value is the minimum
+//      over all participating threads (and the initial value). A non-atomic
+//      read-modify-write can lose the lowest write: a thread reads the
+//      pre-minimum value, then stores its larger proposal *after* the
+//      minimum was written, clobbering it. So the final value can only equal
+//      the true minimum if no atomic min update is lost.
+//
+//   2. Monotonicity (3-argument form). Under correct atomic semantics the
+//      counter is monotonically non-increasing: once a value is written it
+//      can only get smaller. So immediately after this thread's atomic min
+//      returns `orig`, a fresh re-read of the counter must be <= `orig` --
+//      the counter can never climb back above the value this thread observed.
+//      A racy implementation can transiently *raise* the counter (a thread
+//      reads an old value, then writes its larger min back after a smaller
+//      value was already stored); a thread whose `orig` sits below that
+//      bumped-up value would then observe re-read > `orig`. Unlike a
+//      predicate on `orig` alone, this correlates `orig` with a fresh
+//      observation of shared memory and checks every thread, so a correct
+//      implementation yields all-ones.
+
+RWStructuredBuffer<uint> OutMonoInt : register(u0);
+RWStructuredBuffer<uint> OutMonoUInt : register(u1);
+RWStructuredBuffer<int> OutFinal : register(u2);
+
+groupshared int  MinInt;          // 3-arg form, signed
+groupshared uint MinUInt;         // 3-arg form, unsigned
+groupshared int  MinIntNoOrig;    // 2-arg form, signed
+groupshared uint MinUIntNoOrig;   // 2-arg form, unsigned
+groupshared int  SignedCounter;   // 2-arg form reaching a negative minimum
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    MinInt = 1000;
+    MinUInt = 1000u;
+    MinIntNoOrig = 1000;
+    MinUIntNoOrig = 1000u;
+    SignedCounter = 1000;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // 3-argument form. Proposals span -32..31, min = -32. The concurrent
+  // re-read must never exceed the observed original (monotonic non-increase).
+  int origI;
+  InterlockedMin(MinInt, (int)GTID.x - 32, origI);
+  int afterI = MinInt;
+  OutMonoInt[GTID.x] = (afterI <= origI) ? 1u : 0u;
+
+  // 3-argument form, unsigned. Proposals span 0..63, min = 0.
+  uint origU;
+  InterlockedMin(MinUInt, GTID.x, origU);
+  uint afterU = MinUInt;
+  OutMonoUInt[GTID.x] = (afterU <= origU) ? 1u : 0u;
+
+  // 2-argument form. Proposals span 0..-255, min = -255.
+  InterlockedMin(MinIntNoOrig, -(int)GTID.x);
+  // 2-argument form, unsigned. Proposals span 100..163, min = 100.
+  InterlockedMin(MinUIntNoOrig, GTID.x + 100u);
+  // 2-argument form reaching a negative minimum. Proposals span -1000..-937.
+  InterlockedMin(SignedCounter, (int)GTID.x - 1000);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = MinInt;             // -32
+    OutFinal[1] = (int)MinUInt;       // 0
+    OutFinal[2] = MinIntNoOrig;       // -255
+    OutFinal[3] = (int)MinUIntNoOrig; // 100
+    OutFinal[4] = SignedCounter;      // -1000
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutMonoInt
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMonoInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoUInt
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMonoUInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutFinal
+    Format: Int32
+    Stride: 4
+    FillSize: 20
+  - Name: ExpectedFinal
+    Format: Int32
+    Stride: 4
+    Data: [ -32, 0, -255, 100, -1000 ]
+Results:
+  - Result: TestMonoInt
+    Rule: BufferExact
+    Actual: OutMonoInt
+    Expected: ExpectedMonoInt
+  - Result: TestMonoUInt
+    Rule: BufferExact
+    Actual: OutMonoUInt
+    Expected: ExpectedMonoUInt
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutMonoInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutMonoUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99123
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
