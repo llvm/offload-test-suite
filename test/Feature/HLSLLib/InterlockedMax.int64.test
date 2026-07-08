@@ -1,7 +1,7 @@
 #--- source.hlsl
 
 // This test exercises InterlockedMax against non-resource (groupshared)
-// destinations using 64-bit integer types. A single threadgroup of 64
+// destinations using 64-bit integer types. A single threadgroup of 256
 // threads concurrently updates shared counters, so the test actually
 // exercises atomic behavior.
 //
@@ -19,7 +19,7 @@ groupshared uint64_t MaxUIntNoOrig;   // 2-arg form, unsigned
 groupshared int64_t  SignedCounter;   // 2-arg form reaching a positive maximum
 groupshared uint64_t LargeCounter;    // 2-arg form exercising the upper 32 bits
 
-[numthreads(64, 1, 1)]
+[numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     MaxInt = -1000;
@@ -31,7 +31,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
   }
   GroupMemoryBarrierWithGroupSync();
 
-  // 3-argument form. Proposals span -32..31, max = 31. The concurrent
+  // 3-argument form. Proposals span -32..223, max = 223. The concurrent
   // re-read must never fall below the observed original (monotonic
   // non-decrease).
   int64_t origI;
@@ -39,31 +39,31 @@ void main(uint3 GTID : SV_GroupThreadID) {
   int64_t afterI = MaxInt;
   OutMonoInt[GTID.x] = (afterI >= origI) ? 1u : 0u;
 
-  // 3-argument form, unsigned. Proposals span 0..63, max = 63.
+  // 3-argument form, unsigned. Proposals span 0..255, max = 255.
   uint64_t origU;
   InterlockedMax(MaxUInt, (uint64_t)GTID.x, origU);
   uint64_t afterU = MaxUInt;
   OutMonoUInt[GTID.x] = (afterU >= origU) ? 1u : 0u;
 
-  // 2-argument form. Proposals span 0..-63, max = 0.
+  // 2-argument form. Proposals span 0..-255, max = 0.
   InterlockedMax(MaxIntNoOrig, -(int64_t)GTID.x);
-  // 2-argument form, unsigned. Proposals span 100..163, max = 163.
+  // 2-argument form, unsigned. Proposals span 100..355, max = 355.
   InterlockedMax(MaxUIntNoOrig, (uint64_t)GTID.x + 100);
-  // 2-argument form reaching a positive maximum. Proposals span 937..1000.
+  // 2-argument form reaching a positive maximum. Proposals span 937..1192.
   InterlockedMax(SignedCounter, (int64_t)GTID.x + 937);
   // 2-argument form with a value that exercises the upper 32 bits,
-  // max = 2^32 + 63.
+  // max = 2^32 + 255.
   InterlockedMax(LargeCounter, 0x100000000ull + (uint64_t)GTID.x);
 
   GroupMemoryBarrierWithGroupSync();
 
   if (GTID.x == 0) {
-    OutFinal[0] = MaxInt;                 // 31
-    OutFinal[1] = (int64_t)MaxUInt;       // 63
+    OutFinal[0] = MaxInt;                 // 223
+    OutFinal[1] = (int64_t)MaxUInt;       // 255
     OutFinal[2] = MaxIntNoOrig;           // 0
-    OutFinal[3] = (int64_t)MaxUIntNoOrig; // 163
-    OutFinal[4] = SignedCounter;          // 1000
-    OutFinal[5] = (int64_t)LargeCounter;  // 2^32 + 63 = 4294967359
+    OutFinal[3] = (int64_t)MaxUIntNoOrig; // 355
+    OutFinal[4] = SignedCounter;          // 1192
+    OutFinal[5] = (int64_t)LargeCounter;  // 2^32 + 255 = 4294967551
   }
 }
 
@@ -77,22 +77,46 @@ Buffers:
   - Name: OutMonoInt
     Format: UInt32
     Stride: 4
-    FillSize: 256
+    FillSize: 1024
   - Name: ExpectedMonoInt
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutMonoUInt
     Format: UInt32
     Stride: 4
-    FillSize: 256
+    FillSize: 1024
   - Name: ExpectedMonoUInt
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
@@ -103,7 +127,7 @@ Buffers:
   - Name: ExpectedFinal
     Format: Int64
     Stride: 8
-    Data: [ 31, 63, 0, 163, 1000, 4294967359 ]
+    Data: [ 223, 255, 0, 355, 1192, 4294967551 ]
 
 Results:
   - Result: TestMonoInt

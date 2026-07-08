@@ -9,7 +9,7 @@
 //   * RWTexture2D<uint>[coord]             (free function on typed UAV)
 //   * RWByteAddressBuffer::InterlockedMax  (method, 2-arg and 3-arg)
 //
-// For each destination, 32 threads of a single threadgroup atomically take
+// For each destination, 256 threads of a single threadgroup atomically take
 // the maximum of their per-thread proposal and a single accumulator slot.
 
 RWStructuredBuffer<uint> SBufU : register(u0);
@@ -21,7 +21,7 @@ RWByteAddressBuffer      BABuf : register(u4);
 RWStructuredBuffer<uint> OutMonoSBufI : register(u5);
 RWStructuredBuffer<uint> OutMonoBABuf : register(u6);
 
-[numthreads(32, 1, 1)]
+[numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     SBufU[0] = 0u;
@@ -33,12 +33,12 @@ void main(uint3 GTID : SV_GroupThreadID) {
   }
   DeviceMemoryBarrierWithGroupSync();
 
-  // RWStructuredBuffer<uint>: 2-argument free function. Proposals 0..31,
-  // max = 31.
+  // RWStructuredBuffer<uint>: 2-argument free function. Proposals 0..255,
+  // max = 255.
   InterlockedMax(SBufU[0], GTID.x);
 
   // RWStructuredBuffer<int>: 3-argument free function (signed). Proposals
-  // 0..31, max = 31 (a positive proposal must beat the -1000 initializer).
+  // 0..255, max = 255 (a positive proposal must beat the -1000 initializer).
   // The concurrent re-read must never fall below the observed original
   // (monotonic non-decrease).
   int OrigI;
@@ -76,7 +76,7 @@ Buffers:
   - Name: ExpectedSBufU
     Format: UInt32
     Stride: 4
-    Data: [ 31 ]
+    Data: [ 255 ]
   - Name: SBufI
     Format: Int32
     Stride: 4
@@ -84,7 +84,7 @@ Buffers:
   - Name: ExpectedSBufI
     Format: Int32
     Stride: 4
-    Data: [ 31 ]
+    Data: [ 255 ]
   - Name: TBufU
     Format: UInt32
     Channels: 1
@@ -92,7 +92,7 @@ Buffers:
   - Name: ExpectedTBufU
     Format: UInt32
     Channels: 1
-    Data: [ 31 ]
+    Data: [ 255 ]
   - Name: Tex2D
     Format: UInt32
     Channels: 1
@@ -104,7 +104,7 @@ Buffers:
   - Name: ExpectedTex2D
     Format: UInt32
     Channels: 1
-    Data: [ 31 ]
+    Data: [ 255 ]
     OutputProps:
       Height: 1
       Width: 1
@@ -116,20 +116,34 @@ Buffers:
   - Name: ExpectedBABuf
     Format: UInt32
     Stride: 4
-    Data: [ 31, 31 ]
+    Data: [ 255, 255 ]
   - Name: OutMonoSBufI
     Format: UInt32
     Stride: 4
-    FillSize: 128
+    FillSize: 1024
   - Name: ExpectedMono
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutMonoBABuf
     Format: UInt32
     Stride: 4
-    FillSize: 128
+    FillSize: 1024
 Results:
   - Result: TestSBufU
     Rule: BufferExact

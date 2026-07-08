@@ -12,7 +12,7 @@
 // "AtomicInt64OnTypedResource" capability and are intentionally not
 // covered here, to keep this test portable across implementations.
 //
-// For each destination, 64 threads of a single threadgroup atomically take
+// For each destination, 256 threads of a single threadgroup atomically take
 // the maximum of their per-thread proposal and a single accumulator slot.
 // Every proposal sets bits in the upper 32 bits (0x100000000 + tid), so the
 // operation genuinely exercises all 64 bits rather than degenerating to a
@@ -25,7 +25,7 @@ RWByteAddressBuffer          BABuf : register(u2);
 RWStructuredBuffer<uint> OutMonoSBufI : register(u3);
 RWStructuredBuffer<uint> OutMonoBABuf : register(u4);
 
-[numthreads(64, 1, 1)]
+[numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     SBufU[0] = 0;
@@ -36,13 +36,13 @@ void main(uint3 GTID : SV_GroupThreadID) {
   DeviceMemoryBarrierWithGroupSync();
 
   // RWStructuredBuffer<uint64_t>: 2-argument free function. Proposals
-  // 2^32..2^32+63, max = 2^32 + 63.
+  // 2^32..2^32+255, max = 2^32 + 255.
   InterlockedMax(SBufU[0], 0x100000000ull + (uint64_t)GTID.x);
 
   // RWStructuredBuffer<int64_t>: 3-argument free function (signed).
-  // Proposals 2^32..2^32+63, max = 2^32 + 63 (a large positive proposal must
-  // beat the -1000 initializer). The concurrent re-read must never fall below
-  // the observed original (monotonic non-decrease).
+  // Proposals 2^32..2^32+255, max = 2^32 + 255 (a large positive proposal
+  // must beat the -1000 initializer). The concurrent re-read must never fall
+  // below the observed original (monotonic non-decrease).
   int64_t OrigI;
   InterlockedMax(SBufI[0], 0x100000000ll + (int64_t)GTID.x, OrigI);
   int64_t AfterI = SBufI[0];
@@ -72,7 +72,7 @@ Buffers:
   - Name: ExpectedSBufU
     Format: UInt64
     Stride: 8
-    Data: [ 4294967359 ]
+    Data: [ 4294967551 ]
   - Name: SBufI
     Format: Int64
     Stride: 8
@@ -80,7 +80,7 @@ Buffers:
   - Name: ExpectedSBufI
     Format: Int64
     Stride: 8
-    Data: [ 4294967359 ]
+    Data: [ 4294967551 ]
   - Name: BABuf
     Format: UInt64
     Stride: 8
@@ -88,22 +88,34 @@ Buffers:
   - Name: ExpectedBABuf
     Format: UInt64
     Stride: 8
-    Data: [ 4294967359, 4294967359 ]
+    Data: [ 4294967551, 4294967551 ]
   - Name: OutMonoSBufI
     Format: UInt32
     Stride: 4
-    FillSize: 256
+    FillSize: 1024
   - Name: ExpectedMono
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutMonoBABuf
     Format: UInt32
     Stride: 4
-    FillSize: 256
+    FillSize: 1024
 Results:
   - Result: TestSBufU
     Rule: BufferExact
