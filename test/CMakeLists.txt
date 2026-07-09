@@ -147,7 +147,29 @@ function(add_offloadtest_lit_suite suite)
 endfunction()
 
 
-function(add_offloadtest_lavapipe_suite suite)
+# Adds a standalone check-hlsl-<suite> target that runs the Vulkan test suite
+# pinned to a specific device, selected by name through the OFFLOADTEST_GPU_NAME
+# environment variable that test/lit.cfg.py already honors -- there is no
+# device-specific logic in the Python test config. add_lit_testsuite() offers no
+# hook to set an environment variable for the spawned lit process, so this
+# defines the target directly (mirroring add_lit_target) and exports
+# OFFLOADTEST_GPU_NAME=<gpu_name> into lit's environment via `cmake -E env`.
+# Passing "llvmpipe" targets Mesa's lavapipe software rasterizer; passing a
+# vendor/description substring (e.g. "NVIDIA") is enough to add hardware suites
+# such as clang-vk-nvidia in a future change. The target is intentionally kept
+# out of the check-hlsl umbrella so it only runs when explicitly invoked.
+function(add_offloadtest_gpu_suite suite gpu_name)
+  # Suites named clang-* compile with clang instead of dxc. FORCE_CLANG is
+  # consumed by configure_lit_site_cfg below, which substitutes @FORCE_CLANG@
+  # into config.offloadtest_test_clang. Deriving it from the suite name here
+  # keeps the toggle local to this function instead of requiring callers to
+  # bracket each call with set(FORCE_CLANG ...).
+  if (suite MATCHES "^clang-")
+    set(FORCE_CLANG True)
+  else()
+    set(FORCE_CLANG False)
+  endif()
+
   configure_lit_site_cfg(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
     ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.site.cfg.py
@@ -163,10 +185,10 @@ function(add_offloadtest_lavapipe_suite suite)
   separate_arguments(lit_args)
 
   add_custom_target(check-hlsl-${suite}
-    COMMAND ${CMAKE_COMMAND} -E env OFFLOADTEST_GPU_NAME=llvmpipe
+    COMMAND ${CMAKE_COMMAND} -E env OFFLOADTEST_GPU_NAME=${gpu_name}
             ${Python3_EXECUTABLE} ${lit_base_dir}/${lit_file_name}
             ${lit_args} ${CMAKE_CURRENT_BINARY_DIR}/${suite}
-    COMMENT "Running the HLSL regression tests for ${suite} (llvmpipe/lavapipe)"
+    COMMENT "Running the HLSL regression tests for ${suite} (device: ${gpu_name})"
     USES_TERMINAL
     )
   add_dependencies(check-hlsl-${suite} ${OFFLOADTEST_DEPS})
@@ -225,16 +247,14 @@ endif()
 
 if (SUPPORTS_SPIRV AND OFFLOADTEST_ENABLE_VULKAN AND WIN32)
   set(TEST_vk True)
-  # Lavapipe reuses the plain Vulkan suite config; device selection happens via
-  # OFFLOADTEST_GPU_NAME=llvmpipe, which add_offloadtest_lavapipe_suite exports
-  # into lit's environment. No lavapipe-specific logic lives in the Python
-  # test config.
-  add_offloadtest_lavapipe_suite(vk-lavapipe)
+  # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as "llvmpipe (LLVM
+  # ...)"; select it purely via OFFLOADTEST_GPU_NAME, which
+  # add_offloadtest_gpu_suite exports into lit's environment. No lavapipe-specific
+  # logic lives in the Python test config.
+  add_offloadtest_gpu_suite(vk-lavapipe llvmpipe)
 
   if (OFFLOADTEST_TEST_CLANG)
-    set(FORCE_CLANG True)
-    add_offloadtest_lavapipe_suite(clang-vk-lavapipe)
-    set(FORCE_CLANG False)
+    add_offloadtest_gpu_suite(clang-vk-lavapipe llvmpipe)
   endif()
 
   set(TEST_vk False)

@@ -366,6 +366,14 @@ if not target_device:
     config.fatal("No target device found!")
 setDeviceFeatures(config, target_device, HLSLCompiler)
 
+# Lavapipe (Mesa's llvmpipe software Vulkan device) has known limitations
+# compared to hardware drivers -- notably its LLVM JIT can hit access
+# violations on some shaders. Expose a "Lavapipe" feature so affected tests can
+# be scoped with "# XFAIL: Lavapipe" / "# UNSUPPORTED: Lavapipe" without
+# affecting other backends.
+if "llvmpipe" in target_device.get("Description", "").lower():
+    config.available_features.add("Lavapipe")
+
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
     config.available_features.add("goldenimage")
