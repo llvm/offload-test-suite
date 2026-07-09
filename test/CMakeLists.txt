@@ -146,14 +146,7 @@ function(add_offloadtest_lit_suite suite)
   )
 endfunction()
 
-# Lavapipe (Mesa's software Vulkan rasterizer) enumerates as "llvmpipe (LLVM ...)"
-# and is selected purely through the OFFLOADTEST_GPU_NAME environment variable
-# that test/lit.cfg.py already honors -- there is no lavapipe-specific logic in
-# the Python test config. add_lit_testsuite() offers no hook to set an
-# environment variable for the spawned lit process, so this defines the check
-# target directly (mirroring add_lit_target) and exports
-# OFFLOADTEST_GPU_NAME=llvmpipe into lit's environment via `cmake -E env`. The
-# generated suite config is otherwise identical to the plain Vulkan suite.
+
 function(add_offloadtest_lavapipe_suite suite)
   configure_lit_site_cfg(
     ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
