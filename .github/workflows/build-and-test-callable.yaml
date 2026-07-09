@@ -471,6 +471,14 @@ jobs:
                 exit 1
                 ;;
             esac
+            # Lavapipe reuses the plain Vulkan suites; the software rasterizer is
+            # selected by OFFLOADTEST_GPU_NAME=llvmpipe (exported by the Setup
+            # Lavapipe step below), not by a dedicated suite. configure-test-suite.py
+            # only knows the base suites, so map the lavapipe aliases onto them.
+            case "$suite" in
+              vk-lavapipe) suite="vk" ;;
+              clang-vk-lavapipe) suite="clang-vk" ;;
+            esac
             echo "suite=$suite" >> $GITHUB_OUTPUT
             echo "Will run lit suite: $suite"
       - name: Configure standalone test suite
@@ -499,6 +507,11 @@ jobs:
         shell: bash
         run: |
             set -euxo pipefail
+            # Select Mesa's software rasterizer (enumerates as "llvmpipe (LLVM ...)")
+            # via the GPU-name filter that lit.cfg.py reads from the environment.
+            # Exported before any early return so device selection works even when
+            # no ICD needs shadowing below.
+            echo "OFFLOADTEST_GPU_NAME=llvmpipe" >> "$GITHUB_ENV"
             # See previous "Setup Lavapipe" step for details on how we resolve the ICD path.
             icd=""
             if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then

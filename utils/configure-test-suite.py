@@ -31,14 +31,7 @@ import sys
 
 # Suite name -> (d3d12, vk, mtl, clang, warp, description).
 SUITES = {
-    "d3d12": (
-        True,
-        False,
-        False,
-        False,
-        False,
-        "DXC-compiled shaders on DirectX 12",
-    ),
+    "d3d12": (True, False, False, False, False, "DXC-compiled shaders on DirectX 12"),
     "vk": (False, True, False, False, False, "DXC-compiled shaders on Vulkan"),
     "mtl": (False, False, True, False, False, "DXC-compiled shaders on Metal"),
     "clang-d3d12": (
@@ -49,22 +42,8 @@ SUITES = {
         False,
         "Clang-compiled shaders on DirectX 12",
     ),
-    "clang-vk": (
-        False,
-        True,
-        False,
-        True,
-        False,
-        "Clang-compiled shaders on Vulkan",
-    ),
-    "clang-mtl": (
-        False,
-        False,
-        True,
-        True,
-        False,
-        "Clang-compiled shaders on Metal",
-    ),
+    "clang-vk": (False, True, False, True, False, "Clang-compiled shaders on Vulkan"),
+    "clang-mtl": (False, False, True, True, False, "Clang-compiled shaders on Metal"),
     "warp-d3d12": (
         True,
         False,
@@ -81,29 +60,7 @@ SUITES = {
         True,
         "Clang-compiled shaders on WARP (Windows)",
     ),
-    "vk-lavapipe": (
-        False,
-        True,
-        False,
-        False,
-        False,
-        "DXC-compiled shaders on Lavapipe (Vulkan software rasterizer)",
-    ),
-    "clang-vk-lavapipe": (
-        False,
-        True,
-        False,
-        True,
-        False,
-        "Clang-compiled shaders on Lavapipe (Vulkan software rasterizer)",
-    ),
 }
-
-# Suites whose name ends with "lavapipe" target Mesa's software Vulkan
-# rasterizer, which enumerates as "llvmpipe (LLVM ...)". Rather than a
-# dedicated flag, they simply seed the generic OFFLOADTEST_GPU_NAME device
-# filter with "llvmpipe" (the environment variable still overrides it).
-LAVAPIPE_GPU_NAME = "llvmpipe"
 
 # Self-contained replacement for @LIT_SITE_CFG_IN_HEADER@. The in-tree
 # header (provided by LLVM's configure_lit_site_cfg) wraps paths with a
@@ -276,7 +233,6 @@ def main():
 
     for suite in args.suites:
         d3d12, vk, mtl, clang, warp, _ = SUITES[suite]
-        gpu_name = LAVAPIPE_GPU_NAME if suite.endswith("lavapipe") else ""
         suite_obj_root = output_base
         suite_dir = output_base / "test" / suite
         suite_dir.mkdir(parents=True, exist_ok=True)
@@ -292,7 +248,6 @@ def main():
             "SUPPORTS_SPIRV": "True" if vk else "False",
             "FORCE_CLANG": "True" if clang else "False",
             "FORCE_WARP": "True" if warp else "False",
-            "OFFLOADTEST_GPU_NAME": gpu_name,
             "WARP_ARCHITECTURE": args.warp_arch,
             "DXC_DIR": dxc_dir,
             "GOLDENIMAGE_DIR": golden_dir,

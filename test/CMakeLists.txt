@@ -90,7 +90,6 @@ set(TEST_vk False)
 set(TEST_mtl False)
 set(FORCE_CLANG False)
 set(FORCE_WARP False)
-set(OFFLOADTEST_GPU_NAME "")
 
 if (OFFLOADTEST_ENABLE_D3D12)
   list(APPEND platforms_to_test d3d12)
@@ -147,6 +146,40 @@ function(add_offloadtest_lit_suite suite)
   )
 endfunction()
 
+# Lavapipe (Mesa's software Vulkan rasterizer) enumerates as "llvmpipe (LLVM ...)"
+# and is selected purely through the OFFLOADTEST_GPU_NAME environment variable
+# that test/lit.cfg.py already honors -- there is no lavapipe-specific logic in
+# the Python test config. add_lit_testsuite() offers no hook to set an
+# environment variable for the spawned lit process, so this defines the check
+# target directly (mirroring add_lit_target) and exports
+# OFFLOADTEST_GPU_NAME=llvmpipe into lit's environment via `cmake -E env`. The
+# generated suite config is otherwise identical to the plain Vulkan suite.
+function(add_offloadtest_lavapipe_suite suite)
+  configure_lit_site_cfg(
+    ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.site.cfg.py
+    MAIN_CONFIG
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.cfg.py
+    PATHS
+    "OFFLOADTEST_BINARY_DIR"
+    "LLVM_TOOLS_DIR"
+    )
+
+  get_llvm_lit_path(lit_base_dir lit_file_name ALLOW_EXTERNAL)
+  set(lit_args "${LLVM_LIT_ARGS}")
+  separate_arguments(lit_args)
+
+  add_custom_target(check-hlsl-${suite}
+    COMMAND ${CMAKE_COMMAND} -E env OFFLOADTEST_GPU_NAME=llvmpipe
+            ${Python3_EXECUTABLE} ${lit_base_dir}/${lit_file_name}
+            ${lit_args} ${CMAKE_CURRENT_BINARY_DIR}/${suite}
+    COMMENT "Running the HLSL regression tests for ${suite} (llvmpipe/lavapipe)"
+    USES_TERMINAL
+    )
+  add_dependencies(check-hlsl-${suite} ${OFFLOADTEST_DEPS})
+  set_target_properties(check-hlsl-${suite} PROPERTIES FOLDER "HLSL tests")
+endfunction()
+
 umbrella_lit_testsuite_begin(check-hlsl)
 
 # Add unit test suite
@@ -199,20 +232,19 @@ endif()
 
 if (SUPPORTS_SPIRV AND OFFLOADTEST_ENABLE_VULKAN AND WIN32)
   set(TEST_vk True)
-  # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as
-  # "llvmpipe (LLVM ...)"; select it through the generic GPU-name filter
-  # rather than a dedicated flag.
-  set(OFFLOADTEST_GPU_NAME "llvmpipe")
-  add_offloadtest_lit_suite(vk-lavapipe)
+  # Lavapipe reuses the plain Vulkan suite config; device selection happens via
+  # OFFLOADTEST_GPU_NAME=llvmpipe, which add_offloadtest_lavapipe_suite exports
+  # into lit's environment. No lavapipe-specific logic lives in the Python
+  # test config.
+  add_offloadtest_lavapipe_suite(vk-lavapipe)
 
   if (OFFLOADTEST_TEST_CLANG)
     set(FORCE_CLANG True)
-    add_offloadtest_lit_suite(clang-vk-lavapipe)
+    add_offloadtest_lavapipe_suite(clang-vk-lavapipe)
     set(FORCE_CLANG False)
   endif()
 
   set(TEST_vk False)
-  set(OFFLOADTEST_GPU_NAME "")
 endif()
 
 umbrella_lit_testsuite_end(check-hlsl)
