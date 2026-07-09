@@ -9,7 +9,10 @@ config.offloadtest_dxc = '"' + path(r"@DXC_EXECUTABLE@") + '"'
 config.offloadtest_supports_spirv = @SUPPORTS_SPIRV@
 config.offloadtest_test_clang = @FORCE_CLANG@
 config.offloadtest_test_warp = @FORCE_WARP@
-config.offloadtest_test_lavapipe = @FORCE_LAVAPIPE@
+# Optional GPU-name device filter baked into the generated config. The
+# OFFLOADTEST_GPU_NAME environment variable overrides this at run time. The
+# lavapipe suites seed "llvmpipe" here to target Mesa's software rasterizer.
+config.offloadtest_gpu_name = r"@OFFLOADTEST_GPU_NAME@"
 if config.offloadtest_test_warp:
   config.warp_arch = r"@WARP_ARCHITECTURE@"
 config.offloadtest_dxc_dir = r"@DXC_DIR@"

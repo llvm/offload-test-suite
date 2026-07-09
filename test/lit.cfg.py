@@ -67,7 +67,11 @@ llvm_config.with_system_environment(
 
 # Environment equivalents (useful for ninja):
 #   OFFLOADTEST_GPU_NAME
-GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
+# The environment variable takes precedence; otherwise fall back to the value
+# baked into the generated config (the lavapipe suites seed "llvmpipe").
+GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "") or getattr(
+    config, "offloadtest_gpu_name", ""
+)
 ShouldSearchByGPUName = len(GPUName) > 0
 
 tools = [
@@ -266,14 +270,10 @@ if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
-if config.offloadtest_test_lavapipe:
-    # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as
-    # "llvmpipe (LLVM ...)". Lavapipe suites always target it, even on a
-    # machine that also exposes a hardware Vulkan GPU (and even if
-    # OFFLOADTEST_GPU_NAME is set to select that hardware GPU). Pin the
-    # offloader to llvmpipe and ignore OFFLOADTEST_GPU_NAME.
-    offloader_args.append("-adapter-regex=llvmpipe")
-elif ShouldSearchByGPUName:
+if ShouldSearchByGPUName:
+    # Lavapipe suites reach this path too: they seed OFFLOADTEST_GPU_NAME with
+    # "llvmpipe" (Mesa's software rasterizer enumerates as "llvmpipe (LLVM ...)")
+    # so no lavapipe-specific handling is needed here.
     offloader_args.extend([f'-adapter-regex="{GPUName}"'])
 # The %offloader substitution is registered after device selection below so
 # a plain Vulkan suite can pin the offloader to the exact device lit picked
@@ -372,14 +372,13 @@ for device in devices.get("Devices", []):
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
-        if config.offloadtest_test_lavapipe:
-            # Lavapipe suites select the llvmpipe software device and ignore
-            # OFFLOADTEST_GPU_NAME (which selects a hardware GPU).
-            if is_lavapipe:
-                target_device = device
-        elif ShouldSearchByGPUName and is_gpu_name_match:
+        if ShouldSearchByGPUName and is_gpu_name_match:
+            # A GPU name of "llvmpipe" selects the lavapipe software device;
+            # any other name selects a hardware Vulkan GPU.
             target_device = device
         elif not ShouldSearchByGPUName and not is_lavapipe:
+            # With no GPU name filter, never auto-select the software
+            # rasterizer -- a plain Vulkan run should target the hardware GPU.
             target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
@@ -411,8 +410,7 @@ vulkan_has_lavapipe = any(
     for d in devices.get("Devices", [])
 )
 if (
-    not config.offloadtest_test_lavapipe
-    and not ShouldSearchByGPUName
+    not ShouldSearchByGPUName
     and target_device["API"] == "Vulkan"
     and vulkan_has_lavapipe
 ):

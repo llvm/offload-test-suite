@@ -90,7 +90,7 @@ set(TEST_vk False)
 set(TEST_mtl False)
 set(FORCE_CLANG False)
 set(FORCE_WARP False)
-set(FORCE_LAVAPIPE False)
+set(OFFLOADTEST_GPU_NAME "")
 
 if (OFFLOADTEST_ENABLE_D3D12)
   list(APPEND platforms_to_test d3d12)
@@ -199,7 +199,10 @@ endif()
 
 if (SUPPORTS_SPIRV AND OFFLOADTEST_ENABLE_VULKAN AND WIN32)
   set(TEST_vk True)
-  set(FORCE_LAVAPIPE True)
+  # Lavapipe (Mesa's software Vulkan rasterizer) enumerates as
+  # "llvmpipe (LLVM ...)"; select it through the generic GPU-name filter
+  # rather than a dedicated flag.
+  set(OFFLOADTEST_GPU_NAME "llvmpipe")
   add_offloadtest_lit_suite(vk-lavapipe)
 
   if (OFFLOADTEST_TEST_CLANG)
@@ -209,7 +212,7 @@ if (SUPPORTS_SPIRV AND OFFLOADTEST_ENABLE_VULKAN AND WIN32)
   endif()
 
   set(TEST_vk False)
-  set(FORCE_LAVAPIPE False)
+  set(OFFLOADTEST_GPU_NAME "")
 endif()
 
 umbrella_lit_testsuite_end(check-hlsl)
