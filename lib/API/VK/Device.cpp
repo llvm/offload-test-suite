@@ -55,8 +55,12 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
   case DataFormat::Float32:
     VKFormats(SFLOAT, 32) break;
   case DataFormat::Int64:
+    if (Channels == 2)
+      return VK_FORMAT_R32G32B32A32_SINT;
     VKFormats(SINT, 64) break;
   case DataFormat::UInt64:
+    if (Channels == 2)
+      return VK_FORMAT_R32G32B32A32_UINT;
     VKFormats(UINT, 64) break;
   case DataFormat::Float64:
     VKFormats(SFLOAT, 64) break;
