@@ -41,10 +41,24 @@ config.test_exec_root = os.path.join(
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
+
+llvm_config.with_system_environment(
+    [
+        "VK_ICD_FILENAMES",
+        "VK_DRIVER_FILES",
+        "VK_ADD_DRIVER_FILES",
+        "VK_LAYER_PATH",
+        "VK_ADD_LAYER_PATH",
+        "VK_INSTANCE_LAYERS",
+        "VK_LOADER_DRIVERS_SELECT",
+        "VK_LOADER_DEBUG",
+    ]
+)
+
 # Environment equivalents (useful for ninja):
 #   OFFLOADTEST_GPU_NAME
 GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
-ShouldSearchByGPuName = len(GPUName) > 0
+ShouldSearchByGPUName = len(GPUName) > 0
 
 tools = [
     ToolSubst("FileCheck", FindTool("FileCheck")),
@@ -242,7 +256,7 @@ if config.offloadtest_enable_debug:
     offloader_args.append("-debug-layer")
 if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
-if ShouldSearchByGPuName:
+if ShouldSearchByGPUName:
     offloader_args.extend([f'-adapter-regex="{GPUName}"'])
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
@@ -327,12 +341,12 @@ for device in devices.get("Devices", []):
     is_warp = "Microsoft Basic Render Driver" in device["Description"]
     is_gpu_name_match = bool(pattern.search(device["Description"]))
     if device["API"] == "DirectX" and config.offloadtest_enable_d3d12:
-        if ShouldSearchByGPuName and is_gpu_name_match:
+        if ShouldSearchByGPUName and is_gpu_name_match:
             target_device = device
         elif is_warp and config.offloadtest_test_warp:
             target_device = device
         elif (
-            not ShouldSearchByGPuName
+            not ShouldSearchByGPUName
             and not is_warp
             and not config.offloadtest_test_warp
         ):
@@ -340,9 +354,9 @@ for device in devices.get("Devices", []):
     if device["API"] == "Metal" and config.offloadtest_enable_metal:
         target_device = device
     if device["API"] == "Vulkan" and config.offloadtest_enable_vulkan:
-        if ShouldSearchByGPuName and is_gpu_name_match:
+        if ShouldSearchByGPUName and is_gpu_name_match:
             target_device = device
-        elif not ShouldSearchByGPuName:
+        elif not ShouldSearchByGPUName:
             target_device = device
     # Bail from the loop if we found a device that matches what we're looking for.
     if target_device:
@@ -351,6 +365,9 @@ for device in devices.get("Devices", []):
 if not target_device:
     config.fatal("No target device found!")
 setDeviceFeatures(config, target_device, HLSLCompiler)
+
+if "llvmpipe" in target_device.get("Description", "").lower():
+    config.available_features.add("Lavapipe")
 
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
