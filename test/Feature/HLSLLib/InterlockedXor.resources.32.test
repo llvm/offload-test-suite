@@ -1,0 +1,251 @@
+#--- source.hlsl
+
+// This test exercises InterlockedXor against the full set of HLSL-legal
+// non-groupshared (resource) destination types:
+//
+//   * RWStructuredBuffer<uint>[i]          (free function, 2-arg)
+//   * RWStructuredBuffer<int>[i]           (free function, 3-arg, signed)
+//   * RWBuffer<uint>[i]                    (free function on typed UAV)
+//   * RWTexture2D<uint>[coord]             (free function on typed UAV)
+//   * RWByteAddressBuffer::InterlockedXor  (method, 2-arg and 3-arg)
+//
+// See InterlockedXor.32.test for a full description of the unique-bit
+// atomicity construction: each destination holds eight 32-bit words, thread t
+// flips bit (t % 32) of word (t / 32), so every word ends at all-ones
+// (0xFFFFFFFF) and each 3-arg re-read must strictly exceed the observed orig.
+
+RWStructuredBuffer<uint> SBufU : register(u0);
+RWStructuredBuffer<int>  SBufI : register(u1);
+RWBuffer<uint>           TBufU : register(u2);
+RWTexture2D<uint>        Tex2D : register(u3);
+RWByteAddressBuffer      BABuf : register(u4);
+
+RWStructuredBuffer<uint> OutMonoSBufI : register(u5);
+RWStructuredBuffer<uint> OutMonoBABuf : register(u6);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  uint Tid  = GTID.x;
+  uint Word = Tid / 32;         // 0..7, one 32-bit slot per 32 threads
+  uint Bit  = Tid % 32;         // 0..31, this thread's unique bit
+  uint MyBit = 1u << Bit;
+  uint Off2  = Word * 4;        // BAB 2-arg region: byte offsets 0..28
+  uint Off3  = 32 + Word * 4;   // BAB 3-arg region: byte offsets 32..60
+
+  if (Tid < 8) {
+    SBufU[Tid] = 0u;
+    SBufI[Tid] = 0;
+    TBufU[Tid] = 0u;
+    Tex2D[uint2(Tid, 0)] = 0u;
+    BABuf.Store(Tid * 4, 0u);       // 2-arg accumulator words
+    BABuf.Store(32 + Tid * 4, 0u);  // 3-arg accumulator words
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint>: 2-argument free function.
+  InterlockedXor(SBufU[Word], MyBit);
+
+  // RWStructuredBuffer<int>: 3-argument free function (signed). Compared in the
+  // unsigned bit domain; setting a previously-zero bit strictly grows the
+  // pattern, so the concurrent re-read must exceed the observed original.
+  int OrigI;
+  InterlockedXor(SBufI[Word], (int)MyBit, OrigI);
+  int AfterI = SBufI[Word];
+  OutMonoSBufI[Tid] = (asuint(AfterI) > asuint(OrigI)) ? 1u : 0u;
+
+  // RWBuffer<uint> (typed buffer UAV): 2-argument free function.
+  InterlockedXor(TBufU[Word], MyBit);
+
+  // RWTexture2D<uint>: 2-argument free function.
+  InterlockedXor(Tex2D[uint2(Word, 0)], MyBit);
+
+  // RWByteAddressBuffer method: 2-argument form.
+  BABuf.InterlockedXor(Off2, MyBit);
+
+  // RWByteAddressBuffer method: 3-argument form.
+  uint OrigBA;
+  BABuf.InterlockedXor(Off3, MyBit, OrigBA);
+  uint AfterBA = BABuf.Load(Off3);
+  OutMonoBABuf[Tid] = (AfterBA > OrigBA) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt32
+    Stride: 4
+    FillSize: 32
+  - Name: ExpectedSBufU
+    Format: UInt32
+    Stride: 4
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
+  - Name: SBufI
+    Format: Int32
+    Stride: 4
+    FillSize: 32
+  - Name: ExpectedSBufI
+    Format: Int32
+    Stride: 4
+    Data: [ -1, -1, -1, -1, -1, -1, -1, -1 ]
+  - Name: TBufU
+    Format: UInt32
+    Channels: 1
+    FillSize: 32
+  - Name: ExpectedTBufU
+    Format: UInt32
+    Channels: 1
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
+  - Name: Tex2D
+    Format: UInt32
+    Channels: 1
+    FillSize: 32
+    OutputProps:
+      Height: 1
+      Width: 8
+      Depth: 1
+  - Name: ExpectedTex2D
+    Format: UInt32
+    Channels: 1
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
+    OutputProps:
+      Height: 1
+      Width: 8
+      Depth: 1
+  - Name: BABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 64
+  - Name: ExpectedBABuf
+    Format: UInt32
+    Stride: 4
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
+  - Name: OutMonoSBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMono
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestTBufU
+    Rule: BufferExact
+    Actual: TBufU
+    Expected: ExpectedTBufU
+  - Result: TestTex2D
+    Rule: BufferExact
+    Actual: Tex2D
+    Expected: ExpectedTex2D
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestMonoSBufI
+    Rule: BufferExact
+    Actual: OutMonoSBufI
+    Expected: ExpectedMono
+  - Result: TestMonoBABuf
+    Rule: BufferExact
+    Actual: OutMonoBABuf
+    Expected: ExpectedMono
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: TBufU
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Tex2D
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutMonoSBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutMonoBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99127
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
