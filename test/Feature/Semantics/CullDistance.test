@@ -98,6 +98,8 @@ DescriptorSets: []
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
+# UNSUPPORTED: Lavapipe
+
 # Pixels 0,1 rendered red (triangle A kept).
 # Pixels 2,3 zero-initialized clear (triangle B culled).
 # CHECK: Name: Output

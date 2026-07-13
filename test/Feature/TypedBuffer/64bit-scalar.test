@@ -125,6 +125,8 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/1110
 # XFAIL: Intel-Gen-10 && Vulkan
 
+# UNSUPPORTED: Lavapipe
+
 # REQUIRES: Int64
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

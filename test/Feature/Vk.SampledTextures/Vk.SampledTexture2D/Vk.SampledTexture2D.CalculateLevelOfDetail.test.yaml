@@ -125,6 +125,8 @@ Results:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/181910
 # XFAIL: Clang && Vulkan
 
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/source.hlsl
 # RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/source.hlsl

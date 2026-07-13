@@ -84,6 +84,8 @@ DescriptorSets: []
 # XFAIL: Clang && DirectX || Clang && Metal
 # REQUIRES: goldenimage
 
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
