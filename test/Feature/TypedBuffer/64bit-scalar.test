@@ -125,6 +125,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/1110
 # XFAIL: Intel-Gen-10 && Vulkan
 
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15866
 # XFAIL: Lavapipe
 
 # REQUIRES: Int64
