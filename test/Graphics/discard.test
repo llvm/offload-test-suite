@@ -72,6 +72,8 @@ DescriptorSets: []
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
 
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe
 
 # Pixels 0,1 are discarded -> zero-initialized clear (0,0,0,0). 
