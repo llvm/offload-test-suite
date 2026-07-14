@@ -66,7 +66,7 @@ DescriptorSets:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
-# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
+# RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s --check-prefixes=CHECK%if Metal %{,METAL%}%if DirectX %{,DX%}%if Vulkan %{,VULKAN%}
 
 # The behavior of this operation is consistent on Metal, so the test verifies that behavior.
 
@@ -99,7 +99,9 @@ DescriptorSets:
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
 # CHECK: Name: NegInfs
 # CHECK-NEXT: Format: Float32
-# CHECK-NEXT: Data: [ 0, 0, 0, 0 ]
+# METAL-NEXT: Data: [ 0, 0, 0, 0 ]
+# DX-NEXT: Data: [ 0, 0, 0, 0 ]
+# VULKAN-NEXT: Data: [ -inf, -inf, -inf, -inf ]
 # CHECK: Name: Mix
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
