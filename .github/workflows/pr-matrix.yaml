@@ -100,7 +100,9 @@ jobs:
     permissions:
       contents: read
       checks: write
-    if: contains( github.event.pull_request.labels.*.name, 'test-dx-all')
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'test-dx-all')
+      && !contains(github.event.pull_request.labels.*.name, 'test-all')
     strategy:
       fail-fast: false
       matrix:
@@ -120,7 +122,9 @@ jobs:
     permissions:
       contents: read
       checks: write
-    if: contains( github.event.pull_request.labels.*.name, 'test-vk-all')
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'test-vk-all')
+      && !contains(github.event.pull_request.labels.*.name, 'test-all')
     strategy:
       fail-fast: false
       matrix:

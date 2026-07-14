@@ -86,9 +86,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Resource arrays are not yet implemented in Clang:
-# Unimplemented https://github.com/llvm/llvm-project/issues/133835
-# XFAIL: Clang
+# Unimplemented https://github.com/llvm/llvm-project/issues/194930
+# XFAIL: Clang && !Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
