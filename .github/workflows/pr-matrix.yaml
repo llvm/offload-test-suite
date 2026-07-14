@@ -17,8 +17,7 @@ jobs:
     permissions:
       contents: read
       checks: write
-    if: >-
-      !contains(github.event.pull_request.labels.*.name, 'disable-default-tests')
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'disable-default-tests') }}
     strategy:
       fail-fast: false
       matrix:
@@ -157,8 +156,7 @@ jobs:
     permissions:
       contents: read
       checks: write
-    if: >-
-      !contains(github.event.pull_request.labels.*.name, 'disable-default-tests')
+    if: ${{ !contains(github.event.pull_request.labels.*.name, 'disable-default-tests') }}
     strategy:
       fail-fast: false
       matrix:
