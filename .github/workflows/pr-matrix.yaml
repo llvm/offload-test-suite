@@ -17,6 +17,10 @@ jobs:
     permissions:
       contents: read
       checks: write
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'test-all')
+      || (!contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      && !contains(github.event.pull_request.labels.*.name, 'test-warp'))
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +43,11 @@ jobs:
     permissions:
       contents: read
       checks: write
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'test-all')
+      || contains(github.event.pull_request.labels.*.name, 'test-warp')
+      || (!contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      && !contains(github.event.pull_request.labels.*.name, 'test-warp'))
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +67,11 @@ jobs:
     permissions:
       contents: read
       checks: write
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'test-all')
+      || contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      || (!contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      && !contains(github.event.pull_request.labels.*.name, 'test-warp'))
     strategy:
       fail-fast: false
       matrix:
@@ -103,6 +117,8 @@ jobs:
     if: >-
       contains(github.event.pull_request.labels.*.name, 'test-dx-all')
       && !contains(github.event.pull_request.labels.*.name, 'test-all')
+      && !contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      && !contains(github.event.pull_request.labels.*.name, 'test-warp')
     strategy:
       fail-fast: false
       matrix:
@@ -125,6 +141,8 @@ jobs:
     if: >-
       contains(github.event.pull_request.labels.*.name, 'test-vk-all')
       && !contains(github.event.pull_request.labels.*.name, 'test-all')
+      && !contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      && !contains(github.event.pull_request.labels.*.name, 'test-warp')
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +162,10 @@ jobs:
     permissions:
       contents: read
       checks: write
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'test-all')
+      || (!contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      && !contains(github.event.pull_request.labels.*.name, 'test-warp'))
     strategy:
       fail-fast: false
       matrix:
