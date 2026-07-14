@@ -110,7 +110,7 @@ Results:
 
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
-# UNSUPPORTED: Lavapipe & QC
+# UNSUPPORTED: Lavapipe && QC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
