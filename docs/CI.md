@@ -16,8 +16,6 @@ Configurations:
 * Windows NVIDIA GPU DirectX
 * Windows WARP LKG x64
 * Windows WARP LKG arm64
-* Windows Lavapipe Vulkan x64
-* Windows Lavapipe Vulkan arm64
 
 ### Tier 2 Configurations
 
@@ -48,6 +46,8 @@ Configurations:
 * Windows NVIDIA GPU Vulkan
 * Windows QC GPU DirectX
 * Windows QC GPU Vulkan
+* Windows Lavapipe Vulkan x64
+* Windows Lavapipe Vulkan arm64
 
 ## Build Hardware
 

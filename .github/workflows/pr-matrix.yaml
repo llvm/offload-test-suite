@@ -54,25 +54,6 @@ jobs:
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
-  Exec-Tests-Windows-Lavapipe:
-    permissions:
-      contents: read
-      checks: write
-    strategy:
-      fail-fast: false
-      matrix:
-        SKU: [windows-amd, windows-qc]
-        TestTarget: [check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
-
-    uses: ./.github/workflows/build-and-test-callable.yaml
-    with:
-      OS: windows
-      SKU: ${{ matrix.SKU }}
-      TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
-      SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
-
   Exec-Tests-Extra:
     permissions:
       contents: read
@@ -82,10 +63,12 @@ jobs:
       fail-fast: false
       matrix:
         SKU: [windows-amd, windows-nvidia, windows-qc]
-        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk, check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
         exclude:
           - { SKU: windows-nvidia, TestTarget: check-hlsl-d3d12 }
           - { SKU: windows-nvidia, TestTarget: check-hlsl-clang-d3d12 }
+          - { SKU: windows-nvidia, TestTarget: check-hlsl-vk-lavapipe }
+          - { SKU: windows-nvidia, TestTarget: check-hlsl-clang-vk-lavapipe }
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:
@@ -129,7 +112,10 @@ jobs:
       fail-fast: false
       matrix:
         SKU: [windows-amd, windows-nvidia, windows-qc]
-        TestTarget: [check-hlsl-vk, check-hlsl-clang-vk]
+        TestTarget: [check-hlsl-vk, check-hlsl-clang-vk, check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
+        exclude:
+          - { SKU: windows-nvidia, TestTarget: check-hlsl-vk-lavapipe }
+          - { SKU: windows-nvidia, TestTarget: check-hlsl-clang-vk-lavapipe }
 
     uses: ./.github/workflows/build-and-test-callable.yaml
     with:

@@ -266,7 +266,7 @@ jobs:
             cd build
             ninja check-hlsl-unit
             ninja ${{ inputs.TestTarget }}
-      - name: Publish Test Results
+      - name: Publish Test Results (macOS)
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: >-
           always() && inputs.OS == 'macOS'
@@ -274,6 +274,13 @@ jobs:
         with:
           comment_mode: off
           files: llvm-project/build/**/testresults.xunit.xml
+      - name: Upload test results
+        if: always() && inputs.SplitBuild != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: llvm-project/build/**/testresults.xunit.xml
+          if-no-files-found: ignore
       - name: Run dxdiag (Windows only)
         if: >-
           inputs.OS == 'windows' && failure()
@@ -542,12 +549,19 @@ jobs:
             suite='${{ steps.suite.outputs.suite }}'
             lit -v "run/test/$suite" \
               --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
-      - name: Publish Test Results
+      - name: Publish Test Results (macOS)
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
           comment_mode: off
           files: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
+          if-no-files-found: ignore
       - name: Run dxdiag (Windows only)
         if: inputs.OS == 'windows' && failure()
         shell: powershell
