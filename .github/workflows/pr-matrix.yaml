@@ -152,7 +152,6 @@ jobs:
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=On
 
-
   Exec-Tests-MacOS:
     permissions:
       contents: read
