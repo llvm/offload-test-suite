@@ -1,17 +1,19 @@
 #--- source.hlsl
 // Test that a local resource array dispatches to the correct element
 // when indexed at runtime. The 4-thread dispatch and per-thread index
-// ensure the compiler cannot constant-fold the index away.
+// ensure the compiler cannot constant-fold the index away. Each thread
+// stores `tid.x + 10` so a shuffle/aliasing bug that swaps two threads'
+// destinations would show up as swapped values in the result buffers.
 RWByteAddressBuffer gBufArray[4] : register(u0);
 
 [numthreads(4,1,1)]
-void main(uint3 tid : SV_DispatchThreadID) {
-    RWByteAddressBuffer arr[4];
-    arr[0] = gBufArray[0];
-    arr[1] = gBufArray[1];
-    arr[2] = gBufArray[2];
-    arr[3] = gBufArray[3];
-    arr[tid.x].Store(0, 42);
+void main(uint3 Tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer Arr[4];
+    Arr[0] = gBufArray[0];
+    Arr[1] = gBufArray[1];
+    Arr[2] = gBufArray[2];
+    Arr[3] = gBufArray[3];
+    Arr[Tid.x].Store(0, Tid.x + 10);
 }
 //--- pipeline.yaml
 ---
@@ -33,10 +35,10 @@ Buffers:
     Stride: 4
     ArraySize: 4
     Data:
-      - [42]
-      - [42]
-      - [42]
-      - [42]
+      - [10]
+      - [11]
+      - [12]
+      - [13]
 Results:
   - Result: BufCheck
     Rule: BufferExact

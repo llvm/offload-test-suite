@@ -1,12 +1,20 @@
 #--- source.hlsl
-// Test that a local resource used alongside wave intrinsics works correctly.
+// Test that a local resource handle interoperates with wave intrinsics:
+// each lane stores a per-lane value derived from a wave op through the
+// local handle, at a per-lane offset. A bug that hoisted or dropped the
+// wave op, or that aliased the handle across lanes, would show up as
+// an all-same-value or wrong-order pattern.
+//
+// numthreads(4,1,1) keeps all lanes inside a single wave (wave size is
+// >= 4 on every target we run), so WavePrefixCountBits(true) returns
+// 0,1,2,3 deterministically for lanes 0..3.
 RWByteAddressBuffer gBuf : register(u0);
 
-[numthreads(8,8,1)]
-void main() {
-    RWByteAddressBuffer buf = gBuf;
-    uint active = WaveActiveCountBits(true);
-    buf.Store(0, active > 0 ? 42 : 0);
+[numthreads(4,1,1)]
+void main(uint3 Tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer Buf = gBuf;
+    uint Rank = WavePrefixCountBits(true);
+    Buf.Store(Tid.x * 4, Rank + 10);
 }
 //--- pipeline.yaml
 ---
@@ -17,11 +25,11 @@ Buffers:
   - Name: gBuf
     Format: Int32
     Stride: 4
-    Data: [0]
+    Data: [0, 0, 0, 0]
   - Name: ExpectedGBuf
     Format: Int32
     Stride: 4
-    Data: [42]
+    Data: [10, 11, 12, 13]
 Results:
   - Result: Test0
     Rule: BufferExact

@@ -1,20 +1,26 @@
 #--- source.hlsl
-// Test that assigning different elements of the same unbounded global
-// resource array in each branch of an if/else produces correct output.
-// tid.x == 0 is always true (numthreads(1,1,1)), so OutArr[0] is written.
+// Test that both branches of an if/else assigning different elements of
+// the same unbounded global resource array produce correct output.
+// Two threads dispatch: thread 0 takes the `if` branch and writes to
+// OutArr[0]; thread 1 takes the `else` branch and writes to OutArr[1].
+// Each thread stores `In.Load(0) + Tid.x`, giving distinct values
+// per destination so a bug that always took one branch would show up
+// as an all-same-value pattern.
+// NonUniformResourceIndex is required because the branch (and thus
+// the chosen descriptor) is selected by Tid.x, which is wave-divergent.
 
 RWByteAddressBuffer In : register(u0);
 RWByteAddressBuffer OutArr[] : register(u1);
 
-[numthreads(1,1,1)]
-void main(uint3 tid : SV_DispatchThreadID) {
+[numthreads(2,1,1)]
+void main(uint3 Tid : SV_DispatchThreadID) {
     RWByteAddressBuffer Out;
-    if (tid.x == 0) {
-        Out = OutArr[0];
+    if (Tid.x == 0) {
+        Out = OutArr[NonUniformResourceIndex(0)];
     } else {
-        Out = OutArr[1];
+        Out = OutArr[NonUniformResourceIndex(1)];
     }
-    Out.Store(0, In.Load(0));
+    Out.Store(0, In.Load(0) + Tid.x);
 }
 //--- pipeline.yaml
 ---
@@ -39,7 +45,7 @@ Buffers:
     ArraySize: 2
     Data:
       - [42]
-      - [0]
+      - [43]
 Results:
   - Result: OutArrCheck
     Rule: BufferExact

@@ -1,12 +1,15 @@
 #--- source.hlsl
-// Test that indexing a local resource array inside a loop with compiler-unrollable bounds works correctly.
+// Test that indexing a local resource array inside a loop with
+// compiler-unrollable bounds writes each element distinctly.
+// Each iteration stores `I + 10` so a bug that hoisted the store or
+// mis-indexed would show up as an all-same-value or wrong-order pattern.
 RWByteAddressBuffer gBufArray[4] : register(u0);
 
 [numthreads(1,1,1)]
 void main() {
-    for (uint i = 0; i < 4; i++) {
-        RWByteAddressBuffer buf = gBufArray[i];
-        buf.Store(0, 42);
+    for (uint I = 0; I < 4; I++) {
+        RWByteAddressBuffer Buf = gBufArray[I];
+        Buf.Store(0, I + 10);
     }
 }
 //--- pipeline.yaml
@@ -29,10 +32,10 @@ Buffers:
     Stride: 4
     ArraySize: 4
     Data:
-      - [42]
-      - [42]
-      - [42]
-      - [42]
+      - [10]
+      - [11]
+      - [12]
+      - [13]
 Results:
   - Result: Test0
     Rule: BufferExact

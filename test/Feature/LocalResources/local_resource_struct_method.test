@@ -3,15 +3,15 @@
 RWByteAddressBuffer gBuf : register(u0);
 
 struct Wrapper {
-    RWByteAddressBuffer buf;
-    void DoStore(uint val) { buf.Store(0, val); }
+    RWByteAddressBuffer Buf;
+    void DoStore(uint Val) { Buf.Store(0, Val); }
 };
 
 [numthreads(1,1,1)]
 void main() {
-    Wrapper w;
-    w.buf = gBuf;
-    w.DoStore(42);
+    Wrapper W;
+    W.Buf = gBuf;
+    W.DoStore(42);
 }
 //--- pipeline.yaml
 ---

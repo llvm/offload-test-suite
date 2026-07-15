@@ -5,9 +5,9 @@ RWByteAddressBuffer gOutput : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-    ByteAddressBuffer local = gInput;
-    uint val = local.Load(0);
-    gOutput.Store(0, val);
+    ByteAddressBuffer Local = gInput;
+    uint Val = Local.Load(0);
+    gOutput.Store(0, Val);
 }
 //--- pipeline.yaml
 ---
