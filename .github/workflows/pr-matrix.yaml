@@ -89,7 +89,7 @@ jobs:
       checks: write
     if: >-
       contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
-      || contains(github.event.pull_request.labels.*.name, 'test-all')
+      && !contains(github.event.pull_request.labels.*.name, 'test-all')
     strategy:
       fail-fast: false
       matrix:
