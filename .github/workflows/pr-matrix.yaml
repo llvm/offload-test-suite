@@ -93,7 +93,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        SKU: [windows-amd, windows-qc]
+        SKU: [windows-sw-rasterizer-x86_64, windows-qc]
         TestTarget: [check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
