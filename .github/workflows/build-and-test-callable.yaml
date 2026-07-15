@@ -221,7 +221,7 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           # setup-windows forwards this input to VsDevCmd.bat after -arch=.
-          arch: arm64 -host_arch=amd64
+          arch: arm64 -host_arch=x64
       - name: Setup Windows ARM64 native target
         if: >-
           inputs.OS == 'windows'
