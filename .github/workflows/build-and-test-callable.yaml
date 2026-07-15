@@ -182,6 +182,16 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: amd64
+      - name: Restore Git Bash for host tools
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SplitBuild == true
+          && inputs.SKU == 'windows-qc'
+          && runner.arch != 'ARM64'
+        shell: powershell
+        run: |
+          "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
+          "C:\Program Files\Git\usr\bin" >> $env:GITHUB_PATH
       - name: Build native host tools
         if: >-
           inputs.OS == 'windows'
@@ -235,11 +245,17 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64
-      # VsDevCmd replaces PATH. Run setup-python after the final target setup
-      # so Python and Git Bash are available to the remaining workflow steps.
-      - name: Restore Python and Git Bash paths
+      # VsDevCmd replaces PATH. Restore the tool paths required by the
+      # remaining workflow steps after the final target setup.
+      - name: Restore Python path
         if: inputs.OS == 'windows'
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Restore Git Bash path
+        if: inputs.OS == 'windows'
+        shell: powershell
+        run: |
+          "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
+          "C:\Program Files\Git\usr\bin" >> $env:GITHUB_PATH
       - name: Report Windows build architecture
         if: inputs.OS == 'windows'
         shell: bash
