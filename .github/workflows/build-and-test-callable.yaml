@@ -173,56 +173,41 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
-      - name: Setup Windows host tools
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SplitBuild == true
-          && inputs.SKU == 'windows-qc'
-          && runner.arch != 'ARM64'
-        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
-        with:
-          arch: amd64
-      - name: Restore Git Bash for host tools
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SplitBuild == true
-          && inputs.SKU == 'windows-qc'
-          && runner.arch != 'ARM64'
-        shell: powershell
-        run: |
-          "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
-          "C:\Program Files\Git\usr\bin" >> $env:GITHUB_PATH
       - name: Build native host tools
         if: >-
           inputs.OS == 'windows'
           && inputs.SplitBuild == true
           && inputs.SKU == 'windows-qc'
           && runner.arch != 'ARM64'
-        shell: bash
+        shell: cmd
         run: |
-            set -euxo pipefail
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
+          call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64
 
-            cmake -G Ninja \
-              -S "$GITHUB_WORKSPACE/DXC" \
-              -B "$GITHUB_WORKSPACE/DXC/host-build" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DLLVM_ENABLE_ASSERTIONS=Off \
-              -C "$GITHUB_WORKSPACE/DXC/cmake/caches/PredefinedParams.cmake" \
-              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
-              -DHLSL_DISABLE_SOURCE_GENERATION=On
-            cmake --build "$GITHUB_WORKSPACE/DXC/host-build" \
-              --target llvm-tblgen clang-tblgen llvm-config
+          cmake -G Ninja ^
+            -S "%GITHUB_WORKSPACE%\DXC" ^
+            -B "%GITHUB_WORKSPACE%\DXC\host-build" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DLLVM_ENABLE_ASSERTIONS=Off ^
+            -C "%GITHUB_WORKSPACE%\DXC\cmake\caches\PredefinedParams.cmake" ^
+            -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
+            -DHLSL_DISABLE_SOURCE_GENERATION=On
+          if errorlevel 1 exit /b 1
+          cmake --build "%GITHUB_WORKSPACE%\DXC\host-build" ^
+            --target llvm-tblgen clang-tblgen llvm-config
+          if errorlevel 1 exit /b 1
 
-            cmake -G Ninja \
-              -S "$GITHUB_WORKSPACE/llvm-project/llvm" \
-              -B "$GITHUB_WORKSPACE/llvm-project/host-build" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DLLVM_ENABLE_ASSERTIONS=Off \
-              -DLLVM_ENABLE_PROJECTS=clang \
-              -DLLVM_TARGETS_TO_BUILD=Native \
-              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake"
-            cmake --build "$GITHUB_WORKSPACE/llvm-project/host-build" \
-              --target llvm-tblgen clang-tblgen llvm-config
+          cmake -G Ninja ^
+            -S "%GITHUB_WORKSPACE%\llvm-project\llvm" ^
+            -B "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DLLVM_ENABLE_ASSERTIONS=Off ^
+            -DLLVM_ENABLE_PROJECTS=clang ^
+            -DLLVM_TARGETS_TO_BUILD=Native ^
+            -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake"
+          if errorlevel 1 exit /b 1
+          cmake --build "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
+            --target llvm-tblgen clang-tblgen llvm-config
       - name: Setup Windows x64 target
         if: inputs.OS == 'windows' && inputs.SKU != 'windows-qc'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
