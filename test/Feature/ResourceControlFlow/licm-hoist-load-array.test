@@ -1,0 +1,63 @@
+#--- source.hlsl
+
+RWStructuredBuffer<float> Bufs[2] : register(u0);
+RWStructuredBuffer<float> Out     : register(u2);
+
+[numthreads(8, 1, 1)]
+void main(uint TID : SV_DispatchThreadID) {
+  float Acc = 0;
+  for (uint I = 0; I < 2; ++I)
+    Acc += Bufs[I][TID];
+  Out[TID] = Acc;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Bufs
+    Format: Float32
+    ArraySize: 2
+    Data:
+      - [ 10, 11, 12, 13, 14, 15, 16, 17 ]
+      - [ 20, 21, 22, 23, 24, 25, 26, 27 ]
+
+  - Name: BufOut
+    Format: Float32
+    FillSize: 32
+
+  - Name: ExpectedOut
+    Format: Float32
+    Data: [ 30, 32, 34, 36, 38, 40, 42, 44 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferFloatULP
+    ULPT: 5
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: Bufs
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

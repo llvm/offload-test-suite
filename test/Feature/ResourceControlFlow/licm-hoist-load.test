@@ -1,0 +1,94 @@
+#--- source.hlsl
+
+RWStructuredBuffer<float> BufA : register(u0);
+RWStructuredBuffer<float> BufB : register(u1);
+RWStructuredBuffer<float> Out  : register(u2);
+
+cbuffer Constants : register(b0) {
+  uint Condition;
+}
+
+[numthreads(8, 1, 1)]
+void main(uint TID : SV_DispatchThreadID) {
+  float Acc = 0;
+  for (uint I = 0; I < 4; ++I) {
+    if ((TID & 1u) == Condition)
+      Acc += BufA[TID];
+    else
+      Acc += BufB[TID];
+  }
+  Out[TID] = Acc;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [ 0x00000000 ]
+
+  - Name: BufA
+    Format: Float32
+    Data: [ 10, 11, 12, 13, 14, 15, 16, 17 ]
+
+  - Name: BufB
+    Format: Float32
+    Data: [ 20, 21, 22, 23, 24, 25, 26, 27 ]
+
+  - Name: BufOut
+    Format: Float32
+    FillSize: 32
+
+  - Name: ExpectedOut
+    Format: Float32
+    Data: [ 40, 84, 48, 92, 56, 100, 64, 108 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferFloatULP
+    ULPT: 5
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufA
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufB
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# https://github.com/llvm/llvm-project/issues/207852
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
