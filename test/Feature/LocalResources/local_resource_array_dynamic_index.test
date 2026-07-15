@@ -1,7 +1,7 @@
 #--- source.hlsl
 // Test that a local resource array dispatches to the correct element
 // when indexed at runtime. The 4-thread dispatch and per-thread index
-// ensure the compiler cannot constant-fold the index away. Each thread
+// ensure the compiler can't constant-fold the index away. Each thread
 // stores `tid.x + 10` so a shuffle/aliasing bug that swaps two threads'
 // destinations would show up as swapped values in the result buffers.
 RWByteAddressBuffer gBufArray[4] : register(u0);
