@@ -218,11 +218,28 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: amd64
-      - name: Setup Windows ARM64 target
-        if: inputs.OS == 'windows' && inputs.SKU == 'windows-qc'
+      - name: Setup Windows ARM64 cross target
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SKU == 'windows-qc'
+          && runner.arch != 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          # setup-windows forwards this input to VsDevCmd.bat after -arch=.
+          arch: arm64 -host_arch=amd64
+      - name: Setup Windows ARM64 native target
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SKU == 'windows-qc'
+          && runner.arch == 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64
+      # VsDevCmd replaces PATH. Run setup-python after the final target setup
+      # so Python and Git Bash are available to the remaining workflow steps.
+      - name: Restore Python and Git Bash paths
+        if: inputs.OS == 'windows'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       - name: Report Windows build architecture
         if: inputs.OS == 'windows'
         shell: bash
@@ -244,7 +261,7 @@ jobs:
       - name: Build DXC
         shell: bash
         run: |
-            set -euxo pipefail
+            set -exo pipefail
             cross_args=()
             if [ '${{ inputs.SplitBuild }}' = 'true' ] \
               && [ '${{ inputs.SKU }}' = 'windows-qc' ] \
@@ -270,7 +287,7 @@ jobs:
       - name: Build LLVM
         shell: bash
         run: |
-            set -euxo pipefail
+            set -exo pipefail
             cross_args=()
             if [ '${{ inputs.SplitBuild }}' = 'true' ] \
               && [ '${{ inputs.SKU }}' = 'windows-qc' ] \
