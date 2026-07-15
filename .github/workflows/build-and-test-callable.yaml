@@ -126,14 +126,15 @@ jobs:
   build:
     permissions:
       checks: write
-    # When SplitBuild is true, build on any available runner of
-    # the right architecture. Otherwise, build on the GPU runner.
+    # When SplitBuild is true, build on any available runner that can produce
+    # the requested target. windows-qc targets ARM64 but may cross-compile on
+    # an X64 Windows builder. Otherwise, build on the GPU runner.
     runs-on: >-
       ${{ fromJSON(
         inputs.SplitBuild != true
           && format('["self-hosted", "hlsl-{0}"]', inputs.SKU)
         || inputs.SKU == 'windows-qc'
-          && '["self-hosted", "ARM64", "Windows"]'
+          && '["self-hosted", "Windows"]'
         || inputs.SKU == 'macos'
           && '["self-hosted", "hlsl-macos"]'
         || '["self-hosted", "Windows", "X64"]'
@@ -168,16 +169,67 @@ jobs:
           ref: main
           path: golden-images
           fetch-depth: 1
-      - name: Setup Windows x64
-        if: inputs.OS == 'windows' && runner.arch != 'ARM64'
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Setup Windows host tools
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SplitBuild == true
+          && inputs.SKU == 'windows-qc'
+          && runner.arch != 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: amd64
-      - name: Setup Windows
-        if: inputs.OS == 'windows' && runner.arch == 'ARM64'
+      - name: Build native host tools
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SplitBuild == true
+          && inputs.SKU == 'windows-qc'
+          && runner.arch != 'ARM64'
+        shell: bash
+        run: |
+            set -euxo pipefail
+
+            cmake -G Ninja \
+              -S "$GITHUB_WORKSPACE/DXC" \
+              -B "$GITHUB_WORKSPACE/DXC/host-build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DLLVM_ENABLE_ASSERTIONS=Off \
+              -C "$GITHUB_WORKSPACE/DXC/cmake/caches/PredefinedParams.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DHLSL_DISABLE_SOURCE_GENERATION=On
+            cmake --build "$GITHUB_WORKSPACE/DXC/host-build" \
+              --target llvm-tblgen clang-tblgen llvm-config
+
+            cmake -G Ninja \
+              -S "$GITHUB_WORKSPACE/llvm-project/llvm" \
+              -B "$GITHUB_WORKSPACE/llvm-project/host-build" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DLLVM_ENABLE_ASSERTIONS=Off \
+              -DLLVM_ENABLE_PROJECTS=clang \
+              -DLLVM_TARGETS_TO_BUILD=Native \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake"
+            cmake --build "$GITHUB_WORKSPACE/llvm-project/host-build" \
+              --target llvm-tblgen clang-tblgen llvm-config
+      - name: Setup Windows x64 target
+        if: inputs.OS == 'windows' && inputs.SKU != 'windows-qc'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Setup Windows ARM64 target
+        if: inputs.OS == 'windows' && inputs.SKU == 'windows-qc'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64
+      - name: Report Windows build architecture
+        if: inputs.OS == 'windows'
+        shell: bash
+        run: |
+          echo "Runner architecture: ${{ runner.arch }}"
+          echo "MSVC host architecture: ${VSCMD_ARG_HOST_ARCH:-unknown}"
+          echo "MSVC target architecture: ${VSCMD_ARG_TGT_ARCH:-unknown}"
       # When SplitBuild is enabled, force clang into the build set even if
       # the TestTarget doesn't use it. Reason: install-distribution depends
       # on clang (it ships in the install prefix), so if clang isn't part
@@ -189,24 +241,96 @@ jobs:
         shell: bash
         if: contains(inputs.TestTarget, 'clang') || inputs.SplitBuild == true
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
-      - name: Setup Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Build DXC
+        shell: bash
         run: |
-            cd DXC
-            mkdir build
-            cd build
-            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
-            ninja
+            set -euxo pipefail
+            cross_args=()
+            if [ '${{ inputs.SplitBuild }}' = 'true' ] \
+              && [ '${{ inputs.SKU }}' = 'windows-qc' ] \
+              && [ '${{ runner.arch }}' != 'ARM64' ]; then
+              cross_args=(
+                -DCMAKE_SYSTEM_NAME=Windows
+                -DCMAKE_SYSTEM_PROCESSOR=ARM64
+                "-DLLVM_NATIVE_BUILD=$GITHUB_WORKSPACE/DXC/host-build"
+                "-DLLVM_TABLEGEN=$GITHUB_WORKSPACE/DXC/host-build/bin/llvm-tblgen.exe"
+                "-DCLANG_TABLEGEN=$GITHUB_WORKSPACE/DXC/host-build/bin/clang-tblgen.exe"
+              )
+            fi
+            cmake -G Ninja \
+              -S "$GITHUB_WORKSPACE/DXC" \
+              -B "$GITHUB_WORKSPACE/DXC/build" \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -C "$GITHUB_WORKSPACE/DXC/cmake/caches/PredefinedParams.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DHLSL_DISABLE_SOURCE_GENERATION=On \
+              "${cross_args[@]}"
+            cmake --build "$GITHUB_WORKSPACE/DXC/build"
       - name: Build LLVM
+        shell: bash
         run: |
-            cd llvm-project
-            mkdir build
-            cd build
-            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ${{ github.workspace }}/llvm-project/llvm/
-            ninja hlsl-test-depends
+            set -euxo pipefail
+            cross_args=()
+            if [ '${{ inputs.SplitBuild }}' = 'true' ] \
+              && [ '${{ inputs.SKU }}' = 'windows-qc' ] \
+              && [ '${{ runner.arch }}' != 'ARM64' ]; then
+              cross_args=(
+                -DCMAKE_SYSTEM_NAME=Windows
+                -DCMAKE_SYSTEM_PROCESSOR=ARM64
+                -DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc
+                -DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc
+                "-DLLVM_NATIVE_BUILD=$GITHUB_WORKSPACE/llvm-project/host-build"
+                "-DLLVM_NATIVE_TOOL_DIR=$GITHUB_WORKSPACE/llvm-project/host-build/bin"
+              )
+            fi
+            cmake -G Ninja \
+              -S "$GITHUB_WORKSPACE/llvm-project/llvm" \
+              -B "$GITHUB_WORKSPACE/llvm-project/build" \
+              ${{ inputs.LLVM-ExtraCMakeArgs }} \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -DLLVM_EXTERNAL_PROJECTS="OffloadTest" \
+              -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} \
+              -C "$GITHUB_WORKSPACE/llvm-project/clang/cmake/caches/HLSL.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              "-DDXC_DIR=$GITHUB_WORKSPACE/DXC/build/bin" \
+              "-DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=$GITHUB_WORKSPACE/OffloadTest" \
+              -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" \
+              -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} \
+              "-DGOLDENIMAGE_DIR=$GITHUB_WORKSPACE/golden-images" \
+              "-DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install" \
+              "${cross_args[@]}"
+            cmake --build "$GITHUB_WORKSPACE/llvm-project/build" \
+              --target hlsl-test-depends
+      - name: Verify ARM64 build artifacts
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SplitBuild == true
+          && inputs.SKU == 'windows-qc'
+        shell: powershell
+        run: |
+          $expectedMachine = 0xAA64
+          $files = @(
+            "$env:GITHUB_WORKSPACE\DXC\build\bin\dxc.exe",
+            "$env:GITHUB_WORKSPACE\llvm-project\build\bin\clang.exe"
+          )
+          foreach ($file in $files) {
+            $stream = [System.IO.File]::OpenRead($file)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              $stream.Position = 0x3c
+              $peOffset = $reader.ReadInt32()
+              $stream.Position = $peOffset + 4
+              $machine = $reader.ReadUInt16()
+            } finally {
+              $stream.Dispose()
+            }
+            if ($machine -ne $expectedMachine) {
+              throw "$file has PE machine 0x$($machine.ToString('X4')); expected ARM64 (0xAA64)"
+            }
+            Write-Host "$file is ARM64"
+          }
       # Surface sccache cache state after the heavy compile work so we can
       # track hit rate / cache size across runs and diagnose cold-cache
       # blowups on new builders. Always-runs so we still get stats on

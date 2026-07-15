@@ -185,3 +185,10 @@ The reusable workflow `.github/workflows/build-and-test-callable.yaml`
 implements this flow when invoked with `SplitBuild=true`. The build job
 produces two artifacts (`build-<sku>-<target>` and `dxc-<sku>-<target>`)
 and the test job consumes both.
+
+For the `windows-qc` SKU, the build job targets ARM64 independently of the
+build host architecture. It is scheduled on the generic self-hosted Windows
+pool: an ARM64 host builds natively, while an X64 host first builds the native
+LLVM/DXC generator tools and then cross-compiles the packaged binaries for
+Windows ARM64. The workflow verifies the PE machine type before uploading the
+artifacts. The test job remains pinned to the ARM64 `hlsl-windows-qc` runner.
