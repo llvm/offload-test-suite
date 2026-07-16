@@ -13,8 +13,9 @@
 // covered here, to keep this test portable across implementations.
 //
 // See InterlockedXor.32.test for a full description of the unique-bit
-// atomicity construction: each destination holds four 64-bit words, thread t
-// flips bit (t % 64) of word (t / 64), so every word ends at all-ones
+// atomicity construction: SBufU and SBufI hold four 64-bit words each while
+// BABuf holds eight (two 4-word accumulator regions); thread t flips bit
+// (t % 64) of word (t / 64), so every word ends at all-ones
 // (0xFFFFFFFFFFFFFFFF) and each 3-arg re-read must strictly exceed orig.
 // Because every thread with (t % 64) >= 32 sets a bit in the upper 32 bits,
 // the operation genuinely exercises all 64 bits rather than degenerating to a
@@ -76,6 +77,7 @@ Buffers:
     Format: UInt64
     Stride: 8
     FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufU
     Format: UInt64
     Stride: 8
@@ -85,6 +87,7 @@ Buffers:
     Format: Int64
     Stride: 8
     FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufI
     Format: Int64
     Stride: 8
@@ -93,6 +96,7 @@ Buffers:
     Format: UInt64
     Stride: 8
     FillSize: 64
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedBABuf
     Format: UInt64
     Stride: 8

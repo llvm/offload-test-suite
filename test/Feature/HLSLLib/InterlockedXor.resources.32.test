@@ -10,8 +10,9 @@
 //   * RWByteAddressBuffer::InterlockedXor  (method, 2-arg and 3-arg)
 //
 // See InterlockedXor.32.test for a full description of the unique-bit
-// atomicity construction: each destination holds eight 32-bit words, thread t
-// flips bit (t % 32) of word (t / 32), so every word ends at all-ones
+// atomicity construction: SBufU, SBufI, TBufU and Tex2D hold eight 32-bit
+// words each while BABuf holds sixteen (two 8-word accumulator regions);
+// thread t flips bit (t % 32) of word (t / 32), so every word ends at all-ones
 // (0xFFFFFFFF) and each 3-arg re-read must strictly exceed the observed orig.
 
 RWStructuredBuffer<uint> SBufU : register(u0);
@@ -80,6 +81,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufU
     Format: UInt32
     Stride: 4
@@ -89,6 +91,7 @@ Buffers:
     Format: Int32
     Stride: 4
     FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufI
     Format: Int32
     Stride: 4
@@ -97,6 +100,7 @@ Buffers:
     Format: UInt32
     Channels: 1
     FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedTBufU
     Format: UInt32
     Channels: 1
@@ -106,6 +110,7 @@ Buffers:
     Format: UInt32
     Channels: 1
     FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
     OutputProps:
       Height: 1
       Width: 8
@@ -123,6 +128,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 64
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedBABuf
     Format: UInt32
     Stride: 4
