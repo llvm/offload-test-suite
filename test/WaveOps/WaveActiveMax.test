@@ -82,7 +82,6 @@ DescriptorSets:
 # > The identity I for Operation is -INF.
 
 # This makes it defined that any lane value of -INF is ignored.
-
 # DirectX driver implementations seem to match SPIR-V, except WARP, which does
 # not treat -INF as an identity.
 
@@ -99,7 +98,9 @@ DescriptorSets:
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
 # CHECK: Name: NegInfs
 # CHECK-NEXT: Format: Float32
-# CHECK-NEXT: Data: [ 0, 0, 0, 0 ]
+# METAL-NEXT: Data: [ 0, 0, 0, 0 ]
+# DX-NEXT: Data: [ 0, 0, 0, 0 ]
+# VULKAN-NEXT: Data: [ -inf, -inf, -inf, -inf ] 
 # CHECK: Name: Mix
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
