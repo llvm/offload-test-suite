@@ -36,6 +36,7 @@
 #include "API/Encoder.h"
 #include "API/FormatConversion.h"
 #include "DXFeatures.h"
+#include "Support/OffloadMigration.h"
 #include "Support/Pipeline.h"
 #include "Support/WinError.h"
 
@@ -49,8 +50,6 @@
 #include "llvm/Support/Signals.h"
 
 #include "../Util.h"
-
-#include "../Support/OffloadMigration.h"
 
 #include <atomic>
 #include <codecvt>
