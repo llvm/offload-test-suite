@@ -146,6 +146,39 @@ function(add_offloadtest_lit_suite suite)
   )
 endfunction()
 
+
+function(add_offloadtest_gpu_suite suite gpu_name)
+  if (suite MATCHES "^clang-")
+    set(FORCE_CLANG True)
+  else()
+    set(FORCE_CLANG False)
+  endif()
+
+  configure_lit_site_cfg(
+    ${CMAKE_CURRENT_SOURCE_DIR}/lit.site.cfg.py.in
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.site.cfg.py
+    MAIN_CONFIG
+    ${CMAKE_CURRENT_BINARY_DIR}/${suite}/lit.cfg.py
+    PATHS
+    "OFFLOADTEST_BINARY_DIR"
+    "LLVM_TOOLS_DIR"
+    )
+
+  get_llvm_lit_path(lit_base_dir lit_file_name ALLOW_EXTERNAL)
+  set(lit_args "${LLVM_LIT_ARGS}")
+  separate_arguments(lit_args)
+
+  add_custom_target(check-hlsl-${suite}
+    COMMAND ${CMAKE_COMMAND} -E env OFFLOADTEST_GPU_NAME=${gpu_name}
+            ${Python3_EXECUTABLE} ${lit_base_dir}/${lit_file_name}
+            ${lit_args} ${CMAKE_CURRENT_BINARY_DIR}/${suite}
+    COMMENT "Running the HLSL regression tests for ${suite} (device: ${gpu_name})"
+    USES_TERMINAL
+    )
+  add_dependencies(check-hlsl-${suite} ${OFFLOADTEST_DEPS})
+  set_target_properties(check-hlsl-${suite} PROPERTIES FOLDER "HLSL tests")
+endfunction()
+
 umbrella_lit_testsuite_begin(check-hlsl)
 
 # Add unit test suite
@@ -193,6 +226,18 @@ if (OFFLOADTEST_ENABLE_D3D12 AND WIN32)
   endif()
 
   set(TEST_d3d12 False)
+  set(FORCE_WARP False)
+endif()
+
+if (SUPPORTS_SPIRV AND OFFLOADTEST_ENABLE_VULKAN AND WIN32)
+  set(TEST_vk True)
+  add_offloadtest_gpu_suite(vk-lavapipe llvmpipe)
+
+  if (OFFLOADTEST_TEST_CLANG)
+    add_offloadtest_gpu_suite(clang-vk-lavapipe llvmpipe)
+  endif()
+
+  set(TEST_vk False)
 endif()
 
 umbrella_lit_testsuite_end(check-hlsl)

@@ -221,6 +221,44 @@ jobs:
             cd llvm-project
             cd build
             ./bin/api-query
+      - name: Setup Lavapipe
+        if: inputs.SplitBuild != true && contains(inputs.TestTarget, 'lavapipe')
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # Lavapipe is found in the following resolution order:
+            #   1. LAVAPIPE_ICD_JSON, if the runner image exposes it.
+            #   2. The machine-wide registration under
+            #      HKLM\SOFTWARE\Khronos\Vulkan\Drivers (value name = ICD path).
+            # If neither resolves to an existing file, skip shadowing and rely
+            # on lit.cfg.py selecting the llvmpipe device by name.
+            icd=""
+            if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then
+              fs=$(printf '%s' "$LAVAPIPE_ICD_JSON" | sed 's|\\|/|g')
+              if [ -f "$fs" ]; then
+                icd="$LAVAPIPE_ICD_JSON"
+              else
+                echo "::warning::LAVAPIPE_ICD_JSON is set but does not point to an existing file: $LAVAPIPE_ICD_JSON"
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              matches=$(MSYS_NO_PATHCONV=1 reg query "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" /reg:64 2>/dev/null | grep -i "lvp_icd") || matches=""
+              line=${matches%%$'\n'*}
+              cand=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+REG_[A-Z_]+[[:space:]]+0x[0-9A-Fa-f]+[[:space:]]*$//')
+              if [ -n "$cand" ]; then
+                fs=$(printf '%s' "$cand" | sed 's|\\|/|g')
+                if [ -f "$fs" ]; then
+                  icd="$cand"
+                fi
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
+              exit 0
+            fi
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "Using lavapipe ICD: $icd"
       - name: Run HLSL Tests
         if: inputs.SplitBuild != true
         run: |
@@ -228,7 +266,7 @@ jobs:
             cd build
             ninja check-hlsl-unit
             ninja ${{ inputs.TestTarget }}
-      - name: Publish Test Results
+      - name: Publish Test Results (macOS)
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: >-
           always() && inputs.OS == 'macOS'
@@ -236,6 +274,13 @@ jobs:
         with:
           comment_mode: off
           files: llvm-project/build/**/testresults.xunit.xml
+      - name: Upload test results
+        if: always() && inputs.SplitBuild != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: llvm-project/build/**/testresults.xunit.xml
+          if-no-files-found: ignore
       - name: Run dxdiag (Windows only)
         if: >-
           inputs.OS == 'windows' && failure()
@@ -433,6 +478,10 @@ jobs:
                 exit 1
                 ;;
             esac
+            case "$suite" in
+              vk-lavapipe) suite="vk" ;;
+              clang-vk-lavapipe) suite="clang-vk" ;;
+            esac
             echo "suite=$suite" >> $GITHUB_OUTPUT
             echo "Will run lit suite: $suite"
       - name: Configure standalone test suite
@@ -456,6 +505,42 @@ jobs:
               --suite "${{ steps.suite.outputs.suite }}" \
               --dxc-path "$dxc_path" \
               "${warp_arch_args[@]}"
+      - name: Setup Lavapipe
+        if: contains(inputs.TestTarget, 'lavapipe')
+        shell: bash
+        run: |
+            set -euxo pipefail
+            echo "OFFLOADTEST_GPU_NAME=llvmpipe" >> "$GITHUB_ENV"
+            # See previous "Setup Lavapipe" step for details on how we resolve the ICD path.
+            icd=""
+            if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then
+              fs=$(printf '%s' "$LAVAPIPE_ICD_JSON" | sed 's|\\|/|g')
+              if [ -f "$fs" ]; then
+                icd="$LAVAPIPE_ICD_JSON"
+              else
+                echo "::warning::LAVAPIPE_ICD_JSON is set but does not point to an existing file: $LAVAPIPE_ICD_JSON"
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              matches=$(MSYS_NO_PATHCONV=1 reg query "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" /reg:64 2>/dev/null | grep -i "lvp_icd") || matches=""
+              line=${matches%%$'\n'*}
+              cand=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+REG_[A-Z_]+[[:space:]]+0x[0-9A-Fa-f]+[[:space:]]*$//')
+              if [ -n "$cand" ]; then
+                fs=$(printf '%s' "$cand" | sed 's|\\|/|g')
+                if [ -f "$fs" ]; then
+                  icd="$cand"
+                fi
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
+              exit 0
+            fi
+            # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
+            # the legacy fallback for older loaders. Point both at only lavapipe.
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "Using lavapipe ICD: $icd"
       - name: Run HLSL Tests
         shell: bash
         run: |
@@ -464,12 +549,19 @@ jobs:
             suite='${{ steps.suite.outputs.suite }}'
             lit -v "run/test/$suite" \
               --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
-      - name: Publish Test Results
+      - name: Publish Test Results (macOS)
         uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
         if: always() && inputs.OS == 'macOS'
         with:
           comment_mode: off
           files: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
+          if-no-files-found: ignore
       - name: Run dxdiag (Windows only)
         if: inputs.OS == 'windows' && failure()
         shell: powershell

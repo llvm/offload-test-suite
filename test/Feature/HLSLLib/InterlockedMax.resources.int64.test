@@ -1,0 +1,192 @@
+#--- source.hlsl
+
+// This test exercises InterlockedMax against the HLSL-legal 64-bit
+// non-groupshared (resource) destination types. 64-bit atomics on UAVs
+// were introduced in Shader Model 6.6.
+//
+//   * RWStructuredBuffer<uint64_t>[i]        (free function, 2-arg)
+//   * RWStructuredBuffer<int64_t>[i]         (free function, 3-arg, signed)
+//   * RWByteAddressBuffer::InterlockedMax64  (method, 2-arg and 3-arg)
+//
+// 64-bit atomics on typed RWBuffer / RWTexture require the optional
+// "AtomicInt64OnTypedResource" capability and are intentionally not
+// covered here, to keep this test portable across implementations.
+//
+// For each destination, a set of 256 threads atomically take
+// the maximum of their per-thread proposal and a single accumulator slot.
+// Every proposal sets bits in the upper 32 bits (0x100000000 + tid), so the
+// operation genuinely exercises all 64 bits rather than degenerating to a
+// 32-bit update.
+
+RWStructuredBuffer<uint64_t> SBufU : register(u0);
+RWStructuredBuffer<int64_t>  SBufI : register(u1);
+RWByteAddressBuffer          BABuf : register(u2);
+
+RWStructuredBuffer<uint> OutMonoSBufI : register(u3);
+RWStructuredBuffer<uint> OutMonoBABuf : register(u4);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufU[0] = 0;
+    SBufI[0] = -1000;
+    BABuf.Store<uint64_t>(0, 0); // accumulator for 2-arg method form
+    BABuf.Store<uint64_t>(8, 0); // accumulator for 3-arg method form
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint64_t>: 2-argument free function. Proposals
+  // 2^32..2^32+255, max = 2^32 + 255.
+  InterlockedMax(SBufU[0], 0x100000000ull + (uint64_t)GTID.x);
+
+  // RWStructuredBuffer<int64_t>: 3-argument free function (signed).
+  // Proposals 2^32..2^32+255, max = 2^32 + 255 (a large positive proposal
+  // must beat the -1000 initializer). The concurrent re-read must never fall
+  // below the observed original (monotonic non-decrease).
+  int64_t OrigI;
+  InterlockedMax(SBufI[0], 0x100000000ll + (int64_t)GTID.x, OrigI);
+  int64_t AfterI = SBufI[0];
+  OutMonoSBufI[GTID.x] = (AfterI >= OrigI) ? 1u : 0u;
+
+  // RWByteAddressBuffer 64-bit method: 2-argument form.
+  BABuf.InterlockedMax64(0, 0x100000000ull + (uint64_t)GTID.x);
+
+  // RWByteAddressBuffer 64-bit method: 3-argument form.
+  uint64_t OrigBA;
+  BABuf.InterlockedMax64(8, 0x100000000ull + (uint64_t)GTID.x, OrigBA);
+  uint64_t AfterBA = BABuf.Load<uint64_t>(8);
+  OutMonoBABuf[GTID.x] = (AfterBA >= OrigBA) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt64
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedSBufU
+    Format: UInt64
+    Stride: 8
+    Data: [ 4294967551 ]
+  - Name: SBufI
+    Format: Int64
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedSBufI
+    Format: Int64
+    Stride: 8
+    Data: [ 4294967551 ]
+  - Name: BABuf
+    Format: UInt64
+    Stride: 8
+    FillSize: 16
+  - Name: ExpectedBABuf
+    Format: UInt64
+    Stride: 8
+    Data: [ 4294967551, 4294967551 ]
+  - Name: OutMonoSBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMono
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestMonoSBufI
+    Rule: BufferExact
+    Actual: OutMonoSBufI
+    Expected: ExpectedMono
+  - Result: TestMonoBABuf
+    Rule: BufferExact
+    Actual: OutMonoBABuf
+    Expected: ExpectedMono
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutMonoSBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutMonoBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99124
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

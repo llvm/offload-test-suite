@@ -46,6 +46,8 @@ Configurations:
 * Windows NVIDIA GPU Vulkan
 * Windows QC GPU DirectX
 * Windows QC GPU Vulkan
+* Windows Lavapipe Vulkan x64
+* Windows Lavapipe Vulkan arm64
 
 ## Build Hardware
 
@@ -65,6 +67,7 @@ Configurations:
 * Configurations:
   * Windows AMD GPU DirectX
   * Windows AMD GPU Vulkan
+  * Windows Lavapipe Vulkan (x64)
 
 ### Windows Intel GPU
 
@@ -94,3 +97,4 @@ Configurations:
   * Windows QC GPU DirectX
   * Windows QC GPU Vulkan
   * Windows WARP LKG arm64
+  * Windows Lavapipe Vulkan (arm64)

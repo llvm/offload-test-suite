@@ -1,0 +1,27 @@
+name: Windows Lavapipe AMD DXC
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *' # run every 6 hours
+  pull_request:
+    paths:
+     - .github/workflows/windows-amd-dxc-lavapipe.yaml
+
+jobs:
+  Windows-Lavapipe-AMD-DXC:
+    permissions:
+      contents: read
+      checks: write
+    uses: ./.github/workflows/build-and-test-callable.yaml
+    with:
+      OS: windows
+      SKU: windows-amd
+      BuildType: Debug
+      TestTarget: check-hlsl-vk-lavapipe
+      OffloadTest-branch: ${{ github.ref }}
+      SplitBuild: true
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

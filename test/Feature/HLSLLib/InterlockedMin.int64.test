@@ -1,0 +1,179 @@
+#--- source.hlsl
+
+// This test exercises InterlockedMin against non-resource (groupshared)
+// destinations using 64-bit integer types. A set of 256 threads
+// concurrently updates shared counters, so the test actually exercises
+// atomic behavior.
+//
+// Both the 2-argument and 3-argument overloads are covered for int64_t
+// and uint64_t.
+
+RWStructuredBuffer<uint> OutMonoInt : register(u0);
+RWStructuredBuffer<uint> OutMonoUInt : register(u1);
+RWStructuredBuffer<int64_t> OutFinal : register(u2);
+
+groupshared int64_t  MinInt;          // 3-arg form, signed
+groupshared uint64_t MinUInt;         // 3-arg form, unsigned
+groupshared int64_t  MinIntNoOrig;    // 2-arg form, signed
+groupshared uint64_t MinUIntNoOrig;   // 2-arg form, unsigned
+groupshared int64_t  SignedCounter;   // 2-arg form reaching a negative minimum
+groupshared uint64_t LargeCounter;    // 2-arg form exercising the upper 32 bits
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    MinInt = 1000;
+    MinUInt = 1000;
+    MinIntNoOrig = 1000;
+    MinUIntNoOrig = 1000;
+    SignedCounter = 1000;
+    LargeCounter = 0x10000000000ull; // 2^40
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // 3-argument form. Proposals span -32..31, min = -32. The concurrent
+  // re-read must never exceed the observed original (monotonic non-increase).
+  int64_t origI;
+  InterlockedMin(MinInt, (int64_t)GTID.x - 32, origI);
+  int64_t afterI = MinInt;
+  OutMonoInt[GTID.x] = (afterI <= origI) ? 1u : 0u;
+
+  // 3-argument form, unsigned. Proposals span 0..63, min = 0.
+  uint64_t origU;
+  InterlockedMin(MinUInt, (uint64_t)GTID.x, origU);
+  uint64_t afterU = MinUInt;
+  OutMonoUInt[GTID.x] = (afterU <= origU) ? 1u : 0u;
+
+  // 2-argument form. Proposals span 0..-255, min = -255.
+  InterlockedMin(MinIntNoOrig, -(int64_t)GTID.x);
+  // 2-argument form, unsigned. Proposals span 100..163, min = 100.
+  InterlockedMin(MinUIntNoOrig, (uint64_t)GTID.x + 100);
+  // 2-argument form reaching a negative minimum. Proposals span -1000..-937.
+  InterlockedMin(SignedCounter, (int64_t)GTID.x - 1000);
+  // 2-argument form with a value that exercises the upper 32 bits, min = 2^32.
+  InterlockedMin(LargeCounter, 0x100000000ull + (uint64_t)GTID.x);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = MinInt;                 // -32
+    OutFinal[1] = (int64_t)MinUInt;       // 0
+    OutFinal[2] = MinIntNoOrig;           // -255
+    OutFinal[3] = (int64_t)MinUIntNoOrig; // 100
+    OutFinal[4] = SignedCounter;          // -1000
+    OutFinal[5] = (int64_t)LargeCounter;  // 2^32 = 4294967296
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutMonoInt
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMonoInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoUInt
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMonoUInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutFinal
+    Format: Int64
+    Stride: 8
+    FillSize: 48
+  - Name: ExpectedFinal
+    Format: Int64
+    Stride: 8
+    Data: [ -32, 0, -255, 100, -1000, 4294967296 ]
+
+Results:
+  - Result: TestMonoInt
+    Rule: BufferExact
+    Actual: OutMonoInt
+    Expected: ExpectedMonoInt
+  - Result: TestMonoUInt
+    Rule: BufferExact
+    Actual: OutMonoUInt
+    Expected: ExpectedMonoUInt
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutMonoInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutMonoUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# REQUIRES: Int64 && Int64GroupSharedAtomics && SM_6_6
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99123
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: DXC && Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
