@@ -130,6 +130,9 @@ if (OFFLOADTEST_USE_CLANG_TIDY)
       set(CLANG_TIDY_ARGS --extra-arg=-isysroot${SYSROOT})
     endif()
   endif()
+  # Only lint headers that live inside this project's source tree.
+  set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS}
+    --header-filter=^${CMAKE_CURRENT_SOURCE_DIR}/.*)
   if (OFFLOADTEST_CLANG_TIDY_APPLY_FIX)
     set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS} --fix)
   endif ()
