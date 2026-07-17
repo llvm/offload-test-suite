@@ -638,6 +638,19 @@ void MappingTraits<offloadtest::TriangleGeometry>::mapping(
   I.mapOptional("IndexFormat", G.IdxFormat, IndexFormat::Uint32);
   I.mapOptional("IndexCount", G.IndexCount, 0u);
   I.mapOptional("Opaque", G.Opaque, true);
+  llvm::SmallVector<float> Transform;
+  I.mapOptional("Transform", Transform);
+  if (!Transform.empty()) {
+    if (Transform.size() != 12) {
+      I.setError(llvm::Twine("TriangleGeometry.Transform must have exactly 12 "
+                             "floats (3x4 row-major), got ") +
+                 llvm::Twine(Transform.size()));
+      return;
+    }
+    std::array<float, 12> T;
+    std::copy(Transform.begin(), Transform.end(), T.begin());
+    G.Transform = T;
+  }
 }
 
 void MappingTraits<offloadtest::AABBGeometry>::mapping(
