@@ -368,9 +368,10 @@ if not target_device:
         if ShouldSearchByGPUName
         else "first compatible device"
     )
-    reported = ", ".join(
-        d.get("Description", "<unknown>") for d in devices.get("Devices", [])
-    ) or "<none>"
+    reported = (
+        ", ".join(d.get("Description", "<unknown>") for d in devices.get("Devices", []))
+        or "<none>"
+    )
     lit_config.fatal(
         "No target device found! Searched {}. "
         "Devices reported by api-query: {}".format(search_desc, reported)
