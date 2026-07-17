@@ -5136,8 +5136,8 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
   // a staging-copy to a device-local buffer is a follow-up optimization).
   VkBufferCreateInfo BufInfo{};
   BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  // Reserve up to BaseAlign extra bytes so the raygen region can be shifted onto
-  // a shaderGroupBaseAlignment-aligned device address (see BasePad below).
+  // Reserve up to BaseAlign extra bytes so the raygen region can be shifted
+  // onto a shaderGroupBaseAlignment-aligned device address (see BasePad below).
   BufInfo.size = TotalSize + BaseAlign;
   BufInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
@@ -5183,10 +5183,10 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
   // memoryRequirements alignment, not to shaderGroupBaseAlignment. Software
   // drivers (lavapipe) hand back 16-byte-aligned host pointers, so every SBT
   // region device address would otherwise violate
-  // VUID-vkCmdTraceRaysKHR-*ShaderBindingTable-0368x. Region offsets are already
-  // multiples of BaseAlign, so shifting the whole table forward by BasePad lands
-  // every region on an aligned device address. On hardware the base is already
-  // aligned and BasePad is 0.
+  // VUID-vkCmdTraceRaysKHR-*ShaderBindingTable-0368x. Region offsets are
+  // already multiples of BaseAlign, so shifting the whole table forward by
+  // BasePad lands every region on an aligned device address. On hardware the
+  // base is already aligned and BasePad is 0.
   VkBufferDeviceAddressInfo AddrInfo{};
   AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   AddrInfo.buffer = Buffer;
