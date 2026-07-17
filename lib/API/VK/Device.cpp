@@ -5115,9 +5115,9 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
   const auto &VKPSO = llvm::cast<VKRayTracingPipelineState>(PSO);
 
   const uint32_t HandleSize = RTPipelineProps.shaderGroupHandleSize;
-  const uint32_t BaseAlign = RTPipelineProps.shaderGroupBaseAlignment;
-  const SBTLayout Layout = computeSBTLayout(
-      HandleSize, RTPipelineProps.shaderGroupHandleAlignment, BaseAlign, Desc);
+  const SBTLayout Layout =
+      computeSBTLayout(HandleSize, RTPipelineProps.shaderGroupHandleAlignment,
+                       RTPipelineProps.shaderGroupBaseAlignment, Desc);
   const VkDeviceSize TotalSize = Layout.TotalSize;
   // Vulkan dispatches a single raygen per vkCmdTraceRaysKHR; the descriptor
   // only carries one raygen entry, so its region holds exactly one record.
@@ -5136,9 +5136,7 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
   // a staging-copy to a device-local buffer is a follow-up optimization).
   VkBufferCreateInfo BufInfo{};
   BufInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-  // Reserve up to BaseAlign extra bytes so the raygen region can be shifted
-  // onto a shaderGroupBaseAlignment-aligned device address (see BasePad below).
-  BufInfo.size = TotalSize + BaseAlign;
+  BufInfo.size = TotalSize;
   BufInfo.usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR |
                   VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
                   VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -5179,12 +5177,6 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
     return Err;
   }
 
-  VkBufferDeviceAddressInfo AddrInfo{};
-  AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
-  AddrInfo.buffer = Buffer;
-  const VkDeviceAddress Base = vkGetBufferDeviceAddress(Device, &AddrInfo);
-  const VkDeviceSize BasePad = llvm::alignTo(Base, BaseAlign) - Base;
-
   void *MappedRaw = nullptr;
   if (auto Err = VK::toError(
           vkMapMemory(Device, Memory, 0, VK_WHOLE_SIZE, 0, &MappedRaw),
@@ -5194,7 +5186,7 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
     return Err;
   }
   auto *Mapped = static_cast<uint8_t *>(MappedRaw);
-  std::memset(Mapped, 0, TotalSize + BaseAlign);
+  std::memset(Mapped, 0, TotalSize);
 
   // Resolve each SBT entry's ShaderName → shader-group index, then write
   // [handle][localRootData][pad] into the region at the right offset.
@@ -5219,7 +5211,7 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
 
   auto WriteRegion = [&](const SBTRegionLayout &R,
                          llvm::ArrayRef<SBTEntry> Entries) -> llvm::Error {
-    return WriteEntries(Mapped + BasePad + R.Offset, Entries, R.Stride);
+    return WriteEntries(Mapped + R.Offset, Entries, R.Stride);
   };
   auto CleanupAndReturn = [&](llvm::Error Err) {
     vkUnmapMemory(Device, Memory);
@@ -5237,11 +5229,16 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
     return CleanupAndReturn(std::move(Err));
   vkUnmapMemory(Device, Memory);
 
+  VkBufferDeviceAddressInfo AddrInfo{};
+  AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+  AddrInfo.buffer = Buffer;
+  const VkDeviceAddress Base = vkGetBufferDeviceAddress(Device, &AddrInfo);
+
   // VkStridedDeviceAddressRegionKHR uses a zero deviceAddress to signal an
   // empty region — matching what the SBT layout helper records as Size == 0.
   auto MakeRegion = [&](const SBTRegionLayout &R) {
-    return VkStridedDeviceAddressRegionKHR{
-        R.Size ? Base + BasePad + R.Offset : 0, R.Stride, R.Size};
+    return VkStridedDeviceAddressRegionKHR{R.Size ? Base + R.Offset : 0,
+                                           R.Stride, R.Size};
   };
   const VkStridedDeviceAddressRegionKHR RG = MakeRegion(Layout.RayGen);
   const VkStridedDeviceAddressRegionKHR MS = MakeRegion(Layout.Miss);
