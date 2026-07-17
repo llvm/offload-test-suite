@@ -38,7 +38,7 @@ jobs:
       SKU: windows-intel
       TestTarget: ${{ matrix.TestTarget }}
       SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
   split-nvidia:
     if: inputs.SKU == 'windows-nvidia'
@@ -55,7 +55,7 @@ jobs:
       SKU: windows-nvidia
       TestTarget: ${{ matrix.TestTarget }}
       SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
   split-amd:
     if: inputs.SKU == 'windows-amd'
@@ -72,7 +72,7 @@ jobs:
       SKU: windows-amd
       TestTarget: ${{ matrix.TestTarget }}
       SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
   split-qc:
     if: inputs.SKU == 'windows-qc'
@@ -89,7 +89,7 @@ jobs:
       SKU: windows-qc
       TestTarget: ${{ matrix.TestTarget }}
       SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
   split-macos:
     if: inputs.SKU == 'macos'
