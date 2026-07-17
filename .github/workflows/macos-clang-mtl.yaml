@@ -22,4 +22,3 @@ jobs:
       SKU: macos
       TestTarget: check-hlsl-clang-mtl
       OffloadTest-branch: ${{ github.ref }}
-      LLVM-ExtraCMakeArgs: -DOFFLOADTEST_USE_CLANG_TIDY=ON
