@@ -100,7 +100,7 @@ DescriptorSets:
 # CHECK-NEXT: Format: Float32
 # METAL-NEXT: Data: [ 0, 0, 0, 0 ]
 # DX-NEXT: Data: [ 0, 0, 0, 0 ]
-# VULKAN-NEXT: Data: [ -inf, -inf, -inf, -inf ] 
+# VULKAN-NEXT: Data: [ inf, inf, inf, inf ] 
 # CHECK: Name: Mix
 # CHECK-NEXT: Format: Float32
 # CHECK-NEXT: Data: [ inf, inf, inf, inf ]
