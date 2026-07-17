@@ -36,6 +36,10 @@ if (OFFLOADTEST_BUILT_STANDALONE)
   include_directories(${LLVM_INCLUDE_DIRS})
   link_directories("${LLVM_LIBRARY_DIR}")
 
+  if (NOT LLVM_MAIN_SRC_DIR OR NOT EXISTS "${LLVM_MAIN_SRC_DIR}")
+    message(FATAL_ERROR "LLVM_MAIN_SRC_DIR is not set or invalid. Please set it to the root of the LLVM source tree.")
+  endif()
+
   # Seek installed Lit.
   find_program(LLVM_LIT
                 NAMES llvm-lit lit.py lit
