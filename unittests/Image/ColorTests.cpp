@@ -17,6 +17,7 @@
 
 using namespace offloadtest;
 
+namespace {
 TEST(ColorTests, RoundTrip) {
   {
     Color RGB = Color(1.0, 0.5, 0.0);
@@ -48,3 +49,4 @@ TEST(ColorTests, RoundTrip) {
     EXPECT_EQ(RGB.getAs<uint16_t>(), RGBPrime.getAs<uint16_t>());
   }
 }
+} // namespace

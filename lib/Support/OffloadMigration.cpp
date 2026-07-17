@@ -37,7 +37,8 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
         toFormat(Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
     if (!FmtOrErr) {
       printf("Invalid format! FMT: %d, CHANNELS: %d\n",
-             Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
+             static_cast<int>(Resource.BufferPtr->Format),
+             Resource.BufferPtr->Channels);
       assert(false && "Invalid format.");
     }
     OutParams.Fmt = *FmtOrErr;
