@@ -189,7 +189,7 @@ public:
     if (Desc.Location == MemoryLocation::GpuOnly)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Cannot map a GpuOnly buffer.");
-    void *Ptr = nullptr;
+    void *Ptr = nullptr; // NOLINT(misc-const-correctness)
     if (auto Err =
             HR::toError(Buffer->Map(0, nullptr, &Ptr), "Failed to map buffer."))
       return std::move(Err);
