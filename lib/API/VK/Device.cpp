@@ -5179,14 +5179,6 @@ VulkanDevice::createShaderBindingTable(const PipelineState &PSO,
     return Err;
   }
 
-  // Vulkan only guarantees the buffer device address is aligned to the buffer's
-  // memoryRequirements alignment, not to shaderGroupBaseAlignment. Software
-  // drivers (lavapipe) hand back 16-byte-aligned host pointers, so every SBT
-  // region device address would otherwise violate
-  // VUID-vkCmdTraceRaysKHR-*ShaderBindingTable-0368x. Region offsets are
-  // already multiples of BaseAlign, so shifting the whole table forward by
-  // BasePad lands every region on an aligned device address. On hardware the
-  // base is already aligned and BasePad is 0.
   VkBufferDeviceAddressInfo AddrInfo{};
   AddrInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
   AddrInfo.buffer = Buffer;
