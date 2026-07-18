@@ -1968,7 +1968,7 @@ public:
     }
 
     if (Config.EnableDebugLayer || Config.EnableValidationLayer)
-      if (auto Err = configureInfoQueue())
+      if (auto Err = configureInfoQueue(Device))
         return Err;
 
     auto GraphicsQueueOrErr = DXQueue::createGraphicsQueue(Device);
@@ -2023,7 +2023,7 @@ public:
 #include "DXFeatures.def"
   }
 
-  static llvm::Error configureInfoQueue() {
+  static llvm::Error configureInfoQueue(const ComPtr<ID3D12DeviceX> &Device) {
 #ifdef _WIN32
     ComPtr<ID3D12InfoQueue> InfoQueue;
     if (auto Err = HR::toError(Device->QueryInterface(InfoQueue.GetAddressOf()),
@@ -2032,6 +2032,8 @@ public:
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+#else
+    (void)Device;
 #endif
     return llvm::Error::success();
   }
