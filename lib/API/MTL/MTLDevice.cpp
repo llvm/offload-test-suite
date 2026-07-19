@@ -816,6 +816,7 @@ public:
     return llvm::Error::success();
   }
 
+protected:
   void endEncodingImpl() override {
     if (ComputeEnc) {
       flushBarrier();
@@ -1014,6 +1015,7 @@ public:
     return llvm::Error::success();
   }
 
+protected:
   void endEncodingImpl() override {
     assert(RenderEnc);
     RenderEnc->popDebugGroup();

@@ -25,7 +25,7 @@ template <typename T>
 std::enable_if_t<std::is_integral_v<T>, double> toInt(double Val) {
   constexpr double Max = static_cast<double>(std::numeric_limits<T>::max());
   constexpr double Base = Max + 1.0;
-  double Conv = std::clamp(floor(Val * Base), 0.0, Max);
+  const double Conv = std::clamp(floor(Val * Base), 0.0, Max);
   return static_cast<T>(Conv);
 }
 
@@ -40,7 +40,7 @@ std::enable_if_t<std::is_arithmetic_v<T>, double> toDouble(T Val) {
 template <typename NewTy, typename OldTy> NewTy convertColor(OldTy Val) {
   if constexpr (std::is_same_v<NewTy, OldTy>)
     return Val;
-  double Dbl = toDouble(Val);
+  const double Dbl = toDouble(Val);
   assert(Dbl >= 0.0 && Dbl <= 1.0 && "Value should be normalized");
   if constexpr (std::is_integral_v<NewTy>)
     return toInt<NewTy>(Dbl);

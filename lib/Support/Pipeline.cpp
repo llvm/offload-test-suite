@@ -11,6 +11,7 @@
 
 #include "Support/Pipeline.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace offloadtest;
 
@@ -648,7 +649,7 @@ void MappingTraits<offloadtest::TriangleGeometry>::mapping(
       return;
     }
     std::array<float, 12> T;
-    std::copy(Transform.begin(), Transform.end(), T.begin());
+    llvm::copy(Transform, T.begin());
     G.Transform = T;
   }
 }
@@ -680,7 +681,7 @@ void MappingTraits<offloadtest::InstanceDesc>::mapping(
                " floats (3x4 row-major), got " + llvm::Twine(Transform.size()));
     return;
   }
-  std::copy(Transform.begin(), Transform.end(), std::begin(D.Transform));
+  llvm::copy(Transform, std::begin(D.Transform));
   I.mapOptional("InstanceID", D.InstanceID, 0u);
   uint32_t Mask = D.InstanceMask;
   I.mapOptional("InstanceMask", Mask, 255u);

@@ -1059,11 +1059,11 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
-  static size_t size(IO &Io, SmallVector<SmallVector<T>> &Seq) {
+  static size_t size(IO & /*Io*/, SmallVector<SmallVector<T>> &Seq) {
     return Seq.size();
   }
 
-  static SmallVector<T> &element(IO &Io, SmallVector<SmallVector<T>> &Seq,
+  static SmallVector<T> &element(IO & /*Io*/, SmallVector<SmallVector<T>> &Seq,
                                  size_t Index) {
     if (Index >= Seq.size())
       Seq.resize(Index + 1);
@@ -1072,12 +1072,12 @@ template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<MutableArrayRef<T>>> {
-  static size_t size(IO &Io, SmallVector<MutableArrayRef<T>> &Seq) {
+  static size_t size(IO & /*Io*/, SmallVector<MutableArrayRef<T>> &Seq) {
     return Seq.size();
   }
 
   static MutableArrayRef<T> &
-  element(IO &Io, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
+  element(IO & /*Io*/, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
     assert(Index < Seq.size());
     return Seq[Index];
   }

@@ -403,6 +403,40 @@ static bool isExtensionSupported(
   return false;
 }
 
+static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
+  switch (Action) {
+  case offloadtest::LoadAction::Load:
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+  case offloadtest::LoadAction::Clear:
+    return VK_ATTACHMENT_LOAD_OP_CLEAR;
+  case offloadtest::LoadAction::DontCare:
+    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  }
+  llvm_unreachable("All LoadAction cases handled");
+}
+
+static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
+  switch (Action) {
+  case offloadtest::StoreAction::Store:
+    return VK_ATTACHMENT_STORE_OP_STORE;
+  case offloadtest::StoreAction::DontCare:
+    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  }
+  llvm_unreachable("All StoreAction cases handled");
+}
+
+static VkRayTracingShaderGroupTypeKHR getRTGroupType(HitGroupType T) {
+  switch (T) {
+  case HitGroupType::Triangles:
+    return VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+  case HitGroupType::Procedural:
+    return VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+  }
+  llvm_unreachable("All HitGroupType cases handled");
+}
+
+namespace {
+
 struct VulkanInstance {
   VkInstance Instance;
   VkDebugUtilsMessengerEXT DebugMessenger;
@@ -423,8 +457,6 @@ struct VulkanInstance {
     vkDestroyInstance(Instance, nullptr);
   }
 };
-
-namespace {
 
 struct MeshShaderFunctions {
   PFN_vkCmdDrawMeshTasksEXT VkCmdDrawMeshTasksEXT = nullptr;
@@ -1129,37 +1161,9 @@ public:
                            const ShaderBindingTable &SBT, uint32_t Width,
                            uint32_t Height, uint32_t Depth) override;
 
+protected:
   void endEncodingImpl() override { popDebugGroup(); }
 };
-
-llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
-VulkanCommandBuffer::createComputeEncoder() {
-  auto Enc = std::make_unique<VKComputeEncoder>(*this);
-  Enc->pushDebugGroup("ComputeEncoder");
-  return Enc;
-}
-
-static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
-  switch (Action) {
-  case offloadtest::LoadAction::Load:
-    return VK_ATTACHMENT_LOAD_OP_LOAD;
-  case offloadtest::LoadAction::Clear:
-    return VK_ATTACHMENT_LOAD_OP_CLEAR;
-  case offloadtest::LoadAction::DontCare:
-    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  }
-  llvm_unreachable("All LoadAction cases handled");
-}
-
-static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
-  switch (Action) {
-  case offloadtest::StoreAction::Store:
-    return VK_ATTACHMENT_STORE_OP_STORE;
-  case offloadtest::StoreAction::DontCare:
-    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  }
-  llvm_unreachable("All StoreAction cases handled");
-}
 
 class VulkanRenderPass final : public offloadtest::RenderPass {
 public:
@@ -1292,6 +1296,7 @@ public:
     return llvm::Error::success();
   }
 
+protected:
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
 
@@ -1320,152 +1325,6 @@ public:
     popDebugGroup();
   }
 };
-
-llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
-VulkanCommandBuffer::createRenderEncoder(
-    const offloadtest::RenderPassBeginDesc &Desc) {
-  // The pass carries the VkRenderPass and the format / load / store policy.
-  // The begin desc supplies the textures that get bound for this encoder.
-  if (!Desc.Pass)
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc is missing its RenderPass.");
-  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
-  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
-  uint32_t Width = 0, Height = 0;
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
-    return Err;
-
-  llvm::SmallVector<VkImageView, 9> Views;
-  llvm::SmallVector<VkClearValue, 9> ClearValues;
-
-  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    if (!Desc.ColorAttachments[I])
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
-    if (Tex.View == VK_NULL_HANDLE)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Color attachment texture has no image view.");
-    Views.push_back(Tex.View);
-
-    VkClearValue CV = {};
-    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
-      if (!Tex.Desc.OptimizedClearValue)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "LoadAction::Clear requires the render target to have been "
-            "created with an OptimizedClearValue.");
-      const auto *ColorCV =
-          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
-      assert(ColorCV &&
-             "RenderTarget OptimizedClearValue must be a ClearColor");
-      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
-    }
-    ClearValues.push_back(CV);
-  }
-
-  if (Desc.DepthStencil) {
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
-    if (Tex.View == VK_NULL_HANDLE)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Depth-stencil attachment texture has no image view.");
-    Views.push_back(Tex.View);
-
-    const auto &DS = *PassDesc.DepthStencil;
-    VkClearValue CV = {};
-    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
-        DS.StencilLoad == offloadtest::LoadAction::Clear) {
-      if (!Tex.Desc.OptimizedClearValue)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "LoadAction::Clear requires the depth-stencil texture to have "
-            "been created with an OptimizedClearValue.");
-      const auto *DepthCV =
-          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
-      assert(DepthCV &&
-             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
-      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
-    }
-    ClearValues.push_back(CV);
-  }
-
-  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
-    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
-      this->addImageTransition(
-          this->PendingSrcAccess, /*SrcAccessMask*/
-          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
-          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
-          Tex);
-    }
-  }
-
-  if (Desc.DepthStencil) {
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
-
-    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
-        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
-      this->addImageTransition(
-          this->PendingSrcAccess, /*SrcAccessMask*/
-          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
-          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
-          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
-          Tex);
-    }
-  }
-
-  VkFramebufferCreateInfo FBCI = {};
-  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-  FBCI.renderPass = VKPass.Handle;
-  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
-  FBCI.pAttachments = Views.data();
-  FBCI.width = Width;
-  FBCI.height = Height;
-  FBCI.layers = 1;
-
-  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
-  if (auto Err =
-          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
-                      "Failed to create framebuffer for RenderEncoder."))
-    return Err;
-
-  // The framebuffer must outlive this encoder and remain valid through GPU
-  // execution; the command buffer destroys it on teardown. The render pass
-  // is owned by the user-supplied VulkanRenderPass.
-  OwnedFramebuffers.push_back(Framebuffer);
-
-  VkRenderPassBeginInfo BeginInfo = {};
-  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  BeginInfo.renderPass = VKPass.Handle;
-  BeginInfo.framebuffer = Framebuffer;
-  BeginInfo.renderArea.extent.width = Width;
-  BeginInfo.renderArea.extent.height = Height;
-  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
-  BeginInfo.pClearValues = ClearValues.data();
-
-  this->flushBarrier();
-
-  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
-}
 
 class VulkanDevice : public offloadtest::Device {
   // VKComputeEncoder needs access to the device's RT entry points and the
@@ -4779,6 +4638,161 @@ public:
   }
 };
 
+} // namespace
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+VulkanCommandBuffer::createComputeEncoder() {
+  auto Enc = std::make_unique<VKComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+VulkanCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries the VkRenderPass and the format / load / store policy.
+  // The begin desc supplies the textures that get bound for this encoder.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  uint32_t Width = 0, Height = 0;
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+    return Err;
+
+  llvm::SmallVector<VkImageView, 9> Views;
+  llvm::SmallVector<VkClearValue, 9> ClearValues;
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    if (!Desc.ColorAttachments[I])
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    VkClearValue CV = {};
+    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the render target to have been "
+            "created with an OptimizedClearValue.");
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
+      assert(ColorCV &&
+             "RenderTarget OptimizedClearValue must be a ClearColor");
+      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+    }
+    ClearValues.push_back(CV);
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    const auto &DS = *PassDesc.DepthStencil;
+    VkClearValue CV = {};
+    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
+        DS.StencilLoad == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *DepthCV =
+          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
+      assert(DepthCV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
+    }
+    ClearValues.push_back(CV);
+  }
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+
+    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
+        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  VkFramebufferCreateInfo FBCI = {};
+  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  FBCI.renderPass = VKPass.Handle;
+  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
+  FBCI.pAttachments = Views.data();
+  FBCI.width = Width;
+  FBCI.height = Height;
+  FBCI.layers = 1;
+
+  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
+                      "Failed to create framebuffer for RenderEncoder."))
+    return Err;
+
+  // The framebuffer must outlive this encoder and remain valid through GPU
+  // execution; the command buffer destroys it on teardown. The render pass
+  // is owned by the user-supplied VulkanRenderPass.
+  OwnedFramebuffers.push_back(Framebuffer);
+
+  VkRenderPassBeginInfo BeginInfo = {};
+  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  BeginInfo.renderPass = VKPass.Handle;
+  BeginInfo.framebuffer = Framebuffer;
+  BeginInfo.renderArea.extent.width = Width;
+  BeginInfo.renderArea.extent.height = Height;
+  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
+  BeginInfo.pClearValues = ClearValues.data();
+
+  this->flushBarrier();
+
+  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
+}
+
 llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
   if (Items.empty())
     return llvm::Error::success();
@@ -4973,16 +4987,6 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 }
 
 // === Ray tracing pipeline + SBT + DispatchRays ============================
-
-static VkRayTracingShaderGroupTypeKHR getRTGroupType(HitGroupType T) {
-  switch (T) {
-  case HitGroupType::Triangles:
-    return VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-  case HitGroupType::Procedural:
-    return VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-  }
-  llvm_unreachable("All HitGroupType cases handled");
-}
 
 llvm::Expected<std::unique_ptr<PipelineState>>
 VulkanDevice::createPipelineRT(llvm::StringRef Name, const BindingsDesc &BD,
@@ -5293,7 +5297,6 @@ llvm::Error VKComputeEncoder::dispatchRays(const PipelineState &PSO,
                           Height, Depth);
   return llvm::Error::success();
 }
-} // namespace
 
 llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
     llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {
