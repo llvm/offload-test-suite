@@ -122,10 +122,8 @@ DescriptorSets:
 ...
 #--- end
 
-# This test is failing on Vulkan due to two separate issues.
-# Bug https://github.com/llvm/offload-test-suite/issues/1030
-# Bug https://github.com/llvm/offload-test-suite/issues/1037
-# XFAIL: Vulkan
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8615
+# XFAIL: DXC && Vulkan
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
