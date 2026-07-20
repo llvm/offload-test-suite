@@ -52,7 +52,7 @@ on:
 jobs:
   build:
     permissions:
-      checks: write
+      contents: read
     # One build per architecture. The artifacts produced here are reused by
     # every test job that targets the same architecture, so the build runs on
     # a plain (non-GPU) runner of the right architecture:
