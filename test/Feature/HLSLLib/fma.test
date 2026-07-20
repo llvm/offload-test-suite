@@ -94,6 +94,8 @@ DescriptorSets:
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1026
 # XFAIL: Intel && Vulkan && DXC
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1026
 # XFAIL: Lavapipe && DXC
 
 
