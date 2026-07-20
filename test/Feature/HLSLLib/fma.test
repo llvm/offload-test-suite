@@ -95,7 +95,7 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/1026
 # XFAIL: Intel && Vulkan && DXC
 
-# Bug https://github.com/llvm/offload-test-suite/issues/1026
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
 # XFAIL: Lavapipe && DXC
 
 # REQUIRES: Double
