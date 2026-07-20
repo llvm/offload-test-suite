@@ -40,7 +40,7 @@ Buffers:
 
   - Name: ExpectedOut
     Format: Float32
-    Data: [ 10, 21, 12, 23, 14, 25, 16, 27 ]
+    Data: [ 20, 11, 22, 13, 24, 15, 26, 17 ]
 
 Results:
   - Result: BufOut
