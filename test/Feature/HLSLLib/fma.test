@@ -92,7 +92,7 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/1026
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
 # XFAIL: Intel && Vulkan && DXC
 
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
