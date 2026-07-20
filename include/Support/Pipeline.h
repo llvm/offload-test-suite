@@ -21,6 +21,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
+#include <array>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -552,6 +553,7 @@ struct TriangleGeometry {
   IndexFormat IdxFormat = IndexFormat::Uint32;
   uint32_t IndexCount = 0;
   bool Opaque = true;
+  std::optional<std::array<float, 12>> Transform;
 };
 
 struct AABBGeometry {
@@ -1057,11 +1059,11 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
-  static size_t size(IO &Io, SmallVector<SmallVector<T>> &Seq) {
+  static size_t size(IO & /*Io*/, SmallVector<SmallVector<T>> &Seq) {
     return Seq.size();
   }
 
-  static SmallVector<T> &element(IO &Io, SmallVector<SmallVector<T>> &Seq,
+  static SmallVector<T> &element(IO & /*Io*/, SmallVector<SmallVector<T>> &Seq,
                                  size_t Index) {
     if (Index >= Seq.size())
       Seq.resize(Index + 1);
@@ -1070,12 +1072,12 @@ template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<MutableArrayRef<T>>> {
-  static size_t size(IO &Io, SmallVector<MutableArrayRef<T>> &Seq) {
+  static size_t size(IO & /*Io*/, SmallVector<MutableArrayRef<T>> &Seq) {
     return Seq.size();
   }
 
   static MutableArrayRef<T> &
-  element(IO &Io, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
+  element(IO & /*Io*/, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
     assert(Index < Seq.size());
     return Seq[Index];
   }

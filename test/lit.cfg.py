@@ -363,7 +363,19 @@ for device in devices.get("Devices", []):
         break
 
 if not target_device:
-    config.fatal("No target device found!")
+    search_desc = (
+        "matching regex '{}'".format(GPUName)
+        if ShouldSearchByGPUName
+        else "first compatible device"
+    )
+    reported = (
+        ", ".join(d.get("Description", "<unknown>") for d in devices.get("Devices", []))
+        or "<none>"
+    )
+    lit_config.fatal(
+        "No target device found! Searched {}. "
+        "Devices reported by api-query: {}".format(search_desc, reported)
+    )
 setDeviceFeatures(config, target_device, HLSLCompiler)
 
 if "llvmpipe" in target_device.get("Description", "").lower():
