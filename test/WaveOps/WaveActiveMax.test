@@ -88,7 +88,6 @@ DescriptorSets:
 # XFAIL: arm64 && DirectX && WARP
 # XFAIL: Lavapipe
 
-
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32
 # METAL-NEXT: Data: [ 0, 0, 0, 0 ]
