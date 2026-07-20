@@ -1,0 +1,224 @@
+name: HLSL Build
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      OffloadTest-branch:
+        description: 'Test Suite Branch'
+        required: false
+        default: 'main'
+        type: string
+      OffloadTest-fork:
+        description: 'Test Suite Fork'
+        required: false
+        default: 'llvm'
+        type: string
+      LLVM-branch:
+        description: 'LLVM Branch'
+        required: false
+        default: 'main'
+        type: string
+      LLVM-fork:
+        description: 'LLVM Fork'
+        required: false
+        default: 'llvm'
+        type: string
+      DXC-branch:
+        description: 'DXC Branch'
+        required: false
+        default: 'main'
+        type: string
+      OS:
+        required: true
+        type: string
+      SKU:
+        description: 'Runner SKU used to build the binaries'
+        required: true
+        type: string
+      BuildType:
+        description: 'Build Config'
+        required: false
+        default: 'RelWithDebInfo'
+        type: string
+      LLVM-ExtraCMakeArgs:
+        description: 'Extra CMake Args for LLVM'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build:
+    permissions:
+      checks: write
+    # One build per architecture. The artifacts produced here are reused by
+    # every test job that targets the same architecture, so the build runs on
+    # a plain (non-GPU) runner of the right architecture:
+    #   * windows-qc -> Windows ARM64
+    #   * macos      -> macOS
+    #   * everything else -> Windows x64
+    runs-on: >-
+      ${{ fromJSON(
+        inputs.SKU == 'windows-qc'
+          && '["self-hosted", "ARM64", "Windows"]'
+        || inputs.SKU == 'macos'
+          && '["self-hosted", "hlsl-macos"]'
+        || '["self-hosted", "Windows", "X64"]'
+      ) }}
+    # Architecture key used to name the artifacts so test jobs can find the
+    # matching build:
+    #   * windows-qc -> arm
+    #   * macos      -> macos
+    #   * everything else -> x86
+    env:
+      ARCH: >-
+        ${{ inputs.SKU == 'windows-qc' && 'arm'
+        || inputs.SKU == 'macos' && 'macos'
+        || 'x86' }}
+    steps:
+      - name: Checkout DXC
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: Microsoft/DirectXShaderCompiler
+          ref: ${{ inputs.DXC-branch }}
+          path: DXC
+          fetch-depth: 1
+          submodules: true
+      - name: Checkout LLVM
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.LLVM-fork }}/llvm-project
+          ref: ${{ inputs.LLVM-branch }}
+          path: llvm-project
+          fetch-depth: 1
+      - name: Checkout OffloadTest
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.OffloadTest-fork }}/offload-test-suite
+          ref: ${{ inputs.OffloadTest-branch }}
+          path: OffloadTest
+          fetch-depth: 1
+      - name: Checkout Golden Images
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: llvm/offload-golden-images
+          ref: main
+          path: golden-images
+          fetch-depth: 1
+      - name: Setup Windows x64
+        if: inputs.OS == 'windows' && runner.arch != 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Setup Windows
+        if: inputs.OS == 'windows' && runner.arch == 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Build DXC
+        run: |
+            cd DXC
+            mkdir build
+            cd build
+            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
+            ninja
+      # The build always ships clang alongside DXC/LLVM and builds the full
+      # hlsl-test-depends set so a single per-architecture distribution can
+      # serve every downstream test suite (d3d12, vk, clang-*, warp,
+      # lavapipe). Keeping all compile work here also keeps the Install step
+      # down to seconds rather than triggering a from-scratch clang compile.
+      - name: Build LLVM
+        run: |
+            cd llvm-project
+            mkdir build
+            cd build
+            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=On -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=On -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ${{ github.workspace }}/llvm-project/llvm/
+            ninja hlsl-test-depends
+      # Surface sccache cache state after the heavy compile work so we can
+      # track hit rate / cache size across runs and diagnose cold-cache
+      # blowups on new builders. Always-runs so we still get stats on
+      # build failure.
+      - name: Dump sccache Stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
+      # Install the LLVM/DXC distribution and the standalone offload test
+      # suite into a single portable prefix, then tar that prefix for the
+      # test jobs. The prefix is fully self-contained: tools under bin/,
+      # test sources + configure script under share/hlsl-test-suite/. No
+      # CMake, ninja, or compiler toolchain is required on the test runner.
+      - name: Install distribution
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # Prevent stale extraction dirs from previous runs from persisting
+            rm -rf "$GITHUB_WORKSPACE/install" "$GITHUB_WORKSPACE/dxc-dist"
+            cd $GITHUB_WORKSPACE/llvm-project/build
+            ninja install-distribution install-offload-tools install-offload-test-suite
+            # Stage DXC into a portable bin/+lib/ tree at dxc-dist.
+            # See docs/offload-distribution.md ("DXC prefix") for the
+            # rationale (DXC's install targets don't cover everything we
+            # need, so we cherry-pick from the build directory).
+            buildbin=$GITHUB_WORKSPACE/DXC/build/bin
+            buildlib=$GITHUB_WORKSPACE/DXC/build/lib
+            distbin=$GITHUB_WORKSPACE/dxc-dist/bin
+            distlib=$GITHUB_WORKSPACE/dxc-dist/lib
+            mkdir -p "$distbin" "$distlib"
+            case "$RUNNER_OS" in
+              Windows)
+                cp "$buildbin/dxc.exe"          "$distbin/"
+                cp "$buildbin/dxv.exe"          "$distbin/"
+                cp "$buildbin/dxcompiler.dll"   "$distbin/"
+                cp "$buildbin/dxil.dll"         "$distbin/"
+                # PDBs only exist for configs that emit /Zi (Debug,
+                # RelWithDebInfo). Release / MinSizeRel produce no
+                # .pdb files, so we skip the copy in those cases.
+                case "${{ inputs.BuildType }}" in
+                  Debug|RelWithDebInfo)
+                    cp "$buildbin/dxc.pdb"        "$distbin/"
+                    cp "$buildbin/dxv.pdb"        "$distbin/"
+                    cp "$buildbin/dxcompiler.pdb" "$distbin/"
+                    cp "$buildbin/dxil.pdb"       "$distbin/" ;;
+                esac
+                cp "$buildlib/dxcompiler.lib"   "$distlib/"
+                cp "$buildlib/dxil.lib"         "$distlib/" ;;
+              Linux)
+                cp "$buildbin/dxc"              "$distbin/"
+                cp "$buildbin/dxv"              "$distbin/"
+                cp "$buildlib/libdxcompiler.so" "$distlib/"
+                cp "$buildlib/libdxil.so"       "$distlib/" ;;
+              macOS)
+                cp "$buildbin/dxc"                  "$distbin/"
+                cp "$buildbin/dxv"                  "$distbin/"
+                cp "$buildlib/libdxcompiler.dylib"  "$distlib/"
+                cp "$buildlib/libdxil.dylib"        "$distlib/" ;;
+              *)
+                echo "Unsupported RUNNER_OS=$RUNNER_OS" >&2; exit 1 ;;
+            esac
+      - name: Package install prefix
+        shell: bash
+        run: |
+            cd $GITHUB_WORKSPACE
+            # Use stdout redirection so tar doesn't try to parse the
+            # destination Windows drive letter (e.g. C:\...) as a remote
+            # host:path tuple.
+            tar cf - -C install . > "$RUNNER_TEMP/build-artifacts.tar"
+            tar cf - -C dxc-dist . > "$RUNNER_TEMP/dxc-artifacts.tar"
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ env.ARCH }}
+          path: ${{ runner.temp }}/build-artifacts.tar
+          retention-days: 1
+      - name: Upload DXC artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxc-${{ env.ARCH }}
+          path: ${{ runner.temp }}/dxc-artifacts.tar
+          retention-days: 1

@@ -1,0 +1,225 @@
+name: HLSL Test
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      OS:
+        required: true
+        type: string
+      SKU:
+        description: 'GPU runner SKU the tests execute on'
+        required: true
+        type: string
+      TestTarget:
+        required: false
+        default: 'check-hlsl'
+        type: string
+
+jobs:
+  test:
+    permissions:
+      checks: write
+    runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
+    # Architecture key used to locate the matching build produced by
+    # build-callable.yaml:
+    #   * windows-qc -> arm
+    #   * macos      -> macos
+    #   * everything else -> x86
+    env:
+      ARCH: >-
+        ${{ inputs.SKU == 'windows-qc' && 'arm'
+        || inputs.SKU == 'macos' && 'macos'
+        || 'x86' }}
+    steps:
+      # Test job consumes ONLY the install tarball produced by the build job.
+      # No source checkouts of llvm-project / DXC / OffloadTest are needed
+      # here -- everything required to run lit lives inside the prefix.
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-${{ env.ARCH }}
+          path: ${{ runner.temp }}
+      - name: Download DXC artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dxc-${{ env.ARCH }}
+          path: ${{ runner.temp }}
+      - name: Extract install prefix
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE
+            rm -rf install dxc-dist
+            mkdir -p install dxc-dist
+            # Pipe the archive in via stdin and use a relative -C path so
+            # tar doesn't try to parse the Windows drive letter or treat
+            # backslashes as escape characters.
+            tar xf - -C install < "$RUNNER_TEMP/build-artifacts.tar"
+            tar xf - -C dxc-dist < "$RUNNER_TEMP/dxc-artifacts.tar"
+      - name: Setup Windows x64
+        if: inputs.OS == 'windows' && runner.arch != 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Setup Windows ARM64
+        if: inputs.OS == 'windows' && runner.arch == 'ARM64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Install lit and pyyaml
+        # The test runner needs only lit + pyyaml. We install from the
+        # requirements.txt that the build job ships inside the install
+        # prefix (test/CMakeLists.txt installs it under the
+        # offload-test-suite component). That keeps a single source of
+        # truth for pinned versions and avoids drift between this step
+        # and OffloadTest/test/requirements.txt.
+        #
+        # We invoke pip explicitly here instead of relying on
+        # setup-python's `pip-install:` input, which was observed to
+        # silently no-op on our self-hosted Windows runners.
+        #
+        # When pip can't write to the interpreter's system site-packages
+        # (e.g. on self-hosted Windows runners running as NetworkService,
+        # which can't write under C:\Program Files\Python313; or on a
+        # POSIX host where the system Python is owned by root), pip
+        # falls back to a --user install. The console script wrappers
+        # (e.g. lit.exe on Windows, lit on POSIX) then land in the
+        # user-scheme scripts dir, which is NOT on PATH by default:
+        #   - Windows: %APPDATA%\Python\PythonXY\Scripts
+        #   - Linux:   ~/.local/bin
+        #   - macOS:   ~/Library/Python/X.Y/bin
+        # We compute that dir from sysconfig (portable across all three
+        # platforms) and prepend it to PATH for all subsequent steps so
+        # `lit` resolves correctly regardless of where pip put it.
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
+          user_scripts=$(python -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
+          echo "User scripts dir: $user_scripts"
+          echo "$user_scripts" >> "$GITHUB_PATH"
+      - name: Dump GPU Info (test runner)
+        shell: bash
+        run: |
+            $GITHUB_WORKSPACE/install/bin/api-query
+      - name: Resolve lit suite from TestTarget
+        id: suite
+        shell: bash
+        run: |
+            # Callers always pass a single specific suite as
+            # TestTarget=check-hlsl-<suite>. Strip the prefix to get the
+            # suite name configure-test-suite.py understands.
+            set -euxo pipefail
+            target='${{ inputs.TestTarget }}'
+            case "$target" in
+              check-hlsl-*)
+                suite="${target#check-hlsl-}"
+                ;;
+              *)
+                echo "::error::Test requires TestTarget=check-hlsl-<suite>, got: $target"
+                exit 1
+                ;;
+            esac
+            case "$suite" in
+              vk-lavapipe) suite="vk" ;;
+              clang-vk-lavapipe) suite="clang-vk" ;;
+            esac
+            echo "suite=$suite" >> $GITHUB_OUTPUT
+            echo "Will run lit suite: $suite"
+      - name: Configure standalone test suite
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE/install/share/hlsl-test-suite"
+            # Locate dxc in the separate DXC install prefix. .exe on Windows,
+            # bare name elsewhere.
+            dxc_path="$GITHUB_WORKSPACE/dxc-dist/bin/dxc"
+            if [ -x "${dxc_path}.exe" ]; then dxc_path="${dxc_path}.exe"; fi
+            warp_arch_args=()
+            if [ '${{ inputs.OS }}' = 'windows' ]; then
+              if [ '${{ runner.arch }}' = 'ARM64' ]; then
+                warp_arch_args=(--warp-arch arm64)
+              else
+                warp_arch_args=(--warp-arch x64)
+              fi
+            fi
+            python configure-test-suite.py \
+              --suite "${{ steps.suite.outputs.suite }}" \
+              --dxc-path "$dxc_path" \
+              "${warp_arch_args[@]}"
+      - name: Setup Lavapipe
+        if: contains(inputs.TestTarget, 'lavapipe')
+        shell: bash
+        run: |
+            set -euxo pipefail
+            echo "OFFLOADTEST_GPU_NAME=llvmpipe" >> "$GITHUB_ENV"
+            # See the build workflow's Setup Lavapipe step for details on how we resolve the ICD path.
+            icd=""
+            if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then
+              fs=$(printf '%s' "$LAVAPIPE_ICD_JSON" | sed 's|\\|/|g')
+              if [ -f "$fs" ]; then
+                icd="$LAVAPIPE_ICD_JSON"
+              else
+                echo "::warning::LAVAPIPE_ICD_JSON is set but does not point to an existing file: $LAVAPIPE_ICD_JSON"
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              matches=$(MSYS_NO_PATHCONV=1 reg query "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" /reg:64 2>/dev/null | grep -i "lvp_icd") || matches=""
+              line=${matches%%$'\n'*}
+              cand=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+REG_[A-Z_]+[[:space:]]+0x[0-9A-Fa-f]+[[:space:]]*$//')
+              if [ -n "$cand" ]; then
+                fs=$(printf '%s' "$cand" | sed 's|\\|/|g')
+                if [ -f "$fs" ]; then
+                  icd="$cand"
+                fi
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
+              exit 0
+            fi
+            # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
+            # the legacy fallback for older loaders. Point both at only lavapipe.
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "Using lavapipe ICD: $icd"
+      - name: Run HLSL Tests
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd $GITHUB_WORKSPACE/install/share/hlsl-test-suite
+            suite='${{ steps.suite.outputs.suite }}'
+            lit -v "run/test/$suite" \
+              --xunit-xml-output="run/test/$suite/testresults.xunit.xml"
+      - name: Publish Test Results (macOS)
+        uses: EnricoMi/publish-unit-test-result-action/macos@34d7c956a59aed1bfebf31df77b8de55db9bbaaf # v2.21.0
+        if: always() && inputs.OS == 'macOS'
+        with:
+          comment_mode: off
+          files: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: ${{ github.workspace }}/install/share/hlsl-test-suite/run/test/**/testresults.xunit.xml
+          if-no-files-found: ignore
+      - name: Run dxdiag (Windows only)
+        if: inputs.OS == 'windows' && failure()
+        shell: powershell
+        run: |
+          $fileName = "dxdiag.txt"
+          $output = Join-Path $env:RUNNER_TEMP $fileName
+          dxdiag /t $output | Out-Null
+          Write-Host "DxDiag report saved to $output"
+      - name: Upload dxdiag artifact
+        if: inputs.OS == 'windows' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxdiag-${{ inputs.SKU }}-${{inputs.TestTarget}}.txt
+          path: ${{ runner.temp }}/dxdiag.txt
