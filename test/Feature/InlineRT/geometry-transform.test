@@ -5,20 +5,15 @@
 
 [numthreads(2,1,1)]
 void main(uint3 tid : SV_DispatchThreadID) {
-  // The triangle vertices (0,1,0), (-1,-1,0), (1,-1,0) wind CW from +z and
-  // CCW from -z (per the DX / VK / MTL convention all three backends share
-  // for ray-traversal winding, which is the inverse of the math-CCW signed
-  // area when viewing along the ray direction). With CCW = back-face by
-  // default:
-  //   - lane 0 fires from +z toward -z → sees CW → FRONT face (must hit)
-  //   - lane 1 fires from -z toward +z → sees CCW → BACK face (must miss
-  //     under RAY_FLAG_CULL_BACK_FACING_TRIANGLES)
+  // The triangle vertices are centered around x=0, but a per-geometry
+  // BLAS-bake transform translates them to x=5 at AS-build time. With an
+  // identity-transform TLAS instance, only the ray at x=5 hits.
   RayDesc Ray;
-  Ray.Origin = float3(0, 0, tid.x == 0 ? 1.0 : -1.0);
-  Ray.Direction = float3(0, 0, tid.x == 0 ? -1.0 : 1.0);
+  Ray.Origin = float3(tid.x == 0 ? 5.0 : 0.0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
   Ray.TMin = 0.0;
   Ray.TMax = 100.0;
-  RayQuery<RAY_FLAG_CULL_BACK_FACING_TRIANGLES> Q;
+  RayQuery<RAY_FLAG_NONE> Q;
   Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
   Q.Proceed();
   Output[tid.x] = (uint)Q.CommittedStatus();
@@ -40,8 +35,8 @@ Buffers:
   - Name: Expected
     Format: UInt32
     Stride: 4
-    # Lane 0: front face → COMMITTED_TRIANGLE_HIT (1)
-    # Lane 1: back face → COMMITTED_NOTHING (0)
+    # Lane 0: ray hits the baked-translated triangle → COMMITTED_TRIANGLE_HIT (1)
+    # Lane 1: ray misses (triangle no longer at origin) → COMMITTED_NOTHING (0)
     Data: [ 1, 0 ]
 AccelerationStructures:
   BLAS:
@@ -51,6 +46,8 @@ AccelerationStructures:
           VertexFormat: RGB32Float
           VertexStride: 12
           VertexCount: 3
+          # 3x4 row-major affine — translate x by +5.
+          Transform: [1, 0, 0, 5,  0, 1, 0, 0,  0, 0, 1, 0]
   TLAS:
     - Name: Scene
       Instances:
@@ -72,16 +69,12 @@ DescriptorSets:
       VulkanBinding:
         Binding: 1
 Results:
-  - Result: CullBackFacing
+  - Result: GeometryTransform
     Rule: BufferExact
     Actual: Output
     Expected: Expected
 ...
 #--- end
-
-# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
-# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
-# UNSUPPORTED: Lavapipe
 
 # REQUIRES: acceleration-structure
 # XFAIL: Clang
