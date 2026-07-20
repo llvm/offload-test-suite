@@ -98,7 +98,6 @@ DescriptorSets:
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
 # XFAIL: Lavapipe && DXC
 
-
 # REQUIRES: Double
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
