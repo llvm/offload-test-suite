@@ -174,12 +174,12 @@ jobs:
         # The default v143 toolset can lag the complete default toolset and lack
         # x64/ARM64 base libs. Pin every VsDevCmd to the default (latest) toolset.
         if: inputs.OS == 'windows'
-        shell: pwsh
+        shell: powershell
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vs = & $vswhere -latest -property installationPath
           $ver = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
-          "VCToolsVersion=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "VCToolsVersion=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
           Write-Host "Pinned VCToolsVersion=$ver"
       - name: Compute build mode
         # Single source of truth for the ARM64 cross build: SplitBuild + windows-qc
