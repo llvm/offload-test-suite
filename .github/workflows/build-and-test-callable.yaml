@@ -276,6 +276,9 @@ jobs:
                 -DCMAKE_CXX_COMPILER=clang-cl
                 -DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc
                 -DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc
+                # clang-cl reads DXC's -Wall as -Weverything; disable DXC warnings
+                # so SPIRV-Tools' hardcoded /WX doesn't fail on -Wc++98-compat.
+                -DLLVM_ENABLE_WARNINGS=OFF
                 "-DLLVM_NATIVE_BUILD=$GITHUB_WORKSPACE/DXC/host-build"
                 "-DLLVM_TABLEGEN=$GITHUB_WORKSPACE/DXC/host-build/bin/llvm-tblgen.exe"
                 "-DCLANG_TABLEGEN=$GITHUB_WORKSPACE/DXC/host-build/bin/clang-tblgen.exe"
