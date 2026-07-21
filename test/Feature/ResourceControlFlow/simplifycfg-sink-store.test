@@ -5,10 +5,11 @@
 // two stores may be resolved as a single access, so we ensure that access is
 // still directed to the intended resource for each invocation.
 
-RWStructuredBuffer<float> BufA : register(u0);
-RWStructuredBuffer<float> BufB : register(u1);
-RWStructuredBuffer<float> In   : register(u2);
+[[vk::binding(1, 0)]] RWStructuredBuffer<float> BufA : register(u0);
+[[vk::binding(2, 0)]] RWStructuredBuffer<float> BufB : register(u1);
+[[vk::binding(3, 0)]] RWStructuredBuffer<float> In   : register(u2);
 
+[[vk::binding(0, 0)]]
 cbuffer Constants : register(b0) {
   uint Condition;
 }

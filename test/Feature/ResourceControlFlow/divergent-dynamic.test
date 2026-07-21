@@ -1,8 +1,9 @@
 #--- source.hlsl
 
-RWStructuredBuffer<float> Bufs[2] : register(u0);
-RWStructuredBuffer<float> Out     : register(u2);
+[[vk::binding(1, 0)]] RWStructuredBuffer<float> Bufs[2] : register(u0);
+[[vk::binding(2, 0)]] RWStructuredBuffer<float> Out     : register(u2);
 
+[[vk::binding(0, 0)]]
 cbuffer Constants : register(b0) {
   uint Condition;
 }
