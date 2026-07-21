@@ -173,6 +173,23 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Pin MSVC toolset
+        # The runner's default v143 toolset (Microsoft.VCToolsVersion.v143.default.txt)
+        # can lag Microsoft.VCToolsVersion.default.txt and lack the x64/ARM64 base
+        # libraries, which breaks host and cross builds depending on which runner
+        # picks up the job. Pin every VsDevCmd in this job to the default (latest)
+        # toolset, which VS keeps complete.
+        if: >-
+          inputs.OS == 'windows'
+          && inputs.SplitBuild == true
+          && inputs.SKU == 'windows-qc'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $ver = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          "VCToolsVersion=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Pinned VCToolsVersion=$ver"
       - name: Build native host tools
         if: >-
           inputs.OS == 'windows'
@@ -182,7 +199,7 @@ jobs:
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
-          call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64
+          call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 -vcvars_ver=%VCToolsVersion%
 
           cmake -G Ninja ^
             -S "%GITHUB_WORKSPACE%\DXC" ^
@@ -221,7 +238,7 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           # setup-windows forwards this input to VsDevCmd.bat after -arch=.
-          arch: arm64 -host_arch=x64
+          arch: arm64 -host_arch=x64 -vcvars_ver=${{ env.VCToolsVersion }}
       - name: Setup Windows ARM64 native target
         if: >-
           inputs.OS == 'windows'
@@ -229,7 +246,7 @@ jobs:
           && runner.arch == 'ARM64'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
-          arch: arm64
+          arch: arm64 -vcvars_ver=${{ env.VCToolsVersion }}
       # VsDevCmd replaces PATH. Restore the tool paths required by the
       # remaining workflow steps after the final target setup.
       - name: Restore Python path
