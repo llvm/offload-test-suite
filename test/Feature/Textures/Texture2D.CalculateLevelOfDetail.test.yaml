@@ -129,6 +129,10 @@ Results:
 # Unimplemented: Clang + DX: https://github.com/llvm/llvm-project/issues/101558
 # XFAIL: DirectX || Metal
 
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/pixel.hlsl

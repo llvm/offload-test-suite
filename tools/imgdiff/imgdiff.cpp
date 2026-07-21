@@ -30,7 +30,9 @@ static cl::opt<std::string> ActualPath(cl::Positional,
                                        cl::desc("<actual image>"),
                                        cl::value_desc("filename"));
 
+namespace {
 enum class ComparisonMode { ExactMatch, CIE76 };
+} // namespace
 
 static cl::opt<ComparisonMode>
     Mode("mode", cl::desc("Comparison Mode"), cl::init(ComparisonMode::CIE76),
