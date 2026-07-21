@@ -1,5 +1,8 @@
 #--- source.hlsl
 
+// SimplifyCFG sinks the load and its struct-member GEP from both branches into
+// the common successor, creating a phi of pointers into a resource.
+
 struct Foo {
   float A;
   float B;

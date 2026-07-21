@@ -1,5 +1,8 @@
 #--- source.hlsl
 
+// SimplifyCFG sinks the store from both branches into the common successor,
+// creating a phi of a pointer into a resource.
+
 [[vk::binding(1, 0)]] RWStructuredBuffer<float> BufA : register(u0);
 [[vk::binding(2, 0)]] RWStructuredBuffer<float> BufB : register(u1);
 [[vk::binding(3, 0)]] RWStructuredBuffer<float> In   : register(u2);

@@ -1,5 +1,9 @@
 #--- source.hlsl
 
+// GVN sees BufA[TID] loaded on both the entry and the guarded block and
+// eliminates the second load as redundant, reusing a resource load's value
+// across the branch.
+
 [[vk::binding(1, 0)]] RWStructuredBuffer<float> BufA : register(u0);
 [[vk::binding(2, 0)]] RWStructuredBuffer<float> Out  : register(u2);
 

@@ -1,5 +1,9 @@
 #--- source.hlsl
 
+// Dynamic resource: LocalBuf is Bufs[0] or Bufs[1] chosen by divergent control
+// flow, forming a phi of the resource. The dynamic array index must propagate
+// through the phi to the eventual resource access.
+
 [[vk::binding(1, 0)]] RWStructuredBuffer<float> Bufs[2] : register(u0);
 [[vk::binding(2, 0)]] RWStructuredBuffer<float> Out     : register(u2);
 

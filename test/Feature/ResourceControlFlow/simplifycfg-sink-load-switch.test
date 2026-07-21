@@ -1,5 +1,8 @@
 #--- source.hlsl
 
+// SimplifyCFG sinks the loads from each switch case into the common successor,
+// creating a phi of pointers into a resource.
+
 [[vk::binding(0, 0)]] RWStructuredBuffer<float> BufA : register(u0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<float> BufB : register(u1);
 [[vk::binding(2, 0)]] RWStructuredBuffer<float> BufC : register(u2);
