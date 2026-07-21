@@ -86,7 +86,7 @@ DescriptorSets:
 # not treat -INF as an identity.
 
 # XFAIL: arm64 && DirectX && WARP
-# XFAIL: Lavapipe
+# XFAIL: Lavapipe && QC
 
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32
