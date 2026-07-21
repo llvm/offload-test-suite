@@ -1,16 +1,19 @@
 #--- source.hlsl
 
-// This test exercises InterlockedMin against the full set of HLSL-legal
+// This test exercises InterlockedXor against the full set of HLSL-legal
 // non-groupshared (resource) destination types:
 //
 //   * RWStructuredBuffer<uint>[i]          (free function, 2-arg)
 //   * RWStructuredBuffer<int>[i]           (free function, 3-arg, signed)
 //   * RWBuffer<uint>[i]                    (free function on typed UAV)
 //   * RWTexture2D<uint>[coord]             (free function on typed UAV)
-//   * RWByteAddressBuffer::InterlockedMin  (method, 2-arg and 3-arg)
+//   * RWByteAddressBuffer::InterlockedXor  (method, 2-arg and 3-arg)
 //
-// For each destination, a set of 256 threads atomically take
-// the minimum of their per-thread proposal and a single accumulator slot.
+// See InterlockedXor.32.test for a full description of the unique-bit
+// atomicity construction: SBufU, SBufI, TBufU and Tex2D hold eight 32-bit
+// words each while BABuf holds sixteen (two 8-word accumulator regions);
+// thread t flips bit (t % 32) of word (t / 32), so every word ends at all-ones
+// (0xFFFFFFFF) and each 3-arg re-read must strictly exceed the observed orig.
 
 RWStructuredBuffer<uint> SBufU : register(u0);
 RWStructuredBuffer<int>  SBufI : register(u1);
@@ -23,42 +26,48 @@ RWStructuredBuffer<uint> OutMonoBABuf : register(u6);
 
 [numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
-  if (GTID.x == 0) {
-    SBufU[0] = 0xFFFFFFFFu;
-    SBufI[0] = 1000;
-    TBufU[0] = 0xFFFFFFFFu;
-    Tex2D[uint2(0, 0)] = 0xFFFFFFFFu;
-    BABuf.Store(0, 0xFFFFFFFFu); // accumulator for 2-arg method form
-    BABuf.Store(4, 1000u);       // accumulator for 3-arg method form
+  uint Tid  = GTID.x;
+  uint Word = Tid / 32;         // 0..7, one 32-bit slot per 32 threads
+  uint Bit  = Tid % 32;         // 0..31, this thread's unique bit
+  uint MyBit = 1u << Bit;
+  uint Off2  = Word * 4;        // BAB 2-arg region: byte offsets 0..28
+  uint Off3  = 32 + Word * 4;   // BAB 3-arg region: byte offsets 32..60
+
+  if (Tid < 8) {
+    SBufU[Tid] = 0u;
+    SBufI[Tid] = 0;
+    TBufU[Tid] = 0u;
+    Tex2D[uint2(Tid, 0)] = 0u;
+    BABuf.Store(Tid * 4, 0u);       // 2-arg accumulator words
+    BABuf.Store(32 + Tid * 4, 0u);  // 3-arg accumulator words
   }
   DeviceMemoryBarrierWithGroupSync();
 
-  // RWStructuredBuffer<uint>: 2-argument free function. Proposals 0..255,
-  // min = 0.
-  InterlockedMin(SBufU[0], GTID.x);
+  // RWStructuredBuffer<uint>: 2-argument free function.
+  InterlockedXor(SBufU[Word], MyBit);
 
-  // RWStructuredBuffer<int>: 3-argument free function (signed). Proposals
-  // -31..224, min = -31. The concurrent re-read must never exceed the observed
-  // original (monotonic non-increase).
+  // RWStructuredBuffer<int>: 3-argument free function (signed). Compared in the
+  // unsigned bit domain; setting a previously-zero bit strictly grows the
+  // pattern, so the concurrent re-read must exceed the observed original.
   int OrigI;
-  InterlockedMin(SBufI[0], (int)GTID.x - 31, OrigI);
-  int AfterI = SBufI[0];
-  OutMonoSBufI[GTID.x] = (AfterI <= OrigI) ? 1u : 0u;
+  InterlockedXor(SBufI[Word], (int)MyBit, OrigI);
+  int AfterI = SBufI[Word];
+  OutMonoSBufI[Tid] = (asuint(AfterI) > asuint(OrigI)) ? 1u : 0u;
 
   // RWBuffer<uint> (typed buffer UAV): 2-argument free function.
-  InterlockedMin(TBufU[0], GTID.x);
+  InterlockedXor(TBufU[Word], MyBit);
 
   // RWTexture2D<uint>: 2-argument free function.
-  InterlockedMin(Tex2D[uint2(0, 0)], GTID.x);
+  InterlockedXor(Tex2D[uint2(Word, 0)], MyBit);
 
   // RWByteAddressBuffer method: 2-argument form.
-  BABuf.InterlockedMin(0, GTID.x);
+  BABuf.InterlockedXor(Off2, MyBit);
 
   // RWByteAddressBuffer method: 3-argument form.
   uint OrigBA;
-  BABuf.InterlockedMin(4, GTID.x, OrigBA);
-  uint AfterBA = BABuf.Load(4);
-  OutMonoBABuf[GTID.x] = (AfterBA <= OrigBA) ? 1u : 0u;
+  BABuf.InterlockedXor(Off3, MyBit, OrigBA);
+  uint AfterBA = BABuf.Load(Off3);
+  OutMonoBABuf[Tid] = (AfterBA > OrigBA) ? 1u : 0u;
 }
 
 //--- pipeline.yaml
@@ -71,56 +80,62 @@ Buffers:
   - Name: SBufU
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 32
     FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufU
     Format: UInt32
     Stride: 4
-    Data: [ 0 ]
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
   - Name: SBufI
     Format: Int32
     Stride: 4
-    FillSize: 4
+    FillSize: 32
     FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufI
     Format: Int32
     Stride: 4
-    Data: [ -31 ]
+    Data: [ -1, -1, -1, -1, -1, -1, -1, -1 ]
   - Name: TBufU
     Format: UInt32
     Channels: 1
-    FillSize: 4
+    FillSize: 32
     FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedTBufU
     Format: UInt32
     Channels: 1
-    Data: [ 0 ]
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
   - Name: Tex2D
     Format: UInt32
     Channels: 1
-    FillSize: 4
+    FillSize: 32
     FillValue: 137  # trash non-zero initialization data
     OutputProps:
       Height: 1
-      Width: 1
+      Width: 8
       Depth: 1
   - Name: ExpectedTex2D
     Format: UInt32
     Channels: 1
-    Data: [ 0 ]
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
     OutputProps:
       Height: 1
-      Width: 1
+      Width: 8
       Depth: 1
   - Name: BABuf
     Format: UInt32
     Stride: 4
-    FillSize: 8
+    FillSize: 64
     FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedBABuf
     Format: UInt32
     Stride: 4
-    Data: [ 0, 0 ]
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
   - Name: OutMonoSBufI
     Format: UInt32
     Stride: 4
@@ -231,7 +246,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99123
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99127
 # XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
