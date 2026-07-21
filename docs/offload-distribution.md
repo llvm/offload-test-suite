@@ -186,9 +186,32 @@ implements this flow when invoked with `SplitBuild=true`. The build job
 produces two artifacts (`build-<sku>-<target>` and `dxc-<sku>-<target>`)
 and the test job consumes both.
 
-For the `windows-qc` SKU, the build job targets ARM64 independently of the
-build host architecture. It is scheduled on the generic self-hosted Windows
-pool: an ARM64 host builds natively, while an X64 host first builds the native
-LLVM/DXC generator tools and then cross-compiles the packaged binaries for
-Windows ARM64. The workflow verifies the PE machine type before uploading the
-artifacts. The test job remains pinned to the ARM64 `hlsl-windows-qc` runner.
+For the `windows-qc` SKU, the build job targets ARM64 but is always scheduled
+on an X64 self-hosted Windows builder (we do not build ARM64 natively). The
+builder first compiles the native LLVM/DXC generator tools, then cross-compiles
+the packaged binaries for Windows ARM64. The workflow verifies the PE machine
+type before uploading the artifacts. The test job remains pinned to the ARM64
+`hlsl-windows-qc` runner.
+
+The `Compute build mode` step is the single source of truth for whether a job
+cross-compiles: it sets `ARM64_CROSS=true` only when `SplitBuild` is enabled and
+the SKU is `windows-qc`. Every cross-specific step (native host-tools build,
+ARM64 target setup, the `cmake` cross flags, and the PE-machine verification)
+keys off `env.ARM64_CROSS`, so the cross path is defined in exactly one place.
+
+### MSVC toolset pinning
+
+Windows builders can carry a v143 default toolset
+(`Microsoft.VCToolsVersion.v143.default.txt`) that lags the complete default
+toolset (`Microsoft.VCToolsVersion.default.txt`) and is missing the x64 and/or
+ARM64 base libraries (for example `msvcrtd.lib` and `oldnames.lib`). When a job
+lands on such a runner, both the native host build and the ARM64 cross build can
+fail to link, and because jobs are scheduled across a heterogeneous pool the
+failure is intermittent and runner-dependent.
+
+To make builds deterministic, the `Pin MSVC toolset` step reads the default
+(latest) toolset version, which VS keeps complete, and exports it as
+`VCToolsVersion` for the whole job. Every `VsDevCmd` invocation in the job then
+passes `-vcvars_ver=%VCToolsVersion%` (host-tools setup, `Setup Windows x64
+target`, and `Setup Windows ARM64 cross target`) so they all resolve the same
+complete toolset regardless of which runner picks up the job.

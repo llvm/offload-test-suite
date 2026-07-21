@@ -126,15 +126,12 @@ jobs:
   build:
     permissions:
       checks: write
-    # When SplitBuild is true, build on any available runner that can produce
-    # the requested target. windows-qc targets ARM64 but may cross-compile on
-    # an X64 Windows builder. Otherwise, build on the GPU runner.
+    # Split builds run on any X64 Windows runner (windows-qc targets ARM64 but
+    # is always cross-compiled on X64). Non-split builds run on the GPU runner.
     runs-on: >-
       ${{ fromJSON(
         inputs.SplitBuild != true
           && format('["self-hosted", "hlsl-{0}"]', inputs.SKU)
-        || inputs.SKU == 'windows-qc'
-          && '["self-hosted", "Windows"]'
         || inputs.SKU == 'macos'
           && '["self-hosted", "hlsl-macos"]'
         || '["self-hosted", "Windows", "X64"]'
@@ -174,15 +171,9 @@ jobs:
         with:
           pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Pin MSVC toolset
-        # The runner's default v143 toolset (Microsoft.VCToolsVersion.v143.default.txt)
-        # can lag Microsoft.VCToolsVersion.default.txt and lack the x64/ARM64 base
-        # libraries, which breaks host and cross builds depending on which runner
-        # picks up the job. Pin every VsDevCmd in this job to the default (latest)
-        # toolset, which VS keeps complete.
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SplitBuild == true
-          && inputs.SKU == 'windows-qc'
+        # The default v143 toolset can lag the complete default toolset and lack
+        # x64/ARM64 base libs. Pin every VsDevCmd to the default (latest) toolset.
+        if: inputs.OS == 'windows'
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -190,12 +181,19 @@ jobs:
           $ver = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
           "VCToolsVersion=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Pinned VCToolsVersion=$ver"
+      - name: Compute build mode
+        # Single source of truth for the ARM64 cross build: SplitBuild + windows-qc
+        # builds on X64 and targets ARM64. Cross steps key off env.ARM64_CROSS.
+        if: inputs.OS == 'windows'
+        shell: bash
+        run: |
+          cross=false
+          if [ '${{ inputs.SplitBuild }}' = 'true' ] && [ '${{ inputs.SKU }}' = 'windows-qc' ]; then
+            cross=true
+          fi
+          echo "ARM64_CROSS=$cross" >> "$GITHUB_ENV"
       - name: Build native host tools
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SplitBuild == true
-          && inputs.SKU == 'windows-qc'
-          && runner.arch != 'ARM64'
+        if: env.ARM64_CROSS == 'true'
         shell: cmd
         run: |
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
@@ -229,24 +227,13 @@ jobs:
         if: inputs.OS == 'windows' && inputs.SKU != 'windows-qc'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
-          arch: amd64
+          arch: amd64 -vcvars_ver=${{ env.VCToolsVersion }}
       - name: Setup Windows ARM64 cross target
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SKU == 'windows-qc'
-          && runner.arch != 'ARM64'
+        if: env.ARM64_CROSS == 'true'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           # setup-windows forwards this input to VsDevCmd.bat after -arch=.
           arch: arm64 -host_arch=x64 -vcvars_ver=${{ env.VCToolsVersion }}
-      - name: Setup Windows ARM64 native target
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SKU == 'windows-qc'
-          && runner.arch == 'ARM64'
-        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
-        with:
-          arch: arm64 -vcvars_ver=${{ env.VCToolsVersion }}
       # VsDevCmd replaces PATH. Restore the tool paths required by the
       # remaining workflow steps after the final target setup.
       - name: Restore Python path
@@ -281,9 +268,7 @@ jobs:
         run: |
             set -exo pipefail
             cross_args=()
-            if [ '${{ inputs.SplitBuild }}' = 'true' ] \
-              && [ '${{ inputs.SKU }}' = 'windows-qc' ] \
-              && [ '${{ runner.arch }}' != 'ARM64' ]; then
+            if [ "$ARM64_CROSS" = 'true' ]; then
               cross_args=(
                 -DCMAKE_SYSTEM_NAME=Windows
                 -DCMAKE_SYSTEM_PROCESSOR=ARM64
@@ -311,9 +296,7 @@ jobs:
         run: |
             set -exo pipefail
             cross_args=()
-            if [ '${{ inputs.SplitBuild }}' = 'true' ] \
-              && [ '${{ inputs.SKU }}' = 'windows-qc' ] \
-              && [ '${{ runner.arch }}' != 'ARM64' ]; then
+            if [ "$ARM64_CROSS" = 'true' ]; then
               cross_args=(
                 -DCMAKE_SYSTEM_NAME=Windows
                 -DCMAKE_SYSTEM_PROCESSOR=ARM64
@@ -343,10 +326,7 @@ jobs:
             cmake --build "$GITHUB_WORKSPACE/llvm-project/build" \
               --target hlsl-test-depends
       - name: Verify ARM64 build artifacts
-        if: >-
-          inputs.OS == 'windows'
-          && inputs.SplitBuild == true
-          && inputs.SKU == 'windows-qc'
+        if: env.ARM64_CROSS == 'true'
         shell: powershell
         run: |
           $expectedMachine = 0xAA64
