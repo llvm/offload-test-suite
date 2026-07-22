@@ -7,21 +7,9 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch:
-    inputs:
-      DXC-branch:
-        description: 'DXC branch or commit to test against (default: main)'
-        required: false
-        default: 'main'
-        type: string
-      LLVM-branch:
-        description: 'LLVM/clang branch or commit to test against (default: main)'
-        required: false
-        default: 'main'
-        type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -44,9 +32,7 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
@@ -68,9 +54,7 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
@@ -95,9 +79,7 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
@@ -119,9 +101,7 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
@@ -143,9 +123,7 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
@@ -170,9 +148,7 @@ jobs:
       OS: windows
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
@@ -192,6 +168,4 @@ jobs:
       OS: macOS
       SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha || github.sha }}
-      DXC-branch: ${{ inputs.DXC-branch || 'main' }}
-      LLVM-branch: ${{ inputs.LLVM-branch || 'main' }}
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
