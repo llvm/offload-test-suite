@@ -14,10 +14,10 @@ cbuffer Constants : register(b0) {
 
 [numthreads(8, 1, 1)]
 void main(uint TID : SV_DispatchThreadID) {
-  RWStructuredBuffer<float> LocalBuf = Bufs[0];
+  RWStructuredBuffer<float> LocalBuf = Bufs[NonUniformResourceIndex(0)];
 
   if ((TID & 1u) == Condition)
-    LocalBuf = Bufs[1];
+    LocalBuf = Bufs[NonUniformResourceIndex(1)];
 
   Out[TID] = LocalBuf[TID];
 }
