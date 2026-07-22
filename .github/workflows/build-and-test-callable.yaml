@@ -199,6 +199,14 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
           call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 -vcvars_ver=%VCToolsVersion%
 
+          rem Bake x64 lib dirs into host tool links so the cross Build DXC step's
+          rem native llvm-config relink resolves the x64 CRT under the ARM64 env.
+          setlocal enabledelayedexpansion
+          set "LFLAGS="
+          for %%d in ("%LIB:;=" "%") do if not "%%~d"=="" set LFLAGS=!LFLAGS! /LIBPATH:"%%~d"
+          > "%GITHUB_WORKSPACE%\host-linkflags.cmake" echo set(_extra_libpaths [=[!LFLAGS!]=])
+          >> "%GITHUB_WORKSPACE%\host-linkflags.cmake" echo set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${_extra_libpaths}" CACHE STRING "" FORCE)
+
           cmake -G Ninja ^
             -S "%GITHUB_WORKSPACE%\DXC" ^
             -B "%GITHUB_WORKSPACE%\DXC\host-build" ^
@@ -206,7 +214,8 @@ jobs:
             -DLLVM_ENABLE_ASSERTIONS=Off ^
             -C "%GITHUB_WORKSPACE%\DXC\cmake\caches\PredefinedParams.cmake" ^
             -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
-            -DHLSL_DISABLE_SOURCE_GENERATION=On
+            -DHLSL_DISABLE_SOURCE_GENERATION=On ^
+            -C "%GITHUB_WORKSPACE%\host-linkflags.cmake"
           if errorlevel 1 exit /b 1
           cmake --build "%GITHUB_WORKSPACE%\DXC\host-build" ^
             --target llvm-tblgen clang-tblgen llvm-config
@@ -219,7 +228,8 @@ jobs:
             -DLLVM_ENABLE_ASSERTIONS=Off ^
             -DLLVM_ENABLE_PROJECTS=clang ^
             -DLLVM_TARGETS_TO_BUILD=Native ^
-            -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake"
+            -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
+            -C "%GITHUB_WORKSPACE%\host-linkflags.cmake"
           if errorlevel 1 exit /b 1
           cmake --build "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
             --target llvm-tblgen clang-tblgen llvm-config
@@ -241,16 +251,6 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64 -vcvars_ver=${{ env.VCToolsVersion }}
-      - name: Add x64 libs to LIB for native host-tool relinks
-        # Cross steps relink native x64 tools (llvm-config) under the ARM64 env;
-        # append x64 lib dirs so those links resolve the x64 CRT.
-        if: env.ARM64_CROSS == 'true'
-        shell: cmd
-        run: |
-          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
-          set "ARM64_LIB=%LIB%"
-          call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 -vcvars_ver=%VCToolsVersion% >nul
-          echo LIB=%ARM64_LIB%;%LIB%>>%GITHUB_ENV%
       # VsDevCmd replaces PATH. Restore the tool paths required by the
       # remaining workflow steps after the final target setup.
       - name: Restore Python path
