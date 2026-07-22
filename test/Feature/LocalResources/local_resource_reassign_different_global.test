@@ -1,0 +1,99 @@
+#--- source.hlsl
+// Reassign a local resource handle to a different global, then Store.
+// Verifies last-write-wins semantics: the pre-reassignment Store writes
+// to gBuf0, the post-reassignment Store writes to gBuf1, and both
+// buffers end up populated with their respective sentinel values.
+
+RWByteAddressBuffer gBuf0 : register(u0);
+RWByteAddressBuffer gBuf1 : register(u1);
+
+void Pass_Reassign(uint Idx) {
+    RWByteAddressBuffer Buf = gBuf0;
+    Buf.Store(Idx * 4, 7);
+    Buf = gBuf1;
+    Buf.Store(Idx * 4, 13);
+}
+
+[numthreads(8,8,1)]
+void main(uint3 Tid : SV_DispatchThreadID) {
+    uint Idx = Tid.x + Tid.y * 8;
+    Pass_Reassign(Idx);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: gBuf0
+    Format: Int32
+    Stride: 4
+    Data: [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ]
+  - Name: gBuf1
+    Format: Int32
+    Stride: 4
+    Data: [
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+    ]
+  - Name: ExpectedBuf0
+    Format: Int32
+    Stride: 4
+    Data: [
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+      7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7
+    ]
+  - Name: ExpectedBuf1
+    Format: Int32
+    Stride: 4
+    Data: [
+      13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+      13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+      13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13,
+      13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13
+    ]
+Results:
+  - Result: Buf0Check
+    Rule: BufferExact
+    Actual: gBuf0
+    Expected: ExpectedBuf0
+  - Result: Buf1Check
+    Rule: BufferExact
+    Actual: gBuf1
+    Expected: ExpectedBuf1
+DescriptorSets:
+  - Resources:
+    - Name: gBuf0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: gBuf1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
