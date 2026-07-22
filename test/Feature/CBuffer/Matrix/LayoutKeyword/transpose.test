@@ -16,9 +16,13 @@ cbuffer CB_CM_3x2 : register(b3) {
     column_major float3x2 cm_3x2;
 };
 
+[[vk::binding(4, 0)]]
 RWBuffer<float> OutRM2x3 : register(u0);
+[[vk::binding(5, 0)]]
 RWBuffer<float> OutCM2x3 : register(u1);
+[[vk::binding(6, 0)]]
 RWBuffer<float> OutRM3x2 : register(u2);
+[[vk::binding(7, 0)]]
 RWBuffer<float> OutCM3x2 : register(u3);
 
 float3x2 transpose_rm_2x3(row_major float2x3 m) { return transpose(m); }
@@ -179,12 +183,6 @@ DescriptorSets:
         Binding: 7
 ...
 #--- end
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
-# XFAIL: Vulkan && DXC
-
-# Unimplemented: https://github.com/llvm/llvm-project/issues/201712
-# XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl
