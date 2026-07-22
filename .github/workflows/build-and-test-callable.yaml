@@ -204,6 +204,7 @@ jobs:
             -B "%GITHUB_WORKSPACE%\DXC\host-build" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DLLVM_ENABLE_ASSERTIONS=Off ^
+            -DLLVM_APPEND_VC_REV=Off ^
             -C "%GITHUB_WORKSPACE%\DXC\cmake\caches\PredefinedParams.cmake" ^
             -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
             -DHLSL_DISABLE_SOURCE_GENERATION=On
@@ -217,6 +218,7 @@ jobs:
             -B "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DLLVM_ENABLE_ASSERTIONS=Off ^
+            -DLLVM_APPEND_VC_REV=Off ^
             -DLLVM_ENABLE_PROJECTS=clang ^
             -DLLVM_TARGETS_TO_BUILD=Native ^
             -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake"
