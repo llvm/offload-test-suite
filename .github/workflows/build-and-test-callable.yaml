@@ -204,7 +204,6 @@ jobs:
             -B "%GITHUB_WORKSPACE%\DXC\host-build" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DLLVM_ENABLE_ASSERTIONS=Off ^
-            -DLLVM_APPEND_VC_REV=Off ^
             -C "%GITHUB_WORKSPACE%\DXC\cmake\caches\PredefinedParams.cmake" ^
             -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
             -DHLSL_DISABLE_SOURCE_GENERATION=On
@@ -218,7 +217,6 @@ jobs:
             -B "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DLLVM_ENABLE_ASSERTIONS=Off ^
-            -DLLVM_APPEND_VC_REV=Off ^
             -DLLVM_ENABLE_PROJECTS=clang ^
             -DLLVM_TARGETS_TO_BUILD=Native ^
             -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake"
@@ -243,6 +241,16 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: arm64 -vcvars_ver=${{ env.VCToolsVersion }}
+      - name: Add x64 libs to LIB for native host-tool relinks
+        # Cross steps relink native x64 tools (llvm-config) under the ARM64 env;
+        # append x64 lib dirs so those links resolve the x64 CRT.
+        if: env.ARM64_CROSS == 'true'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
+          set "ARM64_LIB=%LIB%"
+          call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 -vcvars_ver=%VCToolsVersion% >nul
+          echo LIB=%ARM64_LIB%;%LIB%>>%GITHUB_ENV%
       # VsDevCmd replaces PATH. Restore the tool paths required by the
       # remaining workflow steps after the final target setup.
       - name: Restore Python path
