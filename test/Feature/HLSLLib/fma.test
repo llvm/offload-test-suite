@@ -51,13 +51,14 @@ Buffers:
     Stride: 32
     Data: [ 3.5, -7.75, -3.5, 6.0,
             -3.5, 6.5, 9.25, -6.5,
-            0x1.0000000000000p-26, -0x1.0000000000000p-26, 0x1.0000000000000p-104, -3.0,
-            0x1.0000000000000p-26, -0x1.0000000000000p-26, 0x1.0000000000000p-104, -3.0 ]
+            0, 0, 0, -3.0,
+            0, 0, 0, -3.0 ]
     # last two rows: 2^-26, -(2^-26), 2^-104, -3
 Results:
   - Result: Result
-    Rule: BufferFloatEpsilon 
-    Epsilon: 0.0001
+    Rule: BufferFloatULP
+    ULPT: 1
+    ZeroTolerance: 0.0001
     Actual: Out
     Expected: Expected
 DescriptorSets:
