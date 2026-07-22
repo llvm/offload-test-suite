@@ -4,13 +4,13 @@
 // the common successor, creating a phi of pointers into a resource.
 
 struct Foo {
-  float A;
-  float B;
+  uint A;
+  uint B;
 };
 
 [[vk::binding(1, 0)]] RWStructuredBuffer<Foo>   BufA : register(u0);
 [[vk::binding(2, 0)]] RWStructuredBuffer<Foo>   BufB : register(u1);
-[[vk::binding(3, 0)]] RWStructuredBuffer<float> Out  : register(u2);
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint> Out  : register(u2);
 
 [[vk::binding(0, 0)]]
 cbuffer Constants : register(b0) {
@@ -19,7 +19,7 @@ cbuffer Constants : register(b0) {
 
 [numthreads(8, 1, 1)]
 void main(uint TID : SV_DispatchThreadID) {
-  float Val;
+  uint Val;
   if ((TID & 1u) == Condition)
     Val = BufA[TID].B;
   else
@@ -38,27 +38,26 @@ Buffers:
     Data: [ 0x00000000 ]
 
   - Name: BufA
-    Format: Float32
+    Format: UInt32
     Stride: 8
     Data: [ 10, 110, 11, 111, 12, 112, 13, 113, 14, 114, 15, 115, 16, 116, 17, 117 ]
 
   - Name: BufB
-    Format: Float32
+    Format: UInt32
     Stride: 8
     Data: [ 20, 210, 21, 211, 22, 212, 23, 213, 24, 214, 25, 215, 26, 216, 27, 217 ]
 
   - Name: BufOut
-    Format: Float32
+    Format: UInt32
     FillSize: 32
 
   - Name: ExpectedOut
-    Format: Float32
+    Format: UInt32
     Data: [ 110, 211, 112, 213, 114, 215, 116, 217 ]
 
 Results:
   - Result: BufOut
-    Rule: BufferFloatULP
-    ULPT: 5
+    Rule: BufferExact
     Actual: BufOut
     Expected: ExpectedOut
 
