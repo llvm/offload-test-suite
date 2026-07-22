@@ -69,6 +69,7 @@ Buffers:
     Format: UInt64
     Stride: 8
     FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufU
     Format: UInt64
     Stride: 8
@@ -77,6 +78,7 @@ Buffers:
     Format: Int64
     Stride: 8
     FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufI
     Format: Int64
     Stride: 8
@@ -85,6 +87,7 @@ Buffers:
     Format: UInt64
     Stride: 8
     FillSize: 16
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedBABuf
     Format: UInt64
     Stride: 8
