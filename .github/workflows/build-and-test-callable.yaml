@@ -62,7 +62,7 @@ on:
       SplitBuild:
         description: 'Split build and test into separate jobs (build on any runner, test on GPU runner)'
         required: false
-        default: false
+        default: true
         type: boolean
       LLVM-ExtraCMakeArgs:
         description: 'Extra CMake Args for LLVM'
@@ -234,6 +234,13 @@ jobs:
         with:
           # setup-windows forwards this input to VsDevCmd.bat after -arch=.
           arch: arm64 -host_arch=x64 -vcvars_ver=${{ env.VCToolsVersion }}
+      - name: Setup Windows ARM64 native target
+        # Non-split windows-qc builds natively on the ARM64 device
+        # (split qc cross-compiles on X64 via the step above).
+        if: inputs.OS == 'windows' && inputs.SKU == 'windows-qc' && env.ARM64_CROSS != 'true'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64 -vcvars_ver=${{ env.VCToolsVersion }}
       # VsDevCmd replaces PATH. Restore the tool paths required by the
       # remaining workflow steps after the final target setup.
       - name: Restore Python path
