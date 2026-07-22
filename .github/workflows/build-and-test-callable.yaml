@@ -269,6 +269,23 @@ jobs:
           echo "Runner architecture: ${{ runner.arch }}"
           echo "MSVC host architecture: ${VSCMD_ARG_HOST_ARCH:-unknown}"
           echo "MSVC target architecture: ${VSCMD_ARG_TGT_ARCH:-unknown}"
+      - name: Generate ARM64 Vulkan import lib
+        # x64 Vulkan SDK ships only an x64 vulkan-1.lib; synthesize an ARM64
+        # import lib from the arch-neutral loader DLL for the cross link.
+        if: env.ARM64_CROSS == 'true'
+        shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -DevCmdArguments '-arch=x64' -SkipAutomaticLocation
+          $out = "$env:GITHUB_WORKSPACE\vulkan-arm64"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $names = & dumpbin /exports "$env:VULKAN_SDK\Bin\vulkan-1.dll" |
+            Select-String '^\s+\d+\s+[0-9A-Fa-f]+\s+[0-9A-Fa-f]+\s+(\S+)$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          @('EXPORTS') + $names | Set-Content "$out\vulkan-1.def"
+          lib /def:"$out\vulkan-1.def" /machine:arm64 /out:"$out\vulkan-1.lib"
       # When SplitBuild is enabled, force clang into the build set even if
       # the TestTarget doesn't use it. Reason: install-distribution depends
       # on clang (it ships in the install prefix), so if clang isn't part
@@ -324,6 +341,7 @@ jobs:
                 -DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc
                 "-DLLVM_NATIVE_BUILD=$GITHUB_WORKSPACE/llvm-project/host-build"
                 "-DLLVM_NATIVE_TOOL_DIR=$GITHUB_WORKSPACE/llvm-project/host-build/bin"
+                "-DVulkan_LIBRARY=$GITHUB_WORKSPACE/vulkan-arm64/vulkan-1.lib"
               )
             fi
             cmake -G Ninja \
