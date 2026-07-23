@@ -131,7 +131,8 @@ Results:
 #--- end
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/664
-# XFAIL: DirectX || Metal
+# XFAIL: Metal
+# XFAIL: Clang && DirectX
 
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 

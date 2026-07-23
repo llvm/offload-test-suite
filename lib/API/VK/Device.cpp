@@ -606,6 +606,17 @@ public:
   }
 };
 
+class VulkanSampler : public offloadtest::Sampler {
+public:
+  SamplerCreateDesc Desc;
+
+  const SamplerCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Sampler *S) {
+    return S->getAPI() == GPUAPI::Vulkan;
+  }
+};
+
 class VulkanAccelerationStructure : public offloadtest::AccelerationStructure {
 public:
   VkDevice Dev;
@@ -2804,6 +2815,11 @@ public:
     return Tex;
   }
 
+  llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string, const SamplerCreateDesc &) override {
+    return llvm::createStringError("createSampler is unimplemented on Vulkan.");
+  }
+
   uint32_t getTextureUploadRowStrideInBytes(
       const TextureCreateDesc &Desc) const override {
     const uint64_t TightRow =
@@ -3336,7 +3352,7 @@ public:
   llvm::Expected<ResourceRef> createSampler(Resource &R, BufferRef &Host) {
     VkSamplerCreateInfo SamplerInfo = {};
     SamplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    const Sampler &S = *R.SamplerPtr;
+    const YAMLSampler &S = *R.SamplerPtr;
     SamplerInfo.magFilter = getVKFilter(S.MagFilter);
     SamplerInfo.minFilter = getVKFilter(S.MinFilter);
     SamplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;

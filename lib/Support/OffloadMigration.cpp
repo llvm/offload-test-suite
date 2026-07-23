@@ -325,9 +325,23 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
           IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
       assert(Inserted.second && "TLAS bound to multiple resources NYI");
       (void)Inserted;
+    } else if (R.isSampler()) {
+      const SamplerCreateDesc Desc = {
+          R.SamplerPtr->MinFilter,    R.SamplerPtr->MagFilter,
+          R.SamplerPtr->Address,      R.SamplerPtr->MinLOD,
+          R.SamplerPtr->MaxLOD,       R.SamplerPtr->MipLODBias,
+          R.SamplerPtr->ComparisonOp, R.SamplerPtr->Kind,
+      };
+
+      auto SamplerOrErr = Dev.createSampler(R.SamplerPtr->Name, Desc);
+      if (!SamplerOrErr)
+        return SamplerOrErr.takeError();
+
+      ResourceSet RSet(std::move(*SamplerOrErr));
+      ResBundle.push_back(std::move(RSet));
     } else {
       return llvm::createStringError(std::errc::not_supported,
-                                     "Samplers are not yet implemented.");
+                                     "Unrecognized resource type.");
     }
 
     Resources.push_back(std::make_pair(&R, std::move(ResBundle)));

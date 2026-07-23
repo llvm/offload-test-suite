@@ -141,6 +141,66 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
+static D3D12_FILTER getDXFilterMode(FilterMode MinFilter, FilterMode MagFilter,
+                                    bool IsComparison) {
+  if (IsComparison) {
+    if (MinFilter == FilterMode::Nearest)
+      return MagFilter == FilterMode::Nearest
+                 ? D3D12_FILTER_COMPARISON_MIN_MAG_MIP_POINT
+                 : D3D12_FILTER_COMPARISON_MIN_POINT_MAG_LINEAR_MIP_POINT;
+
+    return MagFilter == FilterMode::Nearest
+               ? D3D12_FILTER_COMPARISON_MIN_LINEAR_MAG_MIP_POINT
+               : D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT;
+  }
+  if (MinFilter == FilterMode::Nearest)
+    return MagFilter == FilterMode::Nearest
+               ? D3D12_FILTER_MIN_MAG_MIP_POINT
+               : D3D12_FILTER_MIN_POINT_MAG_LINEAR_MIP_POINT;
+
+  return MagFilter == FilterMode::Nearest
+             ? D3D12_FILTER_MIN_LINEAR_MAG_MIP_POINT
+             : D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT;
+}
+
+static D3D12_TEXTURE_ADDRESS_MODE getDXTextureAddressMode(AddressMode Mode) {
+  switch (Mode) {
+  case AddressMode::Clamp:
+    return D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+  case AddressMode::Repeat:
+    return D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+  case AddressMode::Mirror:
+    return D3D12_TEXTURE_ADDRESS_MODE_MIRROR;
+  case AddressMode::Border:
+    return D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+  case AddressMode::MirrorOnce:
+    return D3D12_TEXTURE_ADDRESS_MODE_MIRROR_ONCE;
+  }
+  llvm_unreachable("All cases handled.");
+}
+
+static D3D12_COMPARISON_FUNC getDXComparisonFunc(CompareFunction ComparisonOp) {
+  switch (ComparisonOp) {
+  case CompareFunction::Never:
+    return D3D12_COMPARISON_FUNC_NEVER;
+  case CompareFunction::Less:
+    return D3D12_COMPARISON_FUNC_LESS;
+  case CompareFunction::Equal:
+    return D3D12_COMPARISON_FUNC_EQUAL;
+  case CompareFunction::LessEqual:
+    return D3D12_COMPARISON_FUNC_LESS_EQUAL;
+  case CompareFunction::Greater:
+    return D3D12_COMPARISON_FUNC_GREATER;
+  case CompareFunction::NotEqual:
+    return D3D12_COMPARISON_FUNC_NOT_EQUAL;
+  case CompareFunction::GreaterEqual:
+    return D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+  case CompareFunction::Always:
+    return D3D12_COMPARISON_FUNC_ALWAYS;
+  }
+  llvm_unreachable("All cases handled.");
+}
+
 namespace {
 class DXDevice;
 
@@ -243,10 +303,47 @@ public:
   }
 };
 
+class DXSampler : public offloadtest::Sampler {
+public:
+  D3D12_CPU_DESCRIPTOR_HANDLE Handle = {};
+  std::string Name;
+  SamplerCreateDesc Desc;
+
+  DXSampler(llvm::StringRef Name, SamplerCreateDesc Desc,
+            D3D12_CPU_DESCRIPTOR_HANDLE Handle)
+      : offloadtest::Sampler(GPUAPI::DirectX), Handle(Handle), Name(Name),
+        Desc(Desc) {}
+
+  const SamplerCreateDesc &getDesc() const override { return Desc; }
+
+  static bool classof(const offloadtest::Sampler *S) {
+    return S->getAPI() == GPUAPI::DirectX;
+  }
+};
+
+enum class RootParameterType : uint32_t {
+  DescriptorTable = 0,
+  SamplerTable,
+  Constant,
+  CBV,
+  SRV,
+  UAV,
+};
+
+struct RootSignatureLayout {
+  RootParameterType ParameterType : 3;
+  uint32_t Count : 29;
+
+  RootSignatureLayout(RootParameterType ParameterType, uint32_t Count)
+      : ParameterType(ParameterType), Count(Count) {}
+  RootSignatureLayout() = delete;
+};
+
 class DXPipelineState : public offloadtest::PipelineState {
 public:
   std::string Name;
   ComPtr<ID3D12RootSignature> RootSig;
+  llvm::SmallVector<RootSignatureLayout> Layout;
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
@@ -256,11 +353,13 @@ public:
   bool IsRayTracing = false;
 
   DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
+                  llvm::SmallVector<RootSignatureLayout> Layout,
                   ComPtr<ID3D12PipelineState> PSO,
                   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology,
                   bool IsRT = false)
       : offloadtest::PipelineState(GPUAPI::DirectX), Name(Name),
-        RootSig(RootSig), PSO(PSO), Topology(Topology), IsRayTracing(IsRT) {}
+        RootSig(RootSig), Layout(std::move(Layout)), PSO(PSO),
+        Topology(Topology), IsRayTracing(IsRT) {}
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::DirectX;
@@ -279,9 +378,11 @@ public:
 
   DXRayTracingPipelineState(llvm::StringRef Name,
                             ComPtr<ID3D12RootSignature> RootSig,
+                            llvm::SmallVector<RootSignatureLayout> Layout,
                             ComPtr<ID3D12StateObject> SO,
                             ComPtr<ID3D12StateObjectProperties> Props)
-      : DXPipelineState(Name, RootSig, /*PSO=*/nullptr, std::nullopt,
+      : DXPipelineState(Name, RootSig, std::move(Layout), /*PSO=*/nullptr,
+                        std::nullopt,
                         /*IsRT=*/true),
         StateObject(SO), Properties(Props) {}
 
@@ -1047,15 +1148,18 @@ public:
   DescriptorAllocator RTVAllocator;
   DescriptorAllocator DSVAllocator;
   DescriptorAllocator CSUAllocator;
+  DescriptorAllocator SamplerAllocator;
 
   DXDevice(ComPtr<IDXCoreAdapter> A, ComPtr<ID3D12DeviceX> D, DXQueue Q,
            DescriptorAllocator RTVAllocator, DescriptorAllocator DSVAllocator,
-           DescriptorAllocator CSUAllocator, std::string Desc,
+           DescriptorAllocator CSUAllocator,
+           DescriptorAllocator SamplerAllocator, std::string Desc,
            std::string DriverVer)
       : Adapter(A), Device(D), GraphicsQueue(std::move(Q)),
         RTVAllocator(std::move(RTVAllocator)),
         DSVAllocator(std::move(DSVAllocator)),
-        CSUAllocator(std::move(CSUAllocator)) {
+        CSUAllocator(std::move(CSUAllocator)),
+        SamplerAllocator(std::move(SamplerAllocator)) {
     Description = std::move(Desc);
     DriverVersion = std::move(DriverVer);
     DriverName = "DirectX";
@@ -1097,9 +1201,10 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
-  llvm::Error
-  createRootSignatureFromShader(llvm::StringRef, const ShaderContainer &Shader,
-                                ComPtr<ID3D12RootSignature> &OutRootSignature) {
+  llvm::Error createRootSignatureFromShader(
+      llvm::StringRef Name, const ShaderContainer &Shader,
+      ComPtr<ID3D12RootSignature> &OutRootSignature,
+      llvm::SmallVectorImpl<RootSignatureLayout> &Layout) {
     // Try pulling a root signature from the DXIL first
     auto ExContainer =
         llvm::object::DXContainer::create(Shader.Shader->getMemBufferRef());
@@ -1119,14 +1224,71 @@ public:
                                           IID_PPV_ARGS(&OutRootSignature)),
               "Failed to create root signature."))
         return Err;
+
+      const std::wstring WStr(Name.begin(), Name.end());
+      OutRootSignature->SetName(WStr.c_str());
+
+      // Deserialize the root signature to determine how we need to bind
+      // descriptor tables
+      ComPtr<ID3D12VersionedRootSignatureDeserializer> Deserializer;
+      if (auto Err = HR::toError(
+              D3D12CreateVersionedRootSignatureDeserializer(
+                  Binary.data(), Binary.size(), IID_PPV_ARGS(&Deserializer)),
+              "Failed to create Root Signature Deserializer"))
+        return Err;
+
+      const D3D12_VERSIONED_ROOT_SIGNATURE_DESC *RootSigDesc = nullptr;
+      if (auto Err =
+              HR::toError(Deserializer->GetRootSignatureDescAtVersion(
+                              D3D_ROOT_SIGNATURE_VERSION_1, &RootSigDesc),
+                          "Failed to deseralize root signature"))
+        return Err;
+
+      for (uint32_t I = 0; I < RootSigDesc->Desc_1_0.NumParameters; ++I) {
+        const D3D12_ROOT_PARAMETER &Parameter =
+            RootSigDesc->Desc_1_0.pParameters[I];
+        switch (Parameter.ParameterType) {
+        case D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE: {
+          uint32_t DescriptorCount = 0;
+          for (uint32_t I = 0;
+               I < Parameter.DescriptorTable.NumDescriptorRanges; ++I)
+            DescriptorCount +=
+                Parameter.DescriptorTable.pDescriptorRanges[I].NumDescriptors;
+
+          if (Parameter.DescriptorTable.NumDescriptorRanges > 0 &&
+              Parameter.DescriptorTable.pDescriptorRanges[0].RangeType ==
+                  D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER)
+            Layout.push_back(RootSignatureLayout(
+                RootParameterType::SamplerTable, DescriptorCount));
+          else
+            Layout.push_back(RootSignatureLayout(
+                RootParameterType::DescriptorTable, DescriptorCount));
+          break;
+        }
+        case D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS:
+          Layout.push_back(RootSignatureLayout(
+              RootParameterType::Constant, Parameter.Constants.Num32BitValues));
+          break;
+        case D3D12_ROOT_PARAMETER_TYPE_CBV:
+          Layout.push_back(RootSignatureLayout(RootParameterType::CBV, 1));
+          break;
+        case D3D12_ROOT_PARAMETER_TYPE_SRV:
+          Layout.push_back(RootSignatureLayout(RootParameterType::SRV, 1));
+          break;
+        case D3D12_ROOT_PARAMETER_TYPE_UAV:
+          Layout.push_back(RootSignatureLayout(RootParameterType::UAV, 1));
+          break;
+        }
+      }
     }
 
     return llvm::Error::success();
   }
 
   llvm::Error createRootSignatureFromBindingsDesc(
-      llvm::StringRef, const BindingsDesc &BndDesc, bool IsGraphics,
-      ComPtr<ID3D12RootSignature> &OutRootSignature) {
+      llvm::StringRef Name, const BindingsDesc &BndDesc, bool IsGraphics,
+      ComPtr<ID3D12RootSignature> &OutRootSignature,
+      llvm::SmallVectorImpl<RootSignatureLayout> &Layout) {
     uint32_t DescriptorCount = 0;
     for (auto &D : BndDesc.DescriptorSetDescs)
       DescriptorCount += D.ResourceBindings.size();
@@ -1139,7 +1301,11 @@ public:
       uint32_t DescriptorIdx = 0;
       const uint32_t StartRangeIdx = RangeIdx;
       for (const auto &Binding : Set.ResourceBindings) {
-        switch (getDescriptorKind(Binding.Kind)) {
+        const DescriptorKind Kind = getDescriptorKind(Binding.Kind);
+        if (Kind == DescriptorKind::SAMPLER)
+          continue;
+
+        switch (Kind) {
         case DescriptorKind::SRV:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
           break;
@@ -1150,7 +1316,8 @@ public:
           Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
           break;
         case DescriptorKind::SAMPLER:
-          llvm_unreachable("Not implemented yet."); // Requires a separate heap
+          llvm_unreachable("Sampler should have been filtered out.");
+          break;
         }
         Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
         Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
@@ -1160,12 +1327,48 @@ public:
         RangeIdx++;
         DescriptorIdx += Binding.DescriptorCount;
       }
-      RootParams.push_back(D3D12_ROOT_PARAMETER{
-          D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
-          {D3D12_ROOT_DESCRIPTOR_TABLE{
-              static_cast<uint32_t>(Set.ResourceBindings.size()),
-              &Ranges.get()[StartRangeIdx]}},
-          D3D12_SHADER_VISIBILITY_ALL});
+      const uint32_t RangeCount =
+          static_cast<uint32_t>(RangeIdx - StartRangeIdx);
+      if (RangeCount > 0) {
+        RootParams.push_back(
+            D3D12_ROOT_PARAMETER{D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+                                 {D3D12_ROOT_DESCRIPTOR_TABLE{
+                                     RangeCount, &Ranges.get()[StartRangeIdx]}},
+                                 D3D12_SHADER_VISIBILITY_ALL});
+        Layout.push_back(RootSignatureLayout(RootParameterType::DescriptorTable,
+                                             DescriptorIdx));
+      }
+
+      uint32_t SamplerDescriptorIdx = 0;
+      const uint32_t SamplerStartRangeIdx = RangeIdx;
+      for (const auto &Binding : Set.ResourceBindings) {
+        const DescriptorKind Kind = getDescriptorKind(Binding.Kind);
+        if (Kind != DescriptorKind::SAMPLER)
+          continue;
+
+        Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
+        Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
+        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
+        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
+        Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
+            SamplerDescriptorIdx;
+
+        RangeIdx++;
+        SamplerDescriptorIdx += Binding.DescriptorCount;
+      }
+
+      const uint32_t SamplerRangeCount =
+          static_cast<uint32_t>(RangeIdx - SamplerStartRangeIdx);
+      if (SamplerRangeCount > 0) {
+        RootParams.push_back(D3D12_ROOT_PARAMETER{
+            D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE,
+            {D3D12_ROOT_DESCRIPTOR_TABLE{
+                static_cast<uint32_t>(RangeIdx - SamplerStartRangeIdx),
+                &Ranges.get()[SamplerStartRangeIdx]}},
+            D3D12_SHADER_VISIBILITY_ALL});
+        Layout.push_back(RootSignatureLayout(RootParameterType::SamplerTable,
+                                             SamplerDescriptorIdx));
+      }
     }
 
     CD3DX12_ROOT_SIGNATURE_DESC Desc;
@@ -1196,32 +1399,37 @@ public:
             "Failed to create root signature."))
       return Err;
 
+    const std::wstring WStr(Name.begin(), Name.end());
+    OutRootSignature->SetName(WStr.c_str());
+
     return llvm::Error::success();
   }
 
   llvm::Error
   createRootSignature(llvm::StringRef Name, const BindingsDesc &BndDesc,
                       const ShaderContainer &Shader, bool IsGraphics,
-                      ComPtr<ID3D12RootSignature> &OutRootSignature) {
+                      ComPtr<ID3D12RootSignature> &OutRootSignature,
+                      llvm::SmallVectorImpl<RootSignatureLayout> &Layout) {
     assert(OutRootSignature.Get() == nullptr);
 
-    if (auto Err =
-            createRootSignatureFromShader(Name, Shader, OutRootSignature))
+    if (auto Err = createRootSignatureFromShader(Name, Shader, OutRootSignature,
+                                                 Layout))
       return Err;
 
     if (OutRootSignature.Get() != nullptr)
       return llvm::Error::success();
 
     return createRootSignatureFromBindingsDesc(Name, BndDesc, IsGraphics,
-                                               OutRootSignature);
+                                               OutRootSignature, Layout);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
   createPipelineCs(llvm::StringRef Name, const BindingsDesc &BndDesc,
                    ShaderContainer CS) override {
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, CS,
-                                       /*IsGraphics=*/false, RootSig))
+                                       /*IsGraphics=*/false, RootSig, Layout))
       return Err;
 
     auto DXIL = CS.Shader->getBuffer();
@@ -1241,7 +1449,8 @@ public:
             "Failed to create PSO."))
       return Err;
 
-    return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
+    return std::make_unique<DXPipelineState>(Name, RootSig, std::move(Layout),
+                                             PSO, std::nullopt);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>>
@@ -1251,8 +1460,9 @@ public:
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, Desc.VS,
-                                       /*IsGraphics=*/true, RootSig))
+                                       /*IsGraphics=*/true, RootSig, Layout))
       return Err;
 
     std::vector<D3D12_INPUT_ELEMENT_DESC> DXInputLayout;
@@ -1316,7 +1526,7 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(
-        Name, RootSig, PSO,
+        Name, RootSig, std::move(Layout), PSO,
         getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints));
   }
 
@@ -1326,8 +1536,9 @@ public:
     assert(Desc.RTFormats.size() <= 8);
 
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BindingsDesc, Desc.MS,
-                                       /*IsGraphics=*/true, RootSig))
+                                       /*IsGraphics=*/true, RootSig, Layout))
       return Err;
 
     const D3D12_SHADER_BYTECODE MSBytecode = {
@@ -1393,7 +1604,8 @@ public:
             "Failed to create mesh shader PSO."))
       return Err;
 
-    return std::make_unique<DXPipelineState>(Name, RootSig, PSO, std::nullopt);
+    return std::make_unique<DXPipelineState>(Name, RootSig, std::move(Layout),
+                                             PSO, std::nullopt);
   }
 
   static std::wstring widen(llvm::StringRef S) {
@@ -1425,8 +1637,9 @@ public:
     ShaderContainer LibContainer = {};
     LibContainer.Shader = Desc.Library;
     ComPtr<ID3D12RootSignature> RootSig;
+    llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, LibContainer,
-                                       /*IsGraphics=*/false, RootSig))
+                                       /*IsGraphics=*/false, RootSig, Layout))
       return Err;
 
     CD3DX12_STATE_OBJECT_DESC SODesc(
@@ -1493,7 +1706,7 @@ public:
       return Err;
 
     auto State = std::make_unique<DXRayTracingPipelineState>(
-        Name, RootSig, StateObject, Properties);
+        Name, RootSig, Layout, StateObject, Properties);
     // Cache identifiers up-front. The driver-owned blobs are alive for
     // Properties' lifetime, which lives on the PSO.
     //
@@ -1925,6 +2138,42 @@ public:
     return Tex;
   }
 
+  llvm::Expected<std::unique_ptr<Sampler>>
+  createSampler(std::string Name, const SamplerCreateDesc &Desc) override {
+
+    auto HandleOrErr = SamplerAllocator.allocate();
+    if (!HandleOrErr)
+      return HandleOrErr.takeError();
+    const D3D12_CPU_DESCRIPTOR_HANDLE Handle = *HandleOrErr;
+
+    const D3D12_TEXTURE_ADDRESS_MODE AddressMode =
+        getDXTextureAddressMode(Desc.Address);
+
+    bool IsComparison = false;
+    D3D12_COMPARISON_FUNC ComparisonFunc = D3D12_COMPARISON_FUNC_NONE;
+    if (Desc.Kind == SamplerKind::SamplerComparison) {
+      IsComparison = true;
+      ComparisonFunc = getDXComparisonFunc(Desc.ComparisonOp);
+    }
+
+    const D3D12_SAMPLER_DESC SamplerDesc = {
+        getDXFilterMode(Desc.MinFilter, Desc.MagFilter, IsComparison),
+        AddressMode, // U
+        AddressMode, // V
+        AddressMode, // W
+        Desc.MipLODBias,
+        0, // MaxAnisotropy
+        ComparisonFunc,
+        {0.0f, 0.0f, 0.0f, 0.0f}, // BorderColor
+        Desc.MinLOD,
+        Desc.MaxLOD,
+    };
+
+    Device->CreateSampler(&SamplerDesc, Handle);
+
+    return std::make_unique<DXSampler>(Name, Desc, Handle);
+  }
+
   uint32_t getTextureUploadRowStrideInBytes(
       const TextureCreateDesc &Desc) const override {
     return getAlignedTexturePitch(Desc.Width, getFormatSizeInBytes(Desc.Fmt));
@@ -2032,11 +2281,16 @@ public:
     if (!CSUHeapOrErr)
       return CSUHeapOrErr.takeError();
 
+    auto SamplerHeapOrErr = DescriptorAllocator::create(
+        Device.Get(), D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, 256);
+    if (!SamplerHeapOrErr)
+      return SamplerHeapOrErr.takeError();
+
     return std::make_unique<DXDevice>(
         Adapter, Device, std::move(*GraphicsQueueOrErr),
         std::move(*RTVHeapOrErr), std::move(*DSVHeapOrErr),
-        std::move(*CSUHeapOrErr), std::string(DescVec.data()),
-        std::move(DriverVer));
+        std::move(*CSUHeapOrErr), std::move(*SamplerHeapOrErr),
+        std::string(DescVec.data()), std::move(DriverVer));
   }
 
   const Capabilities &getCapabilities() override {
@@ -2080,18 +2334,44 @@ public:
     return llvm::Error::success();
   }
 
-  llvm::Error createDescriptorHeap(Pipeline &P,
-                                   ComPtr<ID3D12DescriptorHeap> &DescHeap) {
+  llvm::Error createDescriptorHeaps(Pipeline &P,
+                                    ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                                    ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
+
+    uint32_t DescriptorCount = 0;
+    uint32_t SamplerCount = 0;
+    for (auto &D : P.Sets)
+      for (auto &R : D.Resources)
+        if (R.isSampler())
+          SamplerCount += 1;
+        else
+          DescriptorCount += R.getArraySize();
+
+    // prevent empty heaps
+    if (DescriptorCount == 0)
+      DescriptorCount = 1;
+    if (SamplerCount == 0)
+      SamplerCount = 1;
+
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
-        P.getDescriptorCountWithFlattenedArrays(),
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, DescriptorCount,
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
     if (auto Err = HR::toError(
             Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&DescHeap)),
             "Failed to create descriptor heap."))
       return Err;
+
+    const D3D12_DESCRIPTOR_HEAP_DESC SamplerHeapDesc = {
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, SamplerCount,
+        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
+    if (auto Err =
+            HR::toError(Device->CreateDescriptorHeap(
+                            &SamplerHeapDesc, IID_PPV_ARGS(&SamplerHeap)),
+                        "Failed to create sampler descriptor heap."))
+      return Err;
+
     return llvm::Error::success();
   }
 
@@ -2258,15 +2538,26 @@ public:
   }
 
   void buildDescriptorTables(llvm::ArrayRef<DescriptorTable> DescTables,
-                             const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
+                             const ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                             const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     // Bind descriptors in descriptor tables.
     if (!DescHeap)
       return;
+
     uint32_t HeapIndex = 0;
+    uint32_t SamplerHeapIndex = 0;
+
     const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
         DescHeap->GetCPUDescriptorHandleForHeapStart();
+    const D3D12_CPU_DESCRIPTOR_HANDLE SamplerHeapStart =
+        SamplerHeap->GetCPUDescriptorHandleForHeapStart();
+
     const uint32_t DescHandleIncSize = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const uint32_t SamplerHandleIncSize =
+        Device->GetDescriptorHandleIncrementSize(
+            D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
     for (auto &T : DescTables) {
       for (auto &R : T.Resources) {
         for (const auto &Set : R.second) {
@@ -2315,6 +2606,9 @@ public:
             const DXAccelerationStructure &AccelerationStructureDX =
                 llvm::cast<DXAccelerationStructure>(*Set.AS);
             DescriptorHandle = AccelerationStructureDX.SRVHandle;
+          } else if (Set.Sampler != nullptr) {
+            const DXSampler &SamplerDX = llvm::cast<DXSampler>(*Set.Sampler);
+            DescriptorHandle = SamplerDX.Handle;
           } else {
             llvm_unreachable("Resource was a texture nor buffer. Samplers "
                              "are unsupported");
@@ -2322,10 +2616,20 @@ public:
 
           assert(DescriptorHandle.ptr != 0 &&
                  "Somehow got a null descriptor :(");
-          Device->CopyDescriptorsSimple(
-              1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
-              DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-          HeapIndex += 1;
+
+          if (Set.Sampler != nullptr) {
+            Device->CopyDescriptorsSimple(
+                1,
+                {SamplerHeapStart.ptr +
+                 SamplerHeapIndex * SamplerHandleIncSize},
+                DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+            SamplerHeapIndex += 1;
+          } else {
+            Device->CopyDescriptorsSimple(
+                1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
+                DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+            HeapIndex += 1;
+          }
         }
       }
     }
@@ -2333,14 +2637,16 @@ public:
 
   llvm::Error
   createComputeCommands(Pipeline &P, SharedInvocationState &IS,
-                        const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
+                        const ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                        const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     const DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
 
-    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle;
+    CD3DX12_GPU_DESCRIPTOR_HANDLE Handle, SamplerHandle;
     if (DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get()};
-      DXCB.CmdList->SetDescriptorHeaps(1, Heaps);
+      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get(), SamplerHeap.Get()};
+      DXCB.CmdList->SetDescriptorHeaps(2, Heaps);
       Handle = DescHeap->GetGPUDescriptorHandleForHeapStart();
+      SamplerHandle = SamplerHeap->GetGPUDescriptorHandleForHeapStart();
     }
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
@@ -2348,8 +2654,21 @@ public:
 
     const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+    const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
 
     if (P.Settings.DX.RootParams.size() > 0) {
+
+      // Samplers are not supported in RootParams, error if we do find any.
+      for (const auto &Set : P.Sets) {
+        for (const auto &R : Set.Resources) {
+          if (R.isSampler())
+            return llvm::createStringError(
+                "Descriptor tables containing samplers are not yet supported "
+                "with explicit RootParameters.");
+        }
+      }
+
       uint32_t ConstantOffset = 0u;
       uint32_t RootParamIndex = 0u;
       uint32_t DescriptorTableIndex = 0u;
@@ -2405,7 +2724,8 @@ public:
                                                            VirtualAddress);
             break;
           case DescriptorKind::SAMPLER:
-            llvm_unreachable("Not implemented yet.");
+            llvm_unreachable(
+                "Samplers cannot be written directly into the Root Signature.");
           }
           ++RootDescIt;
           break;
@@ -2415,9 +2735,22 @@ public:
       // If no explicit root parameters are provided, fall back to using the
       // descriptor set layout. This is to make it easier to write tests that
       // don't need complicated root signatures.
-      for (uint32_t Idx = 0u; Idx < P.Sets.size(); ++Idx) {
-        DXCB.CmdList->SetComputeRootDescriptorTable(Idx, Handle);
-        Handle.Offset(P.Sets[Idx].Resources.size(), Inc);
+      for (uint32_t I = 0, N = DXPipeline.Layout.size(); I < N; ++I) {
+        const auto &Layout = DXPipeline.Layout[I];
+        switch (Layout.ParameterType) {
+        case RootParameterType::DescriptorTable:
+          DXCB.CmdList->SetComputeRootDescriptorTable(I, Handle);
+          Handle.Offset(Layout.Count, Inc);
+          break;
+        case RootParameterType::SamplerTable:
+          DXCB.CmdList->SetComputeRootDescriptorTable(I, SamplerHandle);
+          SamplerHandle.Offset(Layout.Count, SamplerInc);
+          break;
+        default:
+          return llvm::createStringError(
+              "Root Signatures that contain constants and inline descriptors "
+              "require custom RootParameters to be defined.");
+        }
       }
     }
 
@@ -2464,17 +2797,43 @@ public:
 
   llvm::Error
   createGraphicsCommands(Pipeline &P, SharedInvocationState &IS,
-                         const ComPtr<ID3D12DescriptorHeap> &DescHeap) {
+                         const ComPtr<ID3D12DescriptorHeap> &DescHeap,
+                         const ComPtr<ID3D12DescriptorHeap> &SamplerHeap) {
     const DXPipelineState &DXPipeline =
         llvm::cast<DXPipelineState>(*IS.Pipeline.get());
     const DXCommandBuffer &DXCB = llvm::cast<DXCommandBuffer>(*IS.CB);
-
     DXCB.CmdList->SetGraphicsRootSignature(DXPipeline.RootSig.Get());
+
     if (DescHeap) {
-      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get()};
-      DXCB.CmdList->SetDescriptorHeaps(1, Heaps);
-      DXCB.CmdList->SetGraphicsRootDescriptorTable(
-          0, DescHeap->GetGPUDescriptorHandleForHeapStart());
+      ID3D12DescriptorHeap *const Heaps[] = {DescHeap.Get(), SamplerHeap.Get()};
+      DXCB.CmdList->SetDescriptorHeaps(2, Heaps);
+      CD3DX12_GPU_DESCRIPTOR_HANDLE Handle(
+          DescHeap->GetGPUDescriptorHandleForHeapStart());
+      CD3DX12_GPU_DESCRIPTOR_HANDLE SamplerHandle(
+          SamplerHeap->GetGPUDescriptorHandleForHeapStart());
+
+      const uint32_t Inc = Device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      const uint32_t SamplerInc = Device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
+
+      for (uint32_t I = 0, N = DXPipeline.Layout.size(); I < N; ++I) {
+        const auto &Layout = DXPipeline.Layout[I];
+        switch (Layout.ParameterType) {
+        case RootParameterType::DescriptorTable:
+          DXCB.CmdList->SetGraphicsRootDescriptorTable(I, Handle);
+          Handle.Offset(Layout.Count, Inc);
+          break;
+        case RootParameterType::SamplerTable:
+          DXCB.CmdList->SetGraphicsRootDescriptorTable(I, SamplerHandle);
+          SamplerHandle.Offset(Layout.Count, SamplerInc);
+          break;
+        default:
+          return llvm::createStringError(
+              "Root Signatures that contain constants and inline descriptors "
+              "require custom RootParameters to be defined.");
+        }
+      }
     }
 
     RenderPassBeginDesc BeginDesc = {};
@@ -2544,8 +2903,8 @@ public:
   llvm::Error executeProgram(Pipeline &P) override {
     llvm::outs() << "Configuring execution on device: " << Description << "\n";
 
-    ComPtr<ID3D12DescriptorHeap> DescHeap;
-    if (auto Err = createDescriptorHeap(P, DescHeap))
+    ComPtr<ID3D12DescriptorHeap> DescHeap, SamplerHeap;
+    if (auto Err = createDescriptorHeaps(P, DescHeap, SamplerHeap))
       return Err;
     llvm::outs() << "Descriptor heap created.\n";
 
@@ -2560,7 +2919,7 @@ public:
       return Err;
     llvm::outs() << "Buffers created.\n";
 
-    buildDescriptorTables(State.DescTables, DescHeap);
+    buildDescriptorTables(State.DescTables, DescHeap, SamplerHeap);
 
     if (!P.AccelStructs.BLAS.empty() || !P.AccelStructs.TLAS.empty()) {
       auto EncOrErr = State.CB->createComputeEncoder();
@@ -2607,7 +2966,7 @@ public:
         return PipelineStateOrErr.takeError();
       State.Pipeline = std::move(*PipelineStateOrErr);
       llvm::outs() << "Compute Pipeline created.\n";
-      if (auto Err = createComputeCommands(P, State, DescHeap))
+      if (auto Err = createComputeCommands(P, State, DescHeap, SamplerHeap))
         return Err;
       llvm::outs() << "Compute command list created.\n";
 
@@ -2713,7 +3072,7 @@ public:
         llvm::outs() << "Mesh Shader Pipeline created.\n";
       }
 
-      if (auto Err = createGraphicsCommands(P, State, DescHeap))
+      if (auto Err = createGraphicsCommands(P, State, DescHeap, SamplerHeap))
         return Err;
       llvm::outs() << "Graphics command list created complete.\n";
     } else if (P.isRayTracing()) {
@@ -2744,7 +3103,7 @@ public:
       State.SBT = std::move(*SBTOrErr);
       llvm::outs() << "Shader Binding Table created.\n";
 
-      if (auto Err = createComputeCommands(P, State, DescHeap))
+      if (auto Err = createComputeCommands(P, State, DescHeap, SamplerHeap))
         return Err;
       llvm::outs() << "RayTracing command list created.\n";
     } else {
