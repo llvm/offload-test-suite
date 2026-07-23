@@ -64,7 +64,8 @@ static bool compareDoubleEpsilon(const double &FSrc, const double &FRef,
 
 static bool compareDoubleULP(const double &FSrc, const double &FRef,
                              unsigned ULPTolerance,
-                             offloadtest::DenormMode DM) {
+                             offloadtest::DenormMode DM,
+                             double ZeroTolerance) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -75,6 +76,10 @@ static bool compareDoubleULP(const double &FSrc, const double &FRef,
     if (isDenorm(FRef) && FSrc == 0 && std::signbit(FSrc) == std::signbit(FRef))
       return true;
   }
+  // ULP comparison is meaningless near zero. Use absolute tolerance instead.
+  if (ZeroTolerance > 0.0 &&
+      (std::abs(FSrc) <= ZeroTolerance || std::abs(FRef) <= ZeroTolerance))
+    return std::abs(FSrc - FRef) <= ZeroTolerance;
   // For FTZ or Preserve mode, we should get the expected number within
   // ULPTolerance for any operations.
   const int64_t Diff = *((const uint64_t *)&FSrc) - *((const uint64_t *)&FRef);
@@ -101,7 +106,8 @@ static bool compareFloatEpsilon(const float &FSrc, const float &FRef,
 }
 
 static bool compareFloatULP(const float &FSrc, const float &FRef,
-                            unsigned ULPTolerance, offloadtest::DenormMode DM) {
+                            unsigned ULPTolerance, offloadtest::DenormMode DM,
+                            float ZeroTolerance) {
   if (FSrc == FRef)
     return true;
   if (std::isnan(FSrc) || std::isnan(FRef))
@@ -112,6 +118,10 @@ static bool compareFloatULP(const float &FSrc, const float &FRef,
     if (isDenorm(FRef) && FSrc == 0 && std::signbit(FSrc) == std::signbit(FRef))
       return true;
   }
+  // ULP comparison is meaningless near zero. Use absolute tolerance instead.
+  if (ZeroTolerance > 0.0f &&
+      (std::abs(FSrc) <= ZeroTolerance || std::abs(FRef) <= ZeroTolerance))
+    return std::abs(FSrc - FRef) <= ZeroTolerance;
   // For FTZ or Preserve mode, we should get the expected number within
   // ULPTolerance for any operations.
   const int Diff = *((const uint32_t *)&FSrc) - *((const uint32_t *)&FRef);
@@ -271,19 +281,20 @@ static bool testBufferFloatEpsilon(offloadtest::CPUBuffer *B1,
 
 static bool testBufferFloatULP(offloadtest::CPUBuffer *B1,
                                offloadtest::CPUBuffer *B2, unsigned ULPT,
-                               offloadtest::DenormMode DM) {
+                               offloadtest::DenormMode DM,
+                               double ZeroTolerance) {
 
   switch (B1->Format) {
   case offloadtest::DataFormat::Float64: {
-    auto Fn = [ULPT, DM](const double &FS, const double &FR) {
-      return compareDoubleULP(FS, FR, ULPT, DM);
+    auto Fn = [ULPT, DM, ZeroTolerance](const double &FS, const double &FR) {
+      return compareDoubleULP(FS, FR, ULPT, DM, ZeroTolerance);
     };
     return testBufferFloat<double>(Fn, B1, B2);
   }
   case offloadtest::DataFormat::Float32:
   case offloadtest::DataFormat::Depth32: {
-    auto Fn = [ULPT, DM](const float &FS, const float &FR) {
-      return compareFloatULP(FS, FR, ULPT, DM);
+    auto Fn = [ULPT, DM, ZeroTolerance](const float &FS, const float &FR) {
+      return compareFloatULP(FS, FR, ULPT, DM, (float)ZeroTolerance);
     };
     return testBufferFloat<float>(Fn, B1, B2);
   }
@@ -403,7 +414,8 @@ llvm::Error verifyResult(offloadtest::Result R) {
     break;
   }
   case offloadtest::Rule::BufferFloatULP: {
-    if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM))
+    if (testBufferFloatULP(R.ActualPtr, R.ExpectedPtr, R.ULPT, R.DM,
+                           R.ZeroTolerance))
       return llvm::Error::success();
     OS << "Comparison Rule: BufferFloatULP\nULP: " << R.ULPT << "\n";
     break;

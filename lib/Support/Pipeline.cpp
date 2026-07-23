@@ -609,6 +609,7 @@ void MappingTraits<offloadtest::Result>::mapping(IO &I,
   switch (R.ComparisonRule) {
   case Rule::BufferFloatULP: {
     I.mapRequired("ULPT", R.ULPT);
+    I.mapOptional("ZeroTolerance", R.ZeroTolerance, 0.0);
     I.mapOptional("DenormMode", R.DM);
     break;
   }

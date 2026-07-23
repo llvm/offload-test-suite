@@ -261,6 +261,7 @@ struct Result {
   DenormMode DM = DenormMode::Any;
   unsigned ULPT; // ULP Tolerance
   double Epsilon;
+  double ZeroTolerance = 0.0; // Absolute tolerance for near-zero comparisons
 };
 
 struct TLASDesc;
