@@ -1086,11 +1086,32 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
+    const VkImageAspectFlags AspectMask = isDepthFormat(VKDst.Desc.Fmt)
+                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                              : VK_IMAGE_ASPECT_COLOR_BIT;
+    const uint32_t ElementSize = getFormatSizeInBytes(VKDst.Desc.Fmt);
+    llvm::SmallVector<VkBufferImageCopy> Regions;
+    uint64_t CurrentOffset = 0;
+    for (uint32_t I = 0; I < VKDst.Desc.MipLevels; ++I) {
+      const uint32_t MipWidth = std::max(1u, VKDst.Desc.Width >> I);
+      const uint32_t MipHeight = std::max(1u, VKDst.Desc.Height >> I);
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = I;
+      Region.imageSubresource.baseArrayLayer = 0;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent = {MipWidth, MipHeight, 1};
+      Regions.push_back(Region);
+      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
+    }
+
     insertDebugSignpost(
-        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+        llvm::formatv("copyBufferToTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
     vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, Regions.size(),
+                           Regions.data());
 
     CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,               /*DstAccessMask*/
@@ -2789,6 +2810,12 @@ public:
         uint64_t(Desc.Width) * getFormatSizeInBytes(Desc.Fmt);
     return static_cast<uint32_t>(llvm::alignTo(
         TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
+  }
+
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // copyBufferToTexture consumes a tightly-packed staging buffer.
+    return computeTightTextureUploadLayout(Desc);
   }
 
   const Capabilities &getCapabilities() override {

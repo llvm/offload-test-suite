@@ -529,32 +529,34 @@ offloadtest::createTextureWithData(
     Device &Dev, std::string Name, const TextureCreateDesc &Desc,
     const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
     std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
-
-  const uint64_t PackedRowStrideInBytes =
-      Desc.Width * getFormatSizeInBytes(Desc.Fmt);
-  if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
+  if (Encoder == nullptr)
     return llvm::createStringError(
-        "Data upload is not enough for texture size.");
+        "An encoder is required to upload texture data.");
+  if (OutUploadBuffer == nullptr)
+    return llvm::createStringError(
+        "An upload buffer is required to create a texture with data.");
 
   auto TextureOrErr = Dev.createTexture(Name, Desc);
   if (!TextureOrErr)
     return TextureOrErr.takeError();
   auto Texture = std::move(*TextureOrErr);
 
-  if (OutUploadBuffer == nullptr)
-    return llvm::createStringError("An upload buffer is required to create a "
-                                   "GpuOnly texture with data.");
+  const TextureUploadLayout Layout = Dev.getTextureUploadLayout(Desc);
 
-  const uint64_t TexRowStrideInBytes =
-      Dev.getTextureUploadRowStrideInBytes(Desc);
-  const uint64_t UploadBufferSizeInBytes =
-      (Desc.Height - 1) * TexRowStrideInBytes + PackedRowStrideInBytes;
+  // The source data is tightly packed across mips, so its required size is the
+  // sum of each subresource's tight row size times its row count, independent
+  // of any backend row/offset padding in the upload buffer.
+  uint64_t PackedSizeInBytes = 0;
+  for (const SubresourceFootprint &Sub : Layout.Subresources)
+    PackedSizeInBytes += uint64_t(Sub.RowSizeInBytes) * Sub.NumRows;
+  if (SizeInBytes < PackedSizeInBytes)
+    return llvm::createStringError(
+        "Data upload is not enough for texture size.");
 
-  // Create Upload buffer
   const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
   const std::string UploadBufferName = Name + " (Upload Buffer)";
   auto UploadBufferOrErr =
-      Dev.createBuffer(UploadBufferName, UploadDesc, UploadBufferSizeInBytes);
+      Dev.createBuffer(UploadBufferName, UploadDesc, Layout.TotalSizeInBytes);
   if (!UploadBufferOrErr)
     return UploadBufferOrErr.takeError();
   *OutUploadBuffer = std::move(*UploadBufferOrErr);
@@ -562,18 +564,19 @@ offloadtest::createTextureWithData(
   auto MappedPtrOrErr = (*OutUploadBuffer)->map();
   if (!MappedPtrOrErr)
     return MappedPtrOrErr.takeError();
+  auto *const DstBase = static_cast<uint8_t *>(*MappedPtrOrErr);
+  const auto *SrcPtr = static_cast<const uint8_t *>(Data);
 
-  uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
-  const uint8_t *SrcPtr = (const uint8_t *)Data;
-
-  for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
-    memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
-    DstPtr += TexRowStrideInBytes;
-    SrcPtr += PackedRowStrideInBytes;
+  for (const SubresourceFootprint &Sub : Layout.Subresources) {
+    uint8_t *DstPtr = DstBase + Sub.Offset;
+    for (uint32_t Row = 0; Row < Sub.NumRows; ++Row) {
+      memcpy(DstPtr, SrcPtr, Sub.RowSizeInBytes);
+      DstPtr += Sub.RowPitchInBytes;
+      SrcPtr += Sub.RowSizeInBytes;
+    }
   }
   (*OutUploadBuffer)->unmap();
 
-  // Copy Buffer to Texture
   if (auto Err = Encoder->copyBufferToTexture(**OutUploadBuffer, *Texture))
     return Err;
 
