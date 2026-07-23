@@ -1,0 +1,88 @@
+#--- source.hlsl
+
+// Dynamic resource: LocalBuf is Bufs[0] or Bufs[1] chosen by divergent control
+// flow, forming a phi of the resource. The dynamic array index must propagate
+// through the phi to the eventual resource access.
+
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Bufs[2] : register(u0);
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> Out     : register(u2);
+
+[[vk::binding(0, 0)]]
+cbuffer Constants : register(b0) {
+  uint Condition;
+}
+
+[numthreads(8, 1, 1)]
+void main(uint TID : SV_DispatchThreadID) {
+  RWStructuredBuffer<uint> LocalBuf = Bufs[NonUniformResourceIndex(0)];
+
+  if ((TID & 1u) == Condition)
+    LocalBuf = Bufs[NonUniformResourceIndex(1)];
+
+  Out[TID] = LocalBuf[TID];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [ 0x00000000 ]
+
+  - Name: Bufs
+    Format: UInt32
+    ArraySize: 2
+    Data:
+      - [ 10, 11, 12, 13, 14, 15, 16, 17 ]
+      - [ 20, 21, 22, 23, 24, 25, 26, 27 ]
+
+  - Name: BufOut
+    Format: UInt32
+    FillSize: 32
+
+  - Name: ExpectedOut
+    Format: UInt32
+    Data: [ 20, 11, 22, 13, 24, 15, 26, 17 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Bufs
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# DXC Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8642
+# Clang Bug: https://github.com/llvm/llvm-project/issues/192542
+# XFAIL: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

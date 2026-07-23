@@ -1,0 +1,102 @@
+#--- source.hlsl
+
+// SimplifyCFG sinks the store from both branches into the common successor,
+// creating a phi of a pointer into a resource.
+
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> BufA : register(u0);
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> BufB : register(u1);
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint> In   : register(u2);
+
+[[vk::binding(0, 0)]]
+cbuffer Constants : register(b0) {
+  uint Condition;
+}
+
+[numthreads(8, 1, 1)]
+void main(uint TID : SV_DispatchThreadID) {
+  uint Val = In[TID];
+  if ((TID & 1u) == Condition)
+    BufA[TID] = Val;
+  else
+    BufB[TID] = Val;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [ 0x00000000 ]
+
+  - Name: BufA
+    Format: UInt32
+    FillSize: 32
+
+  - Name: ExpectedBufA
+    Format: UInt32
+    Data: [ 30, 0, 32, 0, 34, 0, 36, 0 ]
+
+  - Name: BufB
+    Format: UInt32
+    FillSize: 32
+
+  - Name: ExpectedBufB
+    Format: UInt32
+    Data: [ 0, 31, 0, 33, 0, 35, 0, 37 ]
+
+  - Name: In
+    Format: UInt32
+    Data: [ 30, 31, 32, 33, 34, 35, 36, 37 ]
+
+Results:
+  - Result: BufA
+    Rule: BufferExact
+    Actual: BufA
+    Expected: ExpectedBufA
+  - Result: BufB
+    Rule: BufferExact
+    Actual: BufB
+    Expected: ExpectedBufB
+
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufA
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufB
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: In
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/211130
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
