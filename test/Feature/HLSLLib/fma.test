@@ -56,8 +56,8 @@ Buffers:
     # last two rows: 2^-26, -(2^-26), 2^-104, -3
 Results:
   - Result: Result
-    Rule: BufferFloatEpsilon 
-    Epsilon: 0.0001
+    Rule: BufferFloatULP
+    ULPT: 1
     Actual: Out
     Expected: Expected
 DescriptorSets:
@@ -92,8 +92,12 @@ DescriptorSets:
         Binding: 3
 #--- end
 
-# Bug https://github.com/llvm/offload-test-suite/issues/1026
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
 # XFAIL: Intel && Vulkan && DXC
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8330
+# XFAIL: Lavapipe && DXC
+
 
 # REQUIRES: Double
 # RUN: split-file %s %t
