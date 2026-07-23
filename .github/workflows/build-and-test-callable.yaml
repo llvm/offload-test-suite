@@ -62,7 +62,7 @@ on:
       SplitBuild:
         description: 'Split build and test into separate jobs (build on any runner, test on GPU runner)'
         required: false
-        default: false
+        default: true
         type: boolean
       LLVM-ExtraCMakeArgs:
         description: 'Extra CMake Args for LLVM'
@@ -126,14 +126,12 @@ jobs:
   build:
     permissions:
       checks: write
-    # When SplitBuild is true, build on any available runner of
-    # the right architecture. Otherwise, build on the GPU runner.
+    # Split builds run on any X64 Windows runner (windows-qc targets ARM64 but
+    # is always cross-compiled on X64). Non-split builds run on the GPU runner.
     runs-on: >-
       ${{ fromJSON(
         inputs.SplitBuild != true
           && format('["self-hosted", "hlsl-{0}"]', inputs.SKU)
-        || inputs.SKU == 'windows-qc'
-          && '["self-hosted", "ARM64", "Windows"]'
         || inputs.SKU == 'macos'
           && '["self-hosted", "hlsl-macos"]'
         || '["self-hosted", "Windows", "X64"]'
@@ -168,16 +166,128 @@ jobs:
           ref: main
           path: golden-images
           fetch-depth: 1
-      - name: Setup Windows x64
-        if: inputs.OS == 'windows' && runner.arch != 'ARM64'
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Pin MSVC toolset
+        # The default v143 toolset can lag the complete default toolset and lack
+        # x64/ARM64 base libs. Pin every VsDevCmd to the default (latest) toolset.
+        if: inputs.OS == 'windows'
+        shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $ver = (Get-Content "$vs\VC\Auxiliary\Build\Microsoft.VCToolsVersion.default.txt").Trim()
+          "VCToolsVersion=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding ascii
+          Write-Host "Pinned VCToolsVersion=$ver"
+      - name: Compute build mode
+        # Single source of truth for the ARM64 cross build: SplitBuild + windows-qc
+        # builds on X64 and targets ARM64. Cross steps key off env.ARM64_CROSS.
+        if: inputs.OS == 'windows'
+        shell: bash
+        run: |
+          cross=false
+          if [ '${{ inputs.SplitBuild }}' = 'true' ] && [ '${{ inputs.SKU }}' = 'windows-qc' ]; then
+            cross=true
+          fi
+          echo "ARM64_CROSS=$cross" >> "$GITHUB_ENV"
+      - name: Build native host tools
+        if: env.ARM64_CROSS == 'true'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do set "InstallDir=%%i"
+          call "%InstallDir%\Common7\Tools\VsDevCmd.bat" -arch=amd64 -host_arch=amd64 -vcvars_ver=%VCToolsVersion%
+
+          rem Bake x64 lib dirs into host tool links so the cross Build DXC step's
+          rem native llvm-config relink resolves the x64 CRT under the ARM64 env.
+          setlocal enabledelayedexpansion
+          set "LFLAGS="
+          for %%d in ("%LIB:;=" "%") do if not "%%~d"=="" set LFLAGS=!LFLAGS! /LIBPATH:"%%~d"
+          > "%GITHUB_WORKSPACE%\host-linkflags.cmake" echo set(_extra_libpaths [=[!LFLAGS!]=])
+          >> "%GITHUB_WORKSPACE%\host-linkflags.cmake" echo set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${_extra_libpaths}" CACHE STRING "" FORCE)
+
+          cmake -G Ninja ^
+            -S "%GITHUB_WORKSPACE%\DXC" ^
+            -B "%GITHUB_WORKSPACE%\DXC\host-build" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DLLVM_ENABLE_ASSERTIONS=Off ^
+            -C "%GITHUB_WORKSPACE%\DXC\cmake\caches\PredefinedParams.cmake" ^
+            -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
+            -DHLSL_DISABLE_SOURCE_GENERATION=On ^
+            -C "%GITHUB_WORKSPACE%\host-linkflags.cmake"
+          if errorlevel 1 exit /b 1
+          cmake --build "%GITHUB_WORKSPACE%\DXC\host-build" ^
+            --target llvm-tblgen clang-tblgen llvm-config
+          if errorlevel 1 exit /b 1
+
+          cmake -G Ninja ^
+            -S "%GITHUB_WORKSPACE%\llvm-project\llvm" ^
+            -B "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DLLVM_ENABLE_ASSERTIONS=Off ^
+            -DLLVM_ENABLE_PROJECTS=clang ^
+            -DLLVM_TARGETS_TO_BUILD=Native ^
+            -C "%GITHUB_WORKSPACE%\OffloadTest\cmake\caches\sccache.cmake" ^
+            -C "%GITHUB_WORKSPACE%\host-linkflags.cmake"
+          if errorlevel 1 exit /b 1
+          cmake --build "%GITHUB_WORKSPACE%\llvm-project\host-build" ^
+            --target llvm-tblgen clang-tblgen llvm-config
+      - name: Setup Windows x64 target
+        if: inputs.OS == 'windows' && inputs.SKU != 'windows-qc'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
-          arch: amd64
-      - name: Setup Windows
-        if: inputs.OS == 'windows' && runner.arch == 'ARM64'
+          arch: amd64 -vcvars_ver=${{ env.VCToolsVersion }}
+      - name: Setup Windows ARM64 cross target
+        if: env.ARM64_CROSS == 'true'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
-          arch: arm64
+          # setup-windows forwards this input to VsDevCmd.bat after -arch=.
+          arch: arm64 -host_arch=x64 -vcvars_ver=${{ env.VCToolsVersion }}
+      - name: Setup Windows ARM64 native target
+        # Non-split windows-qc builds natively on the ARM64 device
+        # (split qc cross-compiles on X64 via the step above).
+        if: inputs.OS == 'windows' && inputs.SKU == 'windows-qc' && env.ARM64_CROSS != 'true'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64 -vcvars_ver=${{ env.VCToolsVersion }}
+      # VsDevCmd replaces PATH. Restore the tool paths required by the
+      # remaining workflow steps after the final target setup.
+      - name: Restore Python path
+        if: inputs.OS == 'windows'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Restore Git Bash path
+        if: inputs.OS == 'windows'
+        shell: powershell
+        run: |
+          "C:\Program Files\Git\bin" >> $env:GITHUB_PATH
+          "C:\Program Files\Git\usr\bin" >> $env:GITHUB_PATH
+      - name: Report Windows build architecture
+        if: inputs.OS == 'windows'
+        shell: bash
+        run: |
+          echo "Runner architecture: ${{ runner.arch }}"
+          echo "MSVC host architecture: ${VSCMD_ARG_HOST_ARCH:-unknown}"
+          echo "MSVC target architecture: ${VSCMD_ARG_TGT_ARCH:-unknown}"
+      - name: Generate ARM64 Vulkan import lib
+        # x64 Vulkan SDK ships only an x64 vulkan-1.lib; synthesize an ARM64
+        # import lib from its arch-neutral export names for the cross link.
+        if: env.ARM64_CROSS == 'true'
+        shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          Enter-VsDevShell -VsInstallPath $vs -DevCmdArguments '-arch=x64' -SkipAutomaticLocation
+          $out = "$env:GITHUB_WORKSPACE\vulkan-arm64"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          $names = & dumpbin /exports "$env:VULKAN_SDK\Lib\vulkan-1.lib" |
+            Select-String '^\s+(vk\w+)\s*$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if ($names.Count -eq 0) { throw "No Vulkan exports found; cannot build ARM64 import lib" }
+          Write-Host "Captured $($names.Count) Vulkan exports"
+          @('EXPORTS') + $names | Set-Content "$out\vulkan-1.def"
+          lib /def:"$out\vulkan-1.def" /machine:arm64 /out:"$out\vulkan-1.lib"
       # When SplitBuild is enabled, force clang into the build set even if
       # the TestTarget doesn't use it. Reason: install-distribution depends
       # on clang (it ships in the install prefix), so if clang isn't part
@@ -189,24 +299,97 @@ jobs:
         shell: bash
         if: contains(inputs.TestTarget, 'clang') || inputs.SplitBuild == true
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
-      - name: Setup Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       - name: Build DXC
+        shell: bash
         run: |
-            cd DXC
-            mkdir build
-            cd build
-            cmake -G Ninja -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -C ${{ github.workspace }}/DXC/cmake/caches/PredefinedParams.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DHLSL_DISABLE_SOURCE_GENERATION=On ${{ github.workspace }}/DXC/
-            ninja
+            set -exo pipefail
+            cross_args=()
+            if [ "$ARM64_CROSS" = 'true' ]; then
+              cross_args=(
+                -DCMAKE_SYSTEM_NAME=Windows
+                -DCMAKE_SYSTEM_PROCESSOR=ARM64
+                -DCMAKE_C_COMPILER=clang-cl
+                -DCMAKE_CXX_COMPILER=clang-cl
+                -DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc
+                -DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc
+                # clang-cl reads DXC's -Wall as -Weverything; disable DXC warnings
+                # so SPIRV-Tools' hardcoded /WX doesn't fail on -Wc++98-compat.
+                -DLLVM_ENABLE_WARNINGS=OFF
+                "-DLLVM_NATIVE_BUILD=$GITHUB_WORKSPACE/DXC/host-build"
+                "-DLLVM_TABLEGEN=$GITHUB_WORKSPACE/DXC/host-build/bin/llvm-tblgen.exe"
+                "-DCLANG_TABLEGEN=$GITHUB_WORKSPACE/DXC/host-build/bin/clang-tblgen.exe"
+              )
+            fi
+            cmake -G Ninja \
+              -S "$GITHUB_WORKSPACE/DXC" \
+              -B "$GITHUB_WORKSPACE/DXC/build" \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -C "$GITHUB_WORKSPACE/DXC/cmake/caches/PredefinedParams.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DHLSL_DISABLE_SOURCE_GENERATION=On \
+              "${cross_args[@]}"
+            cmake --build "$GITHUB_WORKSPACE/DXC/build"
       - name: Build LLVM
+        shell: bash
         run: |
-            cd llvm-project
-            mkdir build
-            cd build
-            cmake -G Ninja ${{ inputs.LLVM-ExtraCMakeArgs }} -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} -DLLVM_ENABLE_ASSERTIONS=On -DLLVM_EXTERNAL_PROJECTS="OffloadTest" -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} -C ${{ github.workspace }}/llvm-project/clang/cmake/caches/HLSL.cmake -C ${{ github.workspace }}/OffloadTest/cmake/caches/sccache.cmake -DDXC_DIR=${{ github.workspace }}/DXC/build/bin -DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=${{ github.workspace }}/OffloadTest -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} -DGOLDENIMAGE_DIR=${{ github.workspace }}/golden-images -DCMAKE_INSTALL_PREFIX=${{ github.workspace }}/install ${{ github.workspace }}/llvm-project/llvm/
-            ninja hlsl-test-depends
+            set -exo pipefail
+            cross_args=()
+            if [ "$ARM64_CROSS" = 'true' ]; then
+              cross_args=(
+                -DCMAKE_SYSTEM_NAME=Windows
+                -DCMAKE_SYSTEM_PROCESSOR=ARM64
+                -DCMAKE_C_COMPILER_TARGET=arm64-pc-windows-msvc
+                -DCMAKE_CXX_COMPILER_TARGET=arm64-pc-windows-msvc
+                "-DLLVM_NATIVE_BUILD=$GITHUB_WORKSPACE/llvm-project/host-build"
+                "-DLLVM_NATIVE_TOOL_DIR=$GITHUB_WORKSPACE/llvm-project/host-build/bin"
+                "-DVulkan_LIBRARY=$GITHUB_WORKSPACE/vulkan-arm64/vulkan-1.lib"
+              )
+            fi
+            cmake -G Ninja \
+              -S "$GITHUB_WORKSPACE/llvm-project/llvm" \
+              -B "$GITHUB_WORKSPACE/llvm-project/build" \
+              ${{ inputs.LLVM-ExtraCMakeArgs }} \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -DLLVM_EXTERNAL_PROJECTS="OffloadTest" \
+              -DHLSL_ENABLE_OFFLOAD_DISTRIBUTION=${{ inputs.SplitBuild == true && 'On' || 'Off' }} \
+              -C "$GITHUB_WORKSPACE/llvm-project/clang/cmake/caches/HLSL.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              "-DDXC_DIR=$GITHUB_WORKSPACE/DXC/build/bin" \
+              "-DLLVM_EXTERNAL_OFFLOADTEST_SOURCE_DIR=$GITHUB_WORKSPACE/OffloadTest" \
+              -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v" \
+              -DOFFLOADTEST_TEST_CLANG=${{steps.Test-Clang.outputs.TEST_CLANG || 'Off' }} \
+              "-DGOLDENIMAGE_DIR=$GITHUB_WORKSPACE/golden-images" \
+              "-DCMAKE_INSTALL_PREFIX=$GITHUB_WORKSPACE/install" \
+              "${cross_args[@]}"
+            cmake --build "$GITHUB_WORKSPACE/llvm-project/build" \
+              --target hlsl-test-depends
+      - name: Verify ARM64 build artifacts
+        if: env.ARM64_CROSS == 'true'
+        shell: powershell
+        run: |
+          $expectedMachine = 0xAA64
+          $files = @(
+            "$env:GITHUB_WORKSPACE\DXC\build\bin\dxc.exe",
+            "$env:GITHUB_WORKSPACE\llvm-project\build\bin\clang.exe"
+          )
+          foreach ($file in $files) {
+            $stream = [System.IO.File]::OpenRead($file)
+            try {
+              $reader = [System.IO.BinaryReader]::new($stream)
+              $stream.Position = 0x3c
+              $peOffset = $reader.ReadInt32()
+              $stream.Position = $peOffset + 4
+              $machine = $reader.ReadUInt16()
+            } finally {
+              $stream.Dispose()
+            }
+            if ($machine -ne $expectedMachine) {
+              throw "$file has PE machine 0x$($machine.ToString('X4')); expected ARM64 (0xAA64)"
+            }
+            Write-Host "$file is ARM64"
+          }
       # Surface sccache cache state after the heavy compile work so we can
       # track hit rate / cache size across runs and diagnose cold-cache
       # blowups on new builders. Always-runs so we still get stats on
