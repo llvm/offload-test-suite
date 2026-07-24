@@ -166,51 +166,90 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   llvm::StringMap<AccelerationStructure *> BLASesByName;
 
   for (const auto &BD : P.AccelStructs.BLAS) {
-    llvm::SmallVector<TriangleGeometryDesc> Triangles;
-    Triangles.reserve(BD.Triangles.size());
-    for (const auto &T : BD.Triangles) {
-      assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
-      auto VBOrErr = createBufferWithData(
-          Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
-          T.VertexBufferPtr->size(), nullptr, nullptr);
-      if (!VBOrErr)
-        return VBOrErr.takeError();
+    if (!BD.Triangles.empty() && !BD.AABBs.empty())
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "BLAS '%s' mixes triangle and AABB "
+                                     "geometry; must be either, not both.",
+                                     BD.Name.c_str());
+    if (BD.Triangles.empty() && BD.AABBs.empty())
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "BLAS '%s' has no geometry.",
+                                     BD.Name.c_str());
 
-      TriangleGeometryDesc TGD;
-      TGD.VertexBuffer = VBOrErr->get();
-      TGD.VertexCount = T.VertexCount;
-      TGD.VertexStride = T.VertexStride;
-      TGD.VertexFormat = T.VertexFormat;
-      TGD.Opaque = T.Opaque;
-      TGD.Transform = T.Transform;
+    auto ReqOrErr = [&]() -> llvm::Expected<BLASBuildRequest> {
+      if (!BD.Triangles.empty()) {
+        llvm::SmallVector<TriangleGeometryDesc> Triangles;
+        Triangles.reserve(BD.Triangles.size());
+        for (const auto &T : BD.Triangles) {
+          assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
+          auto VBOrErr = createBufferWithData(
+              Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
+              T.VertexBufferPtr->size(), nullptr, nullptr);
+          if (!VBOrErr)
+            return VBOrErr.takeError();
 
-      OutInputBuffers.push_back(std::move(*VBOrErr));
+          TriangleGeometryDesc TGD;
+          TGD.VertexBuffer = VBOrErr->get();
+          TGD.VertexCount = T.VertexCount;
+          TGD.VertexStride = T.VertexStride;
+          TGD.VertexFormat = T.VertexFormat;
+          TGD.Opaque = T.Opaque;
+          TGD.Transform = T.Transform;
 
-      if (T.IndexBufferPtr) {
-        auto IBOrErr = createBufferWithData(
-            Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
-            T.IndexBufferPtr->size(), nullptr, nullptr);
-        if (!IBOrErr)
-          return IBOrErr.takeError();
-        TGD.IndexBuffer = IBOrErr->get();
-        TGD.IndexCount = T.IndexCount;
-        TGD.IdxFormat = T.IdxFormat;
-        OutInputBuffers.push_back(std::move(*IBOrErr));
+          OutInputBuffers.push_back(std::move(*VBOrErr));
+
+          if (T.IndexBufferPtr) {
+            auto IBOrErr = createBufferWithData(
+                Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
+                T.IndexBufferPtr->size(), nullptr, nullptr);
+            if (!IBOrErr)
+              return IBOrErr.takeError();
+            TGD.IndexBuffer = IBOrErr->get();
+            TGD.IndexCount = T.IndexCount;
+            TGD.IdxFormat = T.IdxFormat;
+            OutInputBuffers.push_back(std::move(*IBOrErr));
+          }
+          Triangles.push_back(TGD);
+        }
+        BLASBuildRequest Req;
+        Req.Geometry = std::move(Triangles);
+        return Req;
       }
-      Triangles.push_back(TGD);
-    }
-    // TODO: AABB geometry support (would mirror the triangle path).
+      llvm::SmallVector<AABBGeometryDesc> AABBs;
+      AABBs.reserve(BD.AABBs.size());
+      for (const auto &A : BD.AABBs) {
+        assert(A.AABBBufferPtr && "AABBBufferPtr not resolved");
+        auto ABOrErr = createBufferWithData(
+            Dev, "AS-AABBs", UploadDesc, A.AABBBufferPtr->Data[0].get(),
+            A.AABBBufferPtr->size(), nullptr, nullptr);
+        if (!ABOrErr)
+          return ABOrErr.takeError();
+        AABBGeometryDesc AGD;
+        AGD.AABBBuffer = ABOrErr->get();
+        AGD.AABBCount = A.AABBCount;
+        AGD.AABBStride = A.AABBStride;
+        AGD.Opaque = A.Opaque;
+        OutInputBuffers.push_back(std::move(*ABOrErr));
+        AABBs.push_back(AGD);
+      }
+      BLASBuildRequest Req;
+      Req.Geometry = std::move(AABBs);
+      return Req;
+    }();
 
-    auto SizesOrErr = Dev.getBLASBuildSizes(Triangles);
+    if (!ReqOrErr)
+      return ReqOrErr.takeError();
+    auto SizesOrErr = std::visit(
+        [&Dev](const auto &Geom) { return Dev.getBLASBuildSizes(Geom); },
+        ReqOrErr->Geometry);
     if (!SizesOrErr)
       return SizesOrErr.takeError();
     auto ASOrErr = Dev.createBLAS(*SizesOrErr);
     if (!ASOrErr)
       return ASOrErr.takeError();
 
-    BLASBuildRequest Req;
+    BLASBuildRequest Req = std::move(*ReqOrErr);
     Req.AS = ASOrErr->get();
-    Req.Geometry = std::move(Triangles);
 
     BLASesByName[BD.Name] = ASOrErr->get();
     OutBLAS.push_back(std::move(*ASOrErr));
