@@ -103,8 +103,11 @@ struct SharedInvocationState {
 
   // Parallel-indexed to `P.AccelStructs.BLAS`.
   llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>> BLASes;
-  // Keyed by `TLASDesc::Name`.
-  llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
+  // Keyed by `TLASDesc::Name`; each value holds `TLASDesc::ArraySize`
+  // handles (one per descriptor-array element).
+  llvm::StringMap<
+      llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>>
+      TLASes;
   // Vertex/index buffers consumed during AS builds; must outlive submission.
   llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
 };

@@ -398,11 +398,7 @@ struct Resource {
     return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
   }
 
-  uint32_t getArraySize() const {
-    if (isSampler() || isAccelerationStructure())
-      return 1;
-    return BufferPtr->ArraySize;
-  }
+  uint32_t getArraySize() const;
 
   uint32_t size() const {
     assert(!isSampler() && !isAccelerationStructure() &&
@@ -582,7 +578,11 @@ struct InstanceDesc {
 
 struct TLASDesc {
   std::string Name;
-  llvm::SmallVector<InstanceDesc> Instances;
+  uint32_t ArraySize = 1;
+  // Outer vector has ArraySize entries (one per descriptor-array element);
+  // inner vector lists the instances for that element. Mirrors
+  // CPUBuffer::Data's ArraySize-driven layout.
+  llvm::SmallVector<llvm::SmallVector<InstanceDesc>, 1> Instances;
 };
 
 struct AccelerationStructureDescs {
@@ -623,6 +623,14 @@ struct ShaderBindingTableDesc {
   llvm::SmallVector<SBTEntry> HitGroup;
   llvm::SmallVector<SBTEntry> Callable;
 };
+
+inline uint32_t Resource::getArraySize() const {
+  if (isSampler())
+    return 1;
+  if (isAccelerationStructure())
+    return TLASPtr->ArraySize;
+  return BufferPtr->ArraySize;
+}
 
 struct Pipeline {
   ShaderPipelineKind Kind;
