@@ -2271,8 +2271,8 @@ public:
       for (auto &R : T.Resources) {
         for (const auto &Set : R.second) {
           D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
-          if (Set.Buffer != nullptr) {
-            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buffer.get());
+          if (Set.Buf != nullptr) {
+            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buf.get());
             switch (getDescriptorKind(R.first->Kind)) {
             case DescriptorKind::SRV:
               assert(BufferDX.SRVHandle.ptr != 0 &&
@@ -2293,9 +2293,8 @@ public:
               llvm_unreachable("Invalid DescriptorKind for a Buffer.");
               break;
             }
-          } else if (Set.Texture != nullptr) {
-            const DXTexture &TextureDX =
-                llvm::cast<DXTexture>(*Set.Texture.get());
+          } else if (Set.Tex != nullptr) {
+            const DXTexture &TextureDX = llvm::cast<DXTexture>(*Set.Tex.get());
             switch (getDescriptorKind(R.first->Kind)) {
             case DescriptorKind::SRV:
               assert(TextureDX.SRVHandle.ptr != 0 &&
@@ -2382,7 +2381,7 @@ public:
                 "Root descriptor cannot refer to resource arrays.");
 
           const DXBuffer *BufferDX = llvm::cast_if_present<DXBuffer>(
-              RootDescIt->second.back().Buffer.get());
+              RootDescIt->second.back().Buf.get());
           if (!BufferDX) {
             return llvm::createStringError(
                 std::errc::value_too_large,
