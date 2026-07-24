@@ -1,0 +1,72 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<bool4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  bool3x2 b32 = isnan(float3x2(In[0].xyz, In[0].wxy));
+  bool2x4 b24 = isnan(float2x4(In[0].xy, In[0].yz, In[0].zw, In[0].wx));
+  bool3x1 b31 = isnan(float3x1(In[0].yzw));
+  bool4x4 b44 = isnan(float4x4(In[0].xyzw, In[0].yzwx, In[0].zwxy, In[0].wxyz));
+
+  Out[0] = bool4(b31[0], b31[1], b31[2], 0);
+  Out[1] = bool4(b32[0], b32[1]);
+  Out[2] = bool4(b32[2], 0, 0);
+  Out[3] = b24[0];
+  Out[4] = b24[1];
+  Out[5] = b44[0];
+  Out[6] = b44[1];
+  Out[7] = b44[2];
+  Out[8] = b44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [inf, -inf, 0.0, nan] # Inf, -Inf, 0, NaN
+  - Name: Out
+    Format: Bool
+    Stride: 16
+    FillSize: 144
+  - Name: ExpectedOut # The result we expect
+    Format: Bool
+    Stride: 16
+    Data: [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/140824
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
