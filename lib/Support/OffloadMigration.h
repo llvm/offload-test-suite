@@ -34,8 +34,8 @@ class Texture;
 
 struct ResourceSet {
   std::unique_ptr<MemoryHeap> BackingMemory;
-  std::unique_ptr<Buffer> Buffer;
-  std::unique_ptr<Texture> Texture;
+  std::unique_ptr<Buffer> Buf;
+  std::unique_ptr<Texture> Tex;
   std::unique_ptr<offloadtest::Buffer> Readback;
   std::unique_ptr<offloadtest::Buffer> CounterReadback;
 
@@ -46,13 +46,13 @@ struct ResourceSet {
               std::unique_ptr<MemoryHeap> BackingMemory,
               std::unique_ptr<offloadtest::Buffer> Readback,
               std::unique_ptr<offloadtest::Buffer> CounterReadback)
-      : BackingMemory(std::move(BackingMemory)), Buffer(std::move(Buffer)),
+      : BackingMemory(std::move(BackingMemory)), Buf(std::move(Buffer)),
         Readback(std::move(Readback)),
         CounterReadback(std::move(CounterReadback)) {}
   ResourceSet(std::unique_ptr<offloadtest::Texture> Texture,
               std::unique_ptr<MemoryHeap> BackingMemory,
               std::unique_ptr<offloadtest::Buffer> Readback)
-      : BackingMemory(std::move(BackingMemory)), Texture(std::move(Texture)),
+      : BackingMemory(std::move(BackingMemory)), Tex(std::move(Texture)),
         Readback(std::move(Readback)) {}
   explicit ResourceSet(AccelerationStructure *AS) : AS(AS) {}
 
@@ -60,13 +60,13 @@ struct ResourceSet {
   ResourceSet &operator=(const ResourceSet &) = delete;
 
   ResourceSet(ResourceSet &&A)
-      : BackingMemory(std::move(A.BackingMemory)), Buffer(std::move(A.Buffer)),
-        Texture(std::move(A.Texture)), Readback(std::move(A.Readback)),
+      : BackingMemory(std::move(A.BackingMemory)), Buf(std::move(A.Buf)),
+        Tex(std::move(A.Tex)), Readback(std::move(A.Readback)),
         CounterReadback(std::move(A.CounterReadback)), AS(A.AS) {}
   ResourceSet &operator=(ResourceSet &&A) {
     BackingMemory = std::move(A.BackingMemory);
-    Buffer = std::move(A.Buffer);
-    Texture = std::move(A.Texture);
+    Buf = std::move(A.Buf);
+    Tex = std::move(A.Tex);
     Readback = std::move(A.Readback);
     CounterReadback = std::move(A.CounterReadback);
     AS = A.AS;
