@@ -55,8 +55,12 @@ static VkFormat getVKFormat(DataFormat Format, int Channels) {
   case DataFormat::Float32:
     VKFormats(SFLOAT, 32) break;
   case DataFormat::Int64:
+    if (Channels == 2)
+      return VK_FORMAT_R32G32B32A32_SINT;
     VKFormats(SINT, 64) break;
   case DataFormat::UInt64:
+    if (Channels == 2)
+      return VK_FORMAT_R32G32B32A32_UINT;
     VKFormats(UINT, 64) break;
   case DataFormat::Float64:
     VKFormats(SFLOAT, 64) break;
@@ -403,6 +407,40 @@ static bool isExtensionSupported(
   return false;
 }
 
+static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
+  switch (Action) {
+  case offloadtest::LoadAction::Load:
+    return VK_ATTACHMENT_LOAD_OP_LOAD;
+  case offloadtest::LoadAction::Clear:
+    return VK_ATTACHMENT_LOAD_OP_CLEAR;
+  case offloadtest::LoadAction::DontCare:
+    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+  }
+  llvm_unreachable("All LoadAction cases handled");
+}
+
+static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
+  switch (Action) {
+  case offloadtest::StoreAction::Store:
+    return VK_ATTACHMENT_STORE_OP_STORE;
+  case offloadtest::StoreAction::DontCare:
+    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+  }
+  llvm_unreachable("All StoreAction cases handled");
+}
+
+static VkRayTracingShaderGroupTypeKHR getRTGroupType(HitGroupType T) {
+  switch (T) {
+  case HitGroupType::Triangles:
+    return VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+  case HitGroupType::Procedural:
+    return VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
+  }
+  llvm_unreachable("All HitGroupType cases handled");
+}
+
+namespace {
+
 struct VulkanInstance {
   VkInstance Instance;
   VkDebugUtilsMessengerEXT DebugMessenger;
@@ -423,8 +461,6 @@ struct VulkanInstance {
     vkDestroyInstance(Instance, nullptr);
   }
 };
-
-namespace {
 
 struct MeshShaderFunctions {
   PFN_vkCmdDrawMeshTasksEXT VkCmdDrawMeshTasksEXT = nullptr;
@@ -1050,11 +1086,32 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
+    const VkImageAspectFlags AspectMask = isDepthFormat(VKDst.Desc.Fmt)
+                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                              : VK_IMAGE_ASPECT_COLOR_BIT;
+    const uint32_t ElementSize = getFormatSizeInBytes(VKDst.Desc.Fmt);
+    llvm::SmallVector<VkBufferImageCopy> Regions;
+    uint64_t CurrentOffset = 0;
+    for (uint32_t I = 0; I < VKDst.Desc.MipLevels; ++I) {
+      const uint32_t MipWidth = std::max(1u, VKDst.Desc.Width >> I);
+      const uint32_t MipHeight = std::max(1u, VKDst.Desc.Height >> I);
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = I;
+      Region.imageSubresource.baseArrayLayer = 0;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent = {MipWidth, MipHeight, 1};
+      Regions.push_back(Region);
+      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
+    }
+
     insertDebugSignpost(
-        llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
+        llvm::formatv("copyBufferToTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
     vkCmdCopyBufferToImage(CB.CmdBuffer, VKSrc.Buffer, VKDst.Image,
-                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, nullptr);
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, Regions.size(),
+                           Regions.data());
 
     CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,               /*DstAccessMask*/
@@ -1129,37 +1186,9 @@ public:
                            const ShaderBindingTable &SBT, uint32_t Width,
                            uint32_t Height, uint32_t Depth) override;
 
+protected:
   void endEncodingImpl() override { popDebugGroup(); }
 };
-
-llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
-VulkanCommandBuffer::createComputeEncoder() {
-  auto Enc = std::make_unique<VKComputeEncoder>(*this);
-  Enc->pushDebugGroup("ComputeEncoder");
-  return Enc;
-}
-
-static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
-  switch (Action) {
-  case offloadtest::LoadAction::Load:
-    return VK_ATTACHMENT_LOAD_OP_LOAD;
-  case offloadtest::LoadAction::Clear:
-    return VK_ATTACHMENT_LOAD_OP_CLEAR;
-  case offloadtest::LoadAction::DontCare:
-    return VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-  }
-  llvm_unreachable("All LoadAction cases handled");
-}
-
-static VkAttachmentStoreOp getVkStoreOp(offloadtest::StoreAction Action) {
-  switch (Action) {
-  case offloadtest::StoreAction::Store:
-    return VK_ATTACHMENT_STORE_OP_STORE;
-  case offloadtest::StoreAction::DontCare:
-    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
-  }
-  llvm_unreachable("All StoreAction cases handled");
-}
 
 class VulkanRenderPass final : public offloadtest::RenderPass {
 public:
@@ -1292,6 +1321,7 @@ public:
     return llvm::Error::success();
   }
 
+protected:
   void endEncodingImpl() override {
     vkCmdEndRenderPass(CB.CmdBuffer);
 
@@ -1320,152 +1350,6 @@ public:
     popDebugGroup();
   }
 };
-
-llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
-VulkanCommandBuffer::createRenderEncoder(
-    const offloadtest::RenderPassBeginDesc &Desc) {
-  // The pass carries the VkRenderPass and the format / load / store policy.
-  // The begin desc supplies the textures that get bound for this encoder.
-  if (!Desc.Pass)
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc is missing its RenderPass.");
-  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
-  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
-  uint32_t Width = 0, Height = 0;
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
-    return Err;
-
-  llvm::SmallVector<VkImageView, 9> Views;
-  llvm::SmallVector<VkClearValue, 9> ClearValues;
-
-  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    if (!Desc.ColorAttachments[I])
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
-    if (Tex.View == VK_NULL_HANDLE)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Color attachment texture has no image view.");
-    Views.push_back(Tex.View);
-
-    VkClearValue CV = {};
-    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
-      if (!Tex.Desc.OptimizedClearValue)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "LoadAction::Clear requires the render target to have been "
-            "created with an OptimizedClearValue.");
-      const auto *ColorCV =
-          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
-      assert(ColorCV &&
-             "RenderTarget OptimizedClearValue must be a ClearColor");
-      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
-    }
-    ClearValues.push_back(CV);
-  }
-
-  if (Desc.DepthStencil) {
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
-    if (Tex.View == VK_NULL_HANDLE)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Depth-stencil attachment texture has no image view.");
-    Views.push_back(Tex.View);
-
-    const auto &DS = *PassDesc.DepthStencil;
-    VkClearValue CV = {};
-    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
-        DS.StencilLoad == offloadtest::LoadAction::Clear) {
-      if (!Tex.Desc.OptimizedClearValue)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "LoadAction::Clear requires the depth-stencil texture to have "
-            "been created with an OptimizedClearValue.");
-      const auto *DepthCV =
-          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
-      assert(DepthCV &&
-             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
-      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
-    }
-    ClearValues.push_back(CV);
-  }
-
-  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
-    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
-      this->addImageTransition(
-          this->PendingSrcAccess, /*SrcAccessMask*/
-          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
-              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
-          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
-          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
-          Tex);
-    }
-  }
-
-  if (Desc.DepthStencil) {
-    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
-
-    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
-        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
-      this->addImageTransition(
-          this->PendingSrcAccess, /*SrcAccessMask*/
-          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
-          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
-          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
-          Tex);
-    }
-  }
-
-  VkFramebufferCreateInfo FBCI = {};
-  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-  FBCI.renderPass = VKPass.Handle;
-  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
-  FBCI.pAttachments = Views.data();
-  FBCI.width = Width;
-  FBCI.height = Height;
-  FBCI.layers = 1;
-
-  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
-  if (auto Err =
-          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
-                      "Failed to create framebuffer for RenderEncoder."))
-    return Err;
-
-  // The framebuffer must outlive this encoder and remain valid through GPU
-  // execution; the command buffer destroys it on teardown. The render pass
-  // is owned by the user-supplied VulkanRenderPass.
-  OwnedFramebuffers.push_back(Framebuffer);
-
-  VkRenderPassBeginInfo BeginInfo = {};
-  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-  BeginInfo.renderPass = VKPass.Handle;
-  BeginInfo.framebuffer = Framebuffer;
-  BeginInfo.renderArea.extent.width = Width;
-  BeginInfo.renderArea.extent.height = Height;
-  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
-  BeginInfo.pClearValues = ClearValues.data();
-
-  this->flushBarrier();
-
-  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
-}
 
 class VulkanDevice : public offloadtest::Device {
   // VKComputeEncoder needs access to the device's RT entry points and the
@@ -1598,8 +1482,11 @@ private:
     // Parallel-indexed to `P.AccelStructs.BLAS`.
     llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>
         BLASes;
-    // Keyed by `TLASDesc::Name`.
-    llvm::StringMap<std::unique_ptr<offloadtest::AccelerationStructure>> TLASes;
+    // Keyed by `TLASDesc::Name`; each value holds `TLASDesc::ArraySize`
+    // handles (one per descriptor-array element).
+    llvm::StringMap<
+        llvm::SmallVector<std::unique_ptr<offloadtest::AccelerationStructure>>>
+        TLASes;
     // Vertex/index buffers consumed during AS builds; must outlive submission.
     llvm::SmallVector<std::unique_ptr<offloadtest::Buffer>> ASInputBuffers;
   };
@@ -2928,6 +2815,12 @@ public:
         TightRow, Props.limits.optimalBufferCopyRowPitchAlignment));
   }
 
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // copyBufferToTexture consumes a tightly-packed staging buffer.
+    return computeTightTextureUploadLayout(Desc);
+  }
+
   const Capabilities &getCapabilities() override {
     if (Caps.empty())
       queryCapabilities();
@@ -3473,11 +3366,9 @@ public:
     return ResourceRef(Host, ImageRef{0, Sampler, 0});
   }
 
-  llvm::Expected<std::unique_ptr<AccelerationStructure>> createAS(Resource &R) {
-    assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-    assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-    auto SizesOrErr =
-        getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+  llvm::Expected<std::unique_ptr<AccelerationStructure>>
+  createAS(uint32_t InstanceCount) {
+    auto SizesOrErr = getTLASBuildSizes(InstanceCount);
     if (!SizesOrErr)
       return SizesOrErr.takeError();
     return createTLAS(*SizesOrErr);
@@ -3600,15 +3491,23 @@ public:
     for (auto &D : P.Sets) {
       for (auto &R : D.Resources) {
         if (R.isAccelerationStructure()) {
-          auto ASOrErr = createAS(R);
-          if (!ASOrErr)
-            return ASOrErr.takeError();
-          auto *VkAS = llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
+          assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+          const TLASDesc &TD = *R.TLASPtr;
           ResourceBundle Bundle{getDescriptorType(R.Kind), 0, nullptr};
-          Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+          llvm::SmallVector<std::unique_ptr<AccelerationStructure>> Handles;
+          Handles.reserve(TD.ArraySize);
+          for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+            auto ASOrErr =
+                createAS(static_cast<uint32_t>(TD.Instances[Elt].size()));
+            if (!ASOrErr)
+              return ASOrErr.takeError();
+            auto *VkAS =
+                llvm::cast<VulkanAccelerationStructure>(ASOrErr->get());
+            Bundle.ResourceRefs.push_back(ResourceRef{VkAS});
+            Handles.push_back(std::move(*ASOrErr));
+          }
           IS.Resources.push_back(std::move(Bundle));
-          auto Inserted =
-              IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+          auto Inserted = IS.TLASes.try_emplace(TD.Name, std::move(Handles));
           assert(Inserted.second && "TLAS bound to multiple resources NYI");
           (void)Inserted;
           continue;
@@ -3782,14 +3681,19 @@ public:
       for (uint32_t RIdx = 0; RIdx < P.Sets[SetIdx].Resources.size();
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
-        if (VulkanAccelerationStructure *VkAS =
-                IS.Resources[OverallResIdx].ResourceRefs[0].AS) {
+        if (R.isAccelerationStructure()) {
+          const auto &Refs = IS.Resources[OverallResIdx].ResourceRefs;
+          assert(Refs.size() == R.getArraySize() &&
+                 "AS bundle must hold one ResourceRef per array element");
           const size_t HandleStart = ASHandles.size();
-          ASHandles.push_back(VkAS->AccelStruct);
+          for (const auto &Ref : Refs) {
+            assert(Ref.AS && "AS ResourceRef missing AS handle");
+            ASHandles.push_back(Ref.AS->AccelStruct);
+          }
           VkWriteDescriptorSetAccelerationStructureKHR ASWrite = {};
           ASWrite.sType =
               VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-          ASWrite.accelerationStructureCount = 1;
+          ASWrite.accelerationStructureCount = R.getArraySize();
           ASWrite.pAccelerationStructures = &ASHandles[HandleStart];
           ASInfos.push_back(ASWrite);
 
@@ -3798,10 +3702,11 @@ public:
           WDS.pNext = &ASInfos.back();
           WDS.dstSet = IS.DescriptorSets[SetIdx];
           WDS.dstBinding = R.VKBinding->Binding;
-          WDS.descriptorCount = 1;
+          WDS.descriptorCount = R.getArraySize();
           WDS.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
           llvm::outs() << "Updating AS Descriptor [" << OverallResIdx << "] { "
-                       << SetIdx << ", " << RIdx << " }\n";
+                       << SetIdx << ", " << RIdx
+                       << " } count = " << R.getArraySize() << "\n";
           WriteDescriptors.push_back(WDS);
           continue;
         }
@@ -4779,6 +4684,161 @@ public:
   }
 };
 
+} // namespace
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+VulkanCommandBuffer::createComputeEncoder() {
+  auto Enc = std::make_unique<VKComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+VulkanCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries the VkRenderPass and the format / load / store policy.
+  // The begin desc supplies the textures that get bound for this encoder.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  uint32_t Width = 0, Height = 0;
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+    return Err;
+
+  llvm::SmallVector<VkImageView, 9> Views;
+  llvm::SmallVector<VkClearValue, 9> ClearValues;
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    if (!Desc.ColorAttachments[I])
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    VkClearValue CV = {};
+    if (PassDesc.ColorAttachments[I].Load == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the render target to have been "
+            "created with an OptimizedClearValue.");
+      const auto *ColorCV =
+          std::get_if<ClearColor>(&*Tex.Desc.OptimizedClearValue);
+      assert(ColorCV &&
+             "RenderTarget OptimizedClearValue must be a ClearColor");
+      CV.color = {{ColorCV->R, ColorCV->G, ColorCV->B, ColorCV->A}};
+    }
+    ClearValues.push_back(CV);
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+    if (Tex.View == VK_NULL_HANDLE)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil attachment texture has no image view.");
+    Views.push_back(Tex.View);
+
+    const auto &DS = *PassDesc.DepthStencil;
+    VkClearValue CV = {};
+    if (DS.DepthLoad == offloadtest::LoadAction::Clear ||
+        DS.StencilLoad == offloadtest::LoadAction::Clear) {
+      if (!Tex.Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *DepthCV =
+          std::get_if<ClearDepthStencil>(&*Tex.Desc.OptimizedClearValue);
+      assert(DepthCV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CV.depthStencil = {DepthCV->Depth, DepthCV->Stencil};
+    }
+    ClearValues.push_back(CV);
+  }
+
+  for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
+    if (PassDesc.ColorAttachments[I].Load == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),         /*OldLayout*/
+          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  if (Desc.DepthStencil) {
+    auto &Tex = llvm::cast<VulkanTexture>(*Desc.DepthStencil);
+
+    if (PassDesc.DepthStencil->DepthLoad == LoadAction::Load ||
+        PassDesc.DepthStencil->StencilLoad == LoadAction::Load) {
+      this->addImageTransition(
+          this->PendingSrcAccess, /*SrcAccessMask*/
+          VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+              VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, /*DstAccessMask*/
+          Tex.preferredLayoutOrUndefined(),                 /*OldLayout*/
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, /*NewLayout*/
+          Tex);
+    }
+  }
+
+  VkFramebufferCreateInfo FBCI = {};
+  FBCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+  FBCI.renderPass = VKPass.Handle;
+  FBCI.attachmentCount = static_cast<uint32_t>(Views.size());
+  FBCI.pAttachments = Views.data();
+  FBCI.width = Width;
+  FBCI.height = Height;
+  FBCI.layers = 1;
+
+  VkFramebuffer Framebuffer = VK_NULL_HANDLE;
+  if (auto Err =
+          VK::toError(vkCreateFramebuffer(Device, &FBCI, nullptr, &Framebuffer),
+                      "Failed to create framebuffer for RenderEncoder."))
+    return Err;
+
+  // The framebuffer must outlive this encoder and remain valid through GPU
+  // execution; the command buffer destroys it on teardown. The render pass
+  // is owned by the user-supplied VulkanRenderPass.
+  OwnedFramebuffers.push_back(Framebuffer);
+
+  VkRenderPassBeginInfo BeginInfo = {};
+  BeginInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+  BeginInfo.renderPass = VKPass.Handle;
+  BeginInfo.framebuffer = Framebuffer;
+  BeginInfo.renderArea.extent.width = Width;
+  BeginInfo.renderArea.extent.height = Height;
+  BeginInfo.clearValueCount = static_cast<uint32_t>(ClearValues.size());
+  BeginInfo.pClearValues = ClearValues.data();
+
+  this->flushBarrier();
+
+  vkCmdBeginRenderPass(CmdBuffer, &BeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+  return std::make_unique<VulkanRenderEncoder>(*this, Desc);
+}
+
 llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
   if (Items.empty())
     return llvm::Error::success();
@@ -4847,6 +4907,17 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
                 IB->getDeviceAddress() + T.IndexBufferOffset;
           } else {
             Tri.indexType = VK_INDEX_TYPE_NONE_KHR;
+          }
+          if (T.Transform) {
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
+            auto XformOrErr = offloadtest::createBufferWithData(
+                *Dev, "AS-Geom-Transform", XformDesc, T.Transform->data(),
+                T.Transform->size() * sizeof(float), nullptr, nullptr);
+            if (!XformOrErr)
+              return XformOrErr.takeError();
+            auto *XformBuf = llvm::cast<VulkanBuffer>(XformOrErr->get());
+            Tri.transformData.deviceAddress = XformBuf->getDeviceAddress();
+            CB.KeepAliveOwned.push_back(std::move(*XformOrErr));
           }
           Geoms[I].push_back(G);
 
@@ -4962,16 +5033,6 @@ llvm::Error VKComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
 }
 
 // === Ray tracing pipeline + SBT + DispatchRays ============================
-
-static VkRayTracingShaderGroupTypeKHR getRTGroupType(HitGroupType T) {
-  switch (T) {
-  case HitGroupType::Triangles:
-    return VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-  case HitGroupType::Procedural:
-    return VK_RAY_TRACING_SHADER_GROUP_TYPE_PROCEDURAL_HIT_GROUP_KHR;
-  }
-  llvm_unreachable("All HitGroupType cases handled");
-}
 
 llvm::Expected<std::unique_ptr<PipelineState>>
 VulkanDevice::createPipelineRT(llvm::StringRef Name, const BindingsDesc &BD,
@@ -5282,7 +5343,6 @@ llvm::Error VKComputeEncoder::dispatchRays(const PipelineState &PSO,
                           Height, Depth);
   return llvm::Error::success();
 }
-} // namespace
 
 llvm::Expected<offloadtest::SubmitResult> VulkanQueue::submit(
     llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {

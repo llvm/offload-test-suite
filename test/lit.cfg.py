@@ -365,11 +365,28 @@ for device in devices.get("Devices", []):
         break
 
 if not target_device:
-    config.fatal("No target device found!")
+    search_desc = (
+        "matching regex '{}'".format(GPUName)
+        if ShouldSearchByGPUName
+        else "first compatible device"
+    )
+    reported = (
+        ", ".join(d.get("Description", "<unknown>") for d in devices.get("Devices", []))
+        or "<none>"
+    )
+    lit_config.fatal(
+        "No target device found! Searched {}. "
+        "Devices reported by api-query: {}".format(search_desc, reported)
+    )
 setDeviceFeatures(config, target_device, HLSLCompiler)
 
 if "llvmpipe" in target_device.get("Description", "").lower():
     config.available_features.add("Lavapipe")
+
+# Expose the host CPU architecture so tests can gate on it (e.g. XFAIL a test
+# only when running on an ARM host).
+if platform.machine().lower() in ("arm64", "aarch64"):
+    config.available_features.add("host-arm64")
 
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))

@@ -125,6 +125,10 @@ Results:
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
 # XFAIL: Clang
 
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

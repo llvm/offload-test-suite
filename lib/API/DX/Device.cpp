@@ -364,7 +364,7 @@ public:
     HANDLE Event = CreateEventA(nullptr, false, false, nullptr);
     if (!Event)
 #else // WSL
-    int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    const int Event = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
     if (Event == -1)
 #endif
       return llvm::createStringError(std::errc::device_or_resource_busy,
@@ -788,15 +788,20 @@ public:
                                D3D12_RESOURCE_STATE_COPY_DEST);
     CB.flushBarrier();
 
-    const uint32_t ElementSize = getFormatSizeInBytes(DXDst.Desc.Fmt);
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXGIFormat(DXDst.Desc.Fmt), DXDst.Desc.Width, DXDst.Desc.Height,
-            1, getAlignedTexturePitch(DXDst.Desc.Width, ElementSize))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), 0);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(), Footprint);
-    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    const D3D12_RESOURCE_DESC TexDesc = DXDst.Resource->GetDesc();
+    const uint32_t NumSubresources = TexDesc.MipLevels;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Layouts(
+        NumSubresources);
+    ComPtr<ID3D12DeviceX> Device;
+    DXDst.Resource->GetDevice(IID_PPV_ARGS(&Device));
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Layouts.data(), nullptr, nullptr, nullptr);
+    for (uint32_t Sub = 0; Sub < NumSubresources; ++Sub) {
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Resource.Get(), Sub);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Buffer.Get(),
+                                                 Layouts[Sub]);
+      CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
       CB.addResourceTransition(DXSrc.Buffer.Get(),
@@ -891,15 +896,9 @@ public:
                            const ShaderBindingTable &SBT, uint32_t Width,
                            uint32_t Height, uint32_t Depth) override;
 
+protected:
   void endEncodingImpl() override { popDebugGroup(); }
 };
-
-llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
-DXCommandBuffer::createComputeEncoder() {
-  auto Enc = std::make_unique<DXComputeEncoder>(*this);
-  Enc->pushDebugGroup("ComputeEncoder");
-  return Enc;
-}
 
 class DXRenderPass final : public offloadtest::RenderPass {
 public:
@@ -1016,6 +1015,7 @@ public:
     return llvm::Error::success();
   }
 
+protected:
   void endEncodingImpl() override {
     // State transitions
     for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
@@ -1036,125 +1036,6 @@ public:
     popDebugGroup();
   }
 };
-
-llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
-DXCommandBuffer::createRenderEncoder(
-    const offloadtest::RenderPassBeginDesc &Desc) {
-  // The pass carries format / load / store policy; the begin desc supplies
-  // the actual textures. Walk both in lockstep.
-  if (!Desc.Pass)
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc is missing its RenderPass.");
-  auto &DXPass = llvm::cast<DXRenderPass>(*Desc.Pass);
-  const offloadtest::RenderPassDesc &PassDesc = DXPass.Desc;
-
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, nullptr, nullptr))
-    return Err;
-
-  // Validate attachments and gather the RTV / DSV CPU handles. RT and DSV
-  // descriptors are owned by the textures themselves; this just collects
-  // them for OMSetRenderTargets.
-  llvm::SmallVector<DXTexture *, 8> RTTextures;
-  llvm::SmallVector<D3D12_CPU_DESCRIPTOR_HANDLE, 8> RTVHandles;
-  RTTextures.reserve(Desc.ColorAttachments.size());
-  RTVHandles.reserve(Desc.ColorAttachments.size());
-  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
-    if (!Tex)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
-    auto &DXTex = llvm::cast<DXTexture>(*Tex);
-    if (DXTex.RTVHandle.ptr == 0)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Color attachment texture was not created with RenderTarget usage.");
-    RTTextures.push_back(&DXTex);
-    RTVHandles.push_back(DXTex.RTVHandle);
-  }
-
-  DXTexture *DSTexture = nullptr;
-  D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
-  if (Desc.DepthStencil) {
-    auto &DXDS = llvm::cast<DXTexture>(*Desc.DepthStencil);
-    if (DXDS.DSVHandle.ptr == 0)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "Depth-stencil texture was not created with DepthStencil usage.");
-    DSTexture = &DXDS;
-    DSVHandle = DXDS.DSVHandle;
-  }
-
-  // State transitions
-  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
-    auto &DXTex = llvm::cast<DXTexture>(*Tex);
-    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
-      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
-                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
-  }
-  if (Desc.DepthStencil) {
-    auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
-    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
-      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
-                                  D3D12_RESOURCE_STATE_DEPTH_WRITE);
-  }
-
-  this->flushBarrier();
-
-  CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
-                              RTVHandles.data(),
-                              /*RTsSingleHandleToDescriptorRange=*/false,
-                              Desc.DepthStencil ? &DSVHandle : nullptr);
-
-  for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
-    if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)
-      continue;
-    if (!RTTextures[I]->Desc.OptimizedClearValue)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "LoadAction::Clear requires the render target to have been "
-          "created with an OptimizedClearValue.");
-    const auto *CV =
-        std::get_if<ClearColor>(&*RTTextures[I]->Desc.OptimizedClearValue);
-    assert(CV && "RenderTarget OptimizedClearValue must be a ClearColor");
-    const float ClearArr[4] = {CV->R, CV->G, CV->B, CV->A};
-    CmdList->ClearRenderTargetView(RTVHandles[I], ClearArr, 0, nullptr);
-  }
-  if (PassDesc.DepthStencil) {
-    D3D12_CLEAR_FLAGS Flags = static_cast<D3D12_CLEAR_FLAGS>(0);
-    if (PassDesc.DepthStencil->DepthLoad == offloadtest::LoadAction::Clear)
-      Flags |= D3D12_CLEAR_FLAG_DEPTH;
-    if (PassDesc.DepthStencil->StencilLoad == offloadtest::LoadAction::Clear)
-      Flags |= D3D12_CLEAR_FLAG_STENCIL;
-    if (Flags != 0) {
-      if (!DSTexture->Desc.OptimizedClearValue)
-        return llvm::createStringError(
-            std::errc::invalid_argument,
-            "LoadAction::Clear requires the depth-stencil texture to have "
-            "been created with an OptimizedClearValue.");
-      const auto *CV =
-          std::get_if<ClearDepthStencil>(&*DSTexture->Desc.OptimizedClearValue);
-      assert(CV &&
-             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
-      CmdList->ClearDepthStencilView(DSVHandle, Flags, CV->Depth, CV->Stencil,
-                                     0, nullptr);
-    }
-  }
-
-  auto Enc = std::make_unique<DXRenderEncoder>(*this, Desc);
-  Enc->pushDebugGroup("RenderEncoder");
-  return Enc;
-}
 
 class DXDevice : public offloadtest::Device {
 public:
@@ -2048,6 +1929,43 @@ public:
     return getAlignedTexturePitch(Desc.Width, getFormatSizeInBytes(Desc.Fmt));
   }
 
+  TextureUploadLayout
+  getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
+    // Only the fields GetCopyableFootprints consults are needed here; layout,
+    // flags, and clear value do not affect the copyable footprint.
+    D3D12_RESOURCE_DESC TexDesc = {};
+    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    TexDesc.Width = Desc.Width;
+    TexDesc.Height = Desc.Height;
+    TexDesc.DepthOrArraySize = 1;
+    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
+    TexDesc.Format = getDXGIFormat(Desc.Fmt);
+    TexDesc.SampleDesc.Count = 1;
+
+    const uint32_t NumSubresources = Desc.MipLevels;
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints(
+        NumSubresources);
+    llvm::SmallVector<UINT> NumRows(NumSubresources);
+    llvm::SmallVector<UINT64> RowSizes(NumSubresources);
+    UINT64 TotalBytes = 0;
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Footprints.data(), NumRows.data(),
+                                  RowSizes.data(), &TotalBytes);
+
+    TextureUploadLayout Layout;
+    Layout.TotalSizeInBytes = TotalBytes;
+    Layout.Subresources.reserve(NumSubresources);
+    for (uint32_t I = 0; I < NumSubresources; ++I) {
+      SubresourceFootprint Sub;
+      Sub.Offset = Footprints[I].Offset;
+      Sub.RowPitchInBytes = Footprints[I].Footprint.RowPitch;
+      Sub.RowSizeInBytes = static_cast<uint32_t>(RowSizes[I]);
+      Sub.NumRows = NumRows[I];
+      Layout.Subresources.push_back(Sub);
+    }
+    return Layout;
+  }
+
   static llvm::Expected<std::unique_ptr<offloadtest::Device>>
   create(ComPtr<IDXCoreAdapter> Adapter, const DeviceConfig &Config) {
     ComPtr<ID3D12DeviceX> Device;
@@ -2091,7 +2009,7 @@ public:
     }
 
     if (Config.EnableDebugLayer || Config.EnableValidationLayer)
-      if (auto Err = configureInfoQueue(Device.Get()))
+      if (auto Err = configureInfoQueue(Device))
         return Err;
 
     auto GraphicsQueueOrErr = DXQueue::createGraphicsQueue(Device);
@@ -2146,7 +2064,7 @@ public:
 #include "DXFeatures.def"
   }
 
-  static llvm::Error configureInfoQueue(ID3D12DeviceX *Device) {
+  static llvm::Error configureInfoQueue(const ComPtr<ID3D12DeviceX> &Device) {
 #ifdef _WIN32
     ComPtr<ID3D12InfoQueue> InfoQueue;
     if (auto Err = HR::toError(Device->QueryInterface(InfoQueue.GetAddressOf()),
@@ -2155,6 +2073,8 @@ public:
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, TRUE);
     InfoQueue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, TRUE);
+#else
+    (void)Device;
 #endif
     return llvm::Error::success();
   }
@@ -2212,6 +2132,13 @@ public:
         Tri.IndexCount = T.IndexCount;
         Tri.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
       }
+
+      // Scratch sizing depends on whether Transform3x4 will be present at
+      // build time; signal that with any non-NULL sentinel here — the DXR
+      // spec lets the value be NULL or non-NULL for the prebuild query and
+      // does not dereference it.
+      if (T.Transform)
+        Tri.Transform3x4 = 1;
 
       GeomDescs.push_back(GD);
     }
@@ -2343,8 +2270,8 @@ public:
       for (auto &R : T.Resources) {
         for (const auto &Set : R.second) {
           D3D12_CPU_DESCRIPTOR_HANDLE DescriptorHandle = {};
-          if (Set.Buffer != nullptr) {
-            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buffer.get());
+          if (Set.Buf != nullptr) {
+            const DXBuffer &BufferDX = llvm::cast<DXBuffer>(*Set.Buf.get());
             switch (getDescriptorKind(R.first->Kind)) {
             case DescriptorKind::SRV:
               assert(BufferDX.SRVHandle.ptr != 0 &&
@@ -2365,9 +2292,8 @@ public:
               llvm_unreachable("Invalid DescriptorKind for a Buffer.");
               break;
             }
-          } else if (Set.Texture != nullptr) {
-            const DXTexture &TextureDX =
-                llvm::cast<DXTexture>(*Set.Texture.get());
+          } else if (Set.Tex != nullptr) {
+            const DXTexture &TextureDX = llvm::cast<DXTexture>(*Set.Tex.get());
             switch (getDescriptorKind(R.first->Kind)) {
             case DescriptorKind::SRV:
               assert(TextureDX.SRVHandle.ptr != 0 &&
@@ -2454,7 +2380,7 @@ public:
                 "Root descriptor cannot refer to resource arrays.");
 
           const DXBuffer *BufferDX = llvm::cast_if_present<DXBuffer>(
-              RootDescIt->second.back().Buffer.get());
+              RootDescIt->second.back().Buf.get());
           if (!BufferDX) {
             return llvm::createStringError(
                 std::errc::value_too_large,
@@ -2836,6 +2762,133 @@ public:
     return llvm::Error::success();
   }
 };
+} // namespace
+
+llvm::Expected<std::unique_ptr<offloadtest::ComputeEncoder>>
+DXCommandBuffer::createComputeEncoder() {
+  auto Enc = std::make_unique<DXComputeEncoder>(*this);
+  Enc->pushDebugGroup("ComputeEncoder");
+  return Enc;
+}
+
+llvm::Expected<std::unique_ptr<offloadtest::RenderEncoder>>
+DXCommandBuffer::createRenderEncoder(
+    const offloadtest::RenderPassBeginDesc &Desc) {
+  // The pass carries format / load / store policy; the begin desc supplies
+  // the actual textures. Walk both in lockstep.
+  if (!Desc.Pass)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc is missing its RenderPass.");
+  auto &DXPass = llvm::cast<DXRenderPass>(*Desc.Pass);
+  const offloadtest::RenderPassDesc &PassDesc = DXPass.Desc;
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  if (auto Err = findAndValidateRenderPassTextureSize(Desc, nullptr, nullptr))
+    return Err;
+
+  // Validate attachments and gather the RTV / DSV CPU handles. RT and DSV
+  // descriptors are owned by the textures themselves; this just collects
+  // them for OMSetRenderTargets.
+  llvm::SmallVector<DXTexture *, 8> RTTextures;
+  llvm::SmallVector<D3D12_CPU_DESCRIPTOR_HANDLE, 8> RTVHandles;
+  RTTextures.reserve(Desc.ColorAttachments.size());
+  RTVHandles.reserve(Desc.ColorAttachments.size());
+  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+    if (!Tex)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    auto &DXTex = llvm::cast<DXTexture>(*Tex);
+    if (DXTex.RTVHandle.ptr == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment texture was not created with RenderTarget usage.");
+    RTTextures.push_back(&DXTex);
+    RTVHandles.push_back(DXTex.RTVHandle);
+  }
+
+  DXTexture *DSTexture = nullptr;
+  D3D12_CPU_DESCRIPTOR_HANDLE DSVHandle = {};
+  if (Desc.DepthStencil) {
+    auto &DXDS = llvm::cast<DXTexture>(*Desc.DepthStencil);
+    if (DXDS.DSVHandle.ptr == 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Depth-stencil texture was not created with DepthStencil usage.");
+    DSTexture = &DXDS;
+    DSVHandle = DXDS.DSVHandle;
+  }
+
+  // State transitions
+  for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
+    auto &DXTex = llvm::cast<DXTexture>(*Tex);
+    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_RENDER_TARGET)
+      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
+                                  D3D12_RESOURCE_STATE_RENDER_TARGET);
+  }
+  if (Desc.DepthStencil) {
+    auto &DXTex = llvm::cast<DXTexture>(*Desc.DepthStencil);
+    if (DXTex.PreferredState != D3D12_RESOURCE_STATE_DEPTH_WRITE)
+      this->addResourceTransition(DXTex.Resource.Get(), DXTex.PreferredState,
+                                  D3D12_RESOURCE_STATE_DEPTH_WRITE);
+  }
+
+  this->flushBarrier();
+
+  CmdList->OMSetRenderTargets(static_cast<UINT>(RTVHandles.size()),
+                              RTVHandles.data(),
+                              /*RTsSingleHandleToDescriptorRange=*/false,
+                              Desc.DepthStencil ? &DSVHandle : nullptr);
+
+  for (size_t I = 0; I < PassDesc.ColorAttachments.size(); ++I) {
+    if (PassDesc.ColorAttachments[I].Load != offloadtest::LoadAction::Clear)
+      continue;
+    if (!RTTextures[I]->Desc.OptimizedClearValue)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "LoadAction::Clear requires the render target to have been "
+          "created with an OptimizedClearValue.");
+    const auto *CV =
+        std::get_if<ClearColor>(&*RTTextures[I]->Desc.OptimizedClearValue);
+    assert(CV && "RenderTarget OptimizedClearValue must be a ClearColor");
+    const float ClearArr[4] = {CV->R, CV->G, CV->B, CV->A};
+    CmdList->ClearRenderTargetView(RTVHandles[I], ClearArr, 0, nullptr);
+  }
+  if (PassDesc.DepthStencil) {
+    D3D12_CLEAR_FLAGS Flags = static_cast<D3D12_CLEAR_FLAGS>(0);
+    if (PassDesc.DepthStencil->DepthLoad == offloadtest::LoadAction::Clear)
+      Flags |= D3D12_CLEAR_FLAG_DEPTH;
+    if (PassDesc.DepthStencil->StencilLoad == offloadtest::LoadAction::Clear)
+      Flags |= D3D12_CLEAR_FLAG_STENCIL;
+    if (Flags != 0) {
+      if (!DSTexture->Desc.OptimizedClearValue)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "LoadAction::Clear requires the depth-stencil texture to have "
+            "been created with an OptimizedClearValue.");
+      const auto *CV =
+          std::get_if<ClearDepthStencil>(&*DSTexture->Desc.OptimizedClearValue);
+      assert(CV &&
+             "DepthStencil OptimizedClearValue must be a ClearDepthStencil");
+      CmdList->ClearDepthStencilView(DSVHandle, Flags, CV->Depth, CV->Stencil,
+                                     0, nullptr);
+    }
+  }
+
+  auto Enc = std::make_unique<DXRenderEncoder>(*this, Desc);
+  Enc->pushDebugGroup("RenderEncoder");
+  return Enc;
+}
 
 TileShape DXTexture::querySparseTileShape(const Device &Dev) const {
   const DXDevice &DeviceDX = llvm::cast<DXDevice>(Dev);
@@ -2906,6 +2959,18 @@ llvm::Error DXComputeEncoder::batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) {
                 IB->Buffer->GetGPUVirtualAddress() + T.IndexBufferOffset;
             GD.Triangles.IndexCount = T.IndexCount;
             GD.Triangles.IndexFormat = getDXGIIndexFormat(T.IdxFormat);
+          }
+          if (T.Transform) {
+            const BufferCreateDesc XformDesc = BufferCreateDesc::uploadBuffer();
+            auto XformOrErr = offloadtest::createBufferWithData(
+                *Dev, "AS-Geom-Transform", XformDesc, T.Transform->data(),
+                T.Transform->size() * sizeof(float), nullptr, nullptr);
+            if (!XformOrErr)
+              return XformOrErr.takeError();
+            auto *XformBuf = llvm::cast<DXBuffer>(XformOrErr->get());
+            GD.Triangles.Transform3x4 =
+                XformBuf->Buffer->GetGPUVirtualAddress();
+            CB.KeepAliveOwned.push_back(std::move(*XformOrErr));
           }
           GeomDescs.push_back(GD);
         }
@@ -3041,7 +3106,6 @@ llvm::Error DXComputeEncoder::dispatchRays(const PipelineState &PSO,
   CmdList4->DispatchRays(&RaysDesc);
   return llvm::Error::success();
 }
-} // namespace
 
 llvm::Expected<offloadtest::SubmitResult> DXQueue::submit(
     llvm::SmallVector<std::unique_ptr<offloadtest::CommandBuffer>> CBs) {

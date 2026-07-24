@@ -1,0 +1,207 @@
+#--- source.hlsl
+
+// This test exercises InterlockedXor against the HLSL-legal 64-bit
+// non-groupshared (resource) destination types. 64-bit atomics on UAVs were
+// introduced in Shader Model 6.6.
+//
+//   * RWStructuredBuffer<uint64_t>[i]        (free function, 2-arg)
+//   * RWStructuredBuffer<int64_t>[i]         (free function, 3-arg, signed)
+//   * RWByteAddressBuffer::InterlockedXor64  (method, 2-arg and 3-arg)
+//
+// 64-bit atomics on typed RWBuffer / RWTexture require the optional
+// "AtomicInt64OnTypedResource" capability and are intentionally not
+// covered here, to keep this test portable across implementations.
+//
+// See InterlockedXor.32.test for a full description of the unique-bit
+// atomicity construction: SBufU and SBufI hold four 64-bit words each while
+// BABuf holds eight (two 4-word accumulator regions); thread t flips bit
+// (t % 64) of word (t / 64), so every word ends at all-ones
+// (0xFFFFFFFFFFFFFFFF) and each 3-arg re-read must strictly exceed orig.
+// Because every thread with (t % 64) >= 32 sets a bit in the upper 32 bits,
+// the operation genuinely exercises all 64 bits rather than degenerating to a
+// 32-bit update.
+
+RWStructuredBuffer<uint64_t> SBufU : register(u0);
+RWStructuredBuffer<int64_t>  SBufI : register(u1);
+RWByteAddressBuffer          BABuf : register(u2);
+
+RWStructuredBuffer<uint> OutMonoSBufI : register(u3);
+RWStructuredBuffer<uint> OutMonoBABuf : register(u4);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  uint Tid  = GTID.x;
+  uint Word = Tid / 64;         // 0..3, one 64-bit slot per 64 threads
+  uint Bit  = Tid % 64;         // 0..63, this thread's unique bit
+  uint64_t MyBit = 1ull << Bit;
+  uint Off2 = Word * 8;         // BAB 2-arg region: byte offsets 0..24
+  uint Off3 = 32 + Word * 8;    // BAB 3-arg region: byte offsets 32..56
+
+  if (Tid < 4) {
+    SBufU[Tid] = 0;
+    SBufI[Tid] = 0;
+    BABuf.Store<uint64_t>(Tid * 8, 0);       // 2-arg accumulator words
+    BABuf.Store<uint64_t>(32 + Tid * 8, 0);  // 3-arg accumulator words
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint64_t>: 2-argument free function.
+  InterlockedXor(SBufU[Word], MyBit);
+
+  // RWStructuredBuffer<int64_t>: 3-argument free function (signed). Compared in
+  // the unsigned bit domain; setting a previously-zero bit strictly grows the
+  // pattern, so the concurrent re-read must exceed the observed original.
+  int64_t OrigI;
+  InterlockedXor(SBufI[Word], (int64_t)MyBit, OrigI);
+  int64_t AfterI = SBufI[Word];
+  OutMonoSBufI[Tid] = ((uint64_t)AfterI > (uint64_t)OrigI) ? 1u : 0u;
+
+  // RWByteAddressBuffer 64-bit method: 2-argument form.
+  BABuf.InterlockedXor64(Off2, MyBit);
+
+  // RWByteAddressBuffer 64-bit method: 3-argument form.
+  uint64_t OrigBA;
+  BABuf.InterlockedXor64(Off3, MyBit, OrigBA);
+  uint64_t AfterBA = BABuf.Load<uint64_t>(Off3);
+  OutMonoBABuf[Tid] = (AfterBA > OrigBA) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt64
+    Stride: 8
+    FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufU
+    Format: UInt64
+    Stride: 8
+    Data: [ 18446744073709551615, 18446744073709551615,
+            18446744073709551615, 18446744073709551615 ]
+  - Name: SBufI
+    Format: Int64
+    Stride: 8
+    FillSize: 32
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufI
+    Format: Int64
+    Stride: 8
+    Data: [ -1, -1, -1, -1 ]
+  - Name: BABuf
+    Format: UInt64
+    Stride: 8
+    FillSize: 64
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedBABuf
+    Format: UInt64
+    Stride: 8
+    Data: [ 18446744073709551615, 18446744073709551615,
+            18446744073709551615, 18446744073709551615,
+            18446744073709551615, 18446744073709551615,
+            18446744073709551615, 18446744073709551615 ]
+  - Name: OutMonoSBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMono
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestMonoSBufI
+    Rule: BufferExact
+    Actual: OutMonoSBufI
+    Expected: ExpectedMono
+  - Result: TestMonoBABuf
+    Rule: BufferExact
+    Actual: OutMonoBABuf
+    Expected: ExpectedMono
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutMonoSBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutMonoBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99127
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

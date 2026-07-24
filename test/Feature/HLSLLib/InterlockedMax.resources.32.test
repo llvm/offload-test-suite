@@ -73,6 +73,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 4
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufU
     Format: UInt32
     Stride: 4
@@ -81,6 +82,7 @@ Buffers:
     Format: Int32
     Stride: 4
     FillSize: 4
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedSBufI
     Format: Int32
     Stride: 4
@@ -89,6 +91,7 @@ Buffers:
     Format: UInt32
     Channels: 1
     FillSize: 4
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedTBufU
     Format: UInt32
     Channels: 1
@@ -97,6 +100,7 @@ Buffers:
     Format: UInt32
     Channels: 1
     FillSize: 4
+    FillValue: 137  # trash non-zero initialization data
     OutputProps:
       Height: 1
       Width: 1
@@ -113,6 +117,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
   - Name: ExpectedBABuf
     Format: UInt32
     Stride: 4

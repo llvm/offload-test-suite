@@ -11,6 +11,7 @@
 
 #include "Support/Pipeline.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 
 using namespace offloadtest;
 
@@ -195,16 +196,18 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
 
     // Resolve BLAS name references in TLAS instance descriptions.
     for (auto &T : P.AccelStructs.TLAS) {
-      for (auto &Inst : T.Instances) {
-        for (int Idx = 0, E = P.AccelStructs.BLAS.size(); Idx < E; ++Idx) {
-          if (P.AccelStructs.BLAS[Idx].Name == Inst.BLAS) {
-            Inst.BLASIdx = Idx;
-            break;
+      for (auto &Elt : T.Instances) {
+        for (auto &Inst : Elt) {
+          for (int Idx = 0, E = P.AccelStructs.BLAS.size(); Idx < E; ++Idx) {
+            if (P.AccelStructs.BLAS[Idx].Name == Inst.BLAS) {
+              Inst.BLASIdx = Idx;
+              break;
+            }
           }
+          if (Inst.BLASIdx < 0)
+            I.setError(Twine("TLAS '") + T.Name + "': referenced BLAS '" +
+                       Inst.BLAS + "' not found!");
         }
-        if (Inst.BLASIdx < 0)
-          I.setError(Twine("TLAS '") + T.Name + "': referenced BLAS '" +
-                     Inst.BLAS + "' not found!");
       }
     }
   }
@@ -638,6 +641,19 @@ void MappingTraits<offloadtest::TriangleGeometry>::mapping(
   I.mapOptional("IndexFormat", G.IdxFormat, IndexFormat::Uint32);
   I.mapOptional("IndexCount", G.IndexCount, 0u);
   I.mapOptional("Opaque", G.Opaque, true);
+  llvm::SmallVector<float> Transform;
+  I.mapOptional("Transform", Transform);
+  if (!Transform.empty()) {
+    if (Transform.size() != 12) {
+      I.setError(llvm::Twine("TriangleGeometry.Transform must have exactly 12 "
+                             "floats (3x4 row-major), got ") +
+                 llvm::Twine(Transform.size()));
+      return;
+    }
+    std::array<float, 12> T;
+    llvm::copy(Transform, T.begin());
+    G.Transform = T;
+  }
 }
 
 void MappingTraits<offloadtest::AABBGeometry>::mapping(
@@ -667,7 +683,7 @@ void MappingTraits<offloadtest::InstanceDesc>::mapping(
                " floats (3x4 row-major), got " + llvm::Twine(Transform.size()));
     return;
   }
-  std::copy(Transform.begin(), Transform.end(), std::begin(D.Transform));
+  llvm::copy(Transform, std::begin(D.Transform));
   I.mapOptional("InstanceID", D.InstanceID, 0u);
   uint32_t Mask = D.InstanceMask;
   I.mapOptional("InstanceMask", Mask, 255u);
@@ -680,7 +696,34 @@ void MappingTraits<offloadtest::InstanceDesc>::mapping(
 void MappingTraits<offloadtest::TLASDesc>::mapping(IO &I,
                                                    offloadtest::TLASDesc &D) {
   I.mapRequired("Name", D.Name);
+  I.mapOptional("ArraySize", D.ArraySize, 1u);
+
+  if (I.outputting()) {
+    if (D.ArraySize == 1) {
+      // single-element output: emit a flat `Instances:` list (parallel to
+      // CPUBuffer's single-element `Data: [...]` form).
+      I.mapRequired("Instances", D.Instances.front());
+    } else {
+      I.mapRequired("Instances", D.Instances);
+    }
+    return;
+  }
+
+  if (D.ArraySize == 1) {
+    // single-element input: read a flat `Instances:` list.
+    llvm::SmallVector<offloadtest::InstanceDesc> Insts;
+    I.mapRequired("Instances", Insts);
+    D.Instances.push_back(std::move(Insts));
+    return;
+  }
+
+  // array input: read a list-of-lists; validate length matches ArraySize.
   I.mapRequired("Instances", D.Instances);
+  if (D.Instances.size() != D.ArraySize) {
+    I.setError(llvm::Twine("Expected ") + llvm::Twine(D.ArraySize) +
+               " instance lists, found " + llvm::Twine(D.Instances.size()));
+    return;
+  }
 }
 
 void MappingTraits<offloadtest::AccelerationStructureDescs>::mapping(

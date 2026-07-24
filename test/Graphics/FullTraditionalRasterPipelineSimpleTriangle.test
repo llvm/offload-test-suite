@@ -252,6 +252,10 @@ DescriptorSets: []
 # this is technically possible, but that emulation path isn't wired up here.
 # UNSUPPORTED: Metal
 
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# UNSUPPORTED: Lavapipe
+
 # XFAIL: Clang
 # REQUIRES: goldenimage
 

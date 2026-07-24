@@ -82,12 +82,11 @@ DescriptorSets:
 # > The identity I for Operation is -INF.
 
 # This makes it defined that any lane value of -INF is ignored.
-
 # DirectX driver implementations seem to match SPIR-V, except WARP, which does
 # not treat -INF as an identity.
 
 # XFAIL: arm64 && DirectX && WARP
-
+# XFAIL: Lavapipe && host-arm64
 
 # CHECK: Name: Nans
 # CHECK-NEXT: Format: Float32

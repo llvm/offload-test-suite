@@ -1,0 +1,113 @@
+#--- source.hlsl
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+// Slab test against the single AABB at [-1, 1]^3 (matches the AABBs buffer).
+// Returns the entry distance when the ray intersects within [TMin, TMax].
+bool hitAABB(float3 Origin, float3 Direction, float TMin, float TMax,
+             out float THit) {
+  const float3 BMin = float3(-1, -1, -1);
+  const float3 BMax = float3(1, 1, 1);
+  const float3 InvD = 1.0 / Direction;
+  const float3 T0 = (BMin - Origin) * InvD;
+  const float3 T1 = (BMax - Origin) * InvD;
+  const float TEnter =
+      max(max(min(T0.x, T1.x), min(T0.y, T1.y)), max(min(T0.z, T1.z), TMin));
+  const float TExit =
+      min(min(max(T0.x, T1.x), max(T0.y, T1.y)), min(max(T0.z, T1.z), TMax));
+  THit = TEnter;
+  return TEnter <= TExit;
+}
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Two rays against a single AABB at [-1, 1]^3: the first passes through the
+  // box, the second is offset far along +x and misses it entirely. The
+  // candidate path fires per AABB the traversal considers; the shader runs a
+  // manual slab test and only commits a real hit, so a candidate reported for
+  // a miss (AABB quantization) would still resolve to COMMITTED_NOTHING.
+  const float3 Origins[2] = {float3(0, 0, 2), float3(5, 0, 2)};
+  const float3 Directions[2] = {float3(0, 0, -1), float3(0, 0, -1)};
+  [unroll] for (uint I = 0; I < 2; ++I) {
+    RayDesc Ray;
+    Ray.Origin = Origins[I];
+    Ray.Direction = Directions[I];
+    Ray.TMin = 0.0;
+    Ray.TMax = 100.0;
+    RayQuery<RAY_FLAG_NONE> Q;
+    Q.TraceRayInline(Scene, RAY_FLAG_NONE, 0xFF, Ray);
+    while (Q.Proceed()) {
+      if (Q.CandidateType() == CANDIDATE_PROCEDURAL_PRIMITIVE) {
+        float THit;
+        if (hitAABB(Ray.Origin, Ray.Direction, Ray.TMin, Ray.TMax, THit))
+          Q.CommitProceduralPrimitiveHit(THit);
+      }
+    }
+    // COMMITTED_PROCEDURAL_PRIMITIVE_HIT (2) for the hit, COMMITTED_NOTHING (0)
+    // for the miss.
+    Output[I] = (uint)Q.CommittedStatus();
+  }
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: AABBs
+    Format: Float32
+    Stride: 24
+    # D3D12_RAYTRACING_AABB / VkAabbPositionsKHR layout:
+    # { MinX, MinY, MinZ, MaxX, MaxY, MaxZ }, one box per stride.
+    Data: [ -1.0, -1.0, -1.0, 1.0, 1.0, 1.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    # [ through-box hit, offset miss ]
+    Data: [ 2, 0 ]
+AccelerationStructures:
+  BLAS:
+    - Name: AABBBLAS
+      AABBs:
+        - AABBBuffer: AABBs
+          AABBCount: 1
+          AABBStride: 24
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: AABBBLAS
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+Results:
+  - Result: AABBProcedural
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: acceleration-structure
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

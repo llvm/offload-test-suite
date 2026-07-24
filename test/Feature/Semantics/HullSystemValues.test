@@ -240,6 +240,10 @@ Results:
 # [[patch(...)]]. Mapping HLSL HS/DS onto that isn't wired up, so skip Metal.
 # UNSUPPORTED: Metal
 
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# UNSUPPORTED: Lavapipe
+
 # XFAIL: Clang
 
 # RUN: split-file %s %t

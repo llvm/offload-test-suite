@@ -3,6 +3,8 @@
 #include "API/Device.h"
 #include "API/FormatConversion.h"
 
+#include "llvm/ADT/STLForwardCompat.h"
+
 namespace offloadtest {
 
 static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
@@ -37,7 +39,8 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
         toFormat(Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
     if (!FmtOrErr) {
       printf("Invalid format! FMT: %d, CHANNELS: %d\n",
-             Resource.BufferPtr->Format, Resource.BufferPtr->Channels);
+             llvm::to_underlying(Resource.BufferPtr->Format),
+             Resource.BufferPtr->Channels);
       assert(false && "Invalid format.");
     }
     OutParams.Fmt = *FmtOrErr;
@@ -63,11 +66,8 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
 }
 
 static llvm::Expected<std::unique_ptr<AccelerationStructure>>
-createAS(Device &Dev, Resource &R) {
-  assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
-  assert(R.getArraySize() == 1 && "AS arrays not yet supported");
-  auto SizesOrErr =
-      Dev.getTLASBuildSizes(static_cast<uint32_t>(R.TLASPtr->Instances.size()));
+createAS(Device &Dev, uint32_t InstanceCount) {
+  auto SizesOrErr = Dev.getTLASBuildSizes(InstanceCount);
   if (!SizesOrErr)
     return SizesOrErr.takeError();
   return Dev.createTLAS(*SizesOrErr);
@@ -80,8 +80,7 @@ llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
       if (RS.Readback == nullptr)
         continue;
 
-      if (auto Err =
-              ReadbackEncoder.copyTextureToBuffer(*RS.Texture, *RS.Readback))
+      if (auto Err = ReadbackEncoder.copyTextureToBuffer(*RS.Tex, *RS.Readback))
         return Err;
     }
   } else if (R.first->isBuffer()) {
@@ -90,14 +89,14 @@ llvm::Error copyBackResource(offloadtest::ComputeEncoder &ReadbackEncoder,
         continue;
 
       if (auto Err = ReadbackEncoder.copyBufferToBuffer(
-              *RS.Buffer, 0, *RS.Readback, 0, RS.Buffer->getSizeInBytes()))
+              *RS.Buf, 0, *RS.Readback, 0, RS.Buf->getSizeInBytes()))
         return Err;
 
-      if (!RS.Buffer->getDesc().HasCounter)
+      if (!RS.Buf->getDesc().HasCounter)
         continue;
 
-      if (auto Err = ReadbackEncoder.copyCounterToBuffer(*RS.Buffer,
-                                                         *RS.CounterReadback))
+      if (auto Err =
+              ReadbackEncoder.copyCounterToBuffer(*RS.Buf, *RS.CounterReadback))
         return Err;
     }
   }
@@ -121,7 +120,7 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
       const void *DataPtr = *DataPtrOrErr;
 
       if (R.first->isTexture()) {
-        const TextureCreateDesc &Desc = RSIt->Texture->getDesc();
+        const TextureCreateDesc &Desc = RSIt->Tex->getDesc();
         const uint32_t SrcStrideInBytes =
             Dev.getTextureUploadRowStrideInBytes(Desc);
         const uint32_t DstStrideInBytes =
@@ -272,7 +271,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       CreateDesc.Fmt = *FormatOrErr;
       CreateDesc.Width = R.BufferPtr->OutputProps.Width;
       CreateDesc.Height = R.BufferPtr->OutputProps.Height;
-      CreateDesc.MipLevels = 1;
+      CreateDesc.MipLevels = R.BufferPtr->OutputProps.MipLevels;
 
       for (auto &Data : R.BufferPtr->Data) {
         std::unique_ptr<offloadtest::Buffer> UploadBuffer;
@@ -290,7 +289,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
           Texture = std::move(*TextureOrErr);
         } else {
           auto TextureOrErr =
-              createTextureWithData(Dev, "Texture", CreateDesc, Data.get(),
+              createTextureWithData(Dev, R.Name, CreateDesc, Data.get(),
                                     R.size(), Enc.get(), &UploadBuffer);
           if (!TextureOrErr)
             return TextureOrErr.takeError();
@@ -316,12 +315,19 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
         ResBundle.push_back(std::move(RSet));
       }
     } else if (R.isAccelerationStructure()) {
-      auto ASOrErr = createAS(Dev, R);
-      if (!ASOrErr)
-        return ASOrErr.takeError();
-      ResBundle.emplace_back(ASOrErr->get());
-      auto Inserted =
-          IS.TLASes.try_emplace(R.TLASPtr->Name, std::move(*ASOrErr));
+      assert(R.TLASPtr && "AS resource must be resolved to a TLAS");
+      const TLASDesc &TD = *R.TLASPtr;
+      llvm::SmallVector<std::unique_ptr<AccelerationStructure>> Handles;
+      Handles.reserve(TD.ArraySize);
+      for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+        auto ASOrErr =
+            createAS(Dev, static_cast<uint32_t>(TD.Instances[Elt].size()));
+        if (!ASOrErr)
+          return ASOrErr.takeError();
+        ResBundle.emplace_back(ASOrErr->get());
+        Handles.push_back(std::move(*ASOrErr));
+      }
+      auto Inserted = IS.TLASes.try_emplace(TD.Name, std::move(Handles));
       assert(Inserted.second && "TLAS bound to multiple resources NYI");
       (void)Inserted;
     } else {

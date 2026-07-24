@@ -21,6 +21,7 @@
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/YAMLTraits.h"
+#include <array>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -397,11 +398,7 @@ struct Resource {
     return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
   }
 
-  uint32_t getArraySize() const {
-    if (isSampler() || isAccelerationStructure())
-      return 1;
-    return BufferPtr->ArraySize;
-  }
+  uint32_t getArraySize() const;
 
   uint32_t size() const {
     assert(!isSampler() && !isAccelerationStructure() &&
@@ -552,6 +549,7 @@ struct TriangleGeometry {
   IndexFormat IdxFormat = IndexFormat::Uint32;
   uint32_t IndexCount = 0;
   bool Opaque = true;
+  std::optional<std::array<float, 12>> Transform;
 };
 
 struct AABBGeometry {
@@ -580,7 +578,11 @@ struct InstanceDesc {
 
 struct TLASDesc {
   std::string Name;
-  llvm::SmallVector<InstanceDesc> Instances;
+  uint32_t ArraySize = 1;
+  // Outer vector has ArraySize entries (one per descriptor-array element);
+  // inner vector lists the instances for that element. Mirrors
+  // CPUBuffer::Data's ArraySize-driven layout.
+  llvm::SmallVector<llvm::SmallVector<InstanceDesc>, 1> Instances;
 };
 
 struct AccelerationStructureDescs {
@@ -621,6 +623,14 @@ struct ShaderBindingTableDesc {
   llvm::SmallVector<SBTEntry> HitGroup;
   llvm::SmallVector<SBTEntry> Callable;
 };
+
+inline uint32_t Resource::getArraySize() const {
+  if (isSampler())
+    return 1;
+  if (isAccelerationStructure())
+    return TLASPtr->ArraySize;
+  return BufferPtr->ArraySize;
+}
 
 struct Pipeline {
   ShaderPipelineKind Kind;
@@ -1057,11 +1067,11 @@ template <> struct ScalarEnumerationTraits<offloadtest::dx::RootParamKind> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
-  static size_t size(IO &Io, SmallVector<SmallVector<T>> &Seq) {
+  static size_t size(IO & /*Io*/, SmallVector<SmallVector<T>> &Seq) {
     return Seq.size();
   }
 
-  static SmallVector<T> &element(IO &Io, SmallVector<SmallVector<T>> &Seq,
+  static SmallVector<T> &element(IO & /*Io*/, SmallVector<SmallVector<T>> &Seq,
                                  size_t Index) {
     if (Index >= Seq.size())
       Seq.resize(Index + 1);
@@ -1070,12 +1080,12 @@ template <typename T> struct SequenceTraits<SmallVector<SmallVector<T>>> {
 };
 
 template <typename T> struct SequenceTraits<SmallVector<MutableArrayRef<T>>> {
-  static size_t size(IO &Io, SmallVector<MutableArrayRef<T>> &Seq) {
+  static size_t size(IO & /*Io*/, SmallVector<MutableArrayRef<T>> &Seq) {
     return Seq.size();
   }
 
   static MutableArrayRef<T> &
-  element(IO &Io, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
+  element(IO & /*Io*/, SmallVector<MutableArrayRef<T>> &Seq, size_t Index) {
     assert(Index < Seq.size());
     return Seq[Index];
   }
