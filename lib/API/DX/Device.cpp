@@ -979,6 +979,42 @@ public:
     ScissorSet = true;
   }
 
+  void setShadingRate(offloadtest::ShadingRate Rate) override {
+    D3D12_SHADING_RATE DXRate = D3D12_SHADING_RATE_1X1;
+    switch (Rate) {
+    case offloadtest::ShadingRate::Rate_1x1:
+      DXRate = D3D12_SHADING_RATE_1X1;
+      break;
+    case offloadtest::ShadingRate::Rate_1x2:
+      DXRate = D3D12_SHADING_RATE_1X2;
+      break;
+    case offloadtest::ShadingRate::Rate_2x1:
+      DXRate = D3D12_SHADING_RATE_2X1;
+      break;
+    case offloadtest::ShadingRate::Rate_2x2:
+      DXRate = D3D12_SHADING_RATE_2X2;
+      break;
+    case offloadtest::ShadingRate::Rate_2x4:
+      DXRate = D3D12_SHADING_RATE_2X4;
+      break;
+    case offloadtest::ShadingRate::Rate_4x2:
+      DXRate = D3D12_SHADING_RATE_4X2;
+      break;
+    case offloadtest::ShadingRate::Rate_4x4:
+      DXRate = D3D12_SHADING_RATE_4X4;
+      break;
+    }
+    // Tier 1: no combiners (per-primitive / per-tile rates require Tier 2).
+    CB.CmdList->RSSetShadingRate(DXRate, nullptr);
+  }
+
+  void enablePrimitiveShadingRate() override {
+    const D3D12_SHADING_RATE_COMBINER Combiners[] = {
+        D3D12_SHADING_RATE_COMBINER_OVERRIDE,
+        D3D12_SHADING_RATE_COMBINER_PASSTHROUGH};
+    CB.CmdList->RSSetShadingRate(D3D12_SHADING_RATE_1X1, Combiners);
+  }
+
   void setVertexBuffer(uint32_t Slot, offloadtest::Buffer *VB, size_t Offset,
                        uint32_t Stride) override {
     assert(Slot < D3D12_IA_VERTEX_INPUT_RESOURCE_SLOT_COUNT &&
@@ -2049,6 +2085,21 @@ public:
     CD3DX12FeatureSupport Features;
     Features.Init(Device.Get());
 
+    const bool SupportsVariableShadingRateTier1 =
+        Features.VariableShadingRateTier() >=
+        D3D12_VARIABLE_SHADING_RATE_TIER_1;
+    Caps.insert(
+        std::make_pair("VariableShadingRateTier1",
+                       makeCapability<bool>("VariableShadingRateTier1",
+                                            SupportsVariableShadingRateTier1)));
+    const bool SupportsVariableShadingRateTier2 =
+        Features.VariableShadingRateTier() >=
+        D3D12_VARIABLE_SHADING_RATE_TIER_2;
+    Caps.insert(
+        std::make_pair("VariableShadingRateTier2",
+                       makeCapability<bool>("VariableShadingRateTier2",
+                                            SupportsVariableShadingRateTier2)));
+
 #define D3D_FEATURE_BOOL(Name)                                                 \
   Caps.insert(                                                                 \
       std::make_pair(#Name, makeCapability<bool>(#Name, Features.Name())));
@@ -2498,6 +2549,11 @@ public:
     Scissor.Width = static_cast<uint32_t>(VP.Width);
     Scissor.Height = static_cast<uint32_t>(VP.Height);
     Encoder.setScissor(Scissor);
+
+    if (P.ShadingRateOverride)
+      Encoder.setShadingRate(*P.ShadingRateOverride);
+    if (P.PrimitiveShadingRate)
+      Encoder.enablePrimitiveShadingRate();
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)
