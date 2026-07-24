@@ -455,9 +455,12 @@ createSparseTextureWithData(
 // TLAS handles come in pre-allocated because the caller's binding loop
 // stamps the AS pointer into descriptor bundles before this helper runs;
 // BLAS handles are allocated inline since BLASes aren't user-bindable.
-// BLAS and TLAS builds get separate `Enc.batchBuildAS()` calls so the
-// implicit BLAS-write → TLAS-read barrier sits between them. Outputs
-// (`OutBLAS`, `OutInputBuffers`) must outlive command-buffer submission.
+// `PreallocatedTLASes` is keyed by `TLASDesc::Name`; each map value is a
+// vector of `TLASDesc::ArraySize` handles (one per descriptor-array
+// element). BLAS and TLAS builds get separate `Enc.batchBuildAS()` calls
+// so the implicit BLAS-write → TLAS-read barrier sits between them.
+// Outputs (`OutBLAS`, `OutInputBuffers`) must outlive command-buffer
+// submission.
 //
 // TODO: `Pipeline` belongs to the test framework, not the rendering backend
 // API. This helper lives here only because `executeProgram` is still on
@@ -465,7 +468,8 @@ createSparseTextureWithData(
 llvm::Error buildPipelineAccelerationStructures(
     Device &Dev, ComputeEncoder &Enc, Pipeline &P,
     llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
-    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+    const llvm::StringMap<
+        llvm::SmallVector<std::unique_ptr<AccelerationStructure>>>
         &PreallocatedTLASes,
     llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers);
 
