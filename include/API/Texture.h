@@ -16,6 +16,7 @@
 #include "API/Resources.h"
 
 #include "llvm/ADT/BitmaskEnum.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
@@ -153,6 +154,24 @@ struct TileShape {
   uint32_t Height = 1;
   uint32_t Depth = 1;
 };
+
+struct SubresourceFootprint {
+  uint64_t Offset = 0; // Byte offset of this subresource in the buffer.
+  uint32_t RowPitchInBytes = 0; // Destination row stride (may include padding).
+  uint32_t RowSizeInBytes = 0;  // Tightly-packed bytes per row to copy.
+  uint32_t NumRows = 0;         // Number of rows in this subresource.
+};
+
+struct TextureUploadLayout {
+  llvm::SmallVector<SubresourceFootprint> Subresources; // One entry per mip.
+  uint64_t TotalSizeInBytes = 0;
+};
+
+// Compute a tightly-packed upload layout (no row or subresource padding) for
+// the given texture description. Suitable for backends whose buffer-to-texture
+// copy consumes a tightly-packed staging buffer (e.g. Vulkan, Metal).
+TextureUploadLayout
+computeTightTextureUploadLayout(const TextureCreateDesc &Desc);
 
 class Texture {
   GPUAPI API;

@@ -8,7 +8,9 @@ cbuffer CB_CM : register(b1) {
     column_major float2x3 cm;
 };
 
+[[vk::binding(2, 0)]]
 RWBuffer<float> OutRM : register(u0);
+[[vk::binding(3, 0)]]
 RWBuffer<float> OutCM : register(u1);
 
 // Zero-based row swizzle getters
@@ -179,12 +181,6 @@ DescriptorSets:
         Binding: 3
 ...
 #--- end
-
-# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8473
-# XFAIL: Vulkan && DXC
-
-# Task: https://github.com/llvm/llvm-project/issues/201712
-# XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -fvk-use-dx-layout -T cs_6_0 -Fo %t.o %t/source.hlsl

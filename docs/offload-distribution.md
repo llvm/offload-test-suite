@@ -224,3 +224,44 @@ To make builds deterministic, the `Pin MSVC toolset` step reads the default
 passes `-vcvars_ver=%VCToolsVersion%` (host-tools setup, `Setup Windows x64
 target`, and `Setup Windows ARM64 cross target`) so they all resolve the same
 complete toolset regardless of which runner picks up the job.
+
+## Standalone Build Distribution
+
+An alternate approach for separating the build and test flow in the offload test
+suite is using the "standalone" build mode. With this build flow, LLVM (and
+optionally Clang) are built separately from the offload-test suite, and the
+offload-test-suite is configured as the top-level CMake entry.
+
+A sample configuration for this flow is provided in the
+`cmake/caches/StandaloneDistribution.cmake` cache script. In this build
+configuration, the LLVM build contributes Clang, the llvm testing tools, and the
+subset of LLVM component libraries that the offload-test-suite's tools depend
+on.
+
+Using this flow LLVM and Clang are configured using a command like:
+
+```
+cmake -C <offload test>/cmake/caches/StandaloneDistribution.cmake \
+      -DCMAKE_INSTALL_PREFIX=<path to install to>                 \
+      <other cmake options> <path to llvm>
+ninja install-distribution
+```
+
+Then configure and build the offload test suite with a command like so:
+
+```
+cmake -DCMAKE_PREFIX_PATH=<path to llvm install>/lib/cmake/llvm \
+      -DLLVM_MAIN_SRC_DIR=<path to llvm-project>/llvm           \
+      -DDXC_DIR=<path to folder containing dxc/dxv>             \
+      -DOFFLOAD_TEST_TEST_CLANG=On                              \
+      -DGOLDENIMAGE_DIR=<path to images>                        \
+      <other cmake options> <path to ofload test suite>
+ninja check-hlsl
+```
+
+In this configuration the offload-test-suite will build its tools against the
+already built LLVM libraries which dramatically reduces build time. This
+configuration does still require a checkout of the LLVM source tree to pull LIT
+and the third-party unit testing libraries. If clone/checkout time or disk space
+is a concern this could be a sparse checkout or future changes could allow this
+to use LIT from pip and a stock googletest framework.
