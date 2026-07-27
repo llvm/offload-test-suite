@@ -102,7 +102,6 @@ jobs:
           if ! command -v "$python_cmd" >/dev/null 2>&1; then
             python_cmd=python3
           fi
-          "$python_cmd" -m pip install --upgrade pip
           "$python_cmd" -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
           user_scripts=$("$python_cmd" -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
           echo "User scripts dir: $user_scripts"
