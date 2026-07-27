@@ -98,11 +98,16 @@ jobs:
         # `lit` resolves correctly regardless of where pip put it.
         shell: bash
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
-          user_scripts=$(python -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
+          python_cmd=python
+          if ! command -v "$python_cmd" >/dev/null 2>&1; then
+            python_cmd=python3
+          fi
+          "$python_cmd" -m pip install --upgrade pip
+          "$python_cmd" -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
+          user_scripts=$("$python_cmd" -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
           echo "User scripts dir: $user_scripts"
           echo "$user_scripts" >> "$GITHUB_PATH"
+          echo "PYTHON=$python_cmd" >> "$GITHUB_ENV"
       - name: Dump GPU Info (test runner)
         shell: bash
         run: |
@@ -148,7 +153,7 @@ jobs:
                 warp_arch_args=(--warp-arch x64)
               fi
             fi
-            python configure-test-suite.py \
+            "$PYTHON" configure-test-suite.py \
               --suite "${{ steps.suite.outputs.suite }}" \
               --dxc-path "$dxc_path" \
               "${warp_arch_args[@]}"
