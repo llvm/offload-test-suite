@@ -154,10 +154,13 @@ jobs:
                 warp_arch_args=(--warp-arch x64)
               fi
             fi
+            # Expand warp_arch_args defensively: under `set -u`, macOS's
+            # bash 3.2 treats "${arr[@]}" on an empty array as an unbound
+            # variable. The ${arr[@]+...} guard yields nothing when unset.
             "$PYTHON" configure-test-suite.py \
               --suite "${{ steps.suite.outputs.suite }}" \
               --dxc-path "$dxc_path" \
-              "${warp_arch_args[@]}"
+              ${warp_arch_args[@]+"${warp_arch_args[@]}"}
       - name: Setup Lavapipe
         if: contains(inputs.TestTarget, 'lavapipe')
         shell: bash
