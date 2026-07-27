@@ -105,7 +105,7 @@ jobs:
           if [ '${{ inputs.OS }}' != 'macOS' ]; then
             "$python_cmd" -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
           fi
-          user_scripts=$("$python_cmd" -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
+          user_scripts=$("$python_cmd" -c "import sysconfig; print(sysconfig.get_path('scripts', sysconfig.get_preferred_scheme('user')))")
           echo "User scripts dir: $user_scripts"
           echo "$user_scripts" >> "$GITHUB_PATH"
           echo "PYTHON=$python_cmd" >> "$GITHUB_ENV"
