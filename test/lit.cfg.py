@@ -381,6 +381,11 @@ setDeviceFeatures(config, target_device, HLSLCompiler)
 if "llvmpipe" in target_device.get("Description", "").lower():
     config.available_features.add("Lavapipe")
 
+# Expose the host CPU architecture so tests can gate on it (e.g. XFAIL a test
+# only when running on an ARM host).
+if platform.machine().lower() in ("arm64", "aarch64"):
+    config.available_features.add("host-arm64")
+
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
     config.available_features.add("goldenimage")
