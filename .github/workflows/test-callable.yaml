@@ -102,7 +102,14 @@ jobs:
           if ! command -v "$python_cmd" >/dev/null 2>&1; then
             python_cmd=python3
           fi
-          "$python_cmd" -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
+          # On macOS runners lit + pyyaml are already provided by the
+          # Homebrew Python. Those packages are not writable by pip (their
+          # site-packages dir is owned by Homebrew and lacks RECORD files),
+          # so any install/upgrade that touches them fails. Skip the install
+          # there and rely on the preinstalled versions.
+          if [ '${{ inputs.OS }}' != 'macOS' ]; then
+            "$python_cmd" -m pip install -r "$GITHUB_WORKSPACE/install/share/hlsl-test-suite/requirements.txt"
+          fi
           user_scripts=$("$python_cmd" -c "import sysconfig; print(sysconfig.get_path('scripts', f'{sysconfig.get_default_scheme()}_user'))")
           echo "User scripts dir: $user_scripts"
           echo "$user_scripts" >> "$GITHUB_PATH"
