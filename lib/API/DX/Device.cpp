@@ -2658,6 +2658,7 @@ public:
     if (P.Settings.DX.RootParams.size() > 0) {
 
       // Samplers are not supported in RootParams, error if we do find any.
+      // TODO: https://github.com/llvm/offload-test-suite/issues/1400
       for (const auto &Set : P.Sets) {
         for (const auto &R : Set.Resources) {
           if (R.isSampler())
