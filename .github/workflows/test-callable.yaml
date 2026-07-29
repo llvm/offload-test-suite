@@ -209,7 +209,14 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          # The `-frequent` infix records which pipeline produced these
+          # results, so artifacts from a `validate-frequent-builder.yaml`
+          # dispatch are never confused with those from a normal
+          # `build-and-test-callable.yaml` run. It also keeps the two names
+          # distinct should both callables ever run for the same
+          # SKU/TestTarget in one workflow run, which upload-artifact@v4
+          # rejects as a duplicate name.
+          name: test-results-frequent-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: standalone-build/**/testresults.xunit.xml
           if-no-files-found: ignore
       - name: Run dxdiag (Windows only)
@@ -224,5 +231,5 @@ jobs:
         if: inputs.OS == 'windows' && failure()
         uses: actions/upload-artifact@v4
         with:
-          name: dxdiag-${{ inputs.SKU }}-${{ inputs.TestTarget }}.txt
+          name: dxdiag-frequent-${{ inputs.SKU }}-${{ inputs.TestTarget }}.txt
           path: ${{ runner.temp }}/dxdiag.txt

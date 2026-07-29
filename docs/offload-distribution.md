@@ -242,14 +242,25 @@ The builder is being brought up incrementally:
 
 - **Today.** `pr-matrix.yaml` runs `Build-Windows-X64` on every PR, and
   **nothing consumes its artifacts**. Every test cell still builds for
-  itself through `build-and-test-callable.yaml`. Running the builder
-  unconsumed lets us watch build reliability, sccache hit rate, cache-key
-  churn and artifact size without putting PR signal at risk.
-  `test-callable.yaml` is present but unreferenced.
-- **Next.** Once `Build-Windows-X64` is consistently green, Windows x64
-  test cells move onto it one SKU at a time by uncommenting the
-  `Exec-Tests-Windows-Distributed` template in `pr-matrix.yaml` and
-  deleting the corresponding legacy cells.
+  itself through `build-and-test-callable.yaml`, exactly as before.
+  Running the builder unconsumed lets us watch build reliability, sccache
+  hit rate, cache-key churn and artifact size without putting PR signal at
+  risk. `test-callable.yaml` is referenced only by
+  `validate-frequent-builder.yaml`.
+- **Validating the consuming half.** Because no PR job downloads the
+  artifacts, the distribution and test-execution code is exercised by
+  dispatching `validate-frequent-builder.yaml` manually. It runs
+  `build-callable.yaml` followed by `test-callable.yaml` for one chosen
+  x64 SKU and lit suite, covering artifact upload, download, the
+  standalone rebuild and the lit run end to end. Compare its results
+  against the same SKU/TestTarget in a normal `pr-matrix.yaml` run. The
+  build half normally hits the `actions/cache` entry from a recent
+  pr-matrix run, so a dispatch usually skips the compile entirely.
+- **Next.** Once the builder is consistently green and
+  `validate-frequent-builder.yaml` passes for a SKU, that SKU's cells move
+  over by uncommenting the `Exec-Tests-Windows-Distributed` template in
+  `pr-matrix.yaml` and deleting the corresponding legacy cells. One SKU at
+  a time, so a regression is always attributable and trivially revertable.
 - **Phase 2.** `build-callable.yaml` gains arm64 cross-compile support and
   `windows-qc` migrates too.
 

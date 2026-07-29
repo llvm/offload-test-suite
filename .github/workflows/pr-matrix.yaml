@@ -34,8 +34,10 @@ jobs:
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
 
   # TODO: Uncomment one SKU at a time once `Build-Windows-X64` is confirmed
-  # reliably green, deleting each migrated cell from the legacy
-  # `Exec-Tests-*` blocks below as it moves over. This is the template for a
+  # reliably green AND `validate-frequent-builder.yaml` has been dispatched
+  # successfully for that SKU, deleting each migrated cell from the legacy
+  # `Exec-Tests-*` blocks below as it moves over -- a SKU is served by
+  # exactly one path at a time, never both. This is the template for a
   # migrated block: it consumes the frequent builder's artifacts and rebuilds
   # only the offload-test-suite tools standalone on the GPU runner. Cells are
   # enumerated explicitly as `{ SKU, Arch, TestTarget }` so "which build feeds

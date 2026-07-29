@@ -1,0 +1,122 @@
+name: Validate Frequent Builder
+
+# Manual-only workflow for exercising the frequent-builder pipeline
+# end-to-end: `build-callable.yaml` produces the LLVM/Clang + DXC
+# distribution on the `hlsl-frequent-builder` machine, then
+# `test-callable.yaml` consumes those artifacts on a GPU runner and
+# rebuilds the offload-test-suite tools standalone from source.
+#
+# This exists because `pr-matrix.yaml` deliberately does not consume the
+# builder's artifacts yet -- it only runs the build so we can watch it.
+# Use this workflow to validate the consuming half for a given SKU before
+# migrating that SKU's cells in `pr-matrix.yaml` for real. Compare the
+# results against the same SKU/TestTarget in the standard pr-matrix run.
+#
+# The build half normally hits the `actions/cache` entry populated by a
+# recent pr-matrix run (same LLVM SHA, DXC SHA and cmake args), so a
+# dispatch usually skips the compile entirely and just re-uploads.
+#
+# See docs/offload-distribution.md ("Frequent Builder").
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      SKU:
+        description: 'x64 GPU runner SKU to run the tests on'
+        required: true
+        type: choice
+        options:
+        - windows-intel
+        - windows-nvidia
+        - windows-amd
+        - windows-sw-rasterizer-x86_64
+      TestTarget:
+        description: 'lit suite to run'
+        required: true
+        type: choice
+        options:
+        - check-hlsl-d3d12
+        - check-hlsl-clang-d3d12
+        - check-hlsl-vk
+        - check-hlsl-clang-vk
+        - check-hlsl-warp-d3d12
+        - check-hlsl-clang-warp-d3d12
+        - check-hlsl-vk-lavapipe
+        - check-hlsl-clang-vk-lavapipe
+      OffloadTest-branch:
+        description: 'Test Suite Branch'
+        required: false
+        default: 'main'
+        type: string
+      OffloadTest-fork:
+        description: 'Test Suite Fork'
+        required: false
+        default: 'llvm'
+        type: string
+      LLVM-branch:
+        description: 'LLVM Branch'
+        required: false
+        default: 'main'
+        type: string
+      LLVM-fork:
+        description: 'LLVM Fork'
+        required: false
+        default: 'llvm'
+        type: string
+      DXC-branch:
+        description: 'DXC Branch'
+        required: false
+        default: 'main'
+        type: string
+      BuildType:
+        description: 'Build Type'
+        required: false
+        default: 'RelWithDebInfo'
+        type: choice
+        options:
+        - Release
+        - RelWithDebInfo
+        - Debug
+      LLVM-ExtraCMakeArgs:
+        # Defaults to the same args pr-matrix.yaml passes, so a dispatch
+        # lands on the same cache key and reuses that build.
+        description: 'Extra CMake Args for LLVM'
+        required: false
+        default: '-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl'
+        type: string
+
+jobs:
+  Build-Windows-X64:
+    uses: ./.github/workflows/build-callable.yaml
+    with:
+      OS: windows
+      Arch: x64
+      OffloadTest-branch: ${{ inputs.OffloadTest-branch }}
+      OffloadTest-fork: ${{ inputs.OffloadTest-fork }}
+      LLVM-branch: ${{ inputs.LLVM-branch }}
+      LLVM-fork: ${{ inputs.LLVM-fork }}
+      DXC-branch: ${{ inputs.DXC-branch }}
+      BuildType: ${{ inputs.BuildType }}
+      LLVM-ExtraCMakeArgs: ${{ inputs.LLVM-ExtraCMakeArgs }}
+
+  Exec-Test:
+    permissions:
+      contents: read
+      checks: write
+    needs: Build-Windows-X64
+    uses: ./.github/workflows/test-callable.yaml
+    with:
+      OS: windows
+      Arch: x64
+      SKU: ${{ inputs.SKU }}
+      TestTarget: ${{ inputs.TestTarget }}
+      BuildType: ${{ inputs.BuildType }}
+      OffloadTest-branch: ${{ inputs.OffloadTest-branch }}
+      OffloadTest-fork: ${{ inputs.OffloadTest-fork }}
+      LLVM-branch: ${{ inputs.LLVM-branch }}
+      LLVM-fork: ${{ inputs.LLVM-fork }}
+      ArtifactName: ${{ needs.Build-Windows-X64.outputs.ArtifactName }}
+      DXCArtifactName: ${{ needs.Build-Windows-X64.outputs.DXCArtifactName }}
