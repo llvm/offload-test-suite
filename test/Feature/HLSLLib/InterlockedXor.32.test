@@ -1,0 +1,202 @@
+#--- source.hlsl
+
+// This test exercises InterlockedXor against non-resource (groupshared)
+// destinations. A set of 256 threads concurrently updates shared words, so
+// the test actually exercises atomic behavior.
+//
+// Both the 2-argument and 3-argument overloads are covered for int and uint.
+//
+// XOR is not monotonic in general -- XORing the same value into a single slot
+// just toggles a bit up and down -- so the InterlockedMax-style "re-read is
+// larger" check cannot be applied to one shared accumulator. Instead every
+// thread is assigned a *distinct* bit that starts at zero: thread t flips bit
+// (t % 32) of word (t / 32). Because each bit is owned by exactly one thread
+// and starts clear, XOR only ever sets bits (0 -> 1) and never clears them.
+// This makes the construction both deterministic and race-detecting, and
+// atomicity is verified two independent ways:
+//
+//   1. Final value. Each 32-bit word is touched by exactly 32 threads, one per
+//      bit, so its deterministic final value is all-ones (0xFFFFFFFF). A
+//      non-atomic read-modify-write can lose an update: two threads read the
+//      same word, each flips its own bit, and one write clobbers the other,
+//      leaving a bit clear. So a word can equal 0xFFFFFFFF only if no atomic
+//      XOR was lost.
+//
+//   2. Monotonicity (3-argument form). Because every XOR only sets a
+//      previously-zero bit, the word is strictly increasing in the unsigned
+//      bit domain. Immediately after this thread's atomic XOR returns `orig`,
+//      a fresh re-read of the word must be strictly greater than `orig` -- no
+//      other thread can clear a bit, so the observed value can never drop back
+//      to or below `orig`. A racy implementation that loses or reorders a
+//      sub-operation can make the re-read fail to exceed `orig`. Signed slots
+//      are compared in the unsigned bit domain because setting the sign bit
+//      makes the two's-complement value negative even though its bit pattern
+//      still grows. This correlates `orig` with a fresh observation of shared
+//      memory and checks every thread, so a correct implementation yields
+//      all-ones.
+
+RWStructuredBuffer<uint> OutMonoUInt : register(u0);
+RWStructuredBuffer<uint> OutMonoInt  : register(u1);
+RWStructuredBuffer<uint> OutFinal    : register(u2);
+
+groupshared uint XorUInt3[8];   // 3-arg form, unsigned
+groupshared int  XorInt3[8];    // 3-arg form, signed
+groupshared uint XorUInt2[8];   // 2-arg form, unsigned
+groupshared int  XorInt2[8];    // 2-arg form, signed
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  uint Tid  = GTID.x;
+  uint Word = Tid / 32;         // 0..7, one 32-bit word per 32 threads
+  uint Bit  = Tid % 32;         // 0..31, this thread's unique bit
+  uint MyBit = 1u << Bit;
+
+  if (Tid < 8) {
+    XorUInt3[Tid] = 0u;
+    XorInt3[Tid]  = 0;
+    XorUInt2[Tid] = 0u;
+    XorInt2[Tid]  = 0;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // 3-argument form, unsigned. Setting a previously-zero bit makes the word
+  // strictly larger, so the concurrent re-read must exceed the observed orig.
+  uint OrigU;
+  InterlockedXor(XorUInt3[Word], MyBit, OrigU);
+  uint AfterU = XorUInt3[Word];
+  OutMonoUInt[Tid] = (AfterU > OrigU) ? 1u : 0u;
+
+  // 3-argument form, signed. Compared in the unsigned bit domain because the
+  // sign bit flips the value negative even though its bit pattern still grows.
+  int OrigI;
+  InterlockedXor(XorInt3[Word], (int)MyBit, OrigI);
+  int AfterI = XorInt3[Word];
+  OutMonoInt[Tid] = (asuint(AfterI) > asuint(OrigI)) ? 1u : 0u;
+
+  // 2-argument forms.
+  InterlockedXor(XorUInt2[Word], MyBit);
+  InterlockedXor(XorInt2[Word], (int)MyBit);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (Tid < 8) {
+    OutFinal[Tid]      = XorUInt3[Tid];        // 0xFFFFFFFF
+    OutFinal[8 + Tid]  = asuint(XorInt3[Tid]); // 0xFFFFFFFF
+    OutFinal[16 + Tid] = XorUInt2[Tid];        // 0xFFFFFFFF
+    OutFinal[24 + Tid] = asuint(XorInt2[Tid]); // 0xFFFFFFFF
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutMonoUInt
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMonoUInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoInt
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMonoInt
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutFinal
+    Format: UInt32
+    Stride: 4
+    FillSize: 128
+  - Name: ExpectedFinal
+    Format: UInt32
+    Stride: 4
+    Data: [ 4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295,
+            4294967295, 4294967295, 4294967295, 4294967295 ]
+Results:
+  - Result: TestMonoUInt
+    Rule: BufferExact
+    Actual: OutMonoUInt
+    Expected: ExpectedMonoUInt
+  - Result: TestMonoInt
+    Rule: BufferExact
+    Actual: OutMonoInt
+    Expected: ExpectedMonoInt
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutMonoUInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutMonoInt
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99127
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
