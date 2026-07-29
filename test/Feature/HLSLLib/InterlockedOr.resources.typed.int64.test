@@ -128,6 +128,9 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1407
 # XFAIL: Intel && DXC && Clang && Vulkan
 
+# Bug: https://github.com/llvm/llvm-project/issues/116148
+# XFAIL: Clang 
+
 # REQUIRES: Int64TypedResourceAtomics && SM_6_6
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
