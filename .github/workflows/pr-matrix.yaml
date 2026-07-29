@@ -13,6 +13,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # === Frequent builder (Phase 1: bring-up only) ===========================
+  #
+  # Builds the LLVM/Clang distribution and DXC once per PR on the dedicated
+  # `hlsl-frequent-builder` machine and publishes them as artifacts. Nothing
+  # consumes those artifacts yet -- every test cell below still builds for
+  # itself, exactly as before.
+  #
+  # This is deliberate. Running the builder unconsumed lets us watch it for
+  # a while (build reliability, sccache hit rate, cache key churn, artifact
+  # size) without putting PR signal at risk. Once it is consistently green,
+  # test cells get migrated onto it one SKU at a time by uncommenting the
+  # template below and deleting the corresponding legacy block.
+  Build-Windows-X64:
+    uses: ./.github/workflows/build-callable.yaml
+    with:
+      OS: windows
+      Arch: x64
+      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+
+  # TODO: Uncomment one SKU at a time once `Build-Windows-X64` is confirmed
+  # reliably green, deleting each migrated cell from the legacy
+  # `Exec-Tests-*` blocks below as it moves over. This is the template for a
+  # migrated block: it consumes the frequent builder's artifacts and rebuilds
+  # only the offload-test-suite tools standalone on the GPU runner. Cells are
+  # enumerated explicitly as `{ SKU, Arch, TestTarget }` so "which build feeds
+  # which test" stays grep-able from this file alone.
+  # See docs/offload-distribution.md ("Frequent Builder").
+  #
+  # Exec-Tests-Windows-Distributed:
+  #   permissions:
+  #     contents: read
+  #     checks: write
+  #   if: ${{ !contains(github.event.pull_request.labels.*.name, 'disable-default-tests') }}
+  #   needs: Build-Windows-X64
+  #   strategy:
+  #     fail-fast: false
+  #     matrix:
+  #       include:
+  #         - { SKU: windows-nvidia, Arch: x64, TestTarget: check-hlsl-d3d12 }
+  #         - { SKU: windows-nvidia, Arch: x64, TestTarget: check-hlsl-clang-d3d12 }
+  #
+  #   uses: ./.github/workflows/test-callable.yaml
+  #   with:
+  #     OS: windows
+  #     Arch: ${{ matrix.Arch }}
+  #     SKU: ${{ matrix.SKU }}
+  #     TestTarget: ${{ matrix.TestTarget }}
+  #     OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
+  #     ArtifactName: ${{ needs.Build-Windows-X64.outputs.ArtifactName }}
+  #     DXCArtifactName: ${{ needs.Build-Windows-X64.outputs.DXCArtifactName }}
+
+  # === Legacy self-building test cells ======================================
+  #
+  # Each of these still runs a full LLVM/Clang/DXC compile on the SKU runner
+  # via `build-and-test-callable.yaml`. They are migrated to
+  # `Build-Windows-X64` + `test-callable.yaml` incrementally; see above.
+
   Exec-Tests-Windows:
     permissions:
       contents: read

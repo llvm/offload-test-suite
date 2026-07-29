@@ -1,0 +1,241 @@
+name: HLSL Frequent Builder
+
+permissions:
+  contents: read
+
+# Builds the LLVM/Clang distribution and DXC once per
+# (OS, Arch, BuildType, cmake-args, LLVM SHA, DXC SHA) on a dedicated
+# builder pool, and publishes the results as artifacts.
+#
+# The offload-test-suite itself is deliberately NOT built here. Test
+# runners rebuild its tools standalone from the PR head against this
+# distribution (see `test-callable.yaml`), which keeps the offload-suite
+# SHA out of the cache key and guarantees tests exercise the PR's code.
+#
+# NOTE: during bring-up nothing consumes these artifacts yet -- test cells
+# in `pr-matrix.yaml` still build for themselves and are migrated over one
+# SKU at a time. See docs/offload-distribution.md ("Frequent Builder").
+
+on:
+  workflow_call:
+    inputs:
+      OS:
+        required: true
+        type: string
+      Arch:
+        description: 'Target arch. Phase 1 supports x64 only; arm64 cross-compile lands in Phase 2.'
+        required: true
+        type: string
+      OffloadTest-branch:
+        required: false
+        default: 'main'
+        type: string
+      OffloadTest-fork:
+        required: false
+        default: 'llvm'
+        type: string
+      LLVM-branch:
+        required: false
+        default: 'main'
+        type: string
+      LLVM-fork:
+        required: false
+        default: 'llvm'
+        type: string
+      DXC-branch:
+        required: false
+        default: 'main'
+        type: string
+      BuildType:
+        required: false
+        default: 'RelWithDebInfo'
+        type: string
+      LLVM-ExtraCMakeArgs:
+        description: 'Extra CMake Args for LLVM'
+        required: false
+        default: ''
+        type: string
+    outputs:
+      ArtifactName:
+        description: 'Name of the uploaded LLVM install-prefix artifact for this build config'
+        value: ${{ jobs.build.outputs.ArtifactName }}
+      DXCArtifactName:
+        description: 'Name of the uploaded DXC artifact for this build config'
+        value: ${{ jobs.build.outputs.DXCArtifactName }}
+
+jobs:
+  build:
+    # Dedicated frequent-builder pool. Machines in this pool carry the
+    # `hlsl-frequent-builder` label and no `hlsl-<sku>` label, so GitHub
+    # Actions can never schedule a GPU test job here.
+    runs-on: [self-hosted, hlsl-frequent-builder]
+    outputs:
+      ArtifactName: ${{ steps.key.outputs.artifact_name }}
+      DXCArtifactName: ${{ steps.key.outputs.dxc_artifact_name }}
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ inputs.OS }}' != 'windows' ]; then
+            echo "::error::The frequent builder only supports OS=windows today (got '${{ inputs.OS }}')."
+            exit 1
+          fi
+          if [ '${{ inputs.Arch }}' != 'x64' ]; then
+            echo "::error::Phase 1 of the frequent builder only supports Arch=x64 (got '${{ inputs.Arch }}'). arm64 cross-compile arrives in Phase 2."
+            exit 1
+          fi
+      - name: Checkout DXC
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: Microsoft/DirectXShaderCompiler
+          ref: ${{ inputs.DXC-branch }}
+          path: DXC
+          fetch-depth: 1
+          submodules: true
+      - name: Checkout LLVM
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.LLVM-fork }}/llvm-project
+          ref: ${{ inputs.LLVM-branch }}
+          path: llvm-project
+          fetch-depth: 1
+      # OffloadTest is checked out only for its CMake cache scripts
+      # (StandaloneDistribution.cmake, sccache.cmake). None of its sources
+      # are compiled here.
+      - name: Checkout OffloadTest
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.OffloadTest-fork }}/offload-test-suite
+          ref: ${{ inputs.OffloadTest-branch }}
+          path: OffloadTest
+          fetch-depth: 1
+      - name: Compute artifact and cache keys
+        id: key
+        shell: bash
+        env:
+          OS: ${{ inputs.OS }}
+          ARCH: ${{ inputs.Arch }}
+          BUILDTYPE: ${{ inputs.BuildType }}
+          EXTRA: ${{ inputs.LLVM-ExtraCMakeArgs }}
+        run: |
+          set -euxo pipefail
+          llvm12=$(git -C llvm-project rev-parse HEAD | cut -c1-12)
+          dxc12=$(git -C DXC rev-parse HEAD | cut -c1-12)
+          # The cfg hash covers everything that changes the produced
+          # binaries but isn't already captured by OS/Arch/source SHAs:
+          # the build type, the extra cmake args, and the distribution
+          # cache script (which decides what lands in the install prefix).
+          cfg12=$( { printf '%s\n%s\n' "$BUILDTYPE" "$EXTRA"; \
+                     cat OffloadTest/cmake/caches/StandaloneDistribution.cmake; } \
+                   | sha256sum | cut -c1-12)
+          # Run-scoped names: unique per config within a single workflow
+          # run so fan-out test cells can locate them by name.
+          echo "artifact_name=hlsl-dist-${OS}-${ARCH}-${cfg12}"    >> "$GITHUB_OUTPUT"
+          echo "dxc_artifact_name=hlsl-dxc-${OS}-${ARCH}-${cfg12}" >> "$GITHUB_OUTPUT"
+          # Cross-run cache key: the full source + config identity.
+          echo "cache_key=hlsl-dist-${OS}-${ARCH}-${llvm12}-${dxc12}-${cfg12}" >> "$GITHUB_OUTPUT"
+      - name: Restore cached distribution
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/build-artifacts.tar
+            ${{ runner.temp }}/dxc-artifacts.tar
+          key: ${{ steps.key.outputs.cache_key }}
+      - name: Setup Python
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Setup Windows x64
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Build DXC
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+            set -euxo pipefail
+            rm -rf "$GITHUB_WORKSPACE/DXC/build"
+            cmake -G Ninja -S "$GITHUB_WORKSPACE/DXC" -B "$GITHUB_WORKSPACE/DXC/build" \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -C "$GITHUB_WORKSPACE/DXC/cmake/caches/PredefinedParams.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DHLSL_DISABLE_SOURCE_GENERATION=On
+            cmake --build "$GITHUB_WORKSPACE/DXC/build"
+      # StandaloneDistribution.cmake selects the exact set of Clang, LLVM
+      # test tools and LLVM component libraries that the offload-test-suite
+      # needs to build and run against. `ninja install-distribution` both
+      # builds and installs them.
+      - name: Build and install LLVM distribution
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+            set -euxo pipefail
+            rm -rf "$GITHUB_WORKSPACE/llvm-project/build" "$GITHUB_WORKSPACE/install"
+            cmake -G Ninja -S "$GITHUB_WORKSPACE/llvm-project/llvm" -B "$GITHUB_WORKSPACE/llvm-project/build" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/StandaloneDistribution.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+              ${{ inputs.LLVM-ExtraCMakeArgs }}
+            cmake --build "$GITHUB_WORKSPACE/llvm-project/build" --target install-distribution
+      # Surface sccache cache state after the heavy compile work so we can
+      # track hit rate / cache size across runs and diagnose cold-cache
+      # blowups on new builders.
+      - name: Dump sccache Stats
+        if: always() && steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: sccache --show-stats || true
+      - name: Stage DXC distribution
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # See docs/offload-distribution.md ("DXC prefix") for why we
+            # copy out of the build directory instead of using DXC's own
+            # install targets.
+            rm -rf "$GITHUB_WORKSPACE/dxc-dist"
+            buildbin=$GITHUB_WORKSPACE/DXC/build/bin
+            buildlib=$GITHUB_WORKSPACE/DXC/build/lib
+            distbin=$GITHUB_WORKSPACE/dxc-dist/bin
+            distlib=$GITHUB_WORKSPACE/dxc-dist/lib
+            mkdir -p "$distbin" "$distlib"
+            cp "$buildbin/dxc.exe"        "$distbin/"
+            cp "$buildbin/dxv.exe"        "$distbin/"
+            cp "$buildbin/dxcompiler.dll" "$distbin/"
+            cp "$buildbin/dxil.dll"       "$distbin/"
+            # PDBs only exist for configs that emit /Zi.
+            case "${{ inputs.BuildType }}" in
+              Debug|RelWithDebInfo)
+                cp "$buildbin/dxc.pdb"        "$distbin/"
+                cp "$buildbin/dxv.pdb"        "$distbin/"
+                cp "$buildbin/dxcompiler.pdb" "$distbin/"
+                cp "$buildbin/dxil.pdb"       "$distbin/" ;;
+            esac
+            cp "$buildlib/dxcompiler.lib" "$distlib/"
+            cp "$buildlib/dxil.lib"       "$distlib/"
+      - name: Package distribution
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE"
+            # Redirect via stdout so tar doesn't parse the destination
+            # Windows drive letter as a remote host:path tuple.
+            tar cf - -C install  . > "$RUNNER_TEMP/build-artifacts.tar"
+            tar cf - -C dxc-dist . > "$RUNNER_TEMP/dxc-artifacts.tar"
+      - name: Upload LLVM distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.key.outputs.artifact_name }}
+          path: ${{ runner.temp }}/build-artifacts.tar
+          retention-days: 1
+      - name: Upload DXC artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.key.outputs.dxc_artifact_name }}
+          path: ${{ runner.temp }}/dxc-artifacts.tar
+          retention-days: 1

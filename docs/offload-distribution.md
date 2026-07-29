@@ -226,3 +226,150 @@ configuration does still require a checkout of the LLVM source tree to pull LIT
 and the third-party unit testing libraries. If clone/checkout time or disk space
 is a concern this could be a sparse checkout or future changes could allow this
 to use LIT from pip and a stock googletest framework.
+
+## Frequent Builder
+
+The **frequent builder** is the CI application of the standalone build
+distribution described above. It dedicates a labeled runner pool to
+LLVM/Clang/DXC builds and has every GPU test runner rebuild only the
+offload-test-suite tools standalone from the PR head. The two reusable
+workflows that implement it are `build-callable.yaml` and
+`test-callable.yaml`.
+
+### Rollout status
+
+The builder is being brought up incrementally:
+
+- **Today.** `pr-matrix.yaml` runs `Build-Windows-X64` on every PR, and
+  **nothing consumes its artifacts**. Every test cell still builds for
+  itself through `build-and-test-callable.yaml`. Running the builder
+  unconsumed lets us watch build reliability, sccache hit rate, cache-key
+  churn and artifact size without putting PR signal at risk.
+  `test-callable.yaml` is present but unreferenced.
+- **Next.** Once `Build-Windows-X64` is consistently green, Windows x64
+  test cells move onto it one SKU at a time by uncommenting the
+  `Exec-Tests-Windows-Distributed` template in `pr-matrix.yaml` and
+  deleting the corresponding legacy cells.
+- **Phase 2.** `build-callable.yaml` gains arm64 cross-compile support and
+  `windows-qc` migrates too.
+
+### Motivation
+
+`pr-matrix.yaml` fans out roughly twenty test cells per architecture
+(SKU × backend × compiler). Under the `SplitBuild` model each of those
+cells still kicked off a full LLVM/Clang/DXC compile, because the build ran
+on the same SKU-labeled runner as the tests. The frequent builder collapses
+those N per-arch compiles into **one build per (OS, Arch, BuildType,
+cmake-args, LLVM SHA, DXC SHA)**.
+
+Crucially, the builder's artifact contains **no offload-test-suite code**.
+Rebuilding the offload tools on the test runner is what keeps the
+offload-suite SHA out of the cache key: a hundred consecutive
+offload-test-suite PRs that don't bump the LLVM or DXC pins all hit the
+same cached distribution. It also means each test cell always exercises the
+exact offload-suite HEAD of the PR rather than a possibly-stale snapshot
+taken by a cached builder run.
+
+### Runner labels
+
+| Label                   | Role |
+|-------------------------|------|
+| `hlsl-frequent-builder` | LLVM/Clang/DXC builds. No arch qualifier — in Phase 2 a single x64 box will produce both x64 and arm64 targets via cross-compile. |
+| `hlsl-<sku>` (`windows-nvidia`, `windows-amd`, `windows-intel`, `windows-sw-rasterizer-x86_64`, `windows-qc`, `macos`) | Test execution against real hardware. |
+
+Machines are strictly one or the other. Because GitHub Actions schedules a
+job on the *intersection* of the requested labels, these disjoint label sets
+mean a test job physically cannot land on the builder — it lacks the
+`hlsl-<sku>` label the test job asks for — and vice versa. No yaml-level
+guard is required.
+
+### What the builder produces
+
+`build-callable.yaml` configures llvm-project with
+`cmake/caches/StandaloneDistribution.cmake` and runs
+`ninja install-distribution`, then stages DXC out of its build directory
+(see "DXC prefix" above). It uploads two tarballs per build config:
+
+- `hlsl-dist-<os>-<arch>-<cfg12>` — the LLVM/Clang install prefix.
+- `hlsl-dxc-<os>-<arch>-<cfg12>` — the DXC redistributable.
+
+`<cfg12>` is the first 12 hex characters of a SHA-256 over the build type,
+the extra cmake args, and the contents of `StandaloneDistribution.cmake`.
+These names are **run-scoped** — unique within a workflow run so the fan-out
+test cells can locate them by name.
+
+Cross-run reuse is handled separately by `actions/cache@v4` under the
+**fully qualified key**:
+
+```
+hlsl-dist-<os>-<arch>-<llvm-sha12>-<dxc-sha12>-<cfg12>
+```
+
+On a cache hit the builder skips the checkout-dependent build steps
+entirely and re-uploads the cached tarballs as this run's artifacts. On a
+miss it does a full build (still sccache-accelerated), populates the cache,
+and uploads.
+
+### What the test runner does
+
+`test-callable.yaml` extracts both prefixes, checks out the
+offload-test-suite at the PR head plus an llvm-project tree (needed only
+for `llvm-lit` and the third-party googletest sources), configures the
+offload-test-suite as a standalone top-level CMake project against
+`install/lib/cmake/llvm`, and builds `hlsl-test-depends`. That build is
+well under a minute. It then runs `ninja check-hlsl-unit` followed by
+`ninja check-hlsl-<suite>`.
+
+`clang-tidy` is part of the distribution, so the test runner enables
+`OFFLOADTEST_USE_CLANG_TIDY` and points `CLANG_TIDY` at the copy in the
+install prefix. This preserves the lint coverage that used to come from the
+in-tree build.
+
+Unlike the `SplitBuild` flow, this path does **not** use
+`configure-test-suite.py` or the installed `share/hlsl-test-suite` tree —
+lit configuration is generated by the standalone CMake build. Test runners
+therefore do need CMake, Ninja and a host toolchain, which they already had
+under the previous model.
+
+### Failure semantics
+
+Test cells depend on their build via `needs:`. A failed build causes every
+dependent test cell to skip (a grey `-` in the checks UI) rather than each
+running its own compile and failing identically. This is a strict
+improvement in signal — one red X per broken build instead of N — but it
+does mean **skipped test jobs must not be read as passes**. Branch
+protection should require the `Build-*` job checks directly (or a summary
+job with `if: always()` that fails on any upstream-caused skip), so a
+skipped test cell is never green-lit for merge.
+
+### Scope
+
+Phase 1 covers Windows x64 only. `build-callable.yaml` hard-fails on any
+other `OS`/`Arch` combination.
+
+`windows-qc` is the only arm64 SKU, so `SplitBuild` never bought it
+anything — its build always ran on itself. It stays on
+`build-and-test-callable.yaml` until Phase 2 teaches `build-callable.yaml`
+to cross-compile arm64 from an x64 host.
+
+macOS is deliberately out of scope: builds are fast enough on the mac
+runner that the extra plumbing isn't worth it, and there is no
+arm64/x64 cross-compile question. `Exec-Tests-MacOS` continues to invoke
+`build-and-test-callable.yaml` directly.
+
+### Provisioning a frequent-builder machine
+
+1. The runner has the `hlsl-frequent-builder` label and **no** `hlsl-<sku>`
+   label.
+2. The runner service runs as a user with write access to the workspace and
+   the sccache directory, and may run `VsDevCmd.bat`.
+3. Visual Studio 2022 with the C++ x64 build tools.
+4. `sccache` on `PATH`, with a cache directory that persists across jobs.
+5. Python 3.11+ on `PATH`.
+6. CMake 3.31+ and Ninja on `PATH`.
+7. Git on `PATH` with credentials to clone llvm-project, DXC and
+   offload-test-suite.
+
+Validation for Phase 1 is simply to open a PR and confirm
+`Build-Windows-X64` succeeds and the downstream test cells consume its
+artifacts.

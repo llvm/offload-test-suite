@@ -1,0 +1,228 @@
+name: HLSL Frequent Builder Test
+
+permissions:
+  contents: read
+
+# Runs one lit suite on a GPU runner against a distribution produced by
+# `build-callable.yaml`. The offload-test-suite tools (offloader,
+# api-query, imgdiff, OffloadTestUnit) are rebuilt standalone from the PR
+# head against the downloaded LLVM install, which takes well under a
+# minute.
+#
+# NOTE: no caller is wired up yet. `pr-matrix.yaml` carries a commented-out
+# `Exec-Tests-Windows-Distributed` template that is uncommented one SKU at a
+# time once the frequent builder is confirmed green.
+# See docs/offload-distribution.md ("Frequent Builder").
+
+on:
+  workflow_call:
+    inputs:
+      OS:
+        required: true
+        type: string
+      Arch:
+        description: 'Target arch of the consumed artifact; must match the producing build.'
+        required: true
+        type: string
+      SKU:
+        required: true
+        type: string
+      TestTarget:
+        required: true
+        type: string
+      ArtifactName:
+        description: 'LLVM install-prefix artifact name published by build-callable.'
+        required: true
+        type: string
+      DXCArtifactName:
+        description: 'DXC artifact name published by build-callable.'
+        required: true
+        type: string
+      BuildType:
+        required: false
+        default: 'RelWithDebInfo'
+        type: string
+      OffloadTest-branch:
+        required: false
+        default: 'main'
+        type: string
+      OffloadTest-fork:
+        required: false
+        default: 'llvm'
+        type: string
+      LLVM-branch:
+        required: false
+        default: 'main'
+        type: string
+      LLVM-fork:
+        required: false
+        default: 'llvm'
+        type: string
+
+jobs:
+  test:
+    permissions:
+      checks: write
+    runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
+    steps:
+      - name: Download LLVM distribution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.ArtifactName }}
+          path: ${{ runner.temp }}
+      - name: Download DXC artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.DXCArtifactName }}
+          path: ${{ runner.temp }}
+      - name: Extract distribution
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE"
+            # Always extract into freshly-cleaned prefixes: `tar xf` overlays
+            # onto whatever is already there and never removes orphans, so on
+            # a persistent self-hosted runner stale files from a previous run
+            # would otherwise survive.
+            rm -rf install dxc-dist
+            mkdir -p install dxc-dist
+            # Pipe the archive in via stdin and use a relative -C path so tar
+            # doesn't parse the Windows drive letter as a remote host:path.
+            tar xf - -C install  < "$RUNNER_TEMP/build-artifacts.tar"
+            tar xf - -C dxc-dist < "$RUNNER_TEMP/dxc-artifacts.tar"
+      # The offload-test-suite is checked out at the PR head so the tests we
+      # run are always the PR's tests, never a snapshot from a cached
+      # builder run.
+      - name: Checkout OffloadTest
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.OffloadTest-fork }}/offload-test-suite
+          ref: ${{ inputs.OffloadTest-branch }}
+          path: OffloadTest
+          fetch-depth: 1
+      # A standalone build still needs an LLVM source checkout to pick up
+      # llvm-lit and the third-party googletest sources; everything else
+      # comes from the pre-built install prefix.
+      - name: Checkout LLVM
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.LLVM-fork }}/llvm-project
+          ref: ${{ inputs.LLVM-branch }}
+          path: llvm-project
+          fetch-depth: 1
+      - name: Checkout Golden Images
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: llvm/offload-golden-images
+          ref: main
+          path: golden-images
+          fetch-depth: 1
+      - name: Setup Windows x64
+        if: inputs.OS == 'windows' && inputs.Arch == 'x64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Setup Windows ARM64
+        if: inputs.OS == 'windows' && inputs.Arch == 'arm64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      # Standalone configure: OffloadTest is the top-level CMake project and
+      # finds LLVM/Clang via the install prefix's exported CMake package
+      # instead of building them. clang-tidy also comes from that prefix, so
+      # the lint coverage the in-tree build used to provide is preserved.
+      - name: Build offload test suite (standalone)
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE"
+            rm -rf standalone-build
+            clang_tidy="$GITHUB_WORKSPACE/install/bin/clang-tidy"
+            if [ -x "${clang_tidy}.exe" ]; then clang_tidy="${clang_tidy}.exe"; fi
+            cmake -G Ninja -S "$GITHUB_WORKSPACE/OffloadTest" -B "$GITHUB_WORKSPACE/standalone-build" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install/lib/cmake/llvm" \
+              -DLLVM_MAIN_SRC_DIR="$GITHUB_WORKSPACE/llvm-project/llvm" \
+              -DDXC_DIR="$GITHUB_WORKSPACE/dxc-dist/bin" \
+              -DGOLDENIMAGE_DIR="$GITHUB_WORKSPACE/golden-images" \
+              -DOFFLOADTEST_TEST_CLANG=On \
+              -DOFFLOADTEST_USE_CLANG_TIDY=On \
+              -DCLANG_TIDY="$clang_tidy" \
+              -DLLVM_LIT_ARGS="--xunit-xml-output=testresults.xunit.xml -v"
+            cmake --build "$GITHUB_WORKSPACE/standalone-build" --target hlsl-test-depends
+      - name: Dump GPU Info
+        shell: bash
+        run: "$GITHUB_WORKSPACE/standalone-build/bin/api-query"
+      - name: Setup Lavapipe
+        if: contains(inputs.TestTarget, 'lavapipe')
+        shell: bash
+        run: |
+            set -euxo pipefail
+            # Lavapipe is found in the following resolution order:
+            #   1. LAVAPIPE_ICD_JSON, if the runner image exposes it.
+            #   2. The machine-wide registration under
+            #      HKLM\SOFTWARE\Khronos\Vulkan\Drivers (value name = ICD path).
+            # If neither resolves to an existing file, skip shadowing and rely
+            # on lit.cfg.py selecting the llvmpipe device by name.
+            icd=""
+            if [ -n "${LAVAPIPE_ICD_JSON:-}" ]; then
+              fs=$(printf '%s' "$LAVAPIPE_ICD_JSON" | sed 's|\\|/|g')
+              if [ -f "$fs" ]; then
+                icd="$LAVAPIPE_ICD_JSON"
+              else
+                echo "::warning::LAVAPIPE_ICD_JSON is set but does not point to an existing file: $LAVAPIPE_ICD_JSON"
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              matches=$(MSYS_NO_PATHCONV=1 reg query "HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers" /reg:64 2>/dev/null | grep -i "lvp_icd") || matches=""
+              line=${matches%%$'\n'*}
+              cand=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+REG_[A-Z_]+[[:space:]]+0x[0-9A-Fa-f]+[[:space:]]*$//')
+              if [ -n "$cand" ]; then
+                fs=$(printf '%s' "$cand" | sed 's|\\|/|g')
+                if [ -f "$fs" ]; then
+                  icd="$cand"
+                fi
+              fi
+            fi
+            if [ -z "$icd" ]; then
+              echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
+              exit 0
+            fi
+            # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
+            # the legacy fallback for older loaders. Point both at only lavapipe.
+            echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
+            echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
+            echo "Using lavapipe ICD: $icd"
+      - name: Run HLSL Tests
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE/standalone-build"
+            ninja check-hlsl-unit
+            ninja ${{ inputs.TestTarget }}
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ inputs.SKU }}-${{ inputs.TestTarget }}
+          path: standalone-build/**/testresults.xunit.xml
+          if-no-files-found: ignore
+      - name: Run dxdiag (Windows only)
+        if: inputs.OS == 'windows' && failure()
+        shell: powershell
+        run: |
+          $fileName = "dxdiag.txt"
+          $output = Join-Path $env:RUNNER_TEMP $fileName
+          dxdiag /t $output | Out-Null
+          Write-Host "DxDiag report saved to $output"
+      - name: Upload dxdiag artifact
+        if: inputs.OS == 'windows' && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dxdiag-${{ inputs.SKU }}-${{ inputs.TestTarget }}.txt
+          path: ${{ runner.temp }}/dxdiag.txt
