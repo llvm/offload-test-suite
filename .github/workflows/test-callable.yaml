@@ -4,24 +4,19 @@ permissions:
   contents: read
 
 # Runs one lit suite on a GPU runner against a distribution produced by
-# `build-callable.yaml`. The offload-test-suite tools (offloader,
-# api-query, imgdiff, OffloadTestUnit) are rebuilt standalone from the PR
-# head against the downloaded LLVM install, which takes well under a
-# minute.
-#
-# NOTE: no caller is wired up yet. `pr-matrix.yaml` carries a commented-out
-# `Exec-Tests-Windows-Distributed` template that is uncommented one SKU at a
-# time once the frequent builder is confirmed green.
-# See docs/offload-distribution.md ("Frequent Builder").
+# `build-callable.yaml`, rebuilding the offload-test-suite tools standalone
+# from the PR head. No caller is wired up yet; see the commented-out
+# template in pr-matrix.yaml and docs/offload-distribution.md.
 
 on:
   workflow_call:
     inputs:
       OS:
+        description: 'Target OS of the consumed artifact; must match the producing build. Accepted values: `windows`.'
         required: true
         type: string
       Arch:
-        description: 'Target arch of the consumed artifact; must match the producing build.'
+        description: 'Target arch of the consumed artifact; must match the producing build. Accepted values: `x64`.'
         required: true
         type: string
       SKU:
@@ -80,10 +75,8 @@ jobs:
         run: |
             set -euxo pipefail
             cd "$GITHUB_WORKSPACE"
-            # Always extract into freshly-cleaned prefixes: `tar xf` overlays
-            # onto whatever is already there and never removes orphans, so on
-            # a persistent self-hosted runner stale files from a previous run
-            # would otherwise survive.
+            # Clean first: `tar xf` overlays and never removes orphans, so
+            # stale files would survive on a persistent runner.
             rm -rf install dxc-dist
             mkdir -p install dxc-dist
             # Pipe the archive in via stdin and use a relative -C path so tar
@@ -131,10 +124,8 @@ jobs:
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
-      # Standalone configure: OffloadTest is the top-level CMake project and
-      # finds LLVM/Clang via the install prefix's exported CMake package
-      # instead of building them. clang-tidy also comes from that prefix, so
-      # the lint coverage the in-tree build used to provide is preserved.
+      # OffloadTest is the top-level CMake project here; LLVM, Clang and
+      # clang-tidy come from the downloaded install prefix.
       - name: Build offload test suite (standalone)
         shell: bash
         run: |
@@ -193,8 +184,6 @@ jobs:
               echo "::notice::No lavapipe ICD resolved via LAVAPIPE_ICD_JSON or HKLM\\SOFTWARE\\Khronos\\Vulkan\\Drivers; relying on machine-wide registration and adapter-regex device selection."
               exit 0
             fi
-            # VK_DRIVER_FILES is the modern loader variable; VK_ICD_FILENAMES is
-            # the legacy fallback for older loaders. Point both at only lavapipe.
             echo "VK_DRIVER_FILES=$icd" >> "$GITHUB_ENV"
             echo "VK_ICD_FILENAMES=$icd" >> "$GITHUB_ENV"
             echo "Using lavapipe ICD: $icd"
@@ -209,13 +198,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          # The `-frequent` infix records which pipeline produced these
-          # results, so artifacts from a `validate-frequent-builder.yaml`
-          # dispatch are never confused with those from a normal
-          # `build-and-test-callable.yaml` run. It also keeps the two names
-          # distinct should both callables ever run for the same
-          # SKU/TestTarget in one workflow run, which upload-artifact@v4
-          # rejects as a duplicate name.
+          # `-frequent` records the producing pipeline and keeps these names
+          # distinct from build-and-test-callable.yaml's.
           name: test-results-frequent-${{ inputs.SKU }}-${{ inputs.TestTarget }}
           path: standalone-build/**/testresults.xunit.xml
           if-no-files-found: ignore

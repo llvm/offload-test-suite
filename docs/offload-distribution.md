@@ -230,11 +230,8 @@ to use LIT from pip and a stock googletest framework.
 ## Frequent Builder
 
 The **frequent builder** is the CI application of the standalone build
-distribution described above. It dedicates a labeled runner pool to
-LLVM/Clang/DXC builds and has every GPU test runner rebuild only the
-offload-test-suite tools standalone from the PR head. The two reusable
-workflows that implement it are `build-callable.yaml` and
-`test-callable.yaml`.
+distribution described above, implemented by the reusable workflows
+`build-callable.yaml` and `test-callable.yaml`.
 
 ### Rollout status
 
@@ -245,22 +242,24 @@ The builder is being brought up incrementally:
   itself through `build-and-test-callable.yaml`, exactly as before.
   Running the builder unconsumed lets us watch build reliability, sccache
   hit rate, cache-key churn and artifact size without putting PR signal at
-  risk. `test-callable.yaml` is referenced only by
-  `validate-frequent-builder.yaml`.
-- **Validating the consuming half.** Because no PR job downloads the
-  artifacts, the distribution and test-execution code is exercised by
-  dispatching `validate-frequent-builder.yaml` manually. It runs
-  `build-callable.yaml` followed by `test-callable.yaml` for one chosen
-  x64 SKU and lit suite, covering artifact upload, download, the
-  standalone rebuild and the lit run end to end. Compare its results
+  risk.
+- **Validating the consuming half.** The distribution and test-execution
+  code is exercised by dispatching `validate-frequent-builder.yaml`
+  manually. It runs `build-callable.yaml` followed by `test-callable.yaml`
+  for one chosen x64 SKU and lit suite, covering artifact upload, download,
+  the standalone rebuild and the lit run end to end. Compare its results
   against the same SKU/TestTarget in a normal `pr-matrix.yaml` run. The
   build half normally hits the `actions/cache` entry from a recent
   pr-matrix run, so a dispatch usually skips the compile entirely.
 - **Next.** Once the builder is consistently green and
   `validate-frequent-builder.yaml` passes for a SKU, that SKU's cells move
   over by uncommenting the `Exec-Tests-Windows-Distributed` template in
-  `pr-matrix.yaml` and deleting the corresponding legacy cells. One SKU at
-  a time, so a regression is always attributable and trivially revertable.
+  `pr-matrix.yaml` and deleting the corresponding legacy cells. A SKU is
+  served by exactly one path at a time, never both, and migration proceeds
+  one SKU at a time so a regression is always attributable and trivially
+  revertable. The template enumerates cells explicitly as
+  `{ SKU, Arch, TestTarget }` rather than as a cross-product, so "which
+  build feeds which test" stays readable from `pr-matrix.yaml` alone.
 - **Phase 2.** `build-callable.yaml` gains arm64 cross-compile support and
   `windows-qc` migrates too.
 
@@ -324,12 +323,11 @@ and uploads.
 ### What the test runner does
 
 `test-callable.yaml` extracts both prefixes, checks out the
-offload-test-suite at the PR head plus an llvm-project tree (needed only
-for `llvm-lit` and the third-party googletest sources), configures the
-offload-test-suite as a standalone top-level CMake project against
-`install/lib/cmake/llvm`, and builds `hlsl-test-depends`. That build is
-well under a minute. It then runs `ninja check-hlsl-unit` followed by
-`ninja check-hlsl-<suite>`.
+offload-test-suite at the PR head plus an llvm-project source tree (needed
+for the reasons given above), configures the offload-test-suite as a
+standalone top-level CMake project against `install/lib/cmake/llvm`, and
+builds `hlsl-test-depends`. That build is well under a minute. It then runs
+`ninja check-hlsl-unit` followed by `ninja check-hlsl-<suite>`.
 
 `clang-tidy` is part of the distribution, so the test runner enables
 `OFFLOADTEST_USE_CLANG_TIDY` and points `CLANG_TIDY` at the copy in the
@@ -360,8 +358,7 @@ other `OS`/`Arch` combination.
 
 `windows-qc` is the only arm64 SKU, so `SplitBuild` never bought it
 anything — its build always ran on itself. It stays on
-`build-and-test-callable.yaml` until Phase 2 teaches `build-callable.yaml`
-to cross-compile arm64 from an x64 host.
+`build-and-test-callable.yaml` until Phase 2.
 
 macOS is deliberately out of scope: builds are fast enough on the mac
 runner that the extra plumbing isn't worth it, and there is no
@@ -380,7 +377,3 @@ arm64/x64 cross-compile question. `Exec-Tests-MacOS` continues to invoke
 6. CMake 3.31+ and Ninja on `PATH`.
 7. Git on `PATH` with credentials to clone llvm-project, DXC and
    offload-test-suite.
-
-Validation for Phase 1 is simply to open a PR and confirm
-`Build-Windows-X64` succeeds and the downstream test cells consume its
-artifacts.

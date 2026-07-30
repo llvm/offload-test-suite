@@ -4,26 +4,20 @@ permissions:
   contents: read
 
 # Builds the LLVM/Clang distribution and DXC once per
-# (OS, Arch, BuildType, cmake-args, LLVM SHA, DXC SHA) on a dedicated
-# builder pool, and publishes the results as artifacts.
-#
-# The offload-test-suite itself is deliberately NOT built here. Test
-# runners rebuild its tools standalone from the PR head against this
-# distribution (see `test-callable.yaml`), which keeps the offload-suite
-# SHA out of the cache key and guarantees tests exercise the PR's code.
-#
-# NOTE: during bring-up nothing consumes these artifacts yet -- test cells
-# in `pr-matrix.yaml` still build for themselves and are migrated over one
-# SKU at a time. See docs/offload-distribution.md ("Frequent Builder").
+# (OS, Arch, BuildType, cmake-args, LLVM SHA, DXC SHA) and publishes them
+# as artifacts. The offload-test-suite is deliberately NOT built here;
+# test runners rebuild it standalone from the PR head.
+# See docs/offload-distribution.md ("Frequent Builder").
 
 on:
   workflow_call:
     inputs:
       OS:
+        description: 'Target OS. Accepted values: `windows`. macOS is not supported -- the frequent-builder pool has no macOS machines. Enforced by the "Validate inputs" step.'
         required: true
         type: string
       Arch:
-        description: 'Target arch. Phase 1 supports x64 only; arm64 cross-compile lands in Phase 2.'
+        description: 'Target arch. Accepted values: `x64`. arm64 cross-compile lands in Phase 2. Enforced by the "Validate inputs" step.'
         required: true
         type: string
       OffloadTest-branch:
@@ -122,10 +116,8 @@ jobs:
           set -euxo pipefail
           llvm12=$(git -C llvm-project rev-parse HEAD | cut -c1-12)
           dxc12=$(git -C DXC rev-parse HEAD | cut -c1-12)
-          # The cfg hash covers everything that changes the produced
-          # binaries but isn't already captured by OS/Arch/source SHAs:
-          # the build type, the extra cmake args, and the distribution
-          # cache script (which decides what lands in the install prefix).
+          # Covers what changes the binaries but isn't in OS/Arch/SHAs:
+          # build type, extra cmake args, and the distribution cache script.
           cfg12=$( { printf '%s\n%s\n' "$BUILDTYPE" "$EXTRA"; \
                      cat OffloadTest/cmake/caches/StandaloneDistribution.cmake; } \
                    | sha256sum | cut -c1-12)
@@ -164,10 +156,8 @@ jobs:
               -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
               -DHLSL_DISABLE_SOURCE_GENERATION=On
             cmake --build "$GITHUB_WORKSPACE/DXC/build"
-      # StandaloneDistribution.cmake selects the exact set of Clang, LLVM
-      # test tools and LLVM component libraries that the offload-test-suite
-      # needs to build and run against. `ninja install-distribution` both
-      # builds and installs them.
+      # StandaloneDistribution.cmake selects the components the test suite
+      # needs; `install-distribution` both builds and installs them.
       - name: Build and install LLVM distribution
         if: steps.cache.outputs.cache-hit != 'true'
         shell: bash

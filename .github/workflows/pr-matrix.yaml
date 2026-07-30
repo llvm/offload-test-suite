@@ -13,18 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # === Frequent builder (Phase 1: bring-up only) ===========================
-  #
-  # Builds the LLVM/Clang distribution and DXC once per PR on the dedicated
-  # `hlsl-frequent-builder` machine and publishes them as artifacts. Nothing
-  # consumes those artifacts yet -- every test cell below still builds for
-  # itself, exactly as before.
-  #
-  # This is deliberate. Running the builder unconsumed lets us watch it for
-  # a while (build reliability, sccache hit rate, cache key churn, artifact
-  # size) without putting PR signal at risk. Once it is consistently green,
-  # test cells get migrated onto it one SKU at a time by uncommenting the
-  # template below and deleting the corresponding legacy block.
+  # Frequent builder (Phase 1 bring-up): builds LLVM/Clang + DXC once per PR
+  # and publishes artifacts. Nothing consumes them yet -- every test cell
+  # below still builds for itself. See docs/offload-distribution.md.
   Build-Windows-X64:
     uses: ./.github/workflows/build-callable.yaml
     with:
@@ -33,16 +24,9 @@ jobs:
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
 
-  # TODO: Uncomment one SKU at a time once `Build-Windows-X64` is confirmed
-  # reliably green AND `validate-frequent-builder.yaml` has been dispatched
-  # successfully for that SKU, deleting each migrated cell from the legacy
-  # `Exec-Tests-*` blocks below as it moves over -- a SKU is served by
-  # exactly one path at a time, never both. This is the template for a
-  # migrated block: it consumes the frequent builder's artifacts and rebuilds
-  # only the offload-test-suite tools standalone on the GPU runner. Cells are
-  # enumerated explicitly as `{ SKU, Arch, TestTarget }` so "which build feeds
-  # which test" stays grep-able from this file alone.
-  # See docs/offload-distribution.md ("Frequent Builder").
+  # TODO: migration template. Uncomment one SKU at a time and delete that
+  # SKU's cells from the legacy blocks below -- never both paths at once.
+  # See docs/offload-distribution.md ("Frequent Builder") for the criteria.
   #
   # Exec-Tests-Windows-Distributed:
   #   permissions:
@@ -67,11 +51,8 @@ jobs:
   #     ArtifactName: ${{ needs.Build-Windows-X64.outputs.ArtifactName }}
   #     DXCArtifactName: ${{ needs.Build-Windows-X64.outputs.DXCArtifactName }}
 
-  # === Legacy self-building test cells ======================================
-  #
-  # Each of these still runs a full LLVM/Clang/DXC compile on the SKU runner
-  # via `build-and-test-callable.yaml`. They are migrated to
-  # `Build-Windows-X64` + `test-callable.yaml` incrementally; see above.
+  # Legacy self-building cells: each runs a full LLVM/Clang/DXC compile on
+  # the SKU runner. Migrated to the frequent builder incrementally; see above.
 
   Exec-Tests-Windows:
     permissions:
