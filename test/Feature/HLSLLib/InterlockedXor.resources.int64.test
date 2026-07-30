@@ -196,7 +196,7 @@ DescriptorSets:
 # XFAIL: Intel && Clang && Vulkan
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
-# XFAIL: Metal && DXC
+# XFAIL: Metal
 
 # Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
 # XFAIL: Vulkan && DXC
