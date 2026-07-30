@@ -204,9 +204,9 @@ Then configure and build the offload test suite with a command like so:
 cmake -DCMAKE_PREFIX_PATH=<path to llvm install>/lib/cmake/llvm \
       -DLLVM_MAIN_SRC_DIR=<path to llvm-project>/llvm           \
       -DDXC_DIR=<path to folder containing dxc/dxv>             \
-      -DOFFLOAD_TEST_TEST_CLANG=On                              \
+      -DOFFLOADTEST_TEST_CLANG=On                               \
       -DGOLDENIMAGE_DIR=<path to images>                        \
-      <other cmake options> <path to ofload test suite>
+      <other cmake options> <path to offload test suite>
 ninja check-hlsl
 ```
 
@@ -233,15 +233,21 @@ The trade-off is that PRs test against a toolchain up to one schedule
 interval old, and a PR that changes the build configuration itself (for
 example `StandaloneDistribution.cmake` or the builder's cmake args) is not
 exercised by the test cells, because they consume a distribution built
-from `main`'s configuration. `frequent-build.yaml` therefore also triggers
-on pull requests that touch those files, so builder changes are still
-validated by the PR that makes them.
+from `main`'s configuration. Validate such a change by dispatching
+`frequent-build.yaml` against the branch before merging.
+
+`frequent-build.yaml` deliberately has **no `pull_request` trigger**. It
+runs on a self-hosted machine, and a fork PR must never execute code
+there: the builder produces the binaries every test cell trusts, and it
+keeps a persistent workspace and sccache directory. Neither `schedule`
+nor `workflow_dispatch` can be raised from a fork. `workflow_dispatch`
+accepts a branch, so maintainers can still build a branch on demand.
 
 ### Rollout status
 
 The builder is being brought up incrementally:
 
-- **Today.** `frequent-build.yaml` runs the builder on a 4-hourly schedule
+- **Today.** `frequent-build.yaml` runs the builder on a 2-hourly schedule
   and publishes artifacts, and **nothing consumes them**. Every test cell
   still builds for itself through `build-and-test-callable.yaml`, exactly
   as before. Running the builder unconsumed lets us watch build
@@ -265,13 +271,15 @@ The builder is being brought up incrementally:
   a cross-product, so "which build feeds which test" stays readable from
   `pr-matrix.yaml` alone.
 - **Then the scheduled workflows.** `pr-matrix.yaml` is not the only caller
-  of `SplitBuild=true`; the 19 scheduled per-SKU workflows
-  (`windows-amd-*`, `windows-intel-*`, `windows-nvidia-*`) and
-  `validate-split-build-test.yaml` use it too. Their build jobs target the
+  of `SplitBuild=true`; 27 scheduled per-SKU workflows and
+  `validate-split-build-test.yaml` use it too. The 19 x64 ones
+  (`windows-amd-*`, `windows-intel-*`, `windows-nvidia-*`) target the
   generic `["self-hosted", "Windows", "X64"]` pool, which the frequent
   builder is necessarily a member of, so until they migrate they will keep
-  landing foreign builds on it. The builder is only truly dedicated once
-  no caller sets `SplitBuild=true`.
+  landing foreign builds on it. The 8 `windows-qc-*` workflows also set
+  `SplitBuild=true` but build on arm64, so they never reach the builder.
+  The builder is only truly dedicated once no x64 caller sets
+  `SplitBuild=true`.
 - **Phase 2.** `build-callable.yaml` gains arm64 cross-compile support and
   `windows-qc` migrates too.
 
@@ -282,7 +290,7 @@ The builder is being brought up incrementally:
 cells still kicked off a full LLVM/Clang/DXC compile, because the build ran
 on the same SKU-labeled runner as the tests. The frequent builder removes
 compilation from the PR path entirely: those N per-arch compiles become a
-single scheduled build, amortised across every PR that runs before the
+single scheduled build, shared by every PR that runs before the
 next one.
 
 Crucially, the builder's artifact contains **no offload-test-suite code**.
@@ -331,14 +339,17 @@ by `<arch>`.
 PR test cells do not hardcode a run. A resolver job queries the API for
 the newest successful `frequent-build.yaml` run and passes its ID to every
 cell as `BuildRunId`, so all cells in a PR test against one identical
-toolchain rather than straddling a build boundary.
+toolchain rather than some cells using one build and some another.
 
 The resolver accepts only `schedule` and `workflow_dispatch` runs
 originating from this repository — neither event can be raised from a
 fork, so a fork PR cannot influence which binaries other PRs test against.
 
 Incremental build speed comes from `sccache` on the builder, whose cache
-directory persists across jobs.
+directory persists across jobs. Measured across twelve runs of the
+equivalent `SplitBuild` build on the same hardware, a build takes roughly
+19 minutes at the median and 34 at the worst, which is what the job's
+90-minute timeout and the 2-hourly cadence are sized against.
 
 ### What the test runner does
 
@@ -348,8 +359,8 @@ directory persists across jobs.
 checks out the offload-test-suite at the PR head plus an llvm-project
 source tree (needed for the reasons given above), configures the
 offload-test-suite as a standalone top-level CMake project against
-`install/lib/cmake/llvm`, and builds `hlsl-test-depends`. That build is
-well under a minute. It then runs `ninja check-hlsl-unit` followed by
+`install/lib/cmake/llvm`, and builds `hlsl-test-depends`. It then runs
+`ninja check-hlsl-unit` followed by
 `ninja check-hlsl-<suite>`.
 
 `clang-tidy` is part of the distribution, so the test runner enables
@@ -373,15 +384,25 @@ a PR's point of view: the distribution simply ages until someone notices
 the scheduled workflow is red. Treat `frequent-build.yaml` as a monitored
 workflow in its own right, not as PR signal.
 
-Two failure modes do surface in a PR, both from the resolver job:
+Two further failure modes surface in a PR:
 
 - **No successful run exists** (nothing has been built yet, or every run
   since the workflow landed has failed). The resolver fails with an
   actionable message; dispatch `frequent-build.yaml` once to seed it.
-- **Artifacts have expired.** Artifacts are retained for 7 days, so at a
-  4-hourly cadence roughly 40 successive builds would have to fail before
+- **Artifacts have expired.** Artifacts are retained for 3 days, so at a
+  2-hourly cadence roughly 36 successive builds would have to fail before
   the newest successful run's artifacts vanish. If that happens the
   resolver succeeds and the download step is what fails.
+
+A stuck build cannot block the schedule. The build job sets
+`timeout-minutes: 90`, well above the ~34 minute worst case, so a stuck
+build is killed rather than holding the machine. Its concurrency group is
+keyed on ref, OS and arch with `cancel-in-progress: false`: only one build
+per target runs at a time, GitHub keeps at most one more waiting, and a
+build that is merely queued is never discarded. Cancelling queued builds
+would be wrong here, because the builder shares a pool with legacy
+`SplitBuild` jobs and a wait can legitimately exceed the schedule
+interval.
 
 ### Scope
 

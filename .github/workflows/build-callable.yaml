@@ -55,6 +55,14 @@ jobs:
     # `hlsl-frequent-builder` label and no `hlsl-<sku>` label, so GitHub
     # Actions can never schedule a GPU test job here.
     runs-on: [self-hosted, hlsl-frequent-builder]
+    # One build at a time per ref and target. Queued builds are kept, not
+    # cancelled -- the builder shares a pool, so a wait can exceed the
+    # schedule interval. timeout-minutes limits a stuck build instead.
+    concurrency:
+      group: frequent-build-${{ github.ref }}-${{ inputs.OS }}-${{ inputs.Arch }}
+      cancel-in-progress: false
+    # Slowest observed build is ~34 min; anything past 90 is stuck.
+    timeout-minutes: 90
     steps:
       - name: Validate inputs
         shell: bash
@@ -184,10 +192,10 @@ jobs:
           path: ${{ runner.temp }}/build-artifacts.tar
           # Must outlive the gap to the next successful scheduled build,
           # since PRs consume the newest successful run's artifacts.
-          retention-days: 7
+          retention-days: 3
       - name: Upload DXC artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.key.outputs.dxc_artifact_name }}
           path: ${{ runner.temp }}/dxc-artifacts.tar
-          retention-days: 7
+          retention-days: 3

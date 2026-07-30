@@ -9,15 +9,12 @@ permissions:
   contents: read
 
 on:
+  # No pull_request trigger: this runs on a self-hosted machine, and a fork
+  # PR must never execute there. Validate builder changes by dispatching
+  # this workflow against the branch.
   workflow_dispatch:
   schedule:
-    - cron: '0 */4 * * *' # run every 4 hours
-  # Validate builder changes in the PR that makes them.
-  pull_request:
-    paths:
-      - .github/workflows/frequent-build.yaml
-      - .github/workflows/build-callable.yaml
-      - cmake/caches/StandaloneDistribution.cmake
+    - cron: '0 */2 * * *' # run every 2 hours
 
 jobs:
   Build-Windows-X64:

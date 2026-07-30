@@ -86,8 +86,7 @@ jobs:
             tar xf - -C install  < "$RUNNER_TEMP/build-artifacts.tar"
             tar xf - -C dxc-dist < "$RUNNER_TEMP/dxc-artifacts.tar"
       # The offload-test-suite is checked out at the PR head so the tests we
-      # run are always the PR's tests, never a snapshot from a cached
-      # builder run.
+      # run are always the PR's tests, never a snapshot from the builder.
       - name: Checkout OffloadTest
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -136,6 +135,13 @@ jobs:
             rm -rf standalone-build
             clang_tidy="$GITHUB_WORKSPACE/install/bin/clang-tidy"
             if [ -x "${clang_tidy}.exe" ]; then clang_tidy="${clang_tidy}.exe"; fi
+            # -DCLANG_TIDY pre-seeds the cache var, which skips CMake's own
+            # find_program check, so verify it here or the failure surfaces
+            # as an unclear compiler error on every file.
+            if [ ! -x "$clang_tidy" ]; then
+              echo "::error::clang-tidy missing from the downloaded distribution ($clang_tidy). The resolved frequent-build run predates clang-tidy being added to StandaloneDistribution.cmake; rebuild or resolve a newer run."
+              exit 1
+            fi
             cmake -G Ninja -S "$GITHUB_WORKSPACE/OffloadTest" -B "$GITHUB_WORKSPACE/standalone-build" \
               -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
               -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
