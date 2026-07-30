@@ -260,6 +260,14 @@ The builder is being brought up incrementally:
   revertable. The template enumerates cells explicitly as
   `{ SKU, Arch, TestTarget }` rather than as a cross-product, so "which
   build feeds which test" stays readable from `pr-matrix.yaml` alone.
+- **Then the scheduled workflows.** `pr-matrix.yaml` is not the only caller
+  of `SplitBuild=true`; the 19 scheduled per-SKU workflows
+  (`windows-amd-*`, `windows-intel-*`, `windows-nvidia-*`) and
+  `validate-split-build-test.yaml` use it too. Their build jobs target the
+  generic `["self-hosted", "Windows", "X64"]` pool, which the frequent
+  builder is necessarily a member of, so until they migrate they will keep
+  landing foreign builds on it. The builder is only truly dedicated once
+  no caller sets `SplitBuild=true`.
 - **Phase 2.** `build-callable.yaml` gains arm64 cross-compile support and
   `windows-qc` migrates too.
 
