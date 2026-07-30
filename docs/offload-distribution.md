@@ -243,46 +243,6 @@ keeps a persistent workspace and sccache directory. Neither `schedule`
 nor `workflow_dispatch` can be raised from a fork. `workflow_dispatch`
 accepts a branch, so maintainers can still build a branch on demand.
 
-### Rollout status
-
-The builder is being brought up incrementally:
-
-- **Today.** `frequent-build.yaml` runs the builder on a 2-hourly schedule
-  and publishes artifacts, and **nothing consumes them**. Every test cell
-  still builds for itself through `build-and-test-callable.yaml`, exactly
-  as before. Running the builder unconsumed lets us watch build
-  reliability, sccache hit rate and artifact size without
-  putting PR signal at risk.
-- **Validating the consuming half.** The download and test-execution code
-  is exercised by dispatching `validate-frequent-builder.yaml` manually. It
-  resolves a frequent build and runs `test-callable.yaml` for one chosen
-  x64 SKU and lit suite, covering run resolution, artifact download, the
-  standalone rebuild and the lit run — the exact path a migrated pr-matrix
-  cell takes. Compare its results against the same SKU/TestTarget in a
-  normal `pr-matrix.yaml` run.
-- **Next.** Once the builder is consistently green and
-  `validate-frequent-builder.yaml` passes for a SKU, uncomment the
-  `Resolve-Frequent-Build` job and that SKU's cells in the
-  `Exec-Tests-Windows-Distributed` template in `pr-matrix.yaml`, deleting
-  the corresponding legacy cells. A SKU is served by exactly one path at a
-  time, never both, and migration proceeds one SKU at a time so a
-  regression is always attributable and trivially revertable. The template
-  enumerates cells explicitly as `{ SKU, Arch, TestTarget }` rather than as
-  a cross-product, so "which build feeds which test" stays readable from
-  `pr-matrix.yaml` alone.
-- **Then the scheduled workflows.** `pr-matrix.yaml` is not the only caller
-  of `SplitBuild=true`; 27 scheduled per-SKU workflows and
-  `validate-split-build-test.yaml` use it too. The 19 x64 ones
-  (`windows-amd-*`, `windows-intel-*`, `windows-nvidia-*`) target the
-  generic `["self-hosted", "Windows", "X64"]` pool, which the frequent
-  builder is necessarily a member of, so until they migrate they will keep
-  landing foreign builds on it. The 8 `windows-qc-*` workflows also set
-  `SplitBuild=true` but build on arm64, so they never reach the builder.
-  The builder is only truly dedicated once no x64 caller sets
-  `SplitBuild=true`.
-- **Phase 2.** `build-callable.yaml` gains arm64 cross-compile support and
-  `windows-qc` migrates too.
-
 ### Motivation
 
 `pr-matrix.yaml` fans out roughly twenty test cells per architecture
@@ -403,30 +363,3 @@ build that is merely queued is never discarded. Cancelling queued builds
 would be wrong here, because the builder shares a pool with legacy
 `SplitBuild` jobs and a wait can legitimately exceed the schedule
 interval.
-
-### Scope
-
-Phase 1 covers Windows x64 only. `build-callable.yaml` hard-fails on any
-other `OS`/`Arch` combination.
-
-`windows-qc` is the only arm64 SKU, so `SplitBuild` never bought it
-anything — its build always ran on itself. It stays on
-`build-and-test-callable.yaml` until Phase 2.
-
-macOS is deliberately out of scope: builds are fast enough on the mac
-runner that the extra plumbing isn't worth it, and there is no
-arm64/x64 cross-compile question. `Exec-Tests-MacOS` continues to invoke
-`build-and-test-callable.yaml` directly.
-
-### Provisioning a frequent-builder machine
-
-1. The runner has the `hlsl-frequent-builder` label and **no** `hlsl-<sku>`
-   label.
-2. The runner service runs as a user with write access to the workspace and
-   the sccache directory, and may run `VsDevCmd.bat`.
-3. Visual Studio 2022 with the C++ x64 build tools.
-4. `sccache` on `PATH`, with a cache directory that persists across jobs.
-5. Python 3.11+ on `PATH`.
-6. CMake 3.31+ and Ninja on `PATH`.
-7. Git on `PATH` with credentials to clone llvm-project, DXC and
-   offload-test-suite.
