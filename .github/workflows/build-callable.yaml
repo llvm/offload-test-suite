@@ -5,8 +5,7 @@ permissions:
 
 # Builds the LLVM/Clang distribution and DXC once per
 # (OS, Arch, BuildType, cmake-args, LLVM SHA, DXC SHA) and publishes them
-# as artifacts. The offload-test-suite is deliberately NOT built here;
-# test runners rebuild it standalone from the PR head.
+# as artifacts. 
 # See docs/offload-distribution.md ("Frequent Builder").
 
 on:
@@ -94,46 +93,24 @@ jobs:
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1
-      - name: Compute artifact and cache keys
+      - name: Compute artifact names
         id: key
         shell: bash
         env:
           OS: ${{ inputs.OS }}
           ARCH: ${{ inputs.Arch }}
-          BUILDTYPE: ${{ inputs.BuildType }}
-          EXTRA: ${{ inputs.LLVM-ExtraCMakeArgs }}
         run: |
           set -euxo pipefail
-          llvm12=$(git -C llvm-project rev-parse HEAD | cut -c1-12)
-          dxc12=$(git -C DXC rev-parse HEAD | cut -c1-12)
-          # Covers what changes the binaries but isn't in OS/Arch/SHAs:
-          # build type, extra cmake args, and the distribution cache script.
-          cfg12=$( { printf '%s\n%s\n' "$BUILDTYPE" "$EXTRA"; \
-                     cat OffloadTest/cmake/caches/StandaloneDistribution.cmake; } \
-                   | sha256sum | cut -c1-12)
           # Stable names: PRs locate these by (run id, name).
           echo "artifact_name=hlsl-dist-${OS}-${ARCH}"    >> "$GITHUB_OUTPUT"
           echo "dxc_artifact_name=hlsl-dxc-${OS}-${ARCH}" >> "$GITHUB_OUTPUT"
-          # Cross-run cache key: the full source + config identity.
-          echo "cache_key=hlsl-dist-${OS}-${ARCH}-${llvm12}-${dxc12}-${cfg12}" >> "$GITHUB_OUTPUT"
-      - name: Restore cached distribution
-        id: cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ${{ runner.temp }}/build-artifacts.tar
-            ${{ runner.temp }}/dxc-artifacts.tar
-          key: ${{ steps.key.outputs.cache_key }}
       - name: Setup Python
-        if: steps.cache.outputs.cache-hit != 'true'
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       - name: Setup Windows x64
-        if: steps.cache.outputs.cache-hit != 'true'
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: amd64
       - name: Build DXC
-        if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
             set -euxo pipefail
@@ -145,10 +122,8 @@ jobs:
               -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
               -DHLSL_DISABLE_SOURCE_GENERATION=On
             cmake --build "$GITHUB_WORKSPACE/DXC/build"
-      # StandaloneDistribution.cmake selects the components the test suite
-      # needs; `install-distribution` both builds and installs them.
+
       - name: Build and install LLVM distribution
-        if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
             set -euxo pipefail
@@ -161,15 +136,12 @@ jobs:
               -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
               ${{ inputs.LLVM-ExtraCMakeArgs }}
             cmake --build "$GITHUB_WORKSPACE/llvm-project/build" --target install-distribution
-      # Surface sccache cache state after the heavy compile work so we can
-      # track hit rate / cache size across runs and diagnose cold-cache
-      # blowups on new builders.
+
       - name: Dump sccache Stats
-        if: always() && steps.cache.outputs.cache-hit != 'true'
+        if: always()
         shell: bash
         run: sccache --show-stats || true
       - name: Stage DXC distribution
-        if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
             set -euxo pipefail
@@ -197,7 +169,6 @@ jobs:
             cp "$buildlib/dxcompiler.lib" "$distlib/"
             cp "$buildlib/dxil.lib"       "$distlib/"
       - name: Package distribution
-        if: steps.cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
             set -euxo pipefail

@@ -52,16 +52,9 @@ A complete deployment consists of two install prefixes:
    - `lib/libdxcompiler.{so,dylib}`, `lib/libdxil.{so,dylib}` — the
      binaries have RUNPATH set to find them via `../lib`.
 
-   We don't ship DXC's `cmake --install` output. A top-level `ninja
-   install` walks every `cmake_install.cmake`, including LLVM tools
-   (e.g. `llvm-as`) that aren't built by the default `ninja` target, so
-   it fails. The per-component install targets (`install-dxc`,
-   `install-dxcompiler`) work but only cover a subset of the files we
-   need: `dxv` has no `install-dxv` custom target, `dxil` has no install
-   rule at all (it's a prebuilt signing library bundled with DXC source),
-   and the Windows import libraries (`.lib`) aren't installed either.
-   Instead we copy everything we need straight out of the build
-   directory's `bin/` and `lib/`.
+   We copy these straight out of the build directory's `bin/` and `lib/`
+   rather than using DXC's install targets, which don't cover `dxv`, `dxil`
+   or the Windows import libraries.
 
 ## Building
 
@@ -79,9 +72,6 @@ cmake -G Ninja \
     llvm-project/llvm
 
 ninja install-distribution install-offload-tools install-offload-test-suite
-
-# See "DXC prefix" above for why we copy from the build folder instead
-# of using `cmake --install` or per-component install targets.
 ```
 
 Then assemble the DXC prefix by copying the relevant files out of
@@ -223,9 +213,7 @@ ninja check-hlsl
 In this configuration the offload-test-suite will build its tools against the
 already built LLVM libraries which dramatically reduces build time. This
 configuration does still require a checkout of the LLVM source tree to pull LIT
-and the third-party unit testing libraries. If clone/checkout time or disk space
-is a concern this could be a sparse checkout or future changes could allow this
-to use LIT from pip and a stock googletest framework.
+and the third-party unit testing libraries.
 
 ## Frequent Builder
 
@@ -257,7 +245,7 @@ The builder is being brought up incrementally:
   and publishes artifacts, and **nothing consumes them**. Every test cell
   still builds for itself through `build-and-test-callable.yaml`, exactly
   as before. Running the builder unconsumed lets us watch build
-  reliability, sccache hit rate, cache-key churn and artifact size without
+  reliability, sccache hit rate and artifact size without
   putting PR signal at risk.
 - **Validating the consuming half.** The download and test-execution code
   is exercised by dispatching `validate-frequent-builder.yaml` manually. It
@@ -298,12 +286,9 @@ single scheduled build, amortised across every PR that runs before the
 next one.
 
 Crucially, the builder's artifact contains **no offload-test-suite code**.
-Rebuilding the offload tools on the test runner is what keeps the
-offload-suite SHA out of the cache key: a hundred consecutive
-offload-test-suite PRs that don't bump the LLVM or DXC pins all hit the
-same cached distribution. It also means each test cell always exercises the
-exact offload-suite HEAD of the PR rather than a possibly-stale snapshot
-taken by a cached builder run.
+Rebuilding the offload tools on the test runner means each test cell always
+exercises the exact offload-suite HEAD of the PR rather than a
+possibly-stale snapshot taken by the builder.
 
 ### Runner labels
 
@@ -349,25 +334,11 @@ cell as `BuildRunId`, so all cells in a PR test against one identical
 toolchain rather than straddling a build boundary.
 
 The resolver accepts only `schedule` and `workflow_dispatch` runs
-originating from this repository. Filtering on `branch=main` alone is
-**not** sufficient: a pull request from a fork whose branch is named
-`main` also matches that filter, which would let a fork PR decide which
-binaries every other PR is tested against. Both events the resolver does
-accept can only be raised inside the base repository.
+originating from this repository — neither event can be raised from a
+fork, so a fork PR cannot influence which binaries other PRs test against.
 
-Cross-run *build* reuse is handled separately by `actions/cache@v4` under
-the **fully qualified key**:
-
-```
-hlsl-dist-<os>-<arch>-<llvm-sha12>-<dxc-sha12>-<cfg12>
-```
-
-where `<cfg12>` is the first 12 hex characters of a SHA-256 over the build
-type, the extra cmake args, and the contents of
-`StandaloneDistribution.cmake`. On a cache hit the builder skips the
-checkout-dependent build steps entirely and re-uploads the cached tarballs
-as this run's artifacts. On a miss it does a full build (still
-sccache-accelerated), populates the cache, and uploads.
+Incremental build speed comes from `sccache` on the builder, whose cache
+directory persists across jobs.
 
 ### What the test runner does
 
