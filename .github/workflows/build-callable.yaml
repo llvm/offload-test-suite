@@ -49,13 +49,6 @@ on:
         required: false
         default: ''
         type: string
-    outputs:
-      ArtifactName:
-        description: 'Name of the uploaded LLVM install-prefix artifact for this build config'
-        value: ${{ jobs.build.outputs.ArtifactName }}
-      DXCArtifactName:
-        description: 'Name of the uploaded DXC artifact for this build config'
-        value: ${{ jobs.build.outputs.DXCArtifactName }}
 
 jobs:
   build:
@@ -63,9 +56,6 @@ jobs:
     # `hlsl-frequent-builder` label and no `hlsl-<sku>` label, so GitHub
     # Actions can never schedule a GPU test job here.
     runs-on: [self-hosted, hlsl-frequent-builder]
-    outputs:
-      ArtifactName: ${{ steps.key.outputs.artifact_name }}
-      DXCArtifactName: ${{ steps.key.outputs.dxc_artifact_name }}
     steps:
       - name: Validate inputs
         shell: bash
@@ -121,10 +111,9 @@ jobs:
           cfg12=$( { printf '%s\n%s\n' "$BUILDTYPE" "$EXTRA"; \
                      cat OffloadTest/cmake/caches/StandaloneDistribution.cmake; } \
                    | sha256sum | cut -c1-12)
-          # Run-scoped names: unique per config within a single workflow
-          # run so fan-out test cells can locate them by name.
-          echo "artifact_name=hlsl-dist-${OS}-${ARCH}-${cfg12}"    >> "$GITHUB_OUTPUT"
-          echo "dxc_artifact_name=hlsl-dxc-${OS}-${ARCH}-${cfg12}" >> "$GITHUB_OUTPUT"
+          # Stable names: PRs locate these by (run id, name).
+          echo "artifact_name=hlsl-dist-${OS}-${ARCH}"    >> "$GITHUB_OUTPUT"
+          echo "dxc_artifact_name=hlsl-dxc-${OS}-${ARCH}" >> "$GITHUB_OUTPUT"
           # Cross-run cache key: the full source + config identity.
           echo "cache_key=hlsl-dist-${OS}-${ARCH}-${llvm12}-${dxc12}-${cfg12}" >> "$GITHUB_OUTPUT"
       - name: Restore cached distribution
@@ -222,10 +211,12 @@ jobs:
         with:
           name: ${{ steps.key.outputs.artifact_name }}
           path: ${{ runner.temp }}/build-artifacts.tar
-          retention-days: 1
+          # Must outlive the gap to the next successful scheduled build,
+          # since PRs consume the newest successful run's artifacts.
+          retention-days: 7
       - name: Upload DXC artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.key.outputs.dxc_artifact_name }}
           path: ${{ runner.temp }}/dxc-artifacts.tar
-          retention-days: 1
+          retention-days: 7

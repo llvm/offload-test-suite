@@ -1,7 +1,8 @@
 name: Validate Frequent Builder
 
-# Manual-only end-to-end check of the frequent-builder pipeline: builds the
-# distribution, then consumes it on a GPU runner for one SKU and lit suite.
+# Manual-only check of the consuming half: resolves a frequent-build.yaml
+# run and runs one lit suite against its artifacts on a GPU runner. This is
+# the exact path pr-matrix cells take once migrated.
 # See docs/offload-distribution.md ("Frequent Builder").
 
 permissions:
@@ -48,6 +49,11 @@ on:
         - check-hlsl-clang-warp-d3d12
         - check-hlsl-vk-lavapipe
         - check-hlsl-clang-vk-lavapipe
+      BuildRunId:
+        description: 'frequent-build.yaml run ID to consume. Leave blank to use the newest successful run on main.'
+        required: false
+        default: ''
+        type: string
       OffloadTest-branch:
         description: 'Test Suite Branch'
         required: false
@@ -68,11 +74,6 @@ on:
         required: false
         default: 'llvm'
         type: string
-      DXC-branch:
-        description: 'DXC Branch'
-        required: false
-        default: 'main'
-        type: string
       BuildType:
         description: 'Build Type'
         required: false
@@ -82,32 +83,47 @@ on:
         - Release
         - RelWithDebInfo
         - Debug
-      LLVM-ExtraCMakeArgs:
-        # Matches pr-matrix.yaml so a dispatch reuses its cached build.
-        description: 'Extra CMake Args for LLVM'
-        required: false
-        default: '-DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl'
-        type: string
 
 jobs:
-  Build-Windows-X64:
-    uses: ./.github/workflows/build-callable.yaml
-    with:
-      OS: ${{ inputs.OS }}
-      Arch: ${{ inputs.Arch }}
-      OffloadTest-branch: ${{ inputs.OffloadTest-branch }}
-      OffloadTest-fork: ${{ inputs.OffloadTest-fork }}
-      LLVM-branch: ${{ inputs.LLVM-branch }}
-      LLVM-fork: ${{ inputs.LLVM-fork }}
-      DXC-branch: ${{ inputs.DXC-branch }}
-      BuildType: ${{ inputs.BuildType }}
-      LLVM-ExtraCMakeArgs: ${{ inputs.LLVM-ExtraCMakeArgs }}
+  Resolve-Frequent-Build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      RunId: ${{ steps.resolve.outputs.run_id }}
+    steps:
+      - name: Resolve frequent build run
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PINNED: ${{ inputs.BuildRunId }}
+        run: |
+          set -euo pipefail
+          run_id="$PINNED"
+          if [ -z "$run_id" ]; then
+            # Trust only schedule/dispatch runs from this repo: a fork PR
+            # branch named `main` also matches `branch=main`.
+            run_id=$(gh api \
+              "/repos/$REPO/actions/workflows/frequent-build.yaml/runs?status=success&branch=main&per_page=50" \
+              --jq '[.workflow_runs[]
+                     | select((.event == "schedule" or .event == "workflow_dispatch")
+                              and .head_repository.full_name == env.REPO)][0].id // empty')
+          fi
+          if [ -z "$run_id" ]; then
+            echo "::error::No successful frequent-build.yaml run on main. Dispatch it once to seed the artifacts."
+            exit 1
+          fi
+          echo "Using frequent build run $run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
 
   Exec-Test:
     permissions:
       contents: read
       checks: write
-    needs: Build-Windows-X64
+      actions: read
+    needs: Resolve-Frequent-Build
     uses: ./.github/workflows/test-callable.yaml
     with:
       OS: ${{ inputs.OS }}
@@ -119,5 +135,4 @@ jobs:
       OffloadTest-fork: ${{ inputs.OffloadTest-fork }}
       LLVM-branch: ${{ inputs.LLVM-branch }}
       LLVM-fork: ${{ inputs.LLVM-fork }}
-      ArtifactName: ${{ needs.Build-Windows-X64.outputs.ArtifactName }}
-      DXCArtifactName: ${{ needs.Build-Windows-X64.outputs.DXCArtifactName }}
+      BuildRunId: ${{ needs.Resolve-Frequent-Build.outputs.RunId }}

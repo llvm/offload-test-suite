@@ -1,0 +1,29 @@
+name: Frequent Build
+
+# Builds the LLVM/Clang + DXC distribution that PR test cells consume.
+# PRs never build LLVM/DXC themselves -- they download the artifacts from
+# the most recent successful run of this workflow on main.
+# See docs/offload-distribution.md ("Frequent Builder").
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */4 * * *' # run every 4 hours
+  # Validate builder changes in the PR that makes them.
+  pull_request:
+    paths:
+      - .github/workflows/frequent-build.yaml
+      - .github/workflows/build-callable.yaml
+      - cmake/caches/StandaloneDistribution.cmake
+
+jobs:
+  Build-Windows-X64:
+    uses: ./.github/workflows/build-callable.yaml
+    with:
+      OS: windows
+      Arch: x64
+      OffloadTest-branch: ${{ github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

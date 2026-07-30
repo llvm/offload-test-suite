@@ -230,36 +230,52 @@ to use LIT from pip and a stock googletest framework.
 ## Frequent Builder
 
 The **frequent builder** is the CI application of the standalone build
-distribution described above, implemented by the reusable workflows
-`build-callable.yaml` and `test-callable.yaml`.
+distribution described above, implemented by `frequent-build.yaml` (the
+schedule) and the reusable workflows `build-callable.yaml` and
+`test-callable.yaml`.
+
+PRs never build LLVM or DXC. `frequent-build.yaml` runs on a schedule and
+publishes the distribution as artifacts; PR test cells resolve the newest
+successful run of that workflow on `main` and download from it. Decoupling
+the build from the PR means a broken LLVM or DXC `main` no longer blocks
+PR signal — cells keep using the last good distribution — and no PR ever
+waits on a compile.
+
+The trade-off is that PRs test against a toolchain up to one schedule
+interval old, and a PR that changes the build configuration itself (for
+example `StandaloneDistribution.cmake` or the builder's cmake args) is not
+exercised by the test cells, because they consume a distribution built
+from `main`'s configuration. `frequent-build.yaml` therefore also triggers
+on pull requests that touch those files, so builder changes are still
+validated by the PR that makes them.
 
 ### Rollout status
 
 The builder is being brought up incrementally:
 
-- **Today.** `pr-matrix.yaml` runs `Build-Windows-X64` on every PR, and
-  **nothing consumes its artifacts**. Every test cell still builds for
-  itself through `build-and-test-callable.yaml`, exactly as before.
-  Running the builder unconsumed lets us watch build reliability, sccache
-  hit rate, cache-key churn and artifact size without putting PR signal at
-  risk.
-- **Validating the consuming half.** The distribution and test-execution
-  code is exercised by dispatching `validate-frequent-builder.yaml`
-  manually. It runs `build-callable.yaml` followed by `test-callable.yaml`
-  for one chosen x64 SKU and lit suite, covering artifact upload, download,
-  the standalone rebuild and the lit run end to end. Compare its results
-  against the same SKU/TestTarget in a normal `pr-matrix.yaml` run. The
-  build half normally hits the `actions/cache` entry from a recent
-  pr-matrix run, so a dispatch usually skips the compile entirely.
+- **Today.** `frequent-build.yaml` runs the builder on a 4-hourly schedule
+  and publishes artifacts, and **nothing consumes them**. Every test cell
+  still builds for itself through `build-and-test-callable.yaml`, exactly
+  as before. Running the builder unconsumed lets us watch build
+  reliability, sccache hit rate, cache-key churn and artifact size without
+  putting PR signal at risk.
+- **Validating the consuming half.** The download and test-execution code
+  is exercised by dispatching `validate-frequent-builder.yaml` manually. It
+  resolves a frequent build and runs `test-callable.yaml` for one chosen
+  x64 SKU and lit suite, covering run resolution, artifact download, the
+  standalone rebuild and the lit run — the exact path a migrated pr-matrix
+  cell takes. Compare its results against the same SKU/TestTarget in a
+  normal `pr-matrix.yaml` run.
 - **Next.** Once the builder is consistently green and
-  `validate-frequent-builder.yaml` passes for a SKU, that SKU's cells move
-  over by uncommenting the `Exec-Tests-Windows-Distributed` template in
-  `pr-matrix.yaml` and deleting the corresponding legacy cells. A SKU is
-  served by exactly one path at a time, never both, and migration proceeds
-  one SKU at a time so a regression is always attributable and trivially
-  revertable. The template enumerates cells explicitly as
-  `{ SKU, Arch, TestTarget }` rather than as a cross-product, so "which
-  build feeds which test" stays readable from `pr-matrix.yaml` alone.
+  `validate-frequent-builder.yaml` passes for a SKU, uncomment the
+  `Resolve-Frequent-Build` job and that SKU's cells in the
+  `Exec-Tests-Windows-Distributed` template in `pr-matrix.yaml`, deleting
+  the corresponding legacy cells. A SKU is served by exactly one path at a
+  time, never both, and migration proceeds one SKU at a time so a
+  regression is always attributable and trivially revertable. The template
+  enumerates cells explicitly as `{ SKU, Arch, TestTarget }` rather than as
+  a cross-product, so "which build feeds which test" stays readable from
+  `pr-matrix.yaml` alone.
 - **Then the scheduled workflows.** `pr-matrix.yaml` is not the only caller
   of `SplitBuild=true`; the 19 scheduled per-SKU workflows
   (`windows-amd-*`, `windows-intel-*`, `windows-nvidia-*`) and
@@ -276,9 +292,10 @@ The builder is being brought up incrementally:
 `pr-matrix.yaml` fans out roughly twenty test cells per architecture
 (SKU × backend × compiler). Under the `SplitBuild` model each of those
 cells still kicked off a full LLVM/Clang/DXC compile, because the build ran
-on the same SKU-labeled runner as the tests. The frequent builder collapses
-those N per-arch compiles into **one build per (OS, Arch, BuildType,
-cmake-args, LLVM SHA, DXC SHA)**.
+on the same SKU-labeled runner as the tests. The frequent builder removes
+compilation from the PR path entirely: those N per-arch compiles become a
+single scheduled build, amortised across every PR that runs before the
+next one.
 
 Crucially, the builder's artifact contains **no offload-test-suite code**.
 Rebuilding the offload tools on the test runner is what keeps the
@@ -308,34 +325,61 @@ guard is required.
 `ninja install-distribution`, then stages DXC out of its build directory
 (see "DXC prefix" above). It uploads two tarballs per build config:
 
-- `hlsl-dist-<os>-<arch>-<cfg12>` — the LLVM/Clang install prefix.
-- `hlsl-dxc-<os>-<arch>-<cfg12>` — the DXC redistributable.
+- `hlsl-dist-<os>-<arch>` — the LLVM/Clang install prefix.
+- `hlsl-dxc-<os>-<arch>` — the DXC redistributable.
 
-`<cfg12>` is the first 12 hex characters of a SHA-256 over the build type,
-the extra cmake args, and the contents of `StandaloneDistribution.cmake`.
-These names are **run-scoped** — unique within a workflow run so the fan-out
-test cells can locate them by name.
+These names are deliberately **stable** — they carry no build-config hash,
+so a PR can name the artifact it wants without knowing anything about how
+the scheduled run was configured.
 
-Cross-run reuse is handled separately by `actions/cache@v4` under the
-**fully qualified key**:
+Stable names are safe because artifacts are scoped to a workflow run:
+`(run id, name)` is the unique key, and `download-artifact@v4`'s `run-id`
+supplies the first half. Successive scheduled builds all publish
+`hlsl-dist-windows-x64` without colliding. The one invariant this relies
+on is **at most one build job per `(OS, Arch)` per run** — two jobs in the
+same run sharing an `(OS, Arch)` would collide, since `upload-artifact@v4`
+rejects duplicate names within a run. Phase 2's arm64 job is distinguished
+by `<arch>`.
+
+### Choosing which build to consume
+
+PR test cells do not hardcode a run. A resolver job queries the API for
+the newest successful `frequent-build.yaml` run and passes its ID to every
+cell as `BuildRunId`, so all cells in a PR test against one identical
+toolchain rather than straddling a build boundary.
+
+The resolver accepts only `schedule` and `workflow_dispatch` runs
+originating from this repository. Filtering on `branch=main` alone is
+**not** sufficient: a pull request from a fork whose branch is named
+`main` also matches that filter, which would let a fork PR decide which
+binaries every other PR is tested against. Both events the resolver does
+accept can only be raised inside the base repository.
+
+Cross-run *build* reuse is handled separately by `actions/cache@v4` under
+the **fully qualified key**:
 
 ```
 hlsl-dist-<os>-<arch>-<llvm-sha12>-<dxc-sha12>-<cfg12>
 ```
 
-On a cache hit the builder skips the checkout-dependent build steps
-entirely and re-uploads the cached tarballs as this run's artifacts. On a
-miss it does a full build (still sccache-accelerated), populates the cache,
-and uploads.
+where `<cfg12>` is the first 12 hex characters of a SHA-256 over the build
+type, the extra cmake args, and the contents of
+`StandaloneDistribution.cmake`. On a cache hit the builder skips the
+checkout-dependent build steps entirely and re-uploads the cached tarballs
+as this run's artifacts. On a miss it does a full build (still
+sccache-accelerated), populates the cache, and uploads.
 
 ### What the test runner does
 
-`test-callable.yaml` extracts both prefixes, checks out the
-offload-test-suite at the PR head plus an llvm-project source tree (needed
-for the reasons given above), configures the offload-test-suite as a
-standalone top-level CMake project against `install/lib/cmake/llvm`, and
-builds `hlsl-test-depends`. That build is well under a minute. It then runs
-`ninja check-hlsl-unit` followed by `ninja check-hlsl-<suite>`.
+`test-callable.yaml` downloads both prefixes from a specified
+`frequent-build.yaml` run using `download-artifact@v4`'s `run-id` +
+`github-token` (which is why the job needs `actions: read`), extracts them,
+checks out the offload-test-suite at the PR head plus an llvm-project
+source tree (needed for the reasons given above), configures the
+offload-test-suite as a standalone top-level CMake project against
+`install/lib/cmake/llvm`, and builds `hlsl-test-depends`. That build is
+well under a minute. It then runs `ninja check-hlsl-unit` followed by
+`ninja check-hlsl-<suite>`.
 
 `clang-tidy` is part of the distribution, so the test runner enables
 `OFFLOADTEST_USE_CLANG_TIDY` and points `CLANG_TIDY` at the copy in the
@@ -350,14 +394,23 @@ under the previous model.
 
 ### Failure semantics
 
-Test cells depend on their build via `needs:`. A failed build causes every
-dependent test cell to skip (a grey `-` in the checks UI) rather than each
-running its own compile and failing identically. This is a strict
-improvement in signal — one red X per broken build instead of N — but it
-does mean **skipped test jobs must not be read as passes**. Branch
-protection should require the `Build-*` job checks directly (or a summary
-job with `if: always()` that fails on any upstream-caused skip), so a
-skipped test cell is never green-lit for merge.
+A failed scheduled build does **not** affect PRs. Test cells resolve the
+newest *successful* `frequent-build.yaml` run, so a broken LLVM or DXC
+`main` leaves PRs testing against the last good distribution instead of
+turning the whole matrix red. The cost is that the failure is silent from
+a PR's point of view: the distribution simply ages until someone notices
+the scheduled workflow is red. Treat `frequent-build.yaml` as a monitored
+workflow in its own right, not as PR signal.
+
+Two failure modes do surface in a PR, both from the resolver job:
+
+- **No successful run exists** (nothing has been built yet, or every run
+  since the workflow landed has failed). The resolver fails with an
+  actionable message; dispatch `frequent-build.yaml` once to seed it.
+- **Artifacts have expired.** Artifacts are retained for 7 days, so at a
+  4-hourly cadence roughly 40 successive builds would have to fail before
+  the newest successful run's artifacts vanish. If that happens the
+  resolver succeeds and the download step is what fails.
 
 ### Scope
 

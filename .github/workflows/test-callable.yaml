@@ -3,10 +3,10 @@ name: HLSL Frequent Builder Test
 permissions:
   contents: read
 
-# Runs one lit suite on a GPU runner against a distribution produced by
-# `build-callable.yaml`, rebuilding the offload-test-suite tools standalone
-# from the PR head. No caller is wired up yet; see the commented-out
-# template in pr-matrix.yaml and docs/offload-distribution.md.
+# Runs one lit suite on a GPU runner against a distribution built by an
+# earlier `frequent-build.yaml` run, rebuilding the offload-test-suite tools
+# standalone from the PR head. No caller is wired up yet; see the
+# commented-out template in pr-matrix.yaml and docs/offload-distribution.md.
 
 on:
   workflow_call:
@@ -25,12 +25,8 @@ on:
       TestTarget:
         required: true
         type: string
-      ArtifactName:
-        description: 'LLVM install-prefix artifact name published by build-callable.'
-        required: true
-        type: string
-      DXCArtifactName:
-        description: 'DXC artifact name published by build-callable.'
+      BuildRunId:
+        description: 'Run ID of the frequent-build.yaml run whose artifacts to consume.'
         required: true
         type: string
       BuildType:
@@ -58,18 +54,24 @@ jobs:
   test:
     permissions:
       checks: write
+      actions: read
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
+      # run-id + github-token make these downloads cross-run.
       - name: Download LLVM distribution artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.ArtifactName }}
+          name: hlsl-dist-${{ inputs.OS }}-${{ inputs.Arch }}
           path: ${{ runner.temp }}
+          run-id: ${{ inputs.BuildRunId }}
+          github-token: ${{ github.token }}
       - name: Download DXC artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.DXCArtifactName }}
+          name: hlsl-dxc-${{ inputs.OS }}-${{ inputs.Arch }}
           path: ${{ runner.temp }}
+          run-id: ${{ inputs.BuildRunId }}
+          github-token: ${{ github.token }}
       - name: Extract distribution
         shell: bash
         run: |
