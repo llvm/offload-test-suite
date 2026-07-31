@@ -125,8 +125,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99126
-# XFAIL: Clang
+# Bug: https://github.com/llvm/offload-test-suite/issues/1407
+# XFAIL: Intel && Clang && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/116148
+# XFAIL: Clang 
 
 # REQUIRES: Int64TypedResourceAtomics && SM_6_6
 # RUN: split-file %s %t
