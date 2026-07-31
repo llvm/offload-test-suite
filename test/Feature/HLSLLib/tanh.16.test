@@ -59,11 +59,8 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
-
-# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2507
-# XFAIL: Vulkan && MoltenVK
-
 # REQUIRES: Half
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
