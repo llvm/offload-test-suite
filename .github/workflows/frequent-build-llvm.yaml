@@ -1,9 +1,9 @@
-name: Frequent Build
+name: Frequent Build (LLVM)
 
-# Builds the LLVM/Clang + DXC distribution that PR test cells consume.
-# PRs never build LLVM/DXC themselves -- they download the artifacts from
-# the most recent successful run of this workflow on main.
-# See docs/offload-distribution.md ("Frequent Builder").
+# Builds the LLVM/Clang distribution that PR test cells consume. PRs never
+# build LLVM themselves -- they download the artifact from the most recent
+# successful run of this workflow on main.
+# See docs/frequent-builder.md.
 
 permissions:
   contents: read
@@ -18,7 +18,7 @@ on:
 
 jobs:
   Build-Windows-X64:
-    uses: ./.github/workflows/build-callable.yaml
+    uses: ./.github/workflows/build-llvm-callable.yaml
     with:
       OS: windows
       Arch: x64

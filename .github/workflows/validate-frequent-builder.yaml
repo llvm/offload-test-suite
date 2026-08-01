@@ -1,9 +1,9 @@
 name: Validate Frequent Builder
 
-# Manual-only check of the consuming half: resolves a frequent-build.yaml
-# run and runs one lit suite against its artifacts on a GPU runner. This is
-# the exact path pr-matrix cells take once migrated.
-# See docs/offload-distribution.md ("Frequent Builder").
+# Manual-only check of the consuming half: resolves the LLVM and DXC
+# frequent-build runs and runs one lit suite against their artifacts on a
+# GPU runner. This is the exact path pr-matrix cells take once migrated.
+# See docs/frequent-builder.md.
 
 permissions:
   contents: read
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       # Single-option today; listed so the axes stay visible and Phase 2 is
-      # an append. Only values build-callable.yaml accepts are offered.
+      # an append. Only values the build workflows accept are offered.
       OS:
         description: 'Target OS (windows only -- the frequent-builder pool has no macOS machines)'
         required: true
@@ -49,8 +49,13 @@ on:
         - check-hlsl-clang-warp-d3d12
         - check-hlsl-vk-lavapipe
         - check-hlsl-clang-vk-lavapipe
-      BuildRunId:
-        description: 'frequent-build.yaml run ID to consume. Leave blank to use the newest successful run on main.'
+      LlvmRunId:
+        description: 'frequent-build-llvm.yaml run ID to consume. Leave blank to use the newest successful run on main.'
+        required: false
+        default: ''
+        type: string
+      DxcRunId:
+        description: 'frequent-build-dxc.yaml run ID to consume. Leave blank to use the newest successful run on main.'
         required: false
         default: ''
         type: string
@@ -85,45 +90,59 @@ on:
         - Debug
 
 jobs:
-  Resolve-Frequent-Build:
+  Resolve-Frequent-Builds:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
     outputs:
-      RunId: ${{ steps.resolve.outputs.run_id }}
+      LlvmRunId: ${{ steps.resolve.outputs.llvm_run_id }}
+      DxcRunId: ${{ steps.resolve.outputs.dxc_run_id }}
     steps:
-      - name: Resolve frequent build run
+      - name: Resolve frequent build runs
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PINNED: ${{ inputs.BuildRunId }}
+          PINNED_LLVM: ${{ inputs.LlvmRunId }}
+          PINNED_DXC: ${{ inputs.DxcRunId }}
         run: |
           set -euo pipefail
-          run_id="$PINNED"
-          if [ -z "$run_id" ]; then
-            # Trust only schedule/dispatch runs from this repo: a fork PR
-            # branch named `main` also matches `branch=main`.
-            run_id=$(gh api \
-              "/repos/$REPO/actions/workflows/frequent-build.yaml/runs?status=success&branch=main&per_page=50" \
+          # Trust only schedule/dispatch runs from this repo: a fork PR
+          # branch named `main` also matches `branch=main`.
+          resolve() {
+            gh api \
+              "/repos/$REPO/actions/workflows/$1/runs?status=success&branch=main&per_page=50" \
               --jq '[.workflow_runs[]
                      | select((.event == "schedule" or .event == "workflow_dispatch")
-                              and .head_repository.full_name == env.REPO)][0].id // empty')
+                              and .head_repository.full_name == env.REPO)][0].id // empty'
+          }
+          llvm_run_id="$PINNED_LLVM"
+          if [ -z "$llvm_run_id" ]; then
+            llvm_run_id=$(resolve frequent-build-llvm.yaml)
           fi
-          if [ -z "$run_id" ]; then
-            echo "::error::No successful frequent-build.yaml run on main. Dispatch it once to seed the artifacts."
+          if [ -z "$llvm_run_id" ]; then
+            echo "::error::No successful frequent-build-llvm.yaml run on main. Dispatch it once to seed the artifacts."
             exit 1
           fi
-          echo "Using frequent build run $run_id"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          dxc_run_id="$PINNED_DXC"
+          if [ -z "$dxc_run_id" ]; then
+            dxc_run_id=$(resolve frequent-build-dxc.yaml)
+          fi
+          if [ -z "$dxc_run_id" ]; then
+            echo "::error::No successful frequent-build-dxc.yaml run on main. Dispatch it once to seed the artifacts."
+            exit 1
+          fi
+          echo "Using LLVM run $llvm_run_id and DXC run $dxc_run_id"
+          echo "llvm_run_id=$llvm_run_id" >> "$GITHUB_OUTPUT"
+          echo "dxc_run_id=$dxc_run_id"   >> "$GITHUB_OUTPUT"
 
   Exec-Test:
     permissions:
       contents: read
       checks: write
       actions: read
-    needs: Resolve-Frequent-Build
+    needs: Resolve-Frequent-Builds
     uses: ./.github/workflows/test-callable.yaml
     with:
       OS: ${{ inputs.OS }}
@@ -135,4 +154,5 @@ jobs:
       OffloadTest-fork: ${{ inputs.OffloadTest-fork }}
       LLVM-branch: ${{ inputs.LLVM-branch }}
       LLVM-fork: ${{ inputs.LLVM-fork }}
-      BuildRunId: ${{ needs.Resolve-Frequent-Build.outputs.RunId }}
+      LlvmRunId: ${{ needs.Resolve-Frequent-Builds.outputs.LlvmRunId }}
+      DxcRunId: ${{ needs.Resolve-Frequent-Builds.outputs.DxcRunId }}

@@ -1,0 +1,24 @@
+name: Frequent Build (DXC)
+
+# Builds the DXC redistributable that PR test cells consume. Runs daily
+# rather than 2-hourly because DXC's main branch changes roughly weekly.
+# See docs/frequent-builder.md.
+
+permissions:
+  contents: read
+
+on:
+  # No pull_request trigger: this runs on a self-hosted machine, and a fork
+  # PR must never execute there. Validate builder changes by dispatching
+  # this workflow against the branch.
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *' # run daily
+
+jobs:
+  Build-Windows-X64:
+    uses: ./.github/workflows/build-dxc-callable.yaml
+    with:
+      OS: windows
+      Arch: x64
+      OffloadTest-branch: ${{ github.ref }}

@@ -3,10 +3,11 @@ name: HLSL Frequent Builder Test
 permissions:
   contents: read
 
-# Runs one lit suite on a GPU runner against a distribution built by an
-# earlier `frequent-build.yaml` run, rebuilding the offload-test-suite tools
-# standalone from the PR head. No caller is wired up yet; see the
-# commented-out template in pr-matrix.yaml and docs/offload-distribution.md.
+# Runs one lit suite on a GPU runner against distributions built by earlier
+# frequent-build-llvm.yaml and frequent-build-dxc.yaml runs, rebuilding the
+# offload-test-suite tools standalone from the PR head. No caller is wired
+# up yet; see the commented-out template in pr-matrix.yaml and
+# docs/frequent-builder.md.
 
 on:
   workflow_call:
@@ -25,8 +26,12 @@ on:
       TestTarget:
         required: true
         type: string
-      BuildRunId:
-        description: 'Run ID of the frequent-build.yaml run whose artifacts to consume.'
+      LlvmRunId:
+        description: 'Run ID of the frequent-build-llvm.yaml run whose artifact to consume.'
+        required: true
+        type: string
+      DxcRunId:
+        description: 'Run ID of the frequent-build-dxc.yaml run whose artifact to consume.'
         required: true
         type: string
       BuildType:
@@ -57,20 +62,21 @@ jobs:
       actions: read
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
-      # run-id + github-token make these downloads cross-run.
+      # run-id + github-token make these downloads cross-run. LLVM and DXC
+      # come from separate builds, so each has its own run id.
       - name: Download LLVM distribution artifact
         uses: actions/download-artifact@v4
         with:
           name: hlsl-dist-${{ inputs.OS }}-${{ inputs.Arch }}
           path: ${{ runner.temp }}
-          run-id: ${{ inputs.BuildRunId }}
+          run-id: ${{ inputs.LlvmRunId }}
           github-token: ${{ github.token }}
       - name: Download DXC artifact
         uses: actions/download-artifact@v4
         with:
           name: hlsl-dxc-${{ inputs.OS }}-${{ inputs.Arch }}
           path: ${{ runner.temp }}
-          run-id: ${{ inputs.BuildRunId }}
+          run-id: ${{ inputs.DxcRunId }}
           github-token: ${{ github.token }}
       - name: Extract distribution
         shell: bash
@@ -139,7 +145,7 @@ jobs:
             # find_program check, so verify it here or the failure surfaces
             # as an unclear compiler error on every file.
             if [ ! -x "$clang_tidy" ]; then
-              echo "::error::clang-tidy missing from the downloaded distribution ($clang_tidy). The resolved frequent-build run predates clang-tidy being added to StandaloneDistribution.cmake; rebuild or resolve a newer run."
+              echo "::error::clang-tidy missing from the downloaded distribution ($clang_tidy). The resolved frequent-build-llvm run predates clang-tidy being added to StandaloneDistribution.cmake; rebuild or resolve a newer run."
               exit 1
             fi
             cmake -G Ninja -S "$GITHUB_WORKSPACE/OffloadTest" -B "$GITHUB_WORKSPACE/standalone-build" \
