@@ -4491,6 +4491,8 @@ public:
     for (auto &S : P.Sets) {
       DescriptorSetLayoutDesc Layout;
       for (auto &R : S.Resources) {
+        assert(!R.HeapIndex && "Direct heap indexing is not yet supported.");
+
         if (!R.VKBinding)
           return llvm::createStringError(std::errc::invalid_argument,
                                          "No VulkanBinding provided for '%s'",
@@ -4498,9 +4500,11 @@ public:
 
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
-        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
-        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        assert(R.DXBinding &&
+               "DXBinding must not be null when HeapIndex is not set.");
+        ResourceBinding.DXBinding = R.DXBinding;
         ResourceBinding.VKBinding = R.VKBinding;
+        ResourceBinding.HeapIndex = R.HeapIndex;
         ResourceBinding.DescriptorCount = R.getArraySize();
         Layout.ResourceBindings.push_back(ResourceBinding);
 

@@ -451,8 +451,16 @@ void MappingTraits<offloadtest::Resource>::mapping(IO &I,
   I.mapOptional("HasCounter", R.HasCounter, 0);
   I.mapOptional("TilesMapped", R.TilesMapped);
   I.mapOptional("IsReserved", R.IsReserved);
-  I.mapRequired("DirectXBinding", R.DXBinding);
+  I.mapOptional("DirectXBinding", R.DXBinding);
   I.mapOptional("VulkanBinding", R.VKBinding);
+  I.mapOptional("HeapIndex", R.HeapIndex);
+
+  // A resource is reached either through a descriptor table (DirectXBinding)
+  // or by directly indexing the descriptor heap (HeapIndex), never both.
+  if (R.DXBinding.has_value() == R.HeapIndex.has_value())
+    I.setError(Twine("Resource '") + R.Name +
+               "' must specify exactly one of 'DirectXBinding' or "
+               "'HeapIndex'.");
 }
 
 void MappingTraits<offloadtest::DirectXBinding>::mapping(
