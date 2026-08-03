@@ -144,7 +144,7 @@ static bool compareFloat16Epsilon(const uint16_t &FSrc, const uint16_t &FRef,
 }
 
 static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
-                              unsigned ULPTolerance) {
+                              unsigned ULPTolerance, float ZeroTolerance) {
   // Treat +0 and -0 as equal
   if ((FSrc & ~Float16BitSign) == 0 && (FRef & ~Float16BitSign) == 0)
     return true;
@@ -157,6 +157,13 @@ static bool compareFloat16ULP(const uint16_t &FSrc, const uint16_t &FRef,
   auto ToOrdered = [](uint16_t H) -> int {
     return (H & Float16BitSign) ? (~H & 0xFFFF) : (H | Float16BitSign);
   };
+
+  if (ZeroTolerance > 0.0f) {
+    const float FSrc32 = convertFloat16ToFloat(FSrc);
+    const float FRef32 = convertFloat16ToFloat(FRef);
+    if (std::abs(FSrc32) <= ZeroTolerance || std::abs(FRef32) <= ZeroTolerance)
+      return std::abs(FSrc32 - FRef32) <= ZeroTolerance;
+  }
 
   // 16-bit floating point numbers must preserve denorms
   const int IntFSrc = ToOrdered(FSrc);
@@ -298,8 +305,8 @@ static bool testBufferFloatULP(offloadtest::CPUBuffer *B1,
     return testBufferFloat<float>(Fn, B1, B2);
   }
   case offloadtest::DataFormat::Float16: {
-    auto Fn = [ULPT](const uint16_t &FS, const uint16_t &FR) {
-      return compareFloat16ULP(FS, FR, ULPT);
+    auto Fn = [ULPT, ZeroTolerance](const uint16_t &FS, const uint16_t &FR) {
+      return compareFloat16ULP(FS, FR, ULPT, (float)ZeroTolerance);
     };
     return testBufferFloat<uint16_t>(Fn, B1, B2);
   }
