@@ -1,0 +1,257 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareStore on the HLSL-legal non-groupshared
+// (resource) destination types.
+//
+// Every destination covers both a matching and a never-matching compare.
+// RWStructuredBuffer and RWByteAddressBuffer additionally run the stepped
+// counter and monotonicity check described in
+// InterlockedCompareStore.32.test.
+
+RWStructuredBuffer<uint> SBufU : register(u0);
+RWStructuredBuffer<int>  SBufI : register(u1);
+RWBuffer<uint>           TBufU : register(u2);
+RWTexture2D<uint>        Tex2D : register(u3);
+RWByteAddressBuffer      BABuf : register(u4);
+
+RWStructuredBuffer<uint> OutMonoSBufU : register(u5);
+RWStructuredBuffer<uint> OutMonoBABuf : register(u6);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufU[0] = 0u;             // stepped counter
+    SBufU[1] = 9u;             // compare never matches
+    SBufI[0] = 1000;           // compare matches
+    SBufI[1] = 55;             // compare never matches
+    TBufU[0] = 0xFFFFFFFFu;    // compare matches
+    TBufU[1] = 9u;             // compare never matches
+    Tex2D[uint2(0, 0)] = 0xFFFFFFFFu; // compare matches
+    Tex2D[uint2(1, 0)] = 9u;          // compare never matches
+    BABuf.Store(0, 0xFFFFFFFFu); // compare matches
+    BABuf.Store(4, 44u);         // compare never matches
+    BABuf.Store(8, 0u);          // stepped counter
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint>: the compare never matches.
+  InterlockedCompareStore(SBufU[1], 10u, 0u);
+
+  // RWStructuredBuffer<int> (signed).
+  InterlockedCompareStore(SBufI[0], 1000, -31);
+  InterlockedCompareStore(SBufI[1], 56, -1);
+
+  // RWBuffer<uint> (typed buffer UAV).
+  InterlockedCompareStore(TBufU[0], 0xFFFFFFFFu, 77u);
+  InterlockedCompareStore(TBufU[1], 10u, 0u);
+
+  // RWTexture2D<uint> (typed texture UAV).
+  InterlockedCompareStore(Tex2D[uint2(0, 0)], 0xFFFFFFFFu, 88u);
+  InterlockedCompareStore(Tex2D[uint2(1, 0)], 10u, 0u);
+
+  // RWByteAddressBuffer method form.
+  BABuf.InterlockedCompareStore(0, 0xFFFFFFFFu, 123u);
+  BABuf.InterlockedCompareStore(4, 45u, 0u);
+
+  // Stepped counters on the structured buffer and the byte address buffer,
+  // both checked for monotonic non-decrease.
+  uint CompareValue = GTID.x;
+  uint NewValue = GTID.x + 1u;
+  uint PrevS = 0u, PrevB = 0u;
+  uint MonoS = 1u, MonoB = 1u;
+  for (uint I = 0; I < 256; ++I) {
+    InterlockedCompareStore(SBufU[0], CompareValue, NewValue);
+    BABuf.InterlockedCompareStore(8, CompareValue, NewValue);
+    DeviceMemoryBarrierWithGroupSync();
+    uint CurS = SBufU[0];
+    uint CurB = BABuf.Load(8);
+    if (CurS < PrevS)
+      MonoS = 0u;
+    if (CurB < PrevB)
+      MonoB = 0u;
+    PrevS = CurS;
+    PrevB = CurB;
+  }
+  OutMonoSBufU[GTID.x] = MonoS;
+  OutMonoBABuf[GTID.x] = MonoB;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufU
+    Format: UInt32
+    Stride: 4
+    Data: [ 256, 9 ]
+  - Name: SBufI
+    Format: Int32
+    Stride: 4
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufI
+    Format: Int32
+    Stride: 4
+    Data: [ -31, 55 ]
+  - Name: TBufU
+    Format: UInt32
+    Channels: 1
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedTBufU
+    Format: UInt32
+    Channels: 1
+    Data: [ 77, 9 ]
+  - Name: Tex2D
+    Format: UInt32
+    Channels: 1
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+  - Name: ExpectedTex2D
+    Format: UInt32
+    Channels: 1
+    Data: [ 88, 9 ]
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+  - Name: BABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 12
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedBABuf
+    Format: UInt32
+    Stride: 4
+    Data: [ 123, 44, 256 ]
+  - Name: OutMonoSBufU
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMono
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestTBufU
+    Rule: BufferExact
+    Actual: TBufU
+    Expected: ExpectedTBufU
+  - Result: TestTex2D
+    Rule: BufferExact
+    Actual: Tex2D
+    Expected: ExpectedTex2D
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestMonoSBufU
+    Rule: BufferExact
+    Actual: OutMonoSBufU
+    Expected: ExpectedMono
+  - Result: TestMonoBABuf
+    Rule: BufferExact
+    Actual: OutMonoBABuf
+    Expected: ExpectedMono
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: TBufU
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Tex2D
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutMonoSBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutMonoBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99128
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
