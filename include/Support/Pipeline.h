@@ -16,6 +16,7 @@
 #include "API/AccelerationStructure.h"
 #include "API/Enums.h"
 #include "API/Resources.h"
+#include "API/Sampler.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
@@ -141,24 +142,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-enum class FilterMode { Nearest, Linear };
-
-enum class AddressMode { Clamp, Repeat, Mirror, Border, MirrorOnce };
-
-enum class CompareFunction {
-  Never,
-  Less,
-  Equal,
-  LessEqual,
-  Greater,
-  NotEqual,
-  GreaterEqual,
-  Always
-};
-
-enum class SamplerKind { Sampler, SamplerComparison };
-
-struct Sampler {
+struct YAMLSampler {
   std::string Name;
   FilterMode MinFilter = FilterMode::Linear;
   FilterMode MagFilter = FilterMode::Linear;
@@ -272,7 +256,7 @@ struct Resource {
   DirectXBinding DXBinding;
   std::optional<VulkanBinding> VKBinding;
   CPUBuffer *BufferPtr = nullptr;
-  Sampler *SamplerPtr = nullptr;
+  YAMLSampler *SamplerPtr = nullptr;
   bool HasCounter = false;
   std::optional<uint32_t> TilesMapped;
   bool IsReserved = false;
@@ -399,11 +383,7 @@ struct Resource {
     return isByteAddressBuffer() ? 4 : BufferPtr->getElementSize();
   }
 
-  uint32_t getArraySize() const {
-    if (isSampler() || isAccelerationStructure())
-      return 1;
-    return BufferPtr->ArraySize;
-  }
+  uint32_t getArraySize() const;
 
   uint32_t size() const {
     assert(!isSampler() && !isAccelerationStructure() &&
@@ -583,7 +563,11 @@ struct InstanceDesc {
 
 struct TLASDesc {
   std::string Name;
-  llvm::SmallVector<InstanceDesc> Instances;
+  uint32_t ArraySize = 1;
+  // Outer vector has ArraySize entries (one per descriptor-array element);
+  // inner vector lists the instances for that element. Mirrors
+  // CPUBuffer::Data's ArraySize-driven layout.
+  llvm::SmallVector<llvm::SmallVector<InstanceDesc>, 1> Instances;
 };
 
 struct AccelerationStructureDescs {
@@ -625,6 +609,14 @@ struct ShaderBindingTableDesc {
   llvm::SmallVector<SBTEntry> Callable;
 };
 
+inline uint32_t Resource::getArraySize() const {
+  if (isSampler())
+    return 1;
+  if (isAccelerationStructure())
+    return TLASPtr->ArraySize;
+  return BufferPtr->ArraySize;
+}
+
 struct Pipeline {
   ShaderPipelineKind Kind;
   llvm::SmallVector<Shader> Shaders;
@@ -633,7 +625,7 @@ struct Pipeline {
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
   llvm::SmallVector<CPUBuffer> Buffers;
-  llvm::SmallVector<Sampler> Samplers;
+  llvm::SmallVector<YAMLSampler> Samplers;
   llvm::SmallVector<Result> Results;
   llvm::SmallVector<DescriptorSet> Sets;
   DispatchParametersSet DispatchParameters;
@@ -674,7 +666,7 @@ struct Pipeline {
     return nullptr;
   }
 
-  Sampler *getSampler(llvm::StringRef Name) {
+  YAMLSampler *getSampler(llvm::StringRef Name) {
     for (auto &S : Samplers)
       if (Name == S.Name)
         return &S;
@@ -715,7 +707,7 @@ struct Pipeline {
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::DescriptorSet)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Resource)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::CPUBuffer)
-LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Sampler)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::YAMLSampler)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
@@ -747,8 +739,8 @@ template <> struct MappingTraits<offloadtest::CPUBuffer> {
   static void mapping(IO &I, offloadtest::CPUBuffer &R);
 };
 
-template <> struct MappingTraits<offloadtest::Sampler> {
-  static void mapping(IO &I, offloadtest::Sampler &S);
+template <> struct MappingTraits<offloadtest::YAMLSampler> {
+  static void mapping(IO &I, offloadtest::YAMLSampler &S);
 };
 
 template <> struct MappingTraits<offloadtest::Result> {
