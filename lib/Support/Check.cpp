@@ -63,8 +63,7 @@ static bool compareDoubleEpsilon(const double &FSrc, const double &FRef,
 }
 
 static bool compareDoubleULP(const double &FSrc, const double &FRef,
-                             unsigned ULPTolerance,
-                             offloadtest::DenormMode DM,
+                             unsigned ULPTolerance, offloadtest::DenormMode DM,
                              double ZeroTolerance) {
   if (FSrc == FRef)
     return true;
