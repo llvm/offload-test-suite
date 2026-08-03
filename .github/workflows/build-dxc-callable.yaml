@@ -72,7 +72,7 @@ jobs:
           fetch-depth: 1
           submodules: true
       # OffloadTest is checked out only for sccache.cmake. None of its
-      # sources are compiled here.
+      # sources are compiled here, only the cache scripts are fetched.
       - name: Checkout OffloadTest
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -80,6 +80,7 @@ jobs:
           ref: ${{ inputs.OffloadTest-branch }}
           path: OffloadTest
           fetch-depth: 1
+          sparse-checkout: cmake/caches
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
       - name: Setup Windows x64
