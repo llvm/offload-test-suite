@@ -41,6 +41,8 @@ config.test_exec_root = os.path.join(
 # Tweak the PATH to include the tools dir.
 llvm_config.with_environment("PATH", config.llvm_tools_dir, append_path=True)
 
+tool_dirs = [config.llvm_tools_dir, config.offloadtest_tools_dir]
+
 
 llvm_config.with_system_environment(
     [
@@ -329,9 +331,9 @@ config.available_features.add(HLSLCompiler)
 
 tools.append(ToolSubst("obj2yaml", FindTool("obj2yaml")))
 
-llvm_config.add_tool_substitutions(tools, config.llvm_tools_dir)
+llvm_config.add_tool_substitutions(tools, tool_dirs)
 
-api_query = os.path.join(config.llvm_tools_dir, "api-query")
+api_query = os.path.join(config.offloadtest_tools_dir, "api-query")
 query_string = subprocess.check_output(api_query)
 devices = yaml.safe_load(query_string)
 target_device = None

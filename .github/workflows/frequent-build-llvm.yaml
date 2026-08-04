@@ -1,0 +1,26 @@
+name: Frequent Build (LLVM)
+
+# Builds the LLVM/Clang distribution that PR test cells consume. PRs never
+# build LLVM themselves -- they download the artifact from the most recent
+# successful run of this workflow on main.
+# See docs/frequent-builder.md.
+
+permissions:
+  contents: read
+
+on:
+  # No pull_request trigger: this runs on a self-hosted machine, and a fork
+  # PR must never execute there. Validate builder changes by dispatching
+  # this workflow against the branch.
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */2 * * *' # run every 2 hours
+
+jobs:
+  Build-Windows-X64:
+    uses: ./.github/workflows/build-llvm-callable.yaml
+    with:
+      OS: windows
+      Arch: x64
+      OffloadTest-branch: ${{ github.ref }}
+      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl

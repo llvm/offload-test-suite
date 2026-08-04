@@ -1,6 +1,69 @@
 # This project is only buildable as a subproject of LLVM.
+cmake_minimum_required(VERSION 3.31.0)
 
 project(OffloadTest)
+
+# If we are not building as a part of LLVM, build Clang as an
+# standalone project, using LLVM as an external library:
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+  set(OFFLOADTEST_BUILT_STANDALONE TRUE)
+endif()
+
+if (OFFLOADTEST_BUILT_STANDALONE)
+  find_package(LLVM REQUIRED HINTS "${LLVM_CMAKE_DIR}")
+  list(APPEND CMAKE_MODULE_PATH "${LLVM_DIR}")
+
+  include(AddLLVM)
+
+  find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
+    COMPONENTS Interpreter)
+
+  set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
+  set(CMAKE_CXX_STANDARD_REQUIRED YES)
+  set(CMAKE_CXX_EXTENSIONS NO)
+
+  # They are used as destination of target generators.
+  set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
+  set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
+  if(WIN32 OR CYGWIN)
+    # DLL platform -- put DLLs into bin.
+    set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
+  else()
+    set(LLVM_SHLIB_OUTPUT_INTDIR ${LLVM_LIBRARY_OUTPUT_INTDIR})
+  endif()
+
+  set(LLVM_TOOLS_DIR ${LLVM_TOOLS_BINARY_DIR})
+  include_directories(${LLVM_INCLUDE_DIRS})
+  link_directories("${LLVM_LIBRARY_DIR}")
+
+  if (NOT LLVM_MAIN_SRC_DIR OR NOT EXISTS "${LLVM_MAIN_SRC_DIR}")
+    message(FATAL_ERROR "LLVM_MAIN_SRC_DIR is not set or invalid. Please set it to the root of the LLVM source tree.")
+  endif()
+
+  # Seek installed Lit.
+  find_program(LLVM_LIT
+                NAMES llvm-lit lit.py lit
+                PATHS "${LLVM_MAIN_SRC_DIR}/utils/lit"
+                DOC "Path to lit.py")
+
+  if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/lit/lit.py)
+        # Note: path not really used, except for checking if lit was found
+  if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/llvm-lit)
+    add_subdirectory(${LLVM_MAIN_SRC_DIR}/utils/llvm-lit utils/llvm-lit)
+  endif()
+  endif()
+
+  if (NOT LLVM_THIRD_PARTY_DIR)
+    set(LLVM_THIRD_PARTY_DIR "${LLVM_MAIN_SRC_DIR}/../third-party")
+  endif()
+  if (NOT TARGET llvm_gtest)
+      add_subdirectory(${LLVM_THIRD_PARTY_DIR}/unittest ${CMAKE_CURRENT_BINARY_DIR}/third-party/unittest)
+  endif()
+endif()
+
+# Setting this allows the offload-test-suite to have a separate tools directory
+# from the llvm-provided tools.
+set(OFFLOADTEST_TOOLS_DIR ${LLVM_RUNTIME_OUTPUT_INTDIR})
 
 # Add path for custom modules
 list(INSERT CMAKE_MODULE_PATH 0
