@@ -153,6 +153,7 @@ Results: # Using Result can verify test values without filecheck
     Rule: BufferFloatULP # Rule which can be used to compare Float Buffers; They are compared within a ULP range
     ULPT: 1 # ULP to use
     DenormMode: Any # if DenormMode Field is not Specified, 'Any' is the default; FTZ and Preserve are the other options.
+    ZeroTolerance: 0.001 # Optional absolute range for values near zero where ULP-based compares often fail due to tiny rounding errors.
     Actual: Out1 # First buffer to compare
     Expected: Expected1 # Second buffer to compare against first
   - Result: Test2

@@ -52,16 +52,9 @@ A complete deployment consists of two install prefixes:
    - `lib/libdxcompiler.{so,dylib}`, `lib/libdxil.{so,dylib}` — the
      binaries have RUNPATH set to find them via `../lib`.
 
-   We don't ship DXC's `cmake --install` output. A top-level `ninja
-   install` walks every `cmake_install.cmake`, including LLVM tools
-   (e.g. `llvm-as`) that aren't built by the default `ninja` target, so
-   it fails. The per-component install targets (`install-dxc`,
-   `install-dxcompiler`) work but only cover a subset of the files we
-   need: `dxv` has no `install-dxv` custom target, `dxil` has no install
-   rule at all (it's a prebuilt signing library bundled with DXC source),
-   and the Windows import libraries (`.lib`) aren't installed either.
-   Instead we copy everything we need straight out of the build
-   directory's `bin/` and `lib/`.
+   We copy these straight out of the build directory's `bin/` and `lib/`
+   rather than using DXC's install targets, which don't cover `dxv`, `dxil`
+   or the Windows import libraries.
 
 ## Building
 
@@ -79,9 +72,6 @@ cmake -G Ninja \
     llvm-project/llvm
 
 ninja install-distribution install-offload-tools install-offload-test-suite
-
-# See "DXC prefix" above for why we copy from the build folder instead
-# of using `cmake --install` or per-component install targets.
 ```
 
 Then assemble the DXC prefix by copying the relevant files out of
@@ -214,15 +204,17 @@ Then configure and build the offload test suite with a command like so:
 cmake -DCMAKE_PREFIX_PATH=<path to llvm install>/lib/cmake/llvm \
       -DLLVM_MAIN_SRC_DIR=<path to llvm-project>/llvm           \
       -DDXC_DIR=<path to folder containing dxc/dxv>             \
-      -DOFFLOAD_TEST_TEST_CLANG=On                              \
+      -DOFFLOADTEST_TEST_CLANG=On                               \
       -DGOLDENIMAGE_DIR=<path to images>                        \
-      <other cmake options> <path to ofload test suite>
+      <other cmake options> <path to offload test suite>
 ninja check-hlsl
 ```
 
 In this configuration the offload-test-suite will build its tools against the
 already built LLVM libraries which dramatically reduces build time. This
 configuration does still require a checkout of the LLVM source tree to pull LIT
-and the third-party unit testing libraries. If clone/checkout time or disk space
-is a concern this could be a sparse checkout or future changes could allow this
-to use LIT from pip and a stock googletest framework.
+and the third-party unit testing libraries.
+
+For how CI applies this distribution (scheduled builds that publish it as
+artifacts, and PR test cells that download it instead of compiling), see
+[frequent-builder.md](frequent-builder.md).
