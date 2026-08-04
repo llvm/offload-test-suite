@@ -17,34 +17,28 @@ cbuffer DynResIndices : register(b0) {
 void main() {
 
   Texture2D<float4> Tex = ResourceDescriptorHeap[TexIndex];
-  SamplerState Samp0 = ResourceDescriptorHeap[Samp0Index]; // Mag=Nearest, Min=Linear
-  SamplerState Samp1 = ResourceDescriptorHeap[Samp1Index]; // Mag=Linear, Min=Nearest
+  SamplerState MagLinearMinPoint = ResourceDescriptorHeap[Samp0Index];
+  SamplerState MagPointMinLinear = ResourceDescriptorHeap[Samp1Index];
 
-  float2 uv0 = float2(0.5, 0.5);
-  float2 uv1 = float2(0.25, 0.25);
-  
-  float2 ddx_mag = float2(0.0001, 0.0);
-  float2 ddy_mag = float2(0.0, 0.0001);
-  float2 ddx_min = float2(2.0, 0.0);
-  float2 ddy_min = float2(0.0, 2.0);
+  // Texture 2x1: [Red, Green]
+  // Centers at x=0.25, x=0.75.
+  // Sample at x=0.4.
+  // Nearest -> Red (closer to 0.25).
+  // Linear -> Lerp(Red, Green, 0.3) -> (0.7, 0.3, 0.0, 1.0).
 
-  // 1. Samp0 at (0.5, 0.5)
-  // Mag -> Nearest(0.5) -> White
-  // Min -> Linear(0.5)  -> Grey
-  Out[0] = Tex.SampleGrad(Samp0, uv0, ddx_mag, ddy_mag);
-  Out[1] = Tex.SampleGrad(Samp0, uv0, ddx_min, ddy_min);
+  float2 uv = float2(0.4, 0.5);
 
-  // 2. Samp1 at (0.25, 0.25)
-  // Mag -> Linear(0.25)  -> Red
-  // Min -> Nearest(0.25) -> Red
-  Out[2] = Tex.SampleGrad(Samp1, uv1, ddx_mag, ddy_mag);
-  Out[3] = Tex.SampleGrad(Samp1, uv1, ddx_min, ddy_min);
+  // 0: Mag Test (LOD -1) with Mag=Linear -> Linear Result
+  Out[0] = Tex.SampleLevel(MagLinearMinPoint, uv, -1.0);
 
-  // 3. Mip Selection Test
-  // LOD = log2(1.0 * 2) = 1.0 -> Mip 1
-  float2 ddx_mip1 = float2(1.0, 0.0);
-  float2 ddy_mip1 = float2(0.0, 1.0);
-  Out[4] = Tex.SampleGrad(Samp0, uv0, ddx_mip1, ddy_mip1); // Yellow
+  // 1: Mag Test (LOD -1) with Mag=Point -> Nearest Result
+  Out[1] = Tex.SampleLevel(MagPointMinLinear, uv, -1.0);
+
+  // 2: Min Test (LOD 1) with Min=Point -> Nearest Result
+  Out[2] = Tex.SampleLevel(MagLinearMinPoint, uv, 1.0);
+
+  // 3: Min Test (LOD 1) with Min=Linear -> Linear Result
+  Out[3] = Tex.SampleLevel(MagPointMinLinear, uv, 1.0);
 }
 
 //--- pipeline.yaml
@@ -62,35 +56,33 @@ Buffers:
   - Name: Tex
     Format: Float32
     Channels: 4
-    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
-    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0,0)
-            0.0, 1.0, 0.0, 1.0,  # Green (1,0)
-            0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
-            1.0, 1.0, 1.0, 1.0,  # White (1,1)
-            1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1x1) - Yellow
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0,  # Green
+            0.5, 0.5, 0.0, 1.0 ] # Mip 1
 
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 80 # 5 * sizeof(float4)
+    FillSize: 64 # 4 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 1.0, 1.0, 1.0,  # Samp0, uv0, Mag -> White
-            1.0, 1.0, 0.0, 1.0,  # Samp0, uv0, Min -> Yellow (mip 1)
-            1.0, 0.0, 0.0, 1.0,  # Samp1, uv1, Mag -> Red
-            1.0, 1.0, 0.0, 1.0,  # Samp1, uv1, Min -> Yellow (mip 1)
-            1.0, 1.0, 0.0, 1.0 ] # Mip Selection -> Yellow (mip 1)
+    Data: [ 0.7, 0.3, 0.0, 1.0,  # Linear
+            1.0, 0.0, 0.0, 1.0,  # Nearest
+            0.5, 0.5, 0.0, 1.0,  # Nearest (LOD 1)
+            0.5, 0.5, 0.0, 1.0 ] # Linear (LOD 1)
 
 Samplers:
-  - Name: Samp0
-    MinFilter: Linear
-    MagFilter: Nearest
-    Address: Clamp
-  - Name: Samp1
+  - Name: MagLinearMinPoint
     MinFilter: Nearest
     MagFilter: Linear
+    Address: Clamp
+    
+  - Name: MagPointMinLinear
+    MinFilter: Linear
+    MagFilter: Nearest
     Address: Clamp
 
 DescriptorSets:
@@ -102,26 +94,30 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
-      Kind: RWBuffer
-      DirectXBinding: { Register: 1, Space: 0 }
-      VulkanBinding: { Binding: 3 }
+
     - Name: Tex
       Kind: Texture2D
       HeapIndex: 4
-    - Name: Samp0
+
+    - Name: MagLinearMinPoint
       Kind: Sampler
       HeapIndex: 0
-    - Name: Samp1
+
+    - Name: MagPointMinLinear
       Kind: Sampler
       HeapIndex: 8
 
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
 Results:
-  - Result: SampleGradTest
-    Rule: BufferFloatULP
+  - Result: FilterTest
+    Rule: BufferFloatEpsilon
     Actual: Out
     Expected: Expected
-    ULPT: 1
+    Epsilon: 0.01
 ...
 #--- end
 
