@@ -612,6 +612,7 @@ void MappingTraits<offloadtest::Result>::mapping(IO &I,
   case Rule::BufferFloatULP: {
     I.mapRequired("ULPT", R.ULPT);
     I.mapOptional("DenormMode", R.DM);
+    I.mapOptional("ZeroTolerance", R.ZeroTolerance, 0.0);
     break;
   }
   case Rule::BufferFloatEpsilon: {
