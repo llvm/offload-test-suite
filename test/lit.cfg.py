@@ -30,6 +30,11 @@ config.suffixes = [".test", ".yaml"]
 # directories.
 config.excludes = ["Inputs", "CMakeLists.txt", "README.txt", "LICENSE.txt"]
 
+# Cap each test so a GPU hang fails one test instead of getting the suite
+# stuck. Requires psutil; --timeout=N still overrides.
+if lit_config.maxIndividualTestTime == 0:
+    lit_config.maxIndividualTestTime = 300
+
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
 
