@@ -191,8 +191,13 @@ jobs:
         run: echo TEST_CLANG=On >> $GITHUB_OUTPUT
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
+      - name: Install lit, pyyaml and psutil
+        # setup-python's `pip-install:` input silently no-ops on our
+        # self-hosted Windows runners, and lit needs psutil to not abort.
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r "$GITHUB_WORKSPACE/OffloadTest/test/requirements.txt"
       - name: Build DXC
         run: |
             cd DXC
@@ -424,8 +429,8 @@ jobs:
           arch: arm64
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-      - name: Install lit and pyyaml
-        # The test runner needs only lit + pyyaml. We install from the
+      - name: Install lit, pyyaml and psutil
+        # The test runner needs lit, pyyaml and psutil. We install from the
         # requirements.txt that the build job ships inside the install
         # prefix (test/CMakeLists.txt installs it under the
         # offload-test-suite component). That keeps a single source of
