@@ -17,8 +17,8 @@ cbuffer DynResIndices : register(b0) {
 void main() {
 
   Texture2D<float4> Tex = ResourceDescriptorHeap[TexIndex];
-  SamplerState MagLinearMinPoint = ResourceDescriptorHeap[Samp0Index];
-  SamplerState MagPointMinLinear = ResourceDescriptorHeap[Samp1Index];
+  SamplerState MagLinearMinPoint = SamplerDescriptorHeap[Samp0Index];
+  SamplerState MagPointMinLinear = SamplerDescriptorHeap[Samp1Index];
 
   // Texture 2x1: [Red, Green]
   // Centers at x=0.25, x=0.75.
