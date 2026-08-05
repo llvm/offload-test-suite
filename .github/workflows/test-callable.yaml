@@ -129,13 +129,8 @@ jobs:
           arch: arm64
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-      - name: Install lit, pyyaml and psutil
-        # setup-python's `pip-install:` input silently no-ops on our
-        # self-hosted Windows runners, and lit needs psutil to not abort.
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r "$GITHUB_WORKSPACE/OffloadTest/test/requirements.txt"
+        with:
+          pip-install: -r ${{ github.workspace }}/OffloadTest/test/requirements.txt
       # OffloadTest is the top-level CMake project here; LLVM, Clang and
       # clang-tidy come from the downloaded install prefix.
       - name: Build offload test suite (standalone)
