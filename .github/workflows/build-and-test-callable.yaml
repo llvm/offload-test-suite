@@ -424,31 +424,11 @@ jobs:
           arch: arm64
       - name: Setup Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-      - name: Install lit, pyyaml and psutil
-        # The test runner needs lit, pyyaml and psutil. We install from the
-        # requirements.txt that the build job ships inside the install
-        # prefix (test/CMakeLists.txt installs it under the
-        # offload-test-suite component). That keeps a single source of
-        # truth for pinned versions and avoids drift between this step
-        # and OffloadTest/test/requirements.txt.
-        #
+      - name: Install python dependencies
+        # The test runner needs lit, pyyaml and psutil.
         # We invoke pip explicitly here instead of relying on
         # setup-python's `pip-install:` input, which was observed to
         # silently no-op on our self-hosted Windows runners.
-        #
-        # When pip can't write to the interpreter's system site-packages
-        # (e.g. on self-hosted Windows runners running as NetworkService,
-        # which can't write under C:\Program Files\Python313; or on a
-        # POSIX host where the system Python is owned by root), pip
-        # falls back to a --user install. The console script wrappers
-        # (e.g. lit.exe on Windows, lit on POSIX) then land in the
-        # user-scheme scripts dir, which is NOT on PATH by default:
-        #   - Windows: %APPDATA%\Python\PythonXY\Scripts
-        #   - Linux:   ~/.local/bin
-        #   - macOS:   ~/Library/Python/X.Y/bin
-        # We compute that dir from sysconfig (portable across all three
-        # platforms) and prepend it to PATH for all subsequent steps so
-        # `lit` resolves correctly regardless of where pip put it.
         shell: bash
         run: |
           python -m pip install --upgrade pip

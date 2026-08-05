@@ -30,8 +30,8 @@ config.suffixes = [".test", ".yaml"]
 # directories.
 config.excludes = ["Inputs", "CMakeLists.txt", "README.txt", "LICENSE.txt"]
 
-# Cap each test at 5 minutes so a GPU hang fails one test instead of wedging
-# the suite. Requires psutil; --timeout=N still overrides.
+# Cap each test so a GPU hang fails one test instead of getting the suite
+# stuck. Requires psutil; --timeout=N still overrides.
 if lit_config.maxIndividualTestTime == 0:
     lit_config.maxIndividualTestTime = 300
 
