@@ -131,6 +131,9 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
 # XFAIL: Metal
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1421
+# XFAIL: Intel
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
