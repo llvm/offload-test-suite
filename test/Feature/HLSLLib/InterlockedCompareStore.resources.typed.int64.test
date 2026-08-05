@@ -145,7 +145,7 @@ DescriptorSets:
 # XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
-# UNIMPLEMENTED: WARP && DXC
+# UNSUPPORTED: WARP && DXC
 
 # REQUIRES: Int64TypedResourceAtomics && SM_6_6
 # RUN: split-file %s %t

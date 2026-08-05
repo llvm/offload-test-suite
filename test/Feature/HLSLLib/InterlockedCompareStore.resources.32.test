@@ -253,7 +253,7 @@ DescriptorSets:
 # XFAIL: Metal && DXC
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
-# UNIMPLEMENTED: WARP && DXC
+# UNSUPPORTED: WARP && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
