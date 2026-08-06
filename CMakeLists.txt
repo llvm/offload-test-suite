@@ -15,26 +15,26 @@ if (OFFLOADTEST_BUILT_STANDALONE)
 
   include(AddLLVM)
 
+  if (NOT LLVM_MAIN_SRC_DIR OR NOT EXISTS "${LLVM_MAIN_SRC_DIR}")
+    message(FATAL_ERROR "LLVM_MAIN_SRC_DIR is not set or invalid. Please set it to the root of the LLVM source tree.")
+  endif()
+
+  # HandleLLVMOptions caches LLVM_THIRD_PARTY_DIR against the top-level source
+  # directory, which is this project when standalone, so point it at LLVM's
+  # copy first.
+  set(LLVM_THIRD_PARTY_DIR "${LLVM_MAIN_SRC_DIR}/../third-party" CACHE STRING
+      "Directory containing third party software used by LLVM (e.g. googletest)")
+
+  # Apply the same compile settings that in-tree builds get,
+  # including deprecation opt-outs and assertions.
+  include(HandleLLVMOptions)
+
   find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
     COMPONENTS Interpreter)
 
   set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
   set(CMAKE_CXX_STANDARD_REQUIRED YES)
   set(CMAKE_CXX_EXTENSIONS NO)
-
-  # In-tree builds get these from LLVM's HandleLLVMOptions.cmake. Standalone
-  # builds do not include it, so repeat the CRT deprecation opt-outs here or
-  # MSVC flags calls like fopen as deprecated.
-  if (MSVC)
-    add_compile_definitions(
-      _CRT_SECURE_NO_DEPRECATE
-      _CRT_SECURE_NO_WARNINGS
-      _CRT_NONSTDC_NO_DEPRECATE
-      _CRT_NONSTDC_NO_WARNINGS
-      _SCL_SECURE_NO_DEPRECATE
-      _SCL_SECURE_NO_WARNINGS
-      )
-  endif()
 
   # They are used as destination of target generators.
   set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
@@ -50,10 +50,6 @@ if (OFFLOADTEST_BUILT_STANDALONE)
   include_directories(${LLVM_INCLUDE_DIRS})
   link_directories("${LLVM_LIBRARY_DIR}")
 
-  if (NOT LLVM_MAIN_SRC_DIR OR NOT EXISTS "${LLVM_MAIN_SRC_DIR}")
-    message(FATAL_ERROR "LLVM_MAIN_SRC_DIR is not set or invalid. Please set it to the root of the LLVM source tree.")
-  endif()
-
   # Seek installed Lit.
   find_program(LLVM_LIT
                 NAMES llvm-lit lit.py lit
@@ -67,9 +63,6 @@ if (OFFLOADTEST_BUILT_STANDALONE)
   endif()
   endif()
 
-  if (NOT LLVM_THIRD_PARTY_DIR)
-    set(LLVM_THIRD_PARTY_DIR "${LLVM_MAIN_SRC_DIR}/../third-party")
-  endif()
   if (NOT TARGET llvm_gtest)
       add_subdirectory(${LLVM_THIRD_PARTY_DIR}/unittest ${CMAKE_CURRENT_BINARY_DIR}/third-party/unittest)
   endif()
