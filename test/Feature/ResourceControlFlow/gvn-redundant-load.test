@@ -1,0 +1,79 @@
+#--- source.hlsl
+
+// GVN sees BufA[TID] loaded on both the entry and the guarded block and
+// eliminates the second load as redundant, reusing a resource load's value
+// across the branch.
+
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> BufA : register(u0);
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> Out  : register(u2);
+
+[[vk::binding(0, 0)]]
+cbuffer Constants : register(b0) {
+  uint Condition;
+}
+
+[numthreads(8, 1, 1)]
+void main(uint TID : SV_DispatchThreadID) {
+  uint Val = BufA[TID];
+  if ((TID & 1u) == Condition)
+    Val = BufA[TID] + 1;
+  Out[TID] = Val;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Constants
+    Format: Hex32
+    Data: [ 0x00000000 ]
+
+  - Name: BufA
+    Format: UInt32
+    Data: [ 10, 11, 12, 13, 14, 15, 16, 17 ]
+
+  - Name: BufOut
+    Format: UInt32
+    FillSize: 32
+
+  - Name: ExpectedOut
+    Format: UInt32
+    Data: [ 11, 11, 13, 13, 15, 15, 17, 17 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: Constants
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufA
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
