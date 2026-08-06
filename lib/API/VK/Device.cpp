@@ -1030,7 +1030,7 @@ class VKComputeEncoder : public offloadtest::ComputeEncoder {
   }
 
 public:
-  VKComputeEncoder(VulkanCommandBuffer &CB)
+  explicit VKComputeEncoder(VulkanCommandBuffer &CB)
       : ComputeEncoder(GPUAPI::Vulkan), CB(CB) {}
 
   ~VKComputeEncoder() override { endEncoding(); }

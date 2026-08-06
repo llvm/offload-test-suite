@@ -22,6 +22,20 @@ if (OFFLOADTEST_BUILT_STANDALONE)
   set(CMAKE_CXX_STANDARD_REQUIRED YES)
   set(CMAKE_CXX_EXTENSIONS NO)
 
+  # In-tree builds get these from LLVM's HandleLLVMOptions.cmake. Standalone
+  # builds do not include it, so repeat the CRT deprecation opt-outs here or
+  # MSVC flags calls like fopen as deprecated.
+  if (MSVC)
+    add_compile_definitions(
+      _CRT_SECURE_NO_DEPRECATE
+      _CRT_SECURE_NO_WARNINGS
+      _CRT_NONSTDC_NO_DEPRECATE
+      _CRT_NONSTDC_NO_WARNINGS
+      _SCL_SECURE_NO_DEPRECATE
+      _SCL_SECURE_NO_WARNINGS
+      )
+  endif()
+
   # They are used as destination of target generators.
   set(LLVM_RUNTIME_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
   set(LLVM_LIBRARY_OUTPUT_INTDIR ${CMAKE_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})

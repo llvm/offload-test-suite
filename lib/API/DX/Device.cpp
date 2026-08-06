@@ -806,7 +806,7 @@ class DXComputeEncoder : public offloadtest::ComputeEncoder {
   }
 
 public:
-  DXComputeEncoder(DXCommandBuffer &CB)
+  explicit DXComputeEncoder(DXCommandBuffer &CB)
       : ComputeEncoder(GPUAPI::DirectX), CB(CB) {}
 
   ~DXComputeEncoder() override { endEncoding(); }
