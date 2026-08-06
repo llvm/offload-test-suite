@@ -109,7 +109,7 @@ tar cf dxc-prefix.tar  -C <dxc-dist>       .
 ## Test runner prerequisites
 
 - Python 3.6+
-- `pip install lit pyyaml`
+- `pip install lit pyyaml psutil`
 - GPU drivers appropriate for the suite (D3D12 / Vulkan / Metal).
 - The two extracted prefixes from the build runner.
 
