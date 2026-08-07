@@ -13,6 +13,10 @@ set(LLVM_INSTALL_UTILS ON CACHE BOOL "")
 set(LLVM_INSTALL_TOOLCHAIN_ONLY OFF CACHE BOOL "")
 set(LLVM_DISTRIBUTION_COMPONENTS
     clang
+    # Ships clang-tidy so a standalone offload-test-suite build can enable
+    # OFFLOADTEST_USE_CLANG_TIDY without needing a separate Clang toolchain
+    # on the machine doing the standalone build.
+    clang-tidy
     hlsl-resource-headers
     FileCheck
     split-file

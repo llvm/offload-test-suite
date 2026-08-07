@@ -1,0 +1,132 @@
+name: HLSL Frequent Builder (LLVM)
+
+permissions:
+  contents: read
+
+# Builds and installs the LLVM/Clang distribution the test cells consume,
+# and publishes it as an artifact. DXC is built separately by
+# build-dxc-callable.yaml on its own cadence.
+# See docs/frequent-builder.md.
+
+on:
+  workflow_call:
+    inputs:
+      OS:
+        description: 'Target OS. Accepted values: `windows`. macOS is not supported -- the frequent-builder pool has no macOS machines. Enforced by the "Validate inputs" step.'
+        required: true
+        type: string
+      Arch:
+        description: 'Target arch. Accepted values: `x64`. arm64 cross-compile lands in Phase 2. Enforced by the "Validate inputs" step.'
+        required: true
+        type: string
+      OffloadTest-branch:
+        required: false
+        default: 'main'
+        type: string
+      OffloadTest-fork:
+        required: false
+        default: 'llvm'
+        type: string
+      LLVM-branch:
+        required: false
+        default: 'main'
+        type: string
+      LLVM-fork:
+        required: false
+        default: 'llvm'
+        type: string
+      BuildType:
+        required: false
+        default: 'RelWithDebInfo'
+        type: string
+      LLVM-ExtraCMakeArgs:
+        description: 'Extra CMake Args for LLVM'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  build:
+    # Dedicated frequent-builder pool. Machines in this pool carry the
+    # `hlsl-frequent-builder` label and no `hlsl-<sku>` label, so GitHub
+    # Actions can never schedule a GPU test job here.
+    runs-on: [self-hosted, hlsl-frequent-builder]
+    # One build at a time per ref and target. Queued builds are kept, not
+    # cancelled -- the builder shares a pool, so a wait can exceed the
+    # schedule interval. timeout-minutes limits a stuck build instead.
+    concurrency:
+      group: frequent-build-llvm-${{ github.ref }}-${{ inputs.OS }}-${{ inputs.Arch }}
+      cancel-in-progress: false
+    # Slowest observed build is ~34 min; anything past 90 is stuck.
+    timeout-minutes: 90
+    steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ '${{ inputs.OS }}' != 'windows' ]; then
+            echo "::error::The frequent builder only supports OS=windows today (got '${{ inputs.OS }}')."
+            exit 1
+          fi
+          if [ '${{ inputs.Arch }}' != 'x64' ]; then
+            echo "::error::Phase 1 of the frequent builder only supports Arch=x64 (got '${{ inputs.Arch }}'). arm64 cross-compile arrives in Phase 2."
+            exit 1
+          fi
+      - name: Checkout LLVM
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.LLVM-fork }}/llvm-project
+          ref: ${{ inputs.LLVM-branch }}
+          path: llvm-project
+          fetch-depth: 1
+      # OffloadTest is checked out only for its CMake cache scripts
+      # (StandaloneDistribution.cmake, sccache.cmake). None of its sources
+      # are compiled here, only the cache scripts are fetched.
+      - name: Checkout OffloadTest
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
+        with:
+          repository: ${{ inputs.OffloadTest-fork }}/offload-test-suite
+          ref: ${{ inputs.OffloadTest-branch }}
+          path: OffloadTest
+          fetch-depth: 1
+          sparse-checkout: cmake/caches
+      - name: Setup Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      - name: Setup Windows x64
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: amd64
+      - name: Build and install LLVM distribution
+        shell: bash
+        run: |
+            set -euxo pipefail
+            rm -rf "$GITHUB_WORKSPACE/llvm-project/build" "$GITHUB_WORKSPACE/install"
+            cmake -G Ninja -S "$GITHUB_WORKSPACE/llvm-project/llvm" -B "$GITHUB_WORKSPACE/llvm-project/build" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/StandaloneDistribution.cmake" \
+              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+              -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+              ${{ inputs.LLVM-ExtraCMakeArgs }}
+            cmake --build "$GITHUB_WORKSPACE/llvm-project/build" --target install-distribution
+      - name: Dump sccache Stats
+        if: always()
+        shell: bash
+        run: sccache --show-stats || true
+      - name: Package distribution
+        shell: bash
+        run: |
+            set -euxo pipefail
+            cd "$GITHUB_WORKSPACE"
+            # Redirect via stdout so tar doesn't parse the destination
+            # Windows drive letter as a remote host:path tuple.
+            tar cf - -C install . > "$RUNNER_TEMP/build-artifacts.tar"
+      - name: Upload LLVM distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hlsl-dist-${{ inputs.OS }}-${{ inputs.Arch }}
+          path: ${{ runner.temp }}/build-artifacts.tar
+          # Must outlive the gap to the next successful scheduled build,
+          # since PRs consume the newest successful run's artifacts.
+          # 3 days is ~36 builds at the 2-hourly cadence.
+          retention-days: 3

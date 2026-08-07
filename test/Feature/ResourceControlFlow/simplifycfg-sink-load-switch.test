@@ -1,0 +1,92 @@
+#--- source.hlsl
+
+// SimplifyCFG sinks the loads from each switch case into the common successor,
+// creating a phi of pointers into a resource.
+
+[[vk::binding(0, 0)]] RWStructuredBuffer<uint> BufA : register(u0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> BufB : register(u1);
+[[vk::binding(2, 0)]] RWStructuredBuffer<uint> BufC : register(u2);
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint> Out  : register(u3);
+
+[numthreads(8, 1, 1)]
+void main(uint TID : SV_DispatchThreadID) {
+  uint Val;
+  switch (TID % 3u) {
+    case 0:  Val = BufA[TID]; break;
+    case 1:  Val = BufB[TID]; break;
+    default: Val = BufC[TID]; break;
+  }
+  Out[TID] = Val;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: BufA
+    Format: UInt32
+    Data: [ 10, 11, 12, 13, 14, 15, 16, 17 ]
+
+  - Name: BufB
+    Format: UInt32
+    Data: [ 20, 21, 22, 23, 24, 25, 26, 27 ]
+
+  - Name: BufC
+    Format: UInt32
+    Data: [ 30, 31, 32, 33, 34, 35, 36, 37 ]
+
+  - Name: BufOut
+    Format: UInt32
+    FillSize: 32
+
+  - Name: ExpectedOut
+    Format: UInt32
+    Data: [ 10, 21, 32, 13, 24, 35, 16, 27 ]
+
+Results:
+  - Result: BufOut
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedOut
+
+DescriptorSets:
+  - Resources:
+    - Name: BufA
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BufB
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BufC
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/207852
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
