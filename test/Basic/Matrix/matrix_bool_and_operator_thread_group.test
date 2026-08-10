@@ -126,6 +126,9 @@ DescriptorSets:
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8129
 # XFAIL: DXC && Vulkan
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/696
+# XFAIL: Clang && Intel-Gen-Current && DirectX
+
 # Note: Metal does not support boolean matrix types. For
 # Vulkan KosmicKrisp and MoltenVK the output is always False.
 # UNSUPPORTED: Metal || KosmicKrisp || MoltenVK
