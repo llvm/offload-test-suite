@@ -1,0 +1,235 @@
+#--- source.hlsl
+
+// Tests InterlockedAdd against the HLSL-legal 64-bit non-groupshared
+// (resource) destination types. 64-bit atomics on UAVs were introduced in
+// Shader Model 6.6.
+//
+//   * RWStructuredBuffer<uint64_t>[i]        (free function, 2-arg)
+//   * RWStructuredBuffer<int64_t>[i]         (free function, 3-arg, signed)
+//   * RWByteAddressBuffer::InterlockedAdd64  (method, 2-arg and 3-arg)
+//
+// Typed RWBuffer / RWTexture 64-bit atomics need an optional capability and
+// are covered separately in InterlockedAdd.resources.typed.int64.test.
+//
+// 256 threads each add 2^32 to a shared accumulator, exercising the upper
+// word. The 3-argument forms are checked for unique originals via a "seen"
+// array, and a counter is checked for monotonic non-decrease as in
+// InterlockedAdd.32.test.
+
+RWStructuredBuffer<uint64_t> SBufU : register(u0);
+RWStructuredBuffer<int64_t>  SBufI : register(u1);
+RWByteAddressBuffer          BABuf : register(u2);
+
+RWStructuredBuffer<uint> OutSlotsSBufI : register(u3);
+RWStructuredBuffer<uint> OutSlotsBABuf : register(u4);
+RWStructuredBuffer<uint> OutMono : register(u5);
+
+groupshared uint SlotsSBufI[256];
+groupshared uint SlotsBABuf[256];
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufU[0] = 0;
+    SBufI[0] = 0;
+    BABuf.Store<uint64_t>(0, 0);  // accumulator for the 2-arg method form
+    BABuf.Store<uint64_t>(8, 0);  // accumulator for the 3-arg method form
+    BABuf.Store<uint64_t>(16, 0); // monotonicity counter
+  }
+  SlotsSBufI[GTID.x] = 0u;
+  SlotsBABuf[GTID.x] = 0u;
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint64_t>: 2-argument free function, adding a value
+  // that only occupies the upper 32 bits.
+  InterlockedAdd(SBufU[0], 0x100000000ull);
+
+  // RWStructuredBuffer<int64_t>: 3-argument free function (signed).
+  int64_t OrigI;
+  InterlockedAdd(SBufI[0], (int64_t)1, OrigI);
+  SlotsSBufI[(uint)OrigI] = 1u;
+
+  // RWByteAddressBuffer 64-bit method: 2-argument form.
+  BABuf.InterlockedAdd64(0, 0x100000000ull);
+
+  // RWByteAddressBuffer 64-bit method: 3-argument form.
+  uint64_t OrigBA;
+  BABuf.InterlockedAdd64(8, (uint64_t)1, OrigBA);
+  SlotsBABuf[(uint)OrigBA] = 1u;
+
+  // Monotonic non-decrease of a 64-bit byte-address counter, plus strictly
+  // increasing per-thread originals.
+  uint64_t Prev = 0;
+  uint64_t PrevOrig = 0;
+  uint Mono = 1u;
+  for (uint I = 0; I < 256; ++I) {
+    uint64_t Orig;
+    BABuf.InterlockedAdd64(16, (uint64_t)1, Orig);
+    if (I > 0 && Orig <= PrevOrig)
+      Mono = 0u;
+    PrevOrig = Orig;
+    DeviceMemoryBarrierWithGroupSync();
+    uint64_t Cur = BABuf.Load<uint64_t>(16);
+    if (Cur < Prev)
+      Mono = 0u;
+    Prev = Cur;
+  }
+  OutMono[GTID.x] = Mono;
+
+  DeviceMemoryBarrierWithGroupSync();
+
+  OutSlotsSBufI[GTID.x] = SlotsSBufI[GTID.x];
+  OutSlotsBABuf[GTID.x] = SlotsBABuf[GTID.x];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt64
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedSBufU
+    Format: UInt64
+    Stride: 8
+    Data: [ 1099511627776 ]
+  - Name: SBufI
+    Format: Int64
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedSBufI
+    Format: Int64
+    Stride: 8
+    Data: [ 256 ]
+  - Name: BABuf
+    Format: UInt64
+    Stride: 8
+    FillSize: 24
+  - Name: ExpectedBABuf
+    Format: UInt64
+    Stride: 8
+    Data: [ 1099511627776, 256, 65536 ]
+  - Name: OutSlotsSBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlotsBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestSlotsSBufI
+    Rule: BufferExact
+    Actual: OutSlotsSBufI
+    Expected: ExpectedOnes
+  - Result: TestSlotsBABuf
+    Rule: BufferExact
+    Actual: OutSlotsBABuf
+    Expected: ExpectedOnes
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutSlotsSBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutSlotsBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
+#--- end
+
+# REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99122
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1418
+# UNSUPPORTED: WARP && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
