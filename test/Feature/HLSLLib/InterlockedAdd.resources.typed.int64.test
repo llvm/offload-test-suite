@@ -169,6 +169,9 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
 # UNSUPPORTED: WARP && DXC
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/1435
+# XFAIL: Clang && Vulkan
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
