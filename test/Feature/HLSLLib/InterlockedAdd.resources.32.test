@@ -270,9 +270,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99122
-# XFAIL: Clang
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: Metal && DXC
 
