@@ -271,7 +271,7 @@ DescriptorSets:
 #--- end
 
 # Unimplemented texture store: https://github.com/llvm/llvm-project/issues/194930
-# UNSUPPORTED: Clang && DirectX
+# UNSUPPORTED: Clang && (DirectX || Metal)
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: Metal && DXC
