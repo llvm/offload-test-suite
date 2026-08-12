@@ -1606,12 +1606,10 @@ public:
         AvailableDeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
     if (HasShaderAtomicFloatExt) {
-      // Probe on a throwaway chain first. Unlike the extensions above we do
-      // not want to hard-error when the device advertises the extension but
-      // reports the 32-bit bools false: float atomics are optional per-type,
-      // so we drop the extension and let the gating lit features skip the
-      // affected tests. Probing separately keeps a struct we decided against
-      // out of the chain handed to vkCreateDevice.
+      // Probe separately: float atomics are optional per-type, so an
+      // advertised extension with both 32-bit bools false is dropped rather
+      // than hard-errored like the extensions above. Probing keeps a struct
+      // we decided against out of the vkCreateDevice chain.
       VkPhysicalDeviceShaderAtomicFloatFeaturesEXT Probe{};
       Probe.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
@@ -1731,9 +1729,8 @@ public:
 
 #ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
     if (HasShaderAtomicFloatExt) {
-      // Only the 32-bit shared/buffer forms are exercised; they keep whatever
-      // the device reported. Everything else is cleared so we never request a
-      // bool that came back false.
+      // Keep the 32-bit shared/buffer bools as reported; clear the rest so we
+      // never request one that came back false.
       FeaturesAtomicFloat.shaderBufferFloat32AtomicAdd = 0;
       FeaturesAtomicFloat.shaderBufferFloat64Atomics = 0;
       FeaturesAtomicFloat.shaderBufferFloat64AtomicAdd = 0;
@@ -2982,8 +2979,7 @@ private:
     }
 #endif
 #ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
-    // pNext order is irrelevant, so splice this in at the head rather than
-    // chasing whichever Features1X struct happens to be the tail.
+    // pNext order is irrelevant, so splice in at the head.
     if (HasShaderAtomicFloatExt) {
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
