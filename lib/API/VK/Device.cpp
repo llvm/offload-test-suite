@@ -4491,8 +4491,8 @@ public:
     for (auto &S : P.Sets) {
       DescriptorSetLayoutDesc Layout;
       for (auto &R : S.Resources) {
+        // FIXME: https://github.com/llvm/offload-test-suite/issues/1413
         assert(!R.HeapIndex && "Direct heap indexing is not yet supported.");
-
         if (!R.VKBinding)
           return llvm::createStringError(std::errc::invalid_argument,
                                          "No VulkanBinding provided for '%s'",
