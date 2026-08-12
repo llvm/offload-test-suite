@@ -1601,6 +1601,35 @@ public:
     }
 #endif
 
+#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
+    bool HasShaderAtomicFloatExt = isExtensionSupported(
+        AvailableDeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
+    if (HasShaderAtomicFloatExt) {
+      // Probe on a throwaway chain first. Unlike the extensions above we do
+      // not want to hard-error when the device advertises the extension but
+      // reports the 32-bit bools false: float atomics are optional per-type,
+      // so we drop the extension and let the gating lit features skip the
+      // affected tests. Probing separately keeps a struct we decided against
+      // out of the chain handed to vkCreateDevice.
+      VkPhysicalDeviceShaderAtomicFloatFeaturesEXT Probe{};
+      Probe.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+      VkPhysicalDeviceFeatures2 ProbeFeatures{};
+      ProbeFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      ProbeFeatures.pNext = &Probe;
+      vkGetPhysicalDeviceFeatures2(PhysicalDevice, &ProbeFeatures);
+      HasShaderAtomicFloatExt =
+          Probe.shaderSharedFloat32Atomics || Probe.shaderBufferFloat32Atomics;
+      if (HasShaderAtomicFloatExt) {
+        FeaturesAtomicFloat.sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+        FeaturesAtomicFloat.pNext = Features.pNext;
+        Features.pNext = &FeaturesAtomicFloat;
+      }
+    }
+#endif
+
     const bool HasMeshShader = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
@@ -1697,6 +1726,26 @@ public:
       FeaturesImageAtomicInt64.sparseImageInt64Atomics = 0;
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
+    }
+#endif
+
+#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
+    if (HasShaderAtomicFloatExt) {
+      // Only the 32-bit shared/buffer forms are exercised; they keep whatever
+      // the device reported. Everything else is cleared so we never request a
+      // bool that came back false.
+      FeaturesAtomicFloat.shaderBufferFloat32AtomicAdd = 0;
+      FeaturesAtomicFloat.shaderBufferFloat64Atomics = 0;
+      FeaturesAtomicFloat.shaderBufferFloat64AtomicAdd = 0;
+      FeaturesAtomicFloat.shaderSharedFloat32AtomicAdd = 0;
+      FeaturesAtomicFloat.shaderSharedFloat64Atomics = 0;
+      FeaturesAtomicFloat.shaderSharedFloat64AtomicAdd = 0;
+      FeaturesAtomicFloat.shaderImageFloat32Atomics = 0;
+      FeaturesAtomicFloat.shaderImageFloat32AtomicAdd = 0;
+      FeaturesAtomicFloat.sparseImageFloat32Atomics = 0;
+      FeaturesAtomicFloat.sparseImageFloat32AtomicAdd = 0;
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
 #endif
 
@@ -2894,6 +2943,13 @@ private:
     const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
 #endif
+#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
+    FeaturesAtomicFloat.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+    const bool HasShaderAtomicFloatExt = isExtensionSupported(
+        DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+#endif
 
     Features.pNext = &Features11;
     if (HasVulkan12)
@@ -2923,6 +2979,14 @@ private:
         Features12.pNext = &FeaturesImageAtomicInt64;
       else
         Features11.pNext = &FeaturesImageAtomicInt64;
+    }
+#endif
+#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
+    // pNext order is irrelevant, so splice this in at the head rather than
+    // chasing whichever Features1X struct happens to be the tail.
+    if (HasShaderAtomicFloatExt) {
+      FeaturesAtomicFloat.pNext = Features.pNext;
+      Features.pNext = &FeaturesAtomicFloat;
     }
 #endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
@@ -2962,6 +3026,12 @@ private:
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderImageAtomicInt64Ext &&       \
                                              FeaturesImageAtomicInt64.Name)));
+#endif
+#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
+#define VULKAN_EXT_SHADER_ATOMIC_FLOAT_FEATURE_BOOL(Name)                      \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
+                                             FeaturesAtomicFloat.Name)));
 #endif
 #include "VKFeatures.def"
   }
