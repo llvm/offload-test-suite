@@ -241,7 +241,7 @@ DescriptorSets:
 # XFAIL: DXC && Metal
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1440
-# XFAIL: WARP && DXC && DirectX
+# XFAIL: WARP && arm64 && DXC && DirectX
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
