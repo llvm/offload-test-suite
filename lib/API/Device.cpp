@@ -36,6 +36,8 @@ Queue::~Queue() {}
 
 Texture::~Texture() {}
 
+Sampler::~Sampler() {}
+
 MemoryHeap::~MemoryHeap() {}
 
 RenderPass::~RenderPass() {}
@@ -151,7 +153,8 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
 llvm::Error offloadtest::buildPipelineAccelerationStructures(
     Device &Dev, ComputeEncoder &Enc, Pipeline &P,
     llvm::SmallVectorImpl<std::unique_ptr<AccelerationStructure>> &OutBLAS,
-    const llvm::StringMap<std::unique_ptr<AccelerationStructure>>
+    const llvm::StringMap<
+        llvm::SmallVector<std::unique_ptr<AccelerationStructure>>>
         &PreallocatedTLASes,
     llvm::SmallVectorImpl<std::unique_ptr<Buffer>> &OutInputBuffers) {
   if (P.AccelStructs.BLAS.empty() && P.AccelStructs.TLAS.empty())
@@ -166,51 +169,90 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   llvm::StringMap<AccelerationStructure *> BLASesByName;
 
   for (const auto &BD : P.AccelStructs.BLAS) {
-    llvm::SmallVector<TriangleGeometryDesc> Triangles;
-    Triangles.reserve(BD.Triangles.size());
-    for (const auto &T : BD.Triangles) {
-      assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
-      auto VBOrErr = createBufferWithData(
-          Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
-          T.VertexBufferPtr->size(), nullptr, nullptr);
-      if (!VBOrErr)
-        return VBOrErr.takeError();
+    if (!BD.Triangles.empty() && !BD.AABBs.empty())
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "BLAS '%s' mixes triangle and AABB "
+                                     "geometry; must be either, not both.",
+                                     BD.Name.c_str());
+    if (BD.Triangles.empty() && BD.AABBs.empty())
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "BLAS '%s' has no geometry.",
+                                     BD.Name.c_str());
 
-      TriangleGeometryDesc TGD;
-      TGD.VertexBuffer = VBOrErr->get();
-      TGD.VertexCount = T.VertexCount;
-      TGD.VertexStride = T.VertexStride;
-      TGD.VertexFormat = T.VertexFormat;
-      TGD.Opaque = T.Opaque;
-      TGD.Transform = T.Transform;
+    auto ReqOrErr = [&]() -> llvm::Expected<BLASBuildRequest> {
+      if (!BD.Triangles.empty()) {
+        llvm::SmallVector<TriangleGeometryDesc> Triangles;
+        Triangles.reserve(BD.Triangles.size());
+        for (const auto &T : BD.Triangles) {
+          assert(T.VertexBufferPtr && "VertexBufferPtr not resolved");
+          auto VBOrErr = createBufferWithData(
+              Dev, "AS-Vertices", UploadDesc, T.VertexBufferPtr->Data[0].get(),
+              T.VertexBufferPtr->size(), nullptr, nullptr);
+          if (!VBOrErr)
+            return VBOrErr.takeError();
 
-      OutInputBuffers.push_back(std::move(*VBOrErr));
+          TriangleGeometryDesc TGD;
+          TGD.VertexBuffer = VBOrErr->get();
+          TGD.VertexCount = T.VertexCount;
+          TGD.VertexStride = T.VertexStride;
+          TGD.VertexFormat = T.VertexFormat;
+          TGD.Opaque = T.Opaque;
+          TGD.Transform = T.Transform;
 
-      if (T.IndexBufferPtr) {
-        auto IBOrErr = createBufferWithData(
-            Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
-            T.IndexBufferPtr->size(), nullptr, nullptr);
-        if (!IBOrErr)
-          return IBOrErr.takeError();
-        TGD.IndexBuffer = IBOrErr->get();
-        TGD.IndexCount = T.IndexCount;
-        TGD.IdxFormat = T.IdxFormat;
-        OutInputBuffers.push_back(std::move(*IBOrErr));
+          OutInputBuffers.push_back(std::move(*VBOrErr));
+
+          if (T.IndexBufferPtr) {
+            auto IBOrErr = createBufferWithData(
+                Dev, "AS-Indices", UploadDesc, T.IndexBufferPtr->Data[0].get(),
+                T.IndexBufferPtr->size(), nullptr, nullptr);
+            if (!IBOrErr)
+              return IBOrErr.takeError();
+            TGD.IndexBuffer = IBOrErr->get();
+            TGD.IndexCount = T.IndexCount;
+            TGD.IdxFormat = T.IdxFormat;
+            OutInputBuffers.push_back(std::move(*IBOrErr));
+          }
+          Triangles.push_back(TGD);
+        }
+        BLASBuildRequest Req;
+        Req.Geometry = std::move(Triangles);
+        return Req;
       }
-      Triangles.push_back(TGD);
-    }
-    // TODO: AABB geometry support (would mirror the triangle path).
+      llvm::SmallVector<AABBGeometryDesc> AABBs;
+      AABBs.reserve(BD.AABBs.size());
+      for (const auto &A : BD.AABBs) {
+        assert(A.AABBBufferPtr && "AABBBufferPtr not resolved");
+        auto ABOrErr = createBufferWithData(
+            Dev, "AS-AABBs", UploadDesc, A.AABBBufferPtr->Data[0].get(),
+            A.AABBBufferPtr->size(), nullptr, nullptr);
+        if (!ABOrErr)
+          return ABOrErr.takeError();
+        AABBGeometryDesc AGD;
+        AGD.AABBBuffer = ABOrErr->get();
+        AGD.AABBCount = A.AABBCount;
+        AGD.AABBStride = A.AABBStride;
+        AGD.Opaque = A.Opaque;
+        OutInputBuffers.push_back(std::move(*ABOrErr));
+        AABBs.push_back(AGD);
+      }
+      BLASBuildRequest Req;
+      Req.Geometry = std::move(AABBs);
+      return Req;
+    }();
 
-    auto SizesOrErr = Dev.getBLASBuildSizes(Triangles);
+    if (!ReqOrErr)
+      return ReqOrErr.takeError();
+    auto SizesOrErr = std::visit(
+        [&Dev](const auto &Geom) { return Dev.getBLASBuildSizes(Geom); },
+        ReqOrErr->Geometry);
     if (!SizesOrErr)
       return SizesOrErr.takeError();
     auto ASOrErr = Dev.createBLAS(*SizesOrErr);
     if (!ASOrErr)
       return ASOrErr.takeError();
 
-    BLASBuildRequest Req;
+    BLASBuildRequest Req = std::move(*ReqOrErr);
     Req.AS = ASOrErr->get();
-    Req.Geometry = std::move(Triangles);
 
     BLASesByName[BD.Name] = ASOrErr->get();
     OutBLAS.push_back(std::move(*ASOrErr));
@@ -228,36 +270,44 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
   // Separate `batchBuildAS()` from the BLAS batch so the BLAS-write →
   // TLAS-read barrier between them is implicit.
   llvm::SmallVector<TLASBuildRequest> TLASRequests;
-  TLASRequests.reserve(PreallocatedTLASes.size());
   for (const TLASDesc &TD : P.AccelStructs.TLAS) {
     auto ASIt = PreallocatedTLASes.find(TD.Name);
     if (ASIt == PreallocatedTLASes.end())
       continue; // TLAS declared but not bound to any resource.
-    TLASBuildRequest Req;
-    Req.AS = ASIt->second.get();
-    Req.Instances.reserve(TD.Instances.size());
-    for (const auto &I : TD.Instances) {
-      auto It = BLASesByName.find(I.BLAS);
-      if (It == BLASesByName.end())
-        return llvm::createStringError(std::errc::invalid_argument,
-                                       "TLAS '%s' references unknown BLAS '%s'",
-                                       TD.Name.c_str(), I.BLAS.c_str());
+    const auto &Handles = ASIt->second;
+    assert(Handles.size() == TD.ArraySize &&
+           "PreallocatedTLASes entry size must equal TLASDesc::ArraySize");
+    assert(TD.Instances.size() == TD.ArraySize &&
+           "TLASDesc::Instances must have ArraySize entries (one per element)");
+    for (uint32_t Elt = 0; Elt < TD.ArraySize; ++Elt) {
+      TLASBuildRequest Req;
+      Req.AS = Handles[Elt].get();
+      const auto &EltInstances = TD.Instances[Elt];
+      Req.Instances.reserve(EltInstances.size());
+      for (const auto &I : EltInstances) {
+        auto It = BLASesByName.find(I.BLAS);
+        if (It == BLASesByName.end())
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "TLAS '%s' element %u references unknown BLAS '%s'",
+              TD.Name.c_str(), Elt, I.BLAS.c_str());
 
-      AccelerationStructureInstance Inst;
-      static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
-                    "Transform layout mismatch");
-      memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
-      Inst.InstanceID = I.InstanceID;
-      Inst.InstanceMask = I.InstanceMask;
-      Inst.InstanceContributionToHitGroupIndex =
-          I.InstanceContributionToHitGroupIndex;
-      Inst.Flags = I.Flags;
-      Inst.BLAS = It->second;
-      Req.Instances.push_back(Inst);
+        AccelerationStructureInstance Inst;
+        static_assert(sizeof(Inst.Transform) == sizeof(I.Transform),
+                      "Transform layout mismatch");
+        memcpy(Inst.Transform, I.Transform, sizeof(I.Transform));
+        Inst.InstanceID = I.InstanceID;
+        Inst.InstanceMask = I.InstanceMask;
+        Inst.InstanceContributionToHitGroupIndex =
+            I.InstanceContributionToHitGroupIndex;
+        Inst.Flags = I.Flags;
+        Inst.BLAS = It->second;
+        Req.Instances.push_back(Inst);
+      }
+      if (auto Err = validateTLASBuildRequest(Req))
+        return Err;
+      TLASRequests.push_back(std::move(Req));
     }
-    if (auto Err = validateTLASBuildRequest(Req))
-      return Err;
-    TLASRequests.push_back(std::move(Req));
   }
 
   llvm::SmallVector<ASBuildItem> TLASBatch;
@@ -529,32 +579,34 @@ offloadtest::createTextureWithData(
     Device &Dev, std::string Name, const TextureCreateDesc &Desc,
     const void *Data, size_t SizeInBytes, ComputeEncoder *Encoder,
     std::unique_ptr<offloadtest::Buffer> *OutUploadBuffer) {
-
-  const uint64_t PackedRowStrideInBytes =
-      Desc.Width * getFormatSizeInBytes(Desc.Fmt);
-  if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
+  if (Encoder == nullptr)
     return llvm::createStringError(
-        "Data upload is not enough for texture size.");
+        "An encoder is required to upload texture data.");
+  if (OutUploadBuffer == nullptr)
+    return llvm::createStringError(
+        "An upload buffer is required to create a texture with data.");
 
   auto TextureOrErr = Dev.createTexture(Name, Desc);
   if (!TextureOrErr)
     return TextureOrErr.takeError();
   auto Texture = std::move(*TextureOrErr);
 
-  if (OutUploadBuffer == nullptr)
-    return llvm::createStringError("An upload buffer is required to create a "
-                                   "GpuOnly texture with data.");
+  const TextureUploadLayout Layout = Dev.getTextureUploadLayout(Desc);
 
-  const uint64_t TexRowStrideInBytes =
-      Dev.getTextureUploadRowStrideInBytes(Desc);
-  const uint64_t UploadBufferSizeInBytes =
-      (Desc.Height - 1) * TexRowStrideInBytes + PackedRowStrideInBytes;
+  // The source data is tightly packed across mips, so its required size is the
+  // sum of each subresource's tight row size times its row count, independent
+  // of any backend row/offset padding in the upload buffer.
+  uint64_t PackedSizeInBytes = 0;
+  for (const SubresourceFootprint &Sub : Layout.Subresources)
+    PackedSizeInBytes += uint64_t(Sub.RowSizeInBytes) * Sub.NumRows;
+  if (SizeInBytes < PackedSizeInBytes)
+    return llvm::createStringError(
+        "Data upload is not enough for texture size.");
 
-  // Create Upload buffer
   const BufferCreateDesc UploadDesc = BufferCreateDesc::uploadBuffer();
   const std::string UploadBufferName = Name + " (Upload Buffer)";
   auto UploadBufferOrErr =
-      Dev.createBuffer(UploadBufferName, UploadDesc, UploadBufferSizeInBytes);
+      Dev.createBuffer(UploadBufferName, UploadDesc, Layout.TotalSizeInBytes);
   if (!UploadBufferOrErr)
     return UploadBufferOrErr.takeError();
   *OutUploadBuffer = std::move(*UploadBufferOrErr);
@@ -562,18 +614,19 @@ offloadtest::createTextureWithData(
   auto MappedPtrOrErr = (*OutUploadBuffer)->map();
   if (!MappedPtrOrErr)
     return MappedPtrOrErr.takeError();
+  auto *const DstBase = static_cast<uint8_t *>(*MappedPtrOrErr);
+  const auto *SrcPtr = static_cast<const uint8_t *>(Data);
 
-  uint8_t *DstPtr = (uint8_t *)*MappedPtrOrErr;
-  const uint8_t *SrcPtr = (const uint8_t *)Data;
-
-  for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
-    memcpy(DstPtr, SrcPtr, PackedRowStrideInBytes);
-    DstPtr += TexRowStrideInBytes;
-    SrcPtr += PackedRowStrideInBytes;
+  for (const SubresourceFootprint &Sub : Layout.Subresources) {
+    uint8_t *DstPtr = DstBase + Sub.Offset;
+    for (uint32_t Row = 0; Row < Sub.NumRows; ++Row) {
+      memcpy(DstPtr, SrcPtr, Sub.RowSizeInBytes);
+      DstPtr += Sub.RowPitchInBytes;
+      SrcPtr += Sub.RowSizeInBytes;
+    }
   }
   (*OutUploadBuffer)->unmap();
 
-  // Copy Buffer to Texture
   if (auto Err = Encoder->copyBufferToTexture(**OutUploadBuffer, *Texture))
     return Err;
 

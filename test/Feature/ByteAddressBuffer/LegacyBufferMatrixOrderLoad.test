@@ -1,0 +1,63 @@
+#--- source.hlsl
+
+ByteAddressBuffer Input : register(t0);
+RWByteAddressBuffer Output : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int3x2 Matrix = Input.Load<int3x2>(0);
+
+  Output.Store(0, Matrix[0][0]);
+  Output.Store(4, Matrix[0][1]);
+  Output.Store(8, Matrix[1][0]);
+  Output.Store(12, Matrix[1][1]);
+  Output.Store(16, Matrix[2][0]);
+  Output.Store(20, Matrix[2][1]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Input
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6 ]
+  - Name: Output
+    Format: Int32
+    FillSize: 24
+  - Name: ExpectedOutput
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6 ]
+Results:
+  - Result: LegacyRowMajorLoad
+    Rule: BufferExact
+    Actual: Output
+    Expected: ExpectedOutput
+DescriptorSets:
+  - Resources:
+    - Name: Input
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Vulkan
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -fspv-use-legacy-buffer-matrix-order -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

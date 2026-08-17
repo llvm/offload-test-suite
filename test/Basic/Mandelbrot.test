@@ -100,7 +100,6 @@ DescriptorSets:
 # this test doesn't yet do anything... so we should skip it.
 
 # REQUIRES: goldenimage
-# UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o -r Tex -o %t/output.png

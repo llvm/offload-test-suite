@@ -1,0 +1,78 @@
+#--- source.hlsl
+// Test that a local resource array dispatches to the correct element
+// when indexed at runtime. The 4-thread dispatch and per-thread index
+// ensure the compiler can't constant-fold the index away. Each thread
+// stores `tid.x + 10` so a shuffle/aliasing bug that swaps two threads'
+// destinations would show up as swapped values in the result buffers.
+RWByteAddressBuffer gBufArray[4] : register(u0);
+
+[numthreads(4,1,1)]
+void main(uint3 Tid : SV_DispatchThreadID) {
+    RWByteAddressBuffer Arr[4];
+    Arr[0] = gBufArray[0];
+    Arr[1] = gBufArray[1];
+    Arr[2] = gBufArray[2];
+    Arr[3] = gBufArray[3];
+    Arr[Tid.x].Store(0, Tid.x + 10);
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: gBufArray
+    Format: Int32
+    Stride: 4
+    ArraySize: 4
+    Data:
+      - [0]
+      - [0]
+      - [0]
+      - [0]
+  - Name: ExpectedBufArray
+    Format: Int32
+    Stride: 4
+    ArraySize: 4
+    Data:
+      - [10]
+      - [11]
+      - [12]
+      - [13]
+Results:
+  - Result: BufCheck
+    Rule: BufferExact
+    Actual: gBufArray
+    Expected: ExpectedBufArray
+DescriptorSets:
+  - Resources:
+    - Name: gBufArray
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/305
+# UNSUPPORTED: Metal
+
+# Bug: https://github.com/llvm/llvm-project/issues/192523
+# XFAIL: Clang && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/192538
+# Metal is included because it uses the DXIL backend (Metal IR Converter takes
+# DXIL as input), so it hits the same DXILLegalizePass assertion as DirectX.
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8379
+# XFAIL: DXC && Vulkan
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1334
+# XFAIL: AMD && DXC && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

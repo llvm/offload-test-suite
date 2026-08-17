@@ -87,35 +87,35 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: In
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
     - Name: AndTrueTrueOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
     - Name: AndTrueFalseOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
     - Name: AndTrueMixOut
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
       VulkanBinding:
         Binding: 3
     - Name: AndTrueMix2Out
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 4
         Space: 0
@@ -126,15 +126,6 @@ DescriptorSets:
 
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8129
 # XFAIL: DXC && Vulkan
-
-# Bug https://github.com/llvm/offload-test-suite/issues/703
-# XFAIL: Clang && NV && Vulkan
-
-# Bug https://github.com/llvm/offload-test-suite/issues/704
-# XFAIL: Clang && Intel && Vulkan
-
-# Bug https://github.com/llvm/offload-test-suite/issues/1341
-# XFAIL: Intel-Gen-Current && DirectX
 
 # Note: Metal does not support boolean matrix types. For
 # Vulkan KosmicKrisp and MoltenVK the output is always False.

@@ -244,6 +244,7 @@ def main():
             # layout it's the install share dir.
             "OFFLOADTEST_TEST_ROOT": str(test_src_root.parent),
             "LLVM_TOOLS_DIR": str(bin_dir),
+            "OFFLOADTEST_TOOLS_DIR": str(bin_dir),
             "DXC_EXECUTABLE": str(dxc_path) if dxc_path is not None else "",
             "SUPPORTS_SPIRV": "True" if vk else "False",
             "FORCE_CLANG": "True" if clang else "False",
