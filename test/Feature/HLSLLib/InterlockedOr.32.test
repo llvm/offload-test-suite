@@ -125,9 +125,6 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1402
 # XFAIL: Clang
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/1404
-# XFAIL: Intel && Clang && Vulkan
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
