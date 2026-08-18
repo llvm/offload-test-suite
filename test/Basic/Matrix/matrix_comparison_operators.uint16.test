@@ -1,6 +1,6 @@
 #--- source.hlsl
 
-RWBuffer<uint16_t> Uint16In : register(u0);
+RWStructuredBuffer<uint16_t> Uint16In : register(u0);
 RWStructuredBuffer<bool> BoolOut : register(u1);
 
 [numthreads(1, 1, 1)]
@@ -37,7 +37,7 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: Uint16In
-      Kind: RWBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
@@ -52,6 +52,9 @@ DescriptorSets:
         Binding: 1
 ...
 #--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
 
 # REQUIRES: Int16
 
