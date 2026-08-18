@@ -1,0 +1,60 @@
+#--- source.hlsl
+
+RWBuffer<uint16_t> Uint16In : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  uint16_t4x2 Uint16GTLHS = Uint16In[0], Uint16GTRHS = Uint16In[1];
+  bool4x2 Uint16GT = Uint16GTLHS > Uint16GTRHS;
+
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 2; ++Col)
+      BoolOut[Row * 2 + Col] = Uint16GT[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Uint16In
+    Format: UInt16
+    Data: [ 5, 2 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 32
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: Uint16In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Int16
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_2 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
