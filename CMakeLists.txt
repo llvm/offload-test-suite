@@ -174,6 +174,7 @@ endif ()
 add_subdirectory(third-party/libpng)
 set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS_BUILDTREE_ONLY png_static)
 
+include(AgilitySDK)
 include(Warp)
 
 # This must be after the third-party targets are generated so that we only apply
