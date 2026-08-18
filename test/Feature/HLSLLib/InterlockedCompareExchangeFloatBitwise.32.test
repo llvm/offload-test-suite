@@ -1,0 +1,242 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareExchangeFloatBitwise on groupshared destinations
+// with 256 concurrent threads. Comparison is on the bit pattern, not the
+// numeric value, so all checks use asuint(). Four checks:
+//
+//   1. Private slots: a mismatching compare must not store, a following
+//      matching compare must, and both must report the original value.
+//   2. Contended locations: every thread proposes the same new value, so
+//      exactly one thread may observe the original compare value. A
+//      never-matching compare must leave the destination alone.
+//   3. Bitwise semantics: +0.0 compared against -0.0 must not store even
+//      though the two are numerically equal, and a NaN compared against an
+//      identical NaN bit pattern must store even though NaN != NaN.
+//   4. CounterZero: thread `i` only advances the counter from `i` to `i+1`,
+//      so over 256 barrier-separated attempts each thread succeeds exactly
+//      once and the counter ends at 256. It must never decrease.
+
+RWStructuredBuffer<uint> OutMono : register(u0);
+RWStructuredBuffer<uint> OutSlots : register(u1);
+RWStructuredBuffer<uint> OutOrig : register(u2);
+RWStructuredBuffer<uint> OutWins : register(u3);
+RWStructuredBuffer<uint> OutFinal : register(u4);
+
+static const uint NanBits = 0x7FC00000u; // quiet NaN
+static const uint NegZeroBits = 0x80000000u;
+
+groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
+groupshared float MatchMinusFive;              // contended, compare matches
+groupshared float NoMatchSeventySeven;         // contended, never matches
+groupshared float ZeroPositive;                // +0.0, compared against -0.0
+groupshared float NanQuiet;                    // NaN, compared against NaN
+groupshared float CounterZero;                 // stepped from 0.0 to 256.0
+groupshared uint  MatchWinCountZero;           // threads that saw -5.0
+groupshared uint  NanWinCountZero;             // threads that saw the NaN
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsMinusTwoPointFive[GTID.x] = -2.5f;
+  if (GTID.x == 0) {
+    MatchMinusFive = -5.0f;
+    NoMatchSeventySeven = 77.0f;
+    ZeroPositive = 0.0f;
+    NanQuiet = asfloat(NanBits);
+    CounterZero = 0.0f;
+    MatchWinCountZero = 0u;
+    NanWinCountZero = 0u;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // Check 1: both calls report the initial value, only the second stores.
+  float OrigNoStore, OrigStore;
+  InterlockedCompareExchangeFloatBitwise(SlotsMinusTwoPointFive[GTID.x], 1.0f,
+                                         99.0f, OrigNoStore);
+  InterlockedCompareExchangeFloatBitwise(SlotsMinusTwoPointFive[GTID.x], -2.5f,
+                                         (float)GTID.x + 1000.0f, OrigStore);
+
+  OutSlots[GTID.x] = (asuint(OrigNoStore) == asuint(-2.5f) &&
+                      asuint(OrigStore) == asuint(-2.5f) &&
+                      asuint(SlotsMinusTwoPointFive[GTID.x]) ==
+                          asuint((float)GTID.x + 1000.0f)) ? 1u : 0u;
+
+  // Check 2: a matching compare reports either the value the winner replaced
+  // or the value it stored; a never-matching compare reports it untouched.
+  float OrigMatch, OrigNoMatch;
+  InterlockedCompareExchangeFloatBitwise(MatchMinusFive, -5.0f, 42.0f,
+                                         OrigMatch);
+  InterlockedCompareExchangeFloatBitwise(NoMatchSeventySeven, 78.0f, -1.0f,
+                                         OrigNoMatch);
+  if (asuint(OrigMatch) == asuint(-5.0f))
+    InterlockedAdd(MatchWinCountZero, 1u);
+
+  // Check 3: -0.0 must not match +0.0, and NaN must match its own bits.
+  float OrigZero, OrigNan;
+  InterlockedCompareExchangeFloatBitwise(ZeroPositive, asfloat(NegZeroBits),
+                                         99.0f, OrigZero);
+  InterlockedCompareExchangeFloatBitwise(NanQuiet, asfloat(NanBits), 7.0f,
+                                         OrigNan);
+  if (asuint(OrigNan) == NanBits)
+    InterlockedAdd(NanWinCountZero, 1u);
+
+  OutOrig[GTID.x] = ((asuint(OrigMatch) == asuint(-5.0f) ||
+                      asuint(OrigMatch) == asuint(42.0f)) &&
+                     asuint(OrigNoMatch) == asuint(77.0f) &&
+                     asuint(OrigZero) == 0u &&
+                     (asuint(OrigNan) == NanBits ||
+                      asuint(OrigNan) == asuint(7.0f))) ? 1u : 0u;
+
+  // Check 4.
+  float CompareValue = (float)GTID.x;
+  float NewValue = (float)GTID.x + 1.0f;
+  float Prev = 0.0f;
+  uint Mono = 1u;
+  uint Wins = 0u;
+  for (uint I = 0; I < 256; ++I) {
+    float Orig;
+    InterlockedCompareExchangeFloatBitwise(CounterZero, CompareValue, NewValue,
+                                           Orig);
+    if (asuint(Orig) == asuint(CompareValue))
+      ++Wins;
+    GroupMemoryBarrierWithGroupSync();
+    float Cur = CounterZero;
+    if (Cur < Prev)
+      Mono = 0u;
+    Prev = Cur;
+  }
+  OutMono[GTID.x] = Mono;
+  OutWins[GTID.x] = Wins;
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = asuint(CounterZero);         // 256.0
+    OutFinal[1] = asuint(MatchMinusFive);      // 42.0
+    OutFinal[2] = asuint(NoMatchSeventySeven); // 77.0
+    OutFinal[3] = asuint(ZeroPositive);        // +0.0, never stored
+    OutFinal[4] = asuint(NanQuiet);            // 7.0
+    OutFinal[5] = MatchWinCountZero;           // 1
+    OutFinal[6] = NanWinCountZero;             // 1
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlots
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutWins
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: UInt32
+    Stride: 4
+    FillSize: 28
+  - Name: ExpectedFinal
+    Format: Hex32
+    Stride: 4
+    Data: [ 0x43800000, 0x42280000, 0x429A0000, 0x0, 0x40E00000, 0x1, 0x1 ]
+Results:
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+  - Result: TestSlots
+    Rule: BufferExact
+    Actual: OutSlots
+    Expected: ExpectedOnes
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedOnes
+  - Result: TestWins
+    Rule: BufferExact
+    Actual: OutWins
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutSlots
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutWins
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99203
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/7782
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
