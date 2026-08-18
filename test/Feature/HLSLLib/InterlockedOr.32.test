@@ -123,10 +123,7 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1402
-# XFAIL: Clang
-
-# Bug: https://github.com/llvm/offload-test-suite/issues/1404
-# XFAIL: Intel && Clang && Vulkan
+# XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
