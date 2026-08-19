@@ -813,6 +813,14 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error resolveTexture(offloadtest::Texture &,
+                             offloadtest::Texture &) override {
+    // Metal resolves through the render-pass store action.
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Multisample resolve is not supported on the Metal backend.");
+  }
+
   // Defined out-of-line below — needs MTLDevice's full type for access to the
   // MTL::Device handle (used to allocate scratch and instance buffers).
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -2874,6 +2882,11 @@ public:
   }
 
   llvm::Error executeProgram(Pipeline &P) override {
+    if (P.Bindings.SampleCount != 1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Multisampling is not supported on the Metal backend.");
+
     InvocationState IS;
 
     auto CBOrErr = MTLCommandBuffer::create(GraphicsQueue.Queue);

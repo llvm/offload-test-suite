@@ -68,6 +68,15 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
+inline llvm::Error validateSampleCount(uint32_t SampleCount,
+                                       llvm::StringRef FieldName) {
+  if (SampleCount != 0)
+    return llvm::Error::success();
+  return llvm::createStringError(std::errc::invalid_argument,
+                                 "%s must be greater than zero.",
+                                 FieldName.str().c_str());
+}
+
 // TODO: only 2D textures (2D texture arrays, and texture cubes) are supported.
 // 1D and 3D textures need their ResourceDimension cases filled in, plus
 // validation between usage and shape (e.g. 3D textures cannot be used as
@@ -83,6 +92,7 @@ struct TextureCreateDesc {
   uint32_t MipLevels = 1;
   uint32_t ArraySlices = 1;
   bool IsArray = false;
+  uint32_t SampleCount = 1;
   // Clear value for render target or depth/stencil textures.
   // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time
@@ -197,6 +207,36 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         std::errc::not_supported,
         "Array slices are not supported for render target or depth/stencil "
         "textures.");
+
+  if (auto Err = validateSampleCount(Desc.SampleCount, "SampleCount"))
+    return Err;
+  if (Desc.SampleCount > 1) {
+    // TODO: Remove this error on (!IsRT && !IsDS) with Texture2DMS support.
+    if (!IsRT && !IsDS)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Standalone multisampled textures are not supported yet; "
+          "RenderTarget or DepthStencil usage is required.");
+    if ((Desc.Usage & TextureUsage::Sampled) != 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Shader-readable multisampled textures (Texture2DMS) are not "
+          "supported yet.");
+    if ((Desc.Usage & TextureUsage::Storage) != 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Writable multisampled textures (RWTexture2DMS) are not supported "
+          "yet.");
+    // Sparse residency is not implemented for multisampled attachments.
+    if (Desc.Backing == MemoryBacking::Sparse)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Sparse multisampled attachments are not supported.");
+    if (Desc.Dim != ResourceDimension::Dim2D)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Multisampling is only supported for 2D textures.");
+  }
 
   // A clear value requires RenderTarget or DepthStencil usage, and the
   // variant must match.
