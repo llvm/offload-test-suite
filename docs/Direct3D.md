@@ -31,6 +31,12 @@ The **AGILITY_SDK_VERSION** CMake option selects the package:
 * `Latest` downloads the latest stable package from NuGet.
 * An explicit NuGet package version may be specified.
 
+When `nuget.exe` is available on `PATH`, CMake uses it to download the package,
+including its configured NuGet sources and authentication. If it is not
+available, CMake downloads the package directly from nuget.org. Set
+**OFFLOADTEST_USE_NUGET_EXE**, which defaults to `ON`, to `OFF` to force the
+direct download.
+
 For example:
 
 ```shell
