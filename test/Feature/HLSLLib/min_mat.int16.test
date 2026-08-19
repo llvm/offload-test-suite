@@ -1,0 +1,208 @@
+#--- source.hlsl
+StructuredBuffer<int16_t4> X0 : register(t0);
+StructuredBuffer<int16_t4> Y0 : register(t1);
+StructuredBuffer<uint16_t4> X1 : register(t2);
+StructuredBuffer<uint16_t4> Y1 : register(t3);
+
+RWStructuredBuffer<int16_t4> Out0 : register(u4);
+RWStructuredBuffer<uint16_t4> Out1 : register(u5);
+
+[numthreads(1,1,1)]
+void main() {
+  // int16_t
+  int16_t3x2 I32 = min(int16_t3x2(X0[0].xyz, X0[1].xyz),
+                       int16_t3x2(Y0[0].xyz, Y0[1].xyz));
+  int16_t2x4 I24 = min(int16_t2x4(X0[2], X0[3]),
+                       int16_t2x4(Y0[2], Y0[3]));
+  int16_t3x1 I31 = min(int16_t3x1(X0[4].xyz),
+                       int16_t3x1(Y0[4].xyz));
+  int16_t4x4 I44 = min(int16_t4x4(X0[5], X0[6], X0[7], X0[8]),
+                       int16_t4x4(Y0[5], Y0[6], Y0[7], Y0[8]));
+  int16_t2x2 I22Const = min(int16_t2x2(-32768, 2, 30, 32767),
+                            int16_t2x2(0, 3, -50, 0));
+
+  Out0[0] = int16_t4(I32[0], I32[1]);
+  Out0[1] = int16_t4(I32[2], 0, 0);
+  Out0[2] = I24[0];
+  Out0[3] = I24[1];
+  Out0[4] = int16_t4(I31[0], I31[1], I31[2], 0);
+  Out0[5] = I44[0];
+  Out0[6] = I44[1];
+  Out0[7] = I44[2];
+  Out0[8] = I44[3];
+  Out0[9] = int16_t4(I22Const[0], I22Const[1]);
+
+  // uint16_t
+  uint16_t3x2 U32 = min(uint16_t3x2(X1[0].xyz, X1[1].xyz),
+                        uint16_t3x2(Y1[0].xyz, Y1[1].xyz));
+  uint16_t2x4 U24 = min(uint16_t2x4(X1[2], X1[3]),
+                        uint16_t2x4(Y1[2], Y1[3]));
+  uint16_t3x1 U31 = min(uint16_t3x1(X1[4].xyz),
+                        uint16_t3x1(Y1[4].xyz));
+  uint16_t4x4 U44 = min(uint16_t4x4(X1[5], X1[6], X1[7], X1[8]),
+                        uint16_t4x4(Y1[5], Y1[6], Y1[7], Y1[8]));
+  uint16_t2x2 U22Const = min(uint16_t2x2(0, 2, 30, 65535),
+                             uint16_t2x2(65535, 3, 50, 0));
+
+  Out1[0] = uint16_t4(U32[0], U32[1]);
+  Out1[1] = uint16_t4(U32[2], 0, 0);
+  Out1[2] = U24[0];
+  Out1[3] = U24[1];
+  Out1[4] = uint16_t4(U31[0], U31[1], U31[2], 0);
+  Out1[5] = U44[0];
+  Out1[6] = U44[1];
+  Out1[7] = U44[2];
+  Out1[8] = U44[3];
+  Out1[9] = uint16_t4(U22Const[0], U22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X0
+    Format: Int16
+    Stride: 8
+    Data: [ 5, 8, 9, 0,
+            4, 7, 0, 0,
+            10, 12, 3, 15,
+            6, 20, 11, 7,
+            2, 13, 5, 0,
+            -32768, 2, 30, 32767,
+            -1, 100, -50, 25,
+            3, -3, 8, -3,
+            50, -25, 4, 9 ]
+  - Name: Y0
+    Format: Int16
+    Stride: 8
+    Data: [ 4, 2, 10, 0,
+            4, 0, 6, 0,
+            11, 12, 2, 7,
+            5, 18, 14, 8,
+            9, 12, 5, 0,
+            0, 3, -50, 0,
+            -2, 99, 50, 26,
+            3, 4, 7, -3,
+            -50, -24, 5, 8 ]
+  - Name: X1
+    Format: UInt16
+    Stride: 8
+    Data: [ 5, 8, 9, 0,
+            4, 7, 0, 0,
+            10, 12, 3, 15,
+            6, 20, 11, 7,
+            2, 13, 5, 0,
+            0, 2, 30, 65535,
+            20, 100, 60, 25,
+            3, 13, 8, 40,
+            50, 24, 4, 9 ]
+  - Name: Y1
+    Format: UInt16
+    Stride: 8
+    Data: [ 4, 2, 10, 0,
+            4, 0, 6, 0,
+            11, 12, 2, 7,
+            5, 18, 14, 8,
+            9, 12, 5, 0,
+            65535, 3, 50, 0,
+            12, 99, 50, 26,
+            3, 7, 7, 41,
+            60, 25, 5, 8 ]
+  - Name: Out0
+    Format: Int16
+    Stride: 8
+    FillSize: 80
+  - Name: ExpectedOut0
+    Format: Int16
+    Stride: 8
+    Data: [ 4, 2, 9, 4,
+            0, 0, 0, 0,
+            10, 12, 2, 7,
+            5, 18, 11, 7,
+            2, 12, 5, 0,
+            -32768, 2, -50, 0,
+            -2, 99, -50, 25,
+            3, -3, 7, -3,
+            -50, -25, 4, 8,
+            -32768, 2, -50, 0 ]
+  - Name: Out1
+    Format: UInt16
+    Stride: 8
+    FillSize: 80
+  - Name: ExpectedOut1
+    Format: UInt16
+    Stride: 8
+    Data: [ 4, 2, 9, 4,
+            0, 0, 0, 0,
+            10, 12, 2, 7,
+            5, 18, 11, 7,
+            2, 12, 5, 0,
+            0, 2, 30, 0,
+            12, 99, 50, 25,
+            3, 7, 7, 40,
+            50, 24, 4, 8,
+            0, 2, 30, 0 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+DescriptorSets:
+  - Resources:
+    - Name: X0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: X1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Y1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184512
+# XFAIL: Clang
+
+# REQUIRES: Int16
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,300 @@
+#--- source.hlsl
+StructuredBuffer<float4> X0 : register(t0);
+StructuredBuffer<float4> Y0 : register(t1);
+StructuredBuffer<int4> X1 : register(t2);
+StructuredBuffer<int4> Y1 : register(t3);
+StructuredBuffer<uint4> X2 : register(t4);
+StructuredBuffer<uint4> Y2 : register(t5);
+
+RWStructuredBuffer<float4> Out0 : register(u6);
+RWStructuredBuffer<int4> Out1 : register(u7);
+RWStructuredBuffer<uint4> Out2 : register(u8);
+
+[numthreads(1,1,1)]
+void main() {
+  // float
+  float3x2 F32 = min(float3x2(X0[0].xyz, X0[1].xyz),
+                     float3x2(Y0[0].xyz, Y0[1].xyz));
+  float2x4 F24 = min(float2x4(X0[2], X0[3]),
+                     float2x4(Y0[2], Y0[3]));
+  float3x1 F31 = min(float3x1(X0[4].xyz),
+                     float3x1(Y0[4].xyz));
+  float4x4 F44 = min(float4x4(X0[5], X0[6], X0[7], X0[8]),
+                     float4x4(Y0[5], Y0[6], Y0[7], Y0[8]));
+  float2x2 F22Const = min(float2x2(-60000.0, 2.5, 30.0, 60000.0),
+                          float2x2(0.0, 2.6, -50.0, 0.0));
+
+  Out0[0] = float4(F32[0], F32[1]);
+  Out0[1] = float4(F32[2], 0.0, 0.0);
+  Out0[2] = F24[0];
+  Out0[3] = F24[1];
+  Out0[4] = float4(F31[0], F31[1], F31[2], 0.0);
+  Out0[5] = F44[0];
+  Out0[6] = F44[1];
+  Out0[7] = F44[2];
+  Out0[8] = F44[3];
+  Out0[9] = float4(F22Const[0], F22Const[1]);
+
+  // int
+  int3x2 I32 = min(int3x2(X1[0].xyz, X1[1].xyz),
+                   int3x2(Y1[0].xyz, Y1[1].xyz));
+  int2x4 I24 = min(int2x4(X1[2], X1[3]),
+                   int2x4(Y1[2], Y1[3]));
+  int3x1 I31 = min(int3x1(X1[4].xyz),
+                   int3x1(Y1[4].xyz));
+  int4x4 I44 = min(int4x4(X1[5], X1[6], X1[7], X1[8]),
+                   int4x4(Y1[5], Y1[6], Y1[7], Y1[8]));
+  int2x2 I22Const = min(int2x2(-2147483648, 2, 30, 2147483647),
+                        int2x2(0, 3, -50, 0));
+
+  Out1[0] = int4(I32[0], I32[1]);
+  Out1[1] = int4(I32[2], 0, 0);
+  Out1[2] = I24[0];
+  Out1[3] = I24[1];
+  Out1[4] = int4(I31[0], I31[1], I31[2], 0);
+  Out1[5] = I44[0];
+  Out1[6] = I44[1];
+  Out1[7] = I44[2];
+  Out1[8] = I44[3];
+  Out1[9] = int4(I22Const[0], I22Const[1]);
+
+  // uint
+  uint3x2 U32 = min(uint3x2(X2[0].xyz, X2[1].xyz),
+                    uint3x2(Y2[0].xyz, Y2[1].xyz));
+  uint2x4 U24 = min(uint2x4(X2[2], X2[3]),
+                    uint2x4(Y2[2], Y2[3]));
+  uint3x1 U31 = min(uint3x1(X2[4].xyz),
+                    uint3x1(Y2[4].xyz));
+  uint4x4 U44 = min(uint4x4(X2[5], X2[6], X2[7], X2[8]),
+                    uint4x4(Y2[5], Y2[6], Y2[7], Y2[8]));
+  uint2x2 U22Const = min(uint2x2(0, 2, 30, 4294967295),
+                         uint2x2(4294967295, 3, 50, 0));
+
+  Out2[0] = uint4(U32[0], U32[1]);
+  Out2[1] = uint4(U32[2], 0, 0);
+  Out2[2] = U24[0];
+  Out2[3] = U24[1];
+  Out2[4] = uint4(U31[0], U31[1], U31[2], 0);
+  Out2[5] = U44[0];
+  Out2[6] = U44[1];
+  Out2[7] = U44[2];
+  Out2[8] = U44[3];
+  Out2[9] = uint4(U22Const[0], U22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X0
+    Format: Float32
+    Stride: 16
+    Data: [ 5.0, 8.0, 9.0, 0.0,
+            4.0, 7.0, 0.0, 0.0,
+            10.0, 12.0, 3.0, 15.0,
+            6.0, 20.0, 11.0, 7.0,
+            2.0, 13.0, 5.0, 0.0,
+            -60000.0, 2.5, 30.0, 60000.0,
+            -1.0, 100.0, -50.0, 25.5,
+            3.0, -3.0, 7.5, -3.0,
+            50.0, -25.0, 4.5, 9.0 ]
+  - Name: Y0
+    Format: Float32
+    Stride: 16
+    Data: [ 4.0, 2.0, 10.0, 0.0,
+            4.0, 0.0, 6.0, 0.0,
+            11.0, 12.0, 2.0, 7.0,
+            5.0, 18.0, 14.0, 8.0,
+            9.0, 12.0, 5.0, 0.0,
+            0.0, 2.6, -50.0, 0.0,
+            -2.0, 99.0, 50.0, 25.6,
+            3.0, 4.0, 7.4, -3.0,
+            -50.0, -24.0, 4.6, 8.0 ]
+  - Name: X1
+    Format: Int32
+    Stride: 16
+    Data: [ 5, 8, 9, 0,
+            4, 7, 0, 0,
+            10, 12, 3, 15,
+            6, 20, 11, 7,
+            2, 13, 5, 0,
+            -2147483648, 2, 30, 2147483647,
+            -1, 100, -50, 25,
+            3, -3, 8, -3,
+            50, -25, 4, 9 ]
+  - Name: Y1
+    Format: Int32
+    Stride: 16
+    Data: [ 4, 2, 10, 0,
+            4, 0, 6, 0,
+            11, 12, 2, 7,
+            5, 18, 14, 8,
+            9, 12, 5, 0,
+            0, 3, -50, 0,
+            -2, 99, 50, 26,
+            3, 4, 7, -3,
+            -50, -24, 5, 8 ]
+  - Name: X2
+    Format: UInt32
+    Stride: 16
+    Data: [ 5, 8, 9, 0,
+            4, 7, 0, 0,
+            10, 12, 3, 15,
+            6, 20, 11, 7,
+            2, 13, 5, 0,
+            0, 2, 30, 4294967295,
+            20, 100, 60, 25,
+            3, 13, 8, 40,
+            50, 24, 4, 9 ]
+  - Name: Y2
+    Format: UInt32
+    Stride: 16
+    Data: [ 4, 2, 10, 0,
+            4, 0, 6, 0,
+            11, 12, 2, 7,
+            5, 18, 14, 8,
+            9, 12, 5, 0,
+            4294967295, 3, 50, 0,
+            12, 99, 50, 26,
+            3, 7, 7, 41,
+            60, 25, 5, 8 ]
+  - Name: Out0
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut0
+    Format: Float32
+    Stride: 16
+    Data: [ 4.0, 2.0, 9.0, 4.0,
+            0.0, 0.0, 0.0, 0.0,
+            10.0, 12.0, 2.0, 7.0,
+            5.0, 18.0, 11.0, 7.0,
+            2.0, 12.0, 5.0, 0.0,
+            -60000.0, 2.5, -50.0, 0.0,
+            -2.0, 99.0, -50.0, 25.5,
+            3.0, -3.0, 7.4, -3.0,
+            -50.0, -25.0, 4.5, 8.0,
+            -60000.0, 2.5, -50.0, 0.0 ]
+  - Name: Out1
+    Format: Int32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut1
+    Format: Int32
+    Stride: 16
+    Data: [ 4, 2, 9, 4,
+            0, 0, 0, 0,
+            10, 12, 2, 7,
+            5, 18, 11, 7,
+            2, 12, 5, 0,
+            -2147483648, 2, -50, 0,
+            -2, 99, -50, 25,
+            3, -3, 7, -3,
+            -50, -25, 4, 8,
+            -2147483648, 2, -50, 0 ]
+  - Name: Out2
+    Format: UInt32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut2
+    Format: UInt32
+    Stride: 16
+    Data: [ 4, 2, 9, 4,
+            0, 0, 0, 0,
+            10, 12, 2, 7,
+            5, 18, 11, 7,
+            2, 12, 5, 0,
+            0, 2, 30, 0,
+            12, 99, 50, 25,
+            3, 7, 7, 40,
+            50, 24, 4, 8,
+            0, 2, 30, 0 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+  - Result: Test2
+    Rule: BufferExact
+    Actual: Out2
+    Expected: ExpectedOut2
+DescriptorSets:
+  - Resources:
+    - Name: X0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: X1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Y1
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: X2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Y2
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: Out0
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Out1
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: Out2
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184512
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

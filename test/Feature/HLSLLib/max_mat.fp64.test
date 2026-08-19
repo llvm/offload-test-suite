@@ -1,0 +1,116 @@
+#--- source.hlsl
+StructuredBuffer<double4> X : register(t0);
+StructuredBuffer<double4> Y : register(t1);
+
+RWStructuredBuffer<double4> Out : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  double3x2 M32 = max(double3x2(X[0].xyz, X[1].xyz),
+                      double3x2(Y[0].xyz, Y[1].xyz));
+  double2x4 M24 = max(double2x4(X[2], X[3]),
+                      double2x4(Y[2], Y[3]));
+  double3x1 M31 = max(double3x1(X[4].xyz),
+                      double3x1(Y[4].xyz));
+  double4x4 M44 = max(double4x4(X[5], X[6], X[7], X[8]),
+                      double4x4(Y[5], Y[6], Y[7], Y[8]));
+  double2x2 M22Const = max(double2x2(-60000.0L, 2.5L, 30.0L, 60000.0L),
+                           double2x2(0.0L, 2.6L, -50.0L, 0.0L));
+
+  Out[0] = double4(M32[0], M32[1]);
+  Out[1] = double4(M32[2], 0.0, 0.0);
+  Out[2] = M24[0];
+  Out[3] = M24[1];
+  Out[4] = double4(M31[0], M31[1], M31[2], 0.0);
+  Out[5] = M44[0];
+  Out[6] = M44[1];
+  Out[7] = M44[2];
+  Out[8] = M44[3];
+  Out[9] = double4(M22Const[0], M22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X
+    Format: Float64
+    Stride: 32
+    Data: [ 5.0, 8.0, 9.0, 0.0,
+            4.0, 7.0, 0.0, 0.0,
+            10.0, 12.0, 3.0, 15.0,
+            6.0, 20.0, 11.0, 7.0,
+            2.0, 13.0, 5.0, 0.0,
+            -60000.0, 2.5, 30.0, 60000.0,
+            -1.0, 100.0, -50.0, 25.5,
+            3.0, -3.0, 7.5, -3.0,
+            50.0, -25.0, 4.5, 9.0 ]
+  - Name: Y
+    Format: Float64
+    Stride: 32
+    Data: [ 4.0, 2.0, 10.0, 0.0,
+            4.0, 0.0, 6.0, 0.0,
+            11.0, 12.0, 2.0, 7.0,
+            5.0, 18.0, 14.0, 8.0,
+            9.0, 12.0, 5.0, 0.0,
+            0.0, 2.6, -50.0, 0.0,
+            -2.0, 99.0, 50.0, 25.6,
+            3.0, 4.0, 7.4, -3.0,
+            -50.0, -24.0, 4.6, 8.0 ]
+  - Name: Out
+    Format: Float64
+    Stride: 32
+    FillSize: 320
+  - Name: ExpectedOut
+    Format: Float64
+    Stride: 32
+    Data: [ 5.0, 8.0, 10.0, 4.0,
+            7.0, 6.0, 0.0, 0.0,
+            11.0, 12.0, 3.0, 15.0,
+            6.0, 20.0, 14.0, 8.0,
+            9.0, 13.0, 5.0, 0.0,
+            0.0, 2.6, 30.0, 60000.0,
+            -1.0, 100.0, 50.0, 25.6,
+            3.0, 4.0, 7.5, -3.0,
+            50.0, -24.0, 4.6, 9.0,
+            0.0, 2.6, 30.0, 60000.0 ]
+Results:
+  - Result: Test
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184511
+# XFAIL: Clang
+
+# REQUIRES: Double
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
