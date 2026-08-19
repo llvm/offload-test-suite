@@ -143,7 +143,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/1402
+# Bug: https://github.com/llvm/llvm-project/issues/217196
 # XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
