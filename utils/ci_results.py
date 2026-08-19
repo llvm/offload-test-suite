@@ -156,7 +156,9 @@ def analyze_current_status(workflows, regressions_only=False):
             if any(
                 (
                     path.name.startswith("build-"),
+                    path.name.startswith("frequent-build-"),
                     path.name.startswith("pr-"),
+                    path.name.startswith("test-"),
                     path.name.startswith("validate-"),
                 )
             ):
@@ -240,6 +242,7 @@ def workflow_status_key(workflow):
     parts = workflow[: -len(".yaml")].split("-")
     if not parts:
         return None
+
     parts.reverse()
 
     host = parts.pop()
