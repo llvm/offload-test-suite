@@ -253,8 +253,9 @@ struct TLASDesc;
 struct Resource {
   ResourceKind Kind;
   std::string Name;
-  DirectXBinding DXBinding;
+  std::optional<DirectXBinding> DXBinding;
   std::optional<VulkanBinding> VKBinding;
+  std::optional<uint32_t> HeapIndex;
   CPUBuffer *BufferPtr = nullptr;
   YAMLSampler *SamplerPtr = nullptr;
   bool HasCounter = false;

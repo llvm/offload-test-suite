@@ -4,6 +4,7 @@
 
 import argparse
 import bisect
+import datetime as dt
 import json
 import pathlib
 import re
@@ -155,7 +156,9 @@ def analyze_current_status(workflows, regressions_only=False):
             if any(
                 (
                     path.name.startswith("build-"),
+                    path.name.startswith("frequent-build-"),
                     path.name.startswith("pr-"),
+                    path.name.startswith("test-"),
                     path.name.startswith("validate-"),
                 )
             ):
@@ -239,6 +242,7 @@ def workflow_status_key(workflow):
     parts = workflow[: -len(".yaml")].split("-")
     if not parts:
         return None
+
     parts.reverse()
 
     host = parts.pop()
@@ -411,6 +415,22 @@ def runid_index(runids, runid):
 
 
 def get_last_run(workflow, status="completed"):
+    last_run = get_last_run_internal(workflow, status)
+    if not last_run:
+        return None
+
+    for _ in range(5):
+        # The gh cli seems to sometimes just return results from a month ago.
+        # Work around it by trying again a few times if the results seem stale.
+        ran_at = dt.datetime.fromisoformat(last_run["createdAt"])
+        if dt.datetime.now(ran_at.tzinfo) - ran_at < dt.timedelta(days=1):
+            break
+        last_run = get_last_run_internal(workflow, status)
+
+    return last_run
+
+
+def get_last_run_internal(workflow, status):
     output = subprocess.run(
         [
             "gh",
@@ -436,6 +456,22 @@ def get_last_run(workflow, status="completed"):
 
 
 def get_recent_runs(workflow, *, run_limit):
+    recent_runs = get_recent_runs_internal(workflow, run_limit=run_limit)
+    if not recent_runs:
+        return None
+
+    for _ in range(5):
+        # The gh cli seems to sometimes just return results from a month ago.
+        # Work around it by trying again a few times if the results seem stale.
+        ran_at = dt.datetime.fromisoformat(recent_runs[0]["createdAt"])
+        if dt.datetime.now(ran_at.tzinfo) - ran_at < dt.timedelta(days=1):
+            break
+        recent_runs = get_recent_runs_internal(workflow, run_limit=run_limit)
+
+    return recent_runs
+
+
+def get_recent_runs_internal(workflow, *, run_limit):
     output = subprocess.run(
         [
             "gh",
