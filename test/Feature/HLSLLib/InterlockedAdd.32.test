@@ -103,7 +103,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 1024
-  - Name: ExpectedSlotsInt
+  - Name: ExpectedOnes
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -126,25 +126,6 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 1024
-  - Name: ExpectedSlotsUInt
-    Format: UInt32
-    Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutFinal
     Format: Int32
     Stride: 4
@@ -161,11 +142,11 @@ Results:
   - Result: TestSlotsInt
     Rule: BufferExact
     Actual: OutSlotsInt
-    Expected: ExpectedSlotsInt
+    Expected: ExpectedOnes
   - Result: TestSlotsUInt
     Rule: BufferExact
     Actual: OutSlotsUInt
-    Expected: ExpectedSlotsUInt
+    Expected: ExpectedOnes
   - Result: TestFinal
     Rule: BufferExact
     Actual: OutFinal
@@ -173,7 +154,7 @@ Results:
   - Result: TestMono
     Rule: BufferExact
     Actual: OutMono
-    Expected: ExpectedSlotsInt
+    Expected: ExpectedOnes
 DescriptorSets:
   - Resources:
     - Name: OutSlotsInt

@@ -18,6 +18,8 @@
 
 RWStructuredBuffer<uint64_t> SBufU : register(u0);
 RWStructuredBuffer<int64_t>  SBufI : register(u1);
+// Byte offsets 0, 8 and 16 hold the 2-argument accumulator, the 3-argument
+// accumulator and the monotonicity counter.
 RWByteAddressBuffer          BABuf : register(u2);
 
 RWStructuredBuffer<uint> OutSlotsSBufI : register(u3);
@@ -29,13 +31,6 @@ groupshared uint SlotsBABuf[256];
 
 [numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
-  if (GTID.x == 0) {
-    SBufU[0] = 0;
-    SBufI[0] = 0;
-    BABuf.Store<uint64_t>(0, 0);  // accumulator for the 2-arg method form
-    BABuf.Store<uint64_t>(8, 0);  // accumulator for the 3-arg method form
-    BABuf.Store<uint64_t>(16, 0); // monotonicity counter
-  }
   SlotsSBufI[GTID.x] = 0u;
   SlotsBABuf[GTID.x] = 0u;
   DeviceMemoryBarrierWithGroupSync();

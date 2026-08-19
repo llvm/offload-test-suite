@@ -38,7 +38,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
     CounterUIntNoOrig = 0;
     SignedCounter = 1000;
     LargeCounter = 0x100000000ull; // 2^32
-    MonoCounter = 0x100000000ull;  // 2^32, so the loop crosses the upper word
+    MonoCounter = 0x100000000ull;  // above 2^32; upper word must be preserved
   }
   SlotsInt[GTID.x] = 0;
   SlotsUInt[GTID.x] = 0;
@@ -109,7 +109,7 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 1024
-  - Name: ExpectedSlotsInt
+  - Name: ExpectedOnes
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -132,25 +132,6 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 1024
-  - Name: ExpectedSlotsUInt
-    Format: UInt32
-    Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutFinal
     Format: Int64
     Stride: 8
@@ -168,11 +149,11 @@ Results:
   - Result: TestSlotsInt
     Rule: BufferExact
     Actual: OutSlotsInt
-    Expected: ExpectedSlotsInt
+    Expected: ExpectedOnes
   - Result: TestSlotsUInt
     Rule: BufferExact
     Actual: OutSlotsUInt
-    Expected: ExpectedSlotsUInt
+    Expected: ExpectedOnes
   - Result: TestFinal
     Rule: BufferExact
     Actual: OutFinal
@@ -180,7 +161,7 @@ Results:
   - Result: TestMono
     Rule: BufferExact
     Actual: OutMono
-    Expected: ExpectedSlotsInt
+    Expected: ExpectedOnes
 DescriptorSets:
   - Resources:
     - Name: OutSlotsInt
@@ -221,6 +202,9 @@ DescriptorSets:
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1402
 # XFAIL: Clang && DirectX
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1435
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl

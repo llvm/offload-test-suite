@@ -15,6 +15,7 @@
 // checks described in InterlockedAdd.32.test.
 
 RWBuffer<uint64_t> TBufU : register(u0);
+// Element 0 is the 3-argument accumulator, element 1 the monotonicity counter.
 RWBuffer<int64_t>  TBufI : register(u1);
 
 RWStructuredBuffer<uint> OutSlotsTBufI : register(u2);
@@ -24,11 +25,6 @@ groupshared uint SlotsTBufI[256];
 
 [numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
-  if (GTID.x == 0) {
-    TBufU[0] = 0;
-    TBufI[0] = 0;
-    TBufI[1] = 0; // monotonicity counter
-  }
   SlotsTBufI[GTID.x] = 0u;
   DeviceMemoryBarrierWithGroupSync();
 
