@@ -417,7 +417,7 @@ def get_last_run(workflow, status="completed"):
     for _ in range(5):
         # The gh cli seems to sometimes just return results from a month ago.
         # Work around it by trying again a few times if the results seem stale.
-        ran_at = dt.datetime.fromisoformat(last_run['createdAt'])
+        ran_at = dt.datetime.fromisoformat(last_run["createdAt"])
         if dt.datetime.now(ran_at.tzinfo) - ran_at < dt.timedelta(days=1):
             break
         last_run = get_last_run_internal(workflow, status)
@@ -456,7 +456,7 @@ def get_recent_runs(workflow, *, run_limit):
     for _ in range(5):
         # The gh cli seems to sometimes just return results from a month ago.
         # Work around it by trying again a few times if the results seem stale.
-        ran_at = dt.datetime.fromisoformat(recent_runs[0]['createdAt'])
+        ran_at = dt.datetime.fromisoformat(recent_runs[0]["createdAt"])
         if dt.datetime.now(ran_at.tzinfo) - ran_at < dt.timedelta(days=1):
             break
         last_run = get_recent_runs_internal(workflow, run_limit=run_limit)
