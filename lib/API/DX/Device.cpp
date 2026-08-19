@@ -806,7 +806,7 @@ class DXComputeEncoder : public offloadtest::ComputeEncoder {
   }
 
 public:
-  DXComputeEncoder(DXCommandBuffer &CB)
+  explicit DXComputeEncoder(DXCommandBuffer &CB)
       : ComputeEncoder(GPUAPI::DirectX), CB(CB) {}
 
   ~DXComputeEncoder() override { endEncoding(); }
@@ -1296,6 +1296,8 @@ public:
     const std::unique_ptr<D3D12_DESCRIPTOR_RANGE[]> Ranges(
         new D3D12_DESCRIPTOR_RANGE[DescriptorCount]);
     uint32_t RangeIdx = 0;
+    bool HasDynIndexedBufferHeap = false;
+    bool HasDynIndexedSamplerHeap = false;
     for (const auto &Set : BndDesc.DescriptorSetDescs) {
       uint32_t DescriptorIdx = 0;
       const uint32_t StartRangeIdx = RangeIdx;
@@ -1303,6 +1305,12 @@ public:
         const DescriptorKind Kind = getDescriptorKind(Binding.Kind);
         if (Kind == DescriptorKind::SAMPLER)
           continue;
+
+        // Dynamic resources do not have register bindings.
+        if (Binding.HeapIndex) {
+          HasDynIndexedBufferHeap = true;
+          continue;
+        }
 
         switch (Kind) {
         case DescriptorKind::SRV:
@@ -1319,8 +1327,10 @@ public:
           break;
         }
         Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
-        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
-        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
+        assert(Binding.DXBinding.has_value() &&
+               "DXBinding must not be null when HeapIndex is not set.");
+        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding->Register;
+        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding->Space;
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
             DescriptorIdx;
         RangeIdx++;
@@ -1345,10 +1355,18 @@ public:
         if (Kind != DescriptorKind::SAMPLER)
           continue;
 
+        // Dynamic resources do not have register bindings.
+        if (Binding.HeapIndex) {
+          HasDynIndexedSamplerHeap = true;
+          continue;
+        }
+
         Ranges.get()[RangeIdx].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER;
         Ranges.get()[RangeIdx].NumDescriptors = Binding.DescriptorCount;
-        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding.Register;
-        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding.Space;
+        assert(Binding.DXBinding.has_value() &&
+               "DXBinding must not be null when HeapIndex is not set.");
+        Ranges.get()[RangeIdx].BaseShaderRegister = Binding.DXBinding->Register;
+        Ranges.get()[RangeIdx].RegisterSpace = Binding.DXBinding->Space;
         Ranges.get()[RangeIdx].OffsetInDescriptorsFromTableStart =
             SamplerDescriptorIdx;
 
@@ -1370,12 +1388,17 @@ public:
       }
     }
 
+    D3D12_ROOT_SIGNATURE_FLAGS Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+    if (IsGraphics)
+      Flags |= D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+    if (HasDynIndexedBufferHeap)
+      Flags |= D3D12_ROOT_SIGNATURE_FLAG_CBV_SRV_UAV_HEAP_DIRECTLY_INDEXED;
+    if (HasDynIndexedSamplerHeap)
+      Flags |= D3D12_ROOT_SIGNATURE_FLAG_SAMPLER_HEAP_DIRECTLY_INDEXED;
+
     CD3DX12_ROOT_SIGNATURE_DESC Desc;
     Desc.Init(static_cast<uint32_t>(RootParams.size()), RootParams.data(), 0,
-              nullptr,
-              IsGraphics
-                  ? D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
-                  : D3D12_ROOT_SIGNATURE_FLAG_NONE);
+              nullptr, Flags);
 
     ComPtr<ID3DBlob> Signature;
     ComPtr<ID3DBlob> Error;
@@ -2339,23 +2362,35 @@ public:
     if (P.getDescriptorCount() == 0)
       return llvm::Error::success();
 
-    uint32_t DescriptorCount = 0;
-    uint32_t SamplerCount = 0;
+    uint32_t DescriptorHeapSize = 0;
+    uint32_t SamplerHeapSize = 0;
+    uint32_t MaxBufferHeapIndex = 0;
+    uint32_t MaxSamplerHeapIndex = 0;
+
     for (auto &D : P.Sets)
       for (auto &R : D.Resources)
-        if (R.isSampler())
-          SamplerCount += 1;
-        else
-          DescriptorCount += R.getArraySize();
+        if (R.isSampler()) {
+          if (R.HeapIndex)
+            MaxSamplerHeapIndex =
+                std::max(MaxSamplerHeapIndex, R.HeapIndex.value());
+          else
+            SamplerHeapSize += 1;
+        } else {
+          uint32_t ArraySize = R.getArraySize();
+          if (R.HeapIndex)
+            MaxBufferHeapIndex = std::max(MaxBufferHeapIndex,
+                                          R.HeapIndex.value() + ArraySize - 1);
+          else
+            DescriptorHeapSize += ArraySize;
+        }
 
-    // prevent empty heaps
-    if (DescriptorCount == 0)
-      DescriptorCount = 1;
-    if (SamplerCount == 0)
-      SamplerCount = 1;
+    // Increase heap sizes to account for the maximum heap indices used;
+    // also prevents empty heaps.
+    DescriptorHeapSize = std::max(DescriptorHeapSize, MaxBufferHeapIndex + 1);
+    SamplerHeapSize = std::max(SamplerHeapSize, MaxSamplerHeapIndex + 1);
 
     const D3D12_DESCRIPTOR_HEAP_DESC HeapDesc = {
-        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, DescriptorCount,
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, DescriptorHeapSize,
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
     if (auto Err = HR::toError(
             Device->CreateDescriptorHeap(&HeapDesc, IID_PPV_ARGS(&DescHeap)),
@@ -2363,7 +2398,7 @@ public:
       return Err;
 
     const D3D12_DESCRIPTOR_HEAP_DESC SamplerHeapDesc = {
-        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, SamplerCount,
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER, SamplerHeapSize,
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0};
     if (auto Err =
             HR::toError(Device->CreateDescriptorHeap(
@@ -2543,8 +2578,8 @@ public:
     if (!DescHeap)
       return;
 
-    uint32_t HeapIndex = 0;
-    uint32_t SamplerHeapIndex = 0;
+    uint32_t NextBufferHeapIndex = 0;
+    uint32_t NextSamplerHeapIndex = 0;
 
     const D3D12_CPU_DESCRIPTOR_HANDLE HeapStart =
         DescHeap->GetCPUDescriptorHandleForHeapStart();
@@ -2615,18 +2650,21 @@ public:
           assert(DescriptorHandle.ptr != 0 &&
                  "Somehow got a null descriptor :(");
 
+          std::optional<uint32_t> HeapIndex = R.first->HeapIndex;
           if (Set.Smp != nullptr) {
+            uint32_t IndexInHeap =
+                HeapIndex ? HeapIndex.value() : NextSamplerHeapIndex++;
+
             Device->CopyDescriptorsSimple(
-                1,
-                {SamplerHeapStart.ptr +
-                 SamplerHeapIndex * SamplerHandleIncSize},
+                1, {SamplerHeapStart.ptr + IndexInHeap * SamplerHandleIncSize},
                 DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
-            SamplerHeapIndex += 1;
           } else {
+            uint32_t IndexInHeap =
+                HeapIndex ? HeapIndex.value() : NextBufferHeapIndex++;
+
             Device->CopyDescriptorsSimple(
-                1, {HeapStart.ptr + HeapIndex * DescHandleIncSize},
+                1, {HeapStart.ptr + IndexInHeap * DescHandleIncSize},
                 DescriptorHandle, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            HeapIndex += 1;
           }
         }
       }
@@ -2937,9 +2975,9 @@ public:
       for (auto &R : S.Resources) {
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
-        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
-        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        ResourceBinding.DXBinding = R.DXBinding;
         ResourceBinding.VKBinding = R.VKBinding;
+        ResourceBinding.HeapIndex = R.HeapIndex;
         ResourceBinding.DescriptorCount = R.getArraySize();
 
         Layout.ResourceBindings.push_back(ResourceBinding);

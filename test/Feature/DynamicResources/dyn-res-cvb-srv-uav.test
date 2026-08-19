@@ -1,0 +1,127 @@
+#--- source.hlsl
+
+// This test verifies handling of dynamic resource for
+// a constant buffer, SRV and UAV resources.
+
+struct S {
+  int4 vec;
+};
+
+cbuffer DynResIndices : register(b0) {
+  uint CbvIndex;
+  uint SrvIndex;
+  uint UavIndex;
+}
+
+RWStructuredBuffer<int4> BufOut : register(u1); 
+
+[numthreads(4, 1, 1)]
+void main(uint3 ID : SV_GroupThreadID) {
+  ConstantBuffer<S> ConstBuf = ResourceDescriptorHeap[CbvIndex];
+  StructuredBuffer<int4> SrvBuf = ResourceDescriptorHeap[SrvIndex];
+  RWBuffer<int> UavBuf = ResourceDescriptorHeap[UavIndex];
+  
+  int4 a = ConstBuf.vec;
+  int4 b = SrvBuf[ID.x];
+  int c = UavBuf[ID.x];
+
+  BufOut[ID.x] = a + b + c;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: DynResIndices
+    Format: Hex32
+    Data:
+      [ 0x3, 0x5, 0x9 ]
+
+  - Name: ConstBuf
+    Format: Hex32
+    Data:
+     [ 0x0, 0x1, 0x2, 0x3 ]
+
+  - Name: SrvBuf
+    Format: Int32
+    Stride: 16
+    Data:
+     [ 0, 10, 20, 30,
+      40, 50, 60, 70,
+      80, 90, 100, 110,
+      120, 130, 140, 150 ]
+
+  - Name: UavBuf
+    Format: Int32
+    Stride: 16
+    Data:
+     [ 1000, 2000, 3000, 4000 ]
+
+  - Name: BufOut
+    Format: Int32
+    Stride: 16
+    FillSize: 64
+
+  - Name: ExpectedBufOut
+    Format: Int32
+    Stride: 16
+    Data:
+      [ 1000, 1011, 1022, 1033,
+        2040, 2051, 2062, 2073,
+        3080, 3091, 3102, 3113,
+        4120, 4131, 4142, 4153 ]
+
+Results:
+  - Result: ExpectedResult
+    Rule: BufferExact
+    Actual: BufOut
+    Expected: ExpectedBufOut
+
+DescriptorSets:
+  - Resources:
+    - Name: DynResIndices
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+
+    - Name: ConstBuf
+      Kind: ConstantBuffer
+      HeapIndex: 3
+
+    - Name: UavBuf
+      Kind: RWBuffer
+      HeapIndex: 9
+
+    - Name: SrvBuf
+      Kind: StructuredBuffer
+      HeapIndex: 5
+
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/133831
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1413
+# XFAIL: Vulkan
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

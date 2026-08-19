@@ -169,12 +169,6 @@ Results:
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe
 
-# OpImageSampleImplicitLod is illegally sunk into control flow, but it seems
-# that intel drivers can handle this.
-#
-# Bug: https://github.com/llvm/llvm-project/issues/212365
-# XFAIL: Clang && Vulkan && !Intel
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
