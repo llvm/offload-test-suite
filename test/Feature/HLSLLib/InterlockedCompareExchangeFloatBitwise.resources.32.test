@@ -296,9 +296,6 @@ DescriptorSets:
 # Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/7782
 # XFAIL: Vulkan && DXC
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/1164
-# XFAIL: Metal && DXC
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
 # UNSUPPORTED: WARP && DXC
 
