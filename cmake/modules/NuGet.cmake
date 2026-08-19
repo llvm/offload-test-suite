@@ -35,6 +35,7 @@ endfunction()
 function(download_nuget_package_with_cli package version archive)
   set(package_dir
     "${CMAKE_CURRENT_BINARY_DIR}/nuget-downloads/${package}")
+  # Avoid stale archives when Latest resolves to a different package version.
   file(REMOVE_RECURSE "${package_dir}")
 
   set(nuget_args
@@ -61,6 +62,7 @@ function(download_nuget_package_with_cli package version archive)
     ECHO_OUTPUT_VARIABLE
     ECHO_ERROR_VARIABLE)
   if (NOT nuget_result EQUAL 0)
+    # Remove any partial package left by the failed NuGet invocation.
     file(REMOVE_RECURSE "${package_dir}")
     message(FATAL_ERROR
       "nuget.exe failed to download package ${package} ${version} "
@@ -71,6 +73,7 @@ function(download_nuget_package_with_cli package version archive)
     "${package_dir}/*.nupkg")
   list(LENGTH package_archives archive_count)
   if (NOT archive_count EQUAL 1)
+    # Remove the unexpected package layout before reporting the error.
     file(REMOVE_RECURSE "${package_dir}")
     message(FATAL_ERROR
       "Expected nuget.exe to save one package archive for "
@@ -79,6 +82,7 @@ function(download_nuget_package_with_cli package version archive)
 
   list(GET package_archives 0 package_archive)
   file(COPY_FILE "${package_archive}" "${archive}" ONLY_IF_DIFFERENT)
+  # Callers extract the retained archive, so discard NuGet's staging tree.
   file(REMOVE_RECURSE "${package_dir}")
 endfunction()
 
