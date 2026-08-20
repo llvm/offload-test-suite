@@ -114,6 +114,8 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   switch (Format) {
   case DataFormat::Int32:
     MTLFormats(32Sint) break;
+  case DataFormat::UInt32:
+    MTLFormats(32Uint) break;
   case DataFormat::Float32:
     MTLFormats(32Float) break;
   case DataFormat::UInt64:
