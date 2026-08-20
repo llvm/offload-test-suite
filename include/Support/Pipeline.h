@@ -122,6 +122,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
   case ResourceKind::AccelerationStructure:
     return DescriptorKind::SRV;
 
@@ -129,6 +130,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
     return DescriptorKind::UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -169,6 +171,7 @@ struct OutputProperties {
   int Width;
   int Depth;
   int MipLevels = 1;
+  int ArraySlices = 1;
 };
 
 static inline uint32_t getFormatSize(DataFormat Format) {
@@ -273,6 +276,8 @@ struct Resource {
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
@@ -300,6 +305,8 @@ struct Resource {
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
       return false;
@@ -320,6 +327,8 @@ struct Resource {
     case ResourceKind::Sampler:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
       return false;
@@ -329,6 +338,12 @@ struct Resource {
 
   bool isTexture() const {
     switch (Kind) {
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
+    case ResourceKind::SampledTexture2D:
+      return true;
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::StructuredBuffer:
@@ -339,12 +354,38 @@ struct Resource {
     case ResourceKind::Sampler:
     case ResourceKind::AccelerationStructure:
       return false;
-    case ResourceKind::Texture2D:
-    case ResourceKind::RWTexture2D:
-    case ResourceKind::SampledTexture2D:
-      return true;
     }
     llvm_unreachable("All cases handled");
+  }
+
+  bool isTextureArray() const {
+    switch (Kind) {
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
+      return true;
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+    case ResourceKind::Sampler:
+    case ResourceKind::SampledTexture2D:
+    case ResourceKind::AccelerationStructure:
+      return false;
+    }
+    llvm_unreachable("All cases handled");
+  }
+
+  // The number of image layers backing this texture. Validation constrains
+  // this per kind: 1 for non-array textures, 6 for a cube, and a multiple of
+  // 6 for a cube array.
+  uint32_t getTextureArraySlices() const {
+    assert(isTexture() && "Only textures have array slices");
+    return static_cast<uint32_t>(BufferPtr->OutputProps.ArraySlices);
   }
 
   bool isByteAddressBuffer() const {
@@ -398,6 +439,7 @@ struct Resource {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture2D:
+    case ResourceKind::Texture2DArray:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -407,6 +449,7 @@ struct Resource {
     case ResourceKind::RWStructuredBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::RWTexture2DArray:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -963,6 +1006,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(Sampler);
     ENUM_CASE(SampledTexture2D);
     ENUM_CASE(AccelerationStructure);
+    ENUM_CASE(Texture2DArray);
+    ENUM_CASE(RWTexture2DArray);
 #undef ENUM_CASE
   }
 };

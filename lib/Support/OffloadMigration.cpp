@@ -21,6 +21,8 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
     return BufferUsage::ConstantBuffer;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -56,6 +58,8 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
     return BufferShaderAccessType::Raw;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -257,12 +261,14 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       CreateDesc.Backing =
           R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
       CreateDesc.Usage = TextureUsage::Sampled;
-      if (R.Kind == ResourceKind::RWTexture2D)
+      if (R.isReadWrite())
         CreateDesc.Usage |= TextureUsage::Storage;
       CreateDesc.Fmt = *FormatOrErr;
       CreateDesc.Width = R.BufferPtr->OutputProps.Width;
       CreateDesc.Height = R.BufferPtr->OutputProps.Height;
       CreateDesc.MipLevels = R.BufferPtr->OutputProps.MipLevels;
+      CreateDesc.ArraySlices = R.getTextureArraySlices();
+      CreateDesc.IsArray = R.isTextureArray();
 
       for (auto &Data : R.BufferPtr->Data) {
         std::unique_ptr<offloadtest::Buffer> UploadBuffer;
