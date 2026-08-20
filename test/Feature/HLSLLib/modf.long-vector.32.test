@@ -1,0 +1,119 @@
+#--- source.hlsl
+
+StructuredBuffer<float> In : register(t0);
+RWStructuredBuffer<float> Out : register(u1);
+RWStructuredBuffer<float> ExtraOut : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  vector<float, 5> Input5;
+  for (uint I = 0; I < 5; ++I)
+    Input5[I] = In[0 + I];
+  vector<float, 5> Extra5;
+  vector<float, 5> Result5 = modf(Input5, Extra5);
+  for (uint I = 0; I < 5; ++I) {
+    Out[0 + I] = Result5[I];
+    ExtraOut[0 + I] = Extra5[I];
+  }
+  vector<float, 8> Input8;
+  for (uint I = 0; I < 8; ++I)
+    Input8[I] = In[5 + I];
+  vector<float, 8> Extra8;
+  vector<float, 8> Result8 = modf(Input8, Extra8);
+  for (uint I = 0; I < 8; ++I) {
+    Out[5 + I] = Result8[I];
+    ExtraOut[5 + I] = Extra8[I];
+  }
+  vector<float, 16> Input16;
+  for (uint I = 0; I < 16; ++I)
+    Input16[I] = In[13 + I];
+  vector<float, 16> Extra16;
+  vector<float, 16> Result16 = modf(Input16, Extra16);
+  for (uint I = 0; I < 16; ++I) {
+    Out[13 + I] = Result16[I];
+    ExtraOut[13 + I] = Extra16[I];
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 4
+    Data: [-2.75, -1.5, -0.25, 0, 0.25,
+           1.5, 2.75, -2.75, -1.5, -0.25, 0, 0.25, 1.5,
+           2.75, -2.75, -1.5, -0.25, 0, 0.25, 1.5, 2.75, -2.75, -1.5, -0.25, 0, 0.25, 1.5, 2.75, -2.75]
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    FillSize: 116
+  - Name: ExtraOut
+    Format: Float32
+    Stride: 4
+    FillSize: 116
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [-0.75, -0.5, -0.25, 0, 0.25,
+           0.5, 0.75, -0.75, -0.5, -0.25, 0, 0.25, 0.5,
+           0.75, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, -0.75]
+  - Name: ExpectedExtraOut
+    Format: Float32
+    Stride: 4
+    Data: [-2, -1, -0.0, 0, 0,
+           1, 2, -2, -1, -0.0, 0, 0, 1,
+           2, -2, -1, -0.0, 0, 0, 1, 2, -2, -1, -0.0, 0, 0, 1, 2, -2]
+Results:
+  - Result: ReturnValue
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.008
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: OutParameter
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.008
+    Actual: ExtraOut
+    Expected: ExpectedExtraOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: ExtraOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/217716
+# XFAIL: Clang
+
+# CI machines don't have SM 6.9 support yet
+# REQUIRES: !DXC || SM_6_9
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
