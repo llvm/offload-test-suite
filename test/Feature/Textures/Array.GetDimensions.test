@@ -1,0 +1,88 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  uint Width, Height, Elements, Levels;
+
+  // Texture2DArray::GetDimensions reports the slice count as `Elements`, so
+  // this reads back through the shader what the harness created from
+  // `ArraySlices`.
+  Tex.GetDimensions(Width, Height, Elements);
+  Out[0] = (float)Width;    // 4
+  Out[1] = (float)Height;   // 2
+  Out[2] = (float)Elements; // 3
+
+  // With an explicit mip level the extents halve, but the slice count must
+  // not: layers are not a texel dimension.
+  Tex.GetDimensions(0, Width, Height, Elements, Levels);
+  Out[3] = (float)Width;    // 4
+  Out[4] = (float)Height;   // 2
+  Out[5] = (float)Elements; // 3
+  Out[6] = (float)Levels;   // 2
+
+  Tex.GetDimensions(1, Width, Height, Elements, Levels);
+  Out[7] = (float)Width;     // 2
+  Out[8] = (float)Height;    // 1
+  Out[9] = (float)Elements;  // 3 -- unchanged by the mip level
+  Out[10] = (float)Levels;   // 2
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # 4x2 with 2 mips across 3 slices. Contents are irrelevant here; only the
+  # dimensions are queried.
+  # Per slice: mip 0 (4x2 = 8) + mip 1 (2x1 = 2) = 10 texels.
+  # 10 * 3 slices * sizeof(float4) = 480 bytes.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    FillSize: 480
+    OutputProps: { Width: 4, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 3 }
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 44 # 11 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 4.0, 2.0, 3.0,            # GetDimensions(w, h, elements)
+            4.0, 2.0, 3.0, 2.0,       # mip 0: w, h, elements, levels
+            2.0, 1.0, 3.0, 2.0 ]      # mip 1: extents halve, elements do not
+
+Results:
+  - Result: ArrayGetDimensionsTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# Unimplemented: https://github.com/llvm/wg-hlsl/issues/347
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

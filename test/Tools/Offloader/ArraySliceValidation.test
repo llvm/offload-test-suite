@@ -1,0 +1,72 @@
+#--- non-array.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 1, Height: 1, Depth: 1, ArraySlices: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0 ]
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+
+Results: []
+...
+#--- slice-size.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # 2x2 texels of float4 across 3 slices is 192 bytes, not 64.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 3 }
+    FillSize: 64
+
+DescriptorSets:
+  - Resources: []
+
+Results: []
+...
+#--- zero-slices.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 1, Height: 1, Depth: 1, ArraySlices: 0 }
+    FillSize: 16
+
+DescriptorSets:
+  - Resources: []
+
+Results: []
+...
+#--- end
+
+# RUN: split-file %s %t
+
+# RUN: not %offloader %t/non-array.yaml 2>&1 | FileCheck %s --check-prefix=NON-ARRAY
+# NON-ARRAY: Resource 'Tex' is not an array texture, so ArraySlices must be 1 (got 2).
+
+# RUN: not %offloader %t/slice-size.yaml 2>&1 | FileCheck %s --check-prefix=SLICE-SIZE
+# SLICE-SIZE: Buffer 'Tex' size (64) does not match OutputProps dimensions (192)
+
+# RUN: not %offloader %t/zero-slices.yaml 2>&1 | FileCheck %s --check-prefix=ZERO-SLICES
+# ZERO-SLICES: Buffer 'Tex' has an invalid ArraySlices count (0); must be at least 1

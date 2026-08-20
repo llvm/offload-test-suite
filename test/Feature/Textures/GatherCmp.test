@@ -138,7 +138,7 @@ Results:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/143523
+# Unimplemented: https://github.com/llvm/wg-hlsl/issues/409
 # XFAIL: Clang && DirectX
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
