@@ -1,0 +1,93 @@
+#--- source.hlsl
+StructuredBuffer<half4> In : register(t0);
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  half3x2 r32 = degrees(half3x2(In[0].xy, In[0].zw, In[1].xy));
+  half2x4 r24 = degrees(half2x4(In[1], In[2]));
+  half3x1 r31 = degrees(half3x1(In[0].x, In[2].x, In[2].y));
+  half4x4 r44 = degrees(half4x4(In[0], In[1], In[2], In[3]));
+
+  Out[0]  = half4(r32[0], 0.0, 0.0);
+  Out[1]  = half4(r32[1], 0.0, 0.0);
+  Out[2]  = half4(r32[2], 0.0, 0.0);
+  Out[3]  = r24[0];
+  Out[4]  = r24[1];
+  Out[5]  = half4(r31[0], 0.0, 0.0, 0.0);
+  Out[6]  = half4(r31[1], 0.0, 0.0, 0.0);
+  Out[7]  = half4(r31[2], 0.0, 0.0, 0.0);
+  Out[8]  = r44[0];
+  Out[9]  = r44[1];
+  Out[10] = r44[2];
+  Out[11] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0x0000, 0x3830, 0x3A48, 0x3C30,
+            0x3E48, 0x4248, 0x44B6, 0x4648,
+            0xBA48, 0xBE48, 0xC248, 0x3430,
+            0x3830, 0x3E48, 0x3430, 0x3A48 ]
+    # In[0]: 0, ~pi/6(0.5234), ~pi/4(0.7852), ~pi/3(1.0469)
+    # In[1]: ~pi/2(1.5703), ~pi(3.1406), ~3pi/2(4.7109), ~2pi(6.2813)
+    # In[2]: ~-pi/4, ~-pi/2, ~-pi, ~pi/12(0.2617)
+    # In[3]: ~pi/6, ~pi/2, ~pi/12, ~pi/4
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 96
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0x0000, 0x4F7F, 0x0000, 0x0000,
+            0x51A0, 0x537F, 0x0000, 0x0000,
+            0x55A0, 0x59A0, 0x0000, 0x0000,
+            0x55A0, 0x59A0, 0x5C38, 0x5DA0,
+            0xD1A0, 0xD5A0, 0xD9A0, 0x4B7F,
+            0x0000, 0x0000, 0x0000, 0x0000,
+            0xD1A0, 0x0000, 0x0000, 0x0000,
+            0xD5A0, 0x0000, 0x0000, 0x0000,
+            0x0000, 0x4F7F, 0x51A0, 0x537F,
+            0x55A0, 0x59A0, 0x5C38, 0x5DA0,
+            0xD1A0, 0xD5A0, 0xD9A0, 0x4B7F,
+            0x4F7F, 0x55A0, 0x4B7F, 0x51A0 ]
+    # 0=0x0000, 15~0x4B7F, 30~0x4F7F, 45~0x51A0, 60~0x537F
+    # 90=0x55A0, 180=0x59A0, 270=0x5C38, 360=0x5DA0
+    # -45=0xD1A0, -90=0xD5A0, -180=0xD9A0
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

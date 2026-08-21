@@ -1,0 +1,94 @@
+#--- source.hlsl
+StructuredBuffer<half4> In : register(t0);
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  half3x2 r32 = atan(half3x2(In[0].xy, In[0].zw, In[1].xy));
+  half2x4 r24 = atan(half2x4(In[1], In[2]));
+  half3x1 r31 = atan(half3x1(In[0].x, In[1].x, In[2].x));
+  half4x4 r44 = atan(half4x4(In[0], In[1], In[2], In[3]));
+
+  Out[0]  = half4(r32[0], 0.0, 0.0);
+  Out[1]  = half4(r32[1], 0.0, 0.0);
+  Out[2]  = half4(r32[2], 0.0, 0.0);
+  Out[3]  = r24[0];
+  Out[4]  = r24[1];
+  Out[5]  = half4(r31[0], 0.0, 0.0, 0.0);
+  Out[6]  = half4(r31[1], 0.0, 0.0, 0.0);
+  Out[7]  = half4(r31[2], 0.0, 0.0, 0.0);
+  Out[8]  = r44[0];
+  Out[9]  = r44[1];
+  Out[10] = r44[2];
+  Out[11] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0xD640, 0xBEEE, 0xBC00, 0xB89E,
+            0xAE66, 0x0000, 0x2E66, 0x389E,
+            0x3C00, 0x3EEE, 0x5640, 0xAE66,
+            0xBEEE, 0x389E, 0x3EEE, 0xBC00 ]
+    # In[0]: -100, ~-sqrt3, -1, ~-1/sqrt3
+    # In[1]: ~-0.1, 0, ~0.1, ~1/sqrt3
+    # In[2]: 1, ~sqrt3, 100, ~-0.1
+    # In[3]: ~-sqrt3, ~1/sqrt3, ~sqrt3, -1
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 96
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0xBE3E, 0xBC30, 0x0000, 0x0000,
+            0xBA48, 0xB830, 0x0000, 0x0000,
+            0xAE61, 0x0000, 0x0000, 0x0000,
+            0xAE61, 0x0000, 0x2E61, 0x3830,
+            0x3A48, 0x3C30, 0x3E3E, 0xAE61,
+            0xBE3E, 0x0000, 0x0000, 0x0000,
+            0xAE61, 0x0000, 0x0000, 0x0000,
+            0x3A48, 0x0000, 0x0000, 0x0000,
+            0xBE3E, 0xBC30, 0xBA48, 0xB830,
+            0xAE61, 0x0000, 0x2E61, 0x3830,
+            0x3A48, 0x3C30, 0x3E3E, 0xAE61,
+            0xBC30, 0x3830, 0x3C30, 0xBA48 ]
+    # atan(-100)~-pi/2=0xBE3E, atan(-sqrt3)=-pi/3=0xBC30, atan(-1)=-pi/4=0xBA48
+    # atan(-1/sqrt3)=-pi/6=0xB830, atan(-0.1)~-0.09967=0xAE61, atan(0)=0
+    # atan(0.1)~0x2E61, atan(1/sqrt3)=pi/6=0x3830, atan(1)=pi/4=0x3A48
+    # atan(sqrt3)=pi/3=0x3C30, atan(100)~pi/2=0x3E3E
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

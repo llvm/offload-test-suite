@@ -1,0 +1,89 @@
+#--- source.hlsl
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 r32 = exp(float3x2(In[0].xy, In[0].zw, In[1].xy));
+  float2x4 r24 = exp(float2x4(In[1], In[2]));
+  float3x1 r31 = exp(float3x1(In[0].x, In[1].x, In[2].x));
+  float4x4 r44 = exp(float4x4(In[0], In[1], In[2], In[3]));
+
+  Out[0]  = float4(r32[0], 0.0, 0.0);
+  Out[1]  = float4(r32[1], 0.0, 0.0);
+  Out[2]  = float4(r32[2], 0.0, 0.0);
+  Out[3]  = r24[0];
+  Out[4]  = r24[1];
+  Out[5]  = float4(r31[0], 0.0, 0.0, 0.0);
+  Out[6]  = float4(r31[1], 0.0, 0.0, 0.0);
+  Out[7]  = float4(r31[2], 0.0, 0.0, 0.0);
+  Out[8]  = r44[0];
+  Out[9]  = r44[1];
+  Out[10] = r44[2];
+  Out[11] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ -89.0,  -2.0,   -1.0,   0.0,
+              0.5,   1.0,    2.0,   4.0,
+              3.0,   0.5,   89.0,   2.0,
+            -2.0, 4.0, 0.5, -1.0 ]
+    # In[0]: -89, -2, -1, 0
+    # In[1]: 0.5, 1, 2, 4
+    # In[2]: 3, 0.5, 89 (overflow -> inf), 2 (reuse)
+    # In[3]: -2.0, 4.0, 0.5, -1.0
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 192
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 0.13533528, 0.0, 0.0,
+            0.36787945, 1.0, 0.0, 0.0,
+            1.6487212, 2.7182817, 0.0, 0.0,
+            1.6487212, 2.7182817, 7.389056, 54.59815,
+            20.085537, 1.6487212, inf, 7.389056,
+            0.0, 0.0, 0.0, 0.0,
+            1.6487212, 0.0, 0.0, 0.0,
+            20.085537, 0.0, 0.0, 0.0,
+            0.0, 0.13533528, 0.36787945, 1.0,
+            1.6487212, 2.7182817, 7.389056, 54.59815,
+            20.085537, 1.6487212, inf, 7.389056,
+            0.13533528, 54.59815, 1.6487212, 0.36787945 ]
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
