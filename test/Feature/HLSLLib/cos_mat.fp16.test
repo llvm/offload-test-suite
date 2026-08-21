@@ -1,0 +1,93 @@
+#--- source.hlsl
+StructuredBuffer<half4> In : register(t0);
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  half3x2 r32 = cos(half3x2(In[0].xy, In[0].zw, In[1].xy));
+  half2x4 r24 = cos(half2x4(In[1], In[2]));
+  half3x1 r31 = cos(half3x1(In[0].x, In[1].x, In[2].x));
+  half4x4 r44 = cos(half4x4(In[0], In[1], In[2], In[3]));
+
+  Out[0]  = half4(r32[0], 0.0, 0.0);
+  Out[1]  = half4(r32[1], 0.0, 0.0);
+  Out[2]  = half4(r32[2], 0.0, 0.0);
+  Out[3]  = r24[0];
+  Out[4]  = r24[1];
+  Out[5]  = half4(r31[0], 0.0, 0.0, 0.0);
+  Out[6]  = half4(r31[1], 0.0, 0.0, 0.0);
+  Out[7]  = half4(r31[2], 0.0, 0.0, 0.0);
+  Out[8]  = r44[0];
+  Out[9]  = r44[1];
+  Out[10] = r44[2];
+  Out[11] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0xC248, 0xBE48, 0xBA48, 0xB830,
+            0x0000, 0x3830, 0x3A48, 0x3C30,
+            0x3E48, 0x4030, 0x4248, 0x4648,
+            0xBE48, 0x3C30, 0x4030, 0xBA48 ]
+    # In[0]: ~-pi, ~-pi/2, ~-pi/4, ~-pi/6
+    # In[1]: 0, ~pi/6, ~pi/4, ~pi/3
+    # In[2]: ~pi/2, ~2pi/3, ~pi, ~2pi
+    # In[3]: ~-pi/2, ~pi/3, ~2pi/3, ~-pi/4
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 96
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0xBC00, 0x0000, 0x0000, 0x0000,
+            0x39A8, 0x3AEE, 0x0000, 0x0000,
+            0x3C00, 0x3AEE, 0x0000, 0x0000,
+            0x3C00, 0x3AEE, 0x39A8, 0x3800,
+            0x0000, 0xB800, 0xBC00, 0x3C00,
+            0xBC00, 0x0000, 0x0000, 0x0000,
+            0x3C00, 0x0000, 0x0000, 0x0000,
+            0x0000, 0x0000, 0x0000, 0x0000,
+            0xBC00, 0x0000, 0x39A8, 0x3AEE,
+            0x3C00, 0x3AEE, 0x39A8, 0x3800,
+            0x0000, 0xB800, 0xBC00, 0x3C00,
+            0x0000, 0x3800, 0xB800, 0x39A8 ]
+    # cos(-pi)=-1=0xBC00, cos(-pi/2)~0=0x0000, cos(-pi/4)~0.707=0x39A8, cos(-pi/6)~0.866=0x3AEE
+    # cos(0)=1=0x3C00, cos(pi/6)~0.866=0x3AEE, cos(pi/4)~0.707=0x39A8, cos(pi/3)=0.5=0x3800
+    # cos(pi/2)~0, cos(2pi/3)=-0.5=0xB800, cos(pi)=-1=0xBC00, cos(2pi)=1=0x3C00
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.003
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

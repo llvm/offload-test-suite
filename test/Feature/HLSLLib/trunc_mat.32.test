@@ -1,0 +1,85 @@
+#--- source.hlsl
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 r32 = trunc(float3x2(In[0].xy, In[0].zw, In[1].xy));
+  float2x4 r24 = trunc(float2x4(In[1], In[2]));
+  float3x1 r31 = trunc(float3x1(In[0].x, In[2].x, In[3].x));
+  float4x4 r44 = trunc(float4x4(In[0], In[1], In[2], In[3]));
+
+  Out[0]  = float4(r32[0], 0.0, 0.0);
+  Out[1]  = float4(r32[1], 0.0, 0.0);
+  Out[2]  = float4(r32[2], 0.0, 0.0);
+  Out[3]  = r24[0];
+  Out[4]  = r24[1];
+  Out[5]  = float4(r31[0], 0.0, 0.0, 0.0);
+  Out[6]  = float4(r31[1], 0.0, 0.0, 0.0);
+  Out[7]  = float4(r31[2], 0.0, 0.0, 0.0);
+  Out[8]  = r44[0];
+  Out[9]  = r44[1];
+  Out[10] = r44[2];
+  Out[11] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ -2.5, -1.7, -1.5, -1.0,
+            -0.5, -0.3,  0.0,  0.3,
+             0.5,  0.7,  1.0,  1.5,
+             1.7,  2.5,  3.0,  0.0 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 192
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ -2.0, -1.0,  0.0,  0.0,
+            -1.0, -1.0,  0.0,  0.0,
+             0.0,  0.0,  0.0,  0.0,
+             0.0,  0.0,  0.0,  0.0,
+             0.0,  0.0,  1.0,  1.0,
+            -2.0,  0.0,  0.0,  0.0,
+             0.0,  0.0,  0.0,  0.0,
+             1.0,  0.0,  0.0,  0.0,
+            -2.0, -1.0, -1.0, -1.0,
+             0.0,  0.0,  0.0,  0.0,
+             0.0,  0.0,  1.0,  1.0,
+             1.0,  2.0,  3.0,  0.0 ]
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

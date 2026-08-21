@@ -1,0 +1,81 @@
+#--- source.hlsl
+
+StructuredBuffer<half4> In : register(t0);
+
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = tan(In[0]);
+  half4 Tmp = {tan(In[1].xyz), tan(In[1].w)};
+  Out[1] = Tmp;
+  half4 Tmp2 = {tan(In[2].xy), tan(In[2].zw)};
+  Out[2] = Tmp2;
+  Out[3] = tan(In[3]);
+  Out[4] = tan(In[4]);
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0xBC30, 0xBA48, 0xB830, 0xB430,
+            0x0000, 0x3430, 0x3830, 0x3A48,
+            0x3C30, 0xBC30, 0x3430, 0xB430,
+            0x7E00, 0xFC00, 0x8001, 0x8000,
+            0x0000, 0x0001, 0x7C00, 0x7E00 ]
+    #  ~-pi/3, ~-pi/4, ~-pi/6, ~-pi/12, 0, ~pi/12, ~pi/6, ~pi/4, ~pi/3, ~-pi/3, ~pi/12, ~-pi/12
+    #  (near +-pi/2 excluded: tan is unbounded there)
+    #  In[3]: NaN, -Inf, -denorm, -0    In[4]: 0, denorm, Inf, NaN
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 40
+  - Name: ExpectedOut # The result we expect
+    Format: Float16
+    Stride: 8
+    Data: [ 0xBEEE, 0xBC00, 0xB89E, 0xB44A,
+            0x0000, 0x344A, 0x389E, 0x3C00,
+            0x3EEE, 0xBEEE, 0x344A, 0xB44A,
+            0x7E00, 0x7E00, 0x8000, 0x8000,
+            0x0000, 0x0000, 0x7E00, 0x7E00 ]
+    #  tan(-pi/3)~-sqrt3=0xBEEE, tan(-pi/4)=-1=0xBC00, tan(-pi/6)~-1/sqrt3=0xB89E
+    #  tan(-pi/12)~-0.268=0xB44A, tan(0)=0, tan(pi/12)~0x344A, tan(pi/6)~0x389E
+    #  tan(pi/4)=1=0x3C00, tan(pi/3)~sqrt3=0x3EEE
+    #  tan(NaN)=tan(+-Inf)=NaN=0x7E00; tan(+-denorm)=tan(+-0)=+-0 (0x0000/0x8000)
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.003
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

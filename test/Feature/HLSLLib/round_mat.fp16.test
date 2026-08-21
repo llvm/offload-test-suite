@@ -1,0 +1,93 @@
+#--- source.hlsl
+StructuredBuffer<half4> In : register(t0);
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  // round() uses IEEE 754 round-to-nearest-even (banker's rounding):
+  // 0.5h -> 0h, 1.5h -> 2h, 2.5h -> 2h, -0.5h -> 0h, -1.5h -> -2h, -2.5h -> -2h
+  half3x2 r32 = round(half3x2(In[0].xy, In[0].zw, In[1].xy));
+  half2x4 r24 = round(half2x4(In[1], In[2]));
+  half3x1 r31 = round(half3x1(In[0].x, In[2].x, In[3].x));
+  half4x4 r44 = round(half4x4(In[0], In[1], In[2], In[3]));
+
+  Out[0]  = half4(r32[0], 0.0, 0.0);
+  Out[1]  = half4(r32[1], 0.0, 0.0);
+  Out[2]  = half4(r32[2], 0.0, 0.0);
+  Out[3]  = r24[0];
+  Out[4]  = r24[1];
+  Out[5]  = half4(r31[0], 0.0, 0.0, 0.0);
+  Out[6]  = half4(r31[1], 0.0, 0.0, 0.0);
+  Out[7]  = half4(r31[2], 0.0, 0.0, 0.0);
+  Out[8]  = r44[0];
+  Out[9]  = r44[1];
+  Out[10] = r44[2];
+  Out[11] = r44[3];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0xC100, 0xBECD, 0xBE00, 0xBC00,
+            0xB800, 0xB4CD, 0x0000, 0x34CD,
+            0x3800, 0x399A, 0x3C00, 0x3E00,
+            0x3ECD, 0x4100, 0x4200, 0x0000 ]
+    # In[0]: -2.5, ~-1.7, -1.5, -1.0
+    # In[1]: -0.5, ~-0.3,  0.0, ~0.3
+    # In[2]:  0.5, ~0.7,   1.0,  1.5
+    # In[3]: ~1.7,  2.5,   3.0,  0.0
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 96
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0xC000, 0xC000, 0x0000, 0x0000,
+            0xC000, 0xBC00, 0x0000, 0x0000,
+            0x0000, 0x0000, 0x0000, 0x0000,
+            0x0000, 0x0000, 0x0000, 0x0000,
+            0x0000, 0x3C00, 0x3C00, 0x4000,
+            0xC000, 0x0000, 0x0000, 0x0000,
+            0x0000, 0x0000, 0x0000, 0x0000,
+            0x4000, 0x0000, 0x0000, 0x0000,
+            0xC000, 0xC000, 0xC000, 0xBC00,
+            0x0000, 0x0000, 0x0000, 0x0000,
+            0x0000, 0x3C00, 0x3C00, 0x4000,
+            0x4000, 0x4000, 0x4200, 0x0000 ]
+    # -2.0=0xC000, -1.0=0xBC00, 0.0=0x0000, 1.0=0x3C00, 2.0=0x4000, 3.0=0x4200
+Results:
+  - Result: Test1
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
