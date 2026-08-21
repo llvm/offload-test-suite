@@ -1,0 +1,106 @@
+#--- vertex.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+PSInput main(float4 position : POSITION) {
+  PSInput result;
+  result.position = position;
+  return result;
+}
+
+//--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+float4 main(PSInput input) : SV_TARGET {
+  vector<float, 5> Input5;
+  for (uint I = 0; I < 5; ++I)
+    Input5[I] = input.position.x * (I + 1);
+  vector<float, 5> Result5 = ddx_fine(Input5);
+  float Sum5 = 0.0;
+  for (uint I = 0; I < 5; ++I)
+    Sum5 += Result5[I];
+  vector<float, 8> Input8;
+  for (uint I = 0; I < 8; ++I)
+    Input8[I] = input.position.x * (I + 1);
+  vector<float, 8> Result8 = ddx_fine(Input8);
+  float Sum8 = 0.0;
+  for (uint I = 0; I < 8; ++I)
+    Sum8 += Result8[I];
+  vector<float, 16> Input16;
+  for (uint I = 0; I < 16; ++I)
+    Input16[I] = input.position.x * (I + 1);
+  vector<float, 16> Result16 = ddx_fine(Input16);
+  float Sum16 = 0.0;
+  for (uint I = 0; I < 16; ++I)
+    Sum16 += Result16[I];
+  return float4(Sum5, Sum8, Sum16, 1.0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [-1.0, -1.0, 0.0, -1.0, 1.0, 0.0, 1.0, 1.0, 0.0,
+           1.0, 1.0, 0.0, 1.0, -1.0, 0.0, -1.0, -1.0, 0.0]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/217716
+# XFAIL: Clang
+
+# CI machines don't have SM 6.9 support yet
+# REQUIRES: !DXC || SM_6_9
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T %if Clang %{ps_6_0%} %else %{ps_6_9%} -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
+
+# CHECK: Name: Output
+# CHECK: Data: [
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
+# CHECK: 15, 36, 136, 1
