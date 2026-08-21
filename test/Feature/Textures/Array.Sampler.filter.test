@@ -63,7 +63,7 @@ Samplers:
     Address: Clamp
 
 Results:
-  - Result: ArraySampleLevelTest
+  - Result: ArraySamplerFilterTest
     Rule: BufferFloatEpsilon
     Actual: Out
     Expected: Expected

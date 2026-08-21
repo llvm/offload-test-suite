@@ -75,12 +75,12 @@ texture layout (`Device::getTextureUploadLayout`, consumed by
 each subresource's byte offset, row pitch, tight row size and row count, so
 back-ends with row alignment requirements — notably D3D12's 256-byte
 `D3D12_TEXTURE_DATA_PITCH_ALIGNMENT` — work for arbitrary texture widths
-without any per-test padding. `TextureArray.UnalignedRowPitch.test` covers a
+without any per-test padding. `Array.UnalignedRowPitch.test` covers a
 width whose natural row size is not 256-byte aligned.
 
 Writes through an `RWTexture*Array` only reach mip 0, and a UAV spans array
 slices (`FirstArraySlice`/`ArraySize`) but not mip levels, because the slice is
 a shader coordinate and the mip is not. See
 [MipMappedTextures.md](MipMappedTextures.md) for why the level is fixed by the
-binding. `TextureArray.SRVToUAV.test` relies on this: it seeds mip 1 with a
+binding. `Array.SRVToUAV.test` relies on this: it seeds mip 1 with a
 sentinel and checks that the round trip leaves it untouched.
