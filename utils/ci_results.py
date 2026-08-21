@@ -225,7 +225,7 @@ def get_readme_workflows():
     workflows = []
     # Look for [![Name](https://.../badge.svg)](https://.../workflow.yaml)
     workflow_re = re.compile(
-        r'\[!\[.*?\].*?\]\(https://.*?/actions/workflows/(.*?.yaml)\)'
+        r"\[!\[.*?\].*?\]\(https://.*?/actions/workflows/(.*?.yaml)\)"
     )
     try:
         with open("README.md") as fd:
@@ -238,7 +238,7 @@ def get_readme_workflows():
         )
     if not workflows:
         raise CIResultsError(
-            f"Failed to find workflows in README.md - regex changed?"
+            f"No workflows matched in README.md - Has the format changed?"
         )
     return workflows
 
