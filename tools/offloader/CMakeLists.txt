@@ -1,5 +1,6 @@
 add_offloadtest_tool(offloader
               offloader.cpp)
+target_enable_agility_sdk(offloader)
 
 target_link_libraries(offloader PRIVATE
                       LLVMSupport
