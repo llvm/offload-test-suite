@@ -170,6 +170,7 @@ DescriptorSets:
 
 # Bug: https://github.com/llvm/llvm-project/issues/217831
 # XFAIL: Clang && Vulkan
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: Metal
 
