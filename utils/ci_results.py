@@ -152,12 +152,7 @@ def analyze_current_status(workflows, regressions_only=False):
     omitted.
     """
     if not workflows:
-        workflows = get_readme_workflows('README.md')
-    if not workflows:
-        raise CIResultsError(
-            f"Could not find workflows in README.md - "
-            f"Please run from the top level directory of the repository."
-        )
+        workflows = get_readme_workflows()
 
     printer = ResultPrinter()
 
@@ -226,15 +221,25 @@ def get_project_for_workflow(workflow):
     raise CIResultsError(f"Workflow {workflow} is neither clang nor dxc")
 
 
-def get_readme_workflows(readme_filename):
+def get_readme_workflows():
     workflows = []
     # Look for [![Name](https://.../badge.svg)](https://.../workflow.yaml)
     workflow_re = re.compile(
         r'\[!\[.*?\].*?\]\(https://.*?/actions/workflows/(.*?.yaml)\)'
     )
-    with open(readme_filename) as fd:
-        for workflow in workflow_re.finditer(fd.read()):
-            workflows.append(workflow.group(1))
+    try:
+        with open("README.md") as fd:
+            for workflow in workflow_re.finditer(fd.read()):
+                workflows.append(workflow.group(1))
+    except FileNotFoundError:
+        raise CIResultsError(
+            f"Could not find README.md - "
+            f"Please run from the top level directory of the repository."
+        )
+    if not workflows:
+        raise CIResultsError(
+            f"Failed to find workflows in README.md - regex changed?"
+        )
     return workflows
 
 
