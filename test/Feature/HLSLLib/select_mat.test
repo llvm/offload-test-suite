@@ -1,0 +1,172 @@
+#--- source.hlsl
+
+// This test tests all the following scenarios for select on matrices:
+//   - Boolean matrix condition, matrix true/false values (3x2, 2x4, 2x2)
+//   - Boolean matrix condition, scalar true value, matrix false value (3x1)
+//   - Boolean matrix condition, matrix true value, scalar false value (4x4)
+//   - Boolean matrix condition, scalar true/false values (2x2)
+//   - Non-boolean matrix condition, matrix true/false values (2x2)
+
+StructuredBuffer<bool4> Cond : register(t0);
+StructuredBuffer<float4> FloatCond : register(t1);
+StructuredBuffer<float4> TrueVal : register(t2);
+StructuredBuffer<float4> FalseVal : register(t3);
+
+RWStructuredBuffer<float4> Out : register(u4);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 F32 = select(bool3x2(Cond[0].xyz, Cond[1].xyz),
+                        float3x2(TrueVal[0].xyz, TrueVal[1].xyz),
+                        float3x2(FalseVal[0].xyz, FalseVal[1].xyz));
+  float2x4 F24 = select(bool2x4(Cond[2], Cond[3]),
+                        float2x4(TrueVal[2], TrueVal[3]),
+                        float2x4(FalseVal[2], FalseVal[3]));
+  float3x1 F31 = select(bool3x1(Cond[4].xyz),
+                        TrueVal[4].x,
+                        float3x1(FalseVal[4].xyz));
+  float4x4 F44 = select(bool4x4(Cond[5], Cond[6], Cond[7], Cond[8]),
+                        float4x4(TrueVal[5], TrueVal[6], TrueVal[7], TrueVal[8]),
+                        FalseVal[5].x);
+  float2x2 F22 = select(bool2x2(Cond[9].xy, Cond[9].zw),
+                        TrueVal[9].x,
+                        FalseVal[9].x);
+  float2x2 F22NonBool = select(float2x2(FloatCond[0].xy, FloatCond[0].zw),
+                               float2x2(TrueVal[9].xy, TrueVal[9].zw),
+                               float2x2(FalseVal[9].xy, FalseVal[9].zw));
+  float2x2 F22Const = select(bool2x2(1, 0, 0, 1),
+                             float2x2(34.0, 35.0, 36.0, 37.0),
+                             float2x2(-34.0, -35.0, -36.0, -37.0));
+
+  Out[0]  = float4(F32[0], F32[1]);
+  Out[1]  = float4(F32[2], 0.0, 0.0);
+  Out[2]  = F24[0];
+  Out[3]  = F24[1];
+  Out[4]  = float4(F31[0], F31[1], F31[2], 0.0);
+  Out[5]  = F44[0];
+  Out[6]  = F44[1];
+  Out[7]  = F44[2];
+  Out[8]  = F44[3];
+  Out[9]  = float4(F22[0], F22[1]);
+  Out[10] = float4(F22NonBool[0], F22NonBool[1]);
+  Out[11] = float4(F22Const[0], F22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Cond
+    Format: Bool
+    Stride: 16
+    Data: [ 1, 0, 1, 0,
+            0, 1, 1, 0,
+            1, 0, 0, 1,
+            0, 1, 0, 1,
+            1, 0, 1, 0,
+            1, 0, 0, 1,
+            0, 1, 1, 0,
+            1, 1, 0, 0,
+            0, 0, 1, 1,
+            1, 0, 0, 1 ]
+  - Name: FloatCond
+    Format: Float32
+    Stride: 16
+    Data: [ 10, 0, 0, 20 ]
+  - Name: TrueVal
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 2, 3, 0,
+            4, 5, 6, 0,
+            7, 8, 9, 10,
+            11, 12, 13, 14,
+            15, 16, 17, 0,
+            18, 19, 20, 21,
+            22, 23, 24, 25,
+            26, 27, 28, 29,
+            30, 31, 32, 33,
+            34, 35, 36, 37 ]
+  - Name: FalseVal
+    Format: Float32
+    Stride: 16
+    Data: [ -1, -2, -3, 0,
+            -4, -5, -6, 0,
+            -7, -8, -9, -10,
+            -11, -12, -13, -14,
+            -15, -16, -17, 0,
+            -18, -19, -20, -21,
+            -22, -23, -24, -25,
+            -26, -27, -28, -29,
+            -30, -31, -32, -33,
+            -34, -35, -36, -37 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 192
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 1, -2, 3, -4,
+            5, 6, 0, 0,
+            7, -8, -9, 10,
+            -11, 12, -13, 14,
+            15, -16, 15, 0,
+            18, -18, -18, 21,
+            -18, 23, 24, -18,
+            26, 27, -18, -18,
+            -18, -18, 32, 33,
+            34, -34, -34, 34,
+            34, -35, -36, 37,
+            34, -35, -36, 37 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Cond
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: FloatCond
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: TrueVal
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: FalseVal
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184487
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
