@@ -1,0 +1,87 @@
+#--- source.hlsl
+
+RWBuffer<float> FloatIn : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  float2x3 FloatLTLHS = FloatIn[0], FloatLTRHS = FloatIn[1];
+  float4x2 FloatGTLHS = FloatIn[2], FloatGTRHS = FloatIn[3];
+  float3x3 FloatLELHS = FloatIn[4], FloatLERHS = FloatIn[5];
+  float3x4 FloatGELHS = FloatIn[6], FloatGERHS = FloatIn[7];
+  float4x3 FloatEQLHS = FloatIn[8], FloatEQRHS = FloatIn[9];
+  float4x4 FloatNELHS = FloatIn[10], FloatNERHS = FloatIn[11];
+  bool2x3 FloatLT = FloatLTLHS < FloatLTRHS;
+  bool4x2 FloatGT = FloatGTLHS > FloatGTRHS;
+  bool3x3 FloatLE = FloatLELHS <= FloatLERHS;
+  bool3x4 FloatGE = FloatGELHS >= FloatGERHS;
+  bool4x3 FloatEQ = FloatEQLHS == FloatEQRHS;
+  bool4x4 FloatNE = FloatNELHS != FloatNERHS;
+
+  uint Offset = 0;
+  for (uint Row = 0; Row < 2; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = FloatLT[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 2; ++Col)
+      BoolOut[Offset++] = FloatGT[Row][Col];
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = FloatLE[Row][Col];
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Offset++] = FloatGE[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = FloatEQ[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Offset++] = FloatNE[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: FloatIn
+    Format: Float32
+    Data: [ 1.0, 2.0, 3.0, 2.0, 2.0, 2.0, 3.0, 2.0, 5.0, 5.0, 6.0, 7.0 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 252
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: FloatIn
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

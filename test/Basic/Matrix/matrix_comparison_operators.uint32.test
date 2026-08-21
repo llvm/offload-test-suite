@@ -1,0 +1,87 @@
+#--- source.hlsl
+
+RWBuffer<uint> UintIn : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  uint2x3 UintLTLHS = UintIn[0], UintLTRHS = UintIn[1];
+  uint4x2 UintGTLHS = UintIn[2], UintGTRHS = UintIn[3];
+  uint3x3 UintLELHS = UintIn[4], UintLERHS = UintIn[5];
+  uint3x4 UintGELHS = UintIn[6], UintGERHS = UintIn[7];
+  uint4x3 UintEQLHS = UintIn[8], UintEQRHS = UintIn[9];
+  uint4x4 UintNELHS = UintIn[10], UintNERHS = UintIn[11];
+  bool2x3 UintLT = UintLTLHS < UintLTRHS;
+  bool4x2 UintGT = UintGTLHS > UintGTRHS;
+  bool3x3 UintLE = UintLELHS <= UintLERHS;
+  bool3x4 UintGE = UintGELHS >= UintGERHS;
+  bool4x3 UintEQ = UintEQLHS == UintEQRHS;
+  bool4x4 UintNE = UintNELHS != UintNERHS;
+
+  uint Offset = 0;
+  for (uint Row = 0; Row < 2; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = UintLT[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 2; ++Col)
+      BoolOut[Offset++] = UintGT[Row][Col];
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = UintLE[Row][Col];
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Offset++] = UintGE[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = UintEQ[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Offset++] = UintNE[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: UintIn
+    Format: UInt32
+    Data: [ 1, 2, 3, 2, 2, 2, 3, 2, 5, 5, 6, 7 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 252
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: UintIn
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

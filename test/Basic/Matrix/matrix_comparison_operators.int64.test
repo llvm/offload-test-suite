@@ -1,0 +1,63 @@
+#--- source.hlsl
+
+RWBuffer<int64_t> Int64In : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int64_t3x3 Int64LELHS = Int64In[0], Int64LERHS = Int64In[1];
+  bool3x3 Int64LE = Int64LELHS <= Int64LERHS;
+
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Row * 3 + Col] = Int64LE[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Int64In
+    Format: Int64
+    Data: [ 2, 2 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 36
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: Int64In
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Int64
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

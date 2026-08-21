@@ -1,0 +1,63 @@
+#--- source.hlsl
+
+RWStructuredBuffer<double> DoubleIn : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  double4x4 DoubleNELHS = DoubleIn[0], DoubleNERHS = DoubleIn[1];
+  bool4x4 DoubleNE = DoubleNELHS != DoubleNERHS;
+
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Row * 4 + Col] = DoubleNE[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: DoubleIn
+    Format: Float64
+    Data: [ 1.0, 2.0 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 64
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: DoubleIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
