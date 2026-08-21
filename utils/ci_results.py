@@ -152,22 +152,10 @@ def analyze_current_status(workflows, regressions_only=False):
     omitted.
     """
     if not workflows:
-        for path in pathlib.Path(".github/workflows").glob("*.yaml"):
-            if any(
-                (
-                    path.name.startswith("build-"),
-                    path.name.startswith("frequent-build-"),
-                    path.name.startswith("pr-"),
-                    path.name.startswith("test-"),
-                    path.name.startswith("validate-"),
-                )
-            ):
-                continue
-            workflows.append(path.name)
-        workflows.sort(key=workflow_status_key)
+        workflows = get_readme_workflows('README.md')
     if not workflows:
         raise CIResultsError(
-            f"No workflows found in .github/workflows/. "
+            f"Could not find workflows in README.md - "
             f"Please run from the top level directory of the repository."
         )
 
@@ -238,51 +226,16 @@ def get_project_for_workflow(workflow):
     raise CIResultsError(f"Workflow {workflow} is neither clang nor dxc")
 
 
-def workflow_status_key(workflow):
-    parts = workflow[: -len(".yaml")].split("-")
-    if not parts:
-        return None
-
-    parts.reverse()
-
-    host = parts.pop()
-    if host == "macos":
-        target = "metal"
-    else:
-        target = parts.pop()
-    compiler = parts.pop()
-    driver = parts.pop()
-
-    # We label warp warp-d3d12 and the variant warp-preview-d3d12.
-    if driver == "warp" and parts[-1] == "d3d12":
-        parts.pop()
-
-    variant = True if parts else False
-
-    # Match the order that we print the results in the offload test suite
-    # README for easier correlation. Unfortunately I don't see an obvious way
-    # to automate this.
-    tier_list = [
-        ("d3d12", "intel"),
-        ("d3d12", "nvidia"),
-        ("warp", "amd"),
-        ("warp", "qc"),
-        ("vk", "intel"),
-        ("mtl", "metal"),
-        ("d3d12", "amd"),
-        ("d3d12", "qc"),
-        ("vk", "amd"),
-        ("vk", "nvidia"),
-        ("vk", "qc"),
-    ]
-    try:
-        tier = tier_list.index((driver, target))
-    except ValueError:
-        tier = len(tier_list)
-
-    compiler_key = 0 if compiler == "dxc" else 1
-
-    return (variant, tier, driver, target, host, compiler_key)
+def get_readme_workflows(readme_filename):
+    workflows = []
+    # Look for [![Name](https://.../badge.svg)](https://.../workflow.yaml)
+    workflow_re = re.compile(
+        r'\[!\[.*?\].*?\]\(https://.*?/actions/workflows/(.*?.yaml)\)'
+    )
+    with open(readme_filename) as fd:
+        for workflow in workflow_re.finditer(fd.read()):
+            workflows.append(workflow.group(1))
+    return workflows
 
 
 def find_failure_range(
