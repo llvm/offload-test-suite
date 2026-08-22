@@ -203,6 +203,7 @@ if (OFFLOADTEST_USE_CLANG_TIDY)
   endif()
   # Only lint headers that live inside this project's source tree.
   set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS}
+    --config-file=${CMAKE_CURRENT_SOURCE_DIR}/.clang-tidy
     --header-filter=^${CMAKE_CURRENT_SOURCE_DIR}/.*)
   if (OFFLOADTEST_CLANG_TIDY_APPLY_FIX)
     set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS} --fix)
