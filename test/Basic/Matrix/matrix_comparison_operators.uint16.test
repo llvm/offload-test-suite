@@ -11,6 +11,12 @@ void main() {
   for (uint Row = 0; Row < 4; ++Row)
     for (uint Col = 0; Col < 2; ++Col)
       BoolOut[Row * 2 + Col] = Uint16GT[Row][Col];
+
+  Uint16GT = Uint16GTLHS > Uint16GTLHS;
+
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 2; ++Col)
+      BoolOut[8 + Row * 2 + Col] = Uint16GT[Row][Col];
 }
 
 #--- pipeline.yaml
@@ -25,10 +31,11 @@ Buffers:
     Data: [ 5, 2 ]
   - Name: BoolOut
     Format: Int32
-    FillSize: 32
+    FillSize: 64
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1,
+            0, 0, 0, 0, 0, 0, 0, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact

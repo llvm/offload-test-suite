@@ -11,6 +11,13 @@ void main() {
   for (uint Row = 0; Row < 3; ++Row)
     for (uint Col = 0; Col < 4; ++Col)
       BoolOut[Row * 4 + Col] = Uint64GE[Row][Col];
+
+  Uint64GERHS = Uint64In[2];
+  Uint64GE = Uint64GELHS >= Uint64GERHS;
+
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[12 + Row * 4 + Col] = Uint64GE[Row][Col];
 }
 
 #--- pipeline.yaml
@@ -22,13 +29,14 @@ Shaders:
 Buffers:
   - Name: Uint64In
     Format: UInt64
-    Data: [ 3, 3 ]
+    Data: [ 3, 3, 4 ]
   - Name: BoolOut
     Format: Int32
-    FillSize: 48
+    FillSize: 96
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact
