@@ -1,0 +1,173 @@
+#--- source.hlsl
+
+// Tests InterlockedAdd on 64-bit typed RWBuffer resources. 64-bit atomics
+// on typed UAVs are an optional Shader Model 6.6 capability, surfaced to
+// lit as `Int64TypedResourceAtomics`:
+//
+//   * DirectX: cap AtomicInt64OnTypedResourceSupported
+//   * Vulkan:  shaderImageInt64Atomics, from the (non-core) extension
+//              VK_EXT_shader_image_atomic_int64. RWBuffer<T> maps to a
+//              SPIR-V image (not an SSBO), so RWBuffer atomics need this
+//              image-atomics extension, not shaderBufferInt64Atomics.
+//
+// Covers RWBuffer<uint64_t> with the 2-argument form and RWBuffer<int64_t>
+// with the 3-argument form, plus the unique-originals and monotonicity
+// checks described in InterlockedAdd.32.test.
+
+RWBuffer<uint64_t> TBufU : register(u0);
+// Element 0 is the 3-argument accumulator, element 1 the monotonicity counter.
+RWBuffer<int64_t>  TBufI : register(u1);
+
+RWStructuredBuffer<uint> OutSlotsTBufI : register(u2);
+RWStructuredBuffer<uint> OutMono : register(u3);
+
+groupshared uint SlotsTBufI[256];
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsTBufI[GTID.x] = 0u;
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWBuffer<uint64_t>: 2-argument free function, adding a value that only
+  // occupies the upper 32 bits.
+  InterlockedAdd(TBufU[0], 0x100000000ull);
+
+  // RWBuffer<int64_t>: 3-argument free function (signed).
+  int64_t OrigI;
+  InterlockedAdd(TBufI[0], (int64_t)1, OrigI);
+  SlotsTBufI[(uint)OrigI] = 1u;
+
+  // Monotonic non-decrease, plus strictly increasing per-thread originals.
+  int64_t Prev = 0;
+  int64_t PrevOrig = 0;
+  uint Mono = 1u;
+  for (uint I = 0; I < 256; ++I) {
+    int64_t Orig;
+    InterlockedAdd(TBufI[1], (int64_t)1, Orig);
+    if (I > 0 && Orig <= PrevOrig)
+      Mono = 0u;
+    PrevOrig = Orig;
+    DeviceMemoryBarrierWithGroupSync();
+    int64_t Cur = TBufI[1];
+    if (Cur < Prev)
+      Mono = 0u;
+    Prev = Cur;
+  }
+  OutMono[GTID.x] = Mono;
+
+  DeviceMemoryBarrierWithGroupSync();
+
+  OutSlotsTBufI[GTID.x] = SlotsTBufI[GTID.x];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: TBufU
+    Format: UInt64
+    Channels: 1
+    FillSize: 8
+  - Name: ExpectedTBufU
+    Format: UInt64
+    Channels: 1
+    Data: [ 1099511627776 ]
+  - Name: TBufI
+    Format: Int64
+    Channels: 1
+    FillSize: 16
+  - Name: ExpectedTBufI
+    Format: Int64
+    Channels: 1
+    Data: [ 256, 65536 ]
+  - Name: OutSlotsTBufI
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestTBufU
+    Rule: BufferExact
+    Actual: TBufU
+    Expected: ExpectedTBufU
+  - Result: TestTBufI
+    Rule: BufferExact
+    Actual: TBufI
+    Expected: ExpectedTBufI
+  - Result: TestSlotsTBufI
+    Rule: BufferExact
+    Actual: OutSlotsTBufI
+    Expected: ExpectedOnes
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+DescriptorSets:
+  - Resources:
+    - Name: TBufU
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TBufI
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutSlotsTBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Int64TypedResourceAtomics && SM_6_6
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1418
+# UNSUPPORTED: WARP && DXC
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1435
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
