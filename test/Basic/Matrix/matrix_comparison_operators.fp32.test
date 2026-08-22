@@ -5,12 +5,18 @@ RWStructuredBuffer<bool> BoolOut : register(u1);
 
 [numthreads(1, 1, 1)]
 void main() {
-  float2x3 FloatLTLHS = FloatIn[0], FloatLTRHS = FloatIn[1];
-  float4x2 FloatGTLHS = FloatIn[2], FloatGTRHS = FloatIn[3];
-  float3x3 FloatLELHS = FloatIn[4], FloatLERHS = FloatIn[5];
-  float3x4 FloatGELHS = FloatIn[6], FloatGERHS = FloatIn[7];
-  float4x3 FloatEQLHS = FloatIn[8], FloatEQRHS = FloatIn[9];
-  float4x4 FloatNELHS = FloatIn[10], FloatNERHS = FloatIn[11];
+  float2x3 FloatLTLHS = float2x3(FloatIn[0], FloatIn[1], FloatIn[2], FloatIn[3], FloatIn[4], FloatIn[5]);
+  float2x3 FloatLTRHS = float2x3(FloatIn[1], FloatIn[0], FloatIn[3], FloatIn[2], FloatIn[5], FloatIn[4]);
+  float4x2 FloatGTLHS = float4x2(FloatIn[0], FloatIn[1], FloatIn[2], FloatIn[3], FloatIn[4], FloatIn[5], FloatIn[6], FloatIn[7]);
+  float4x2 FloatGTRHS = float4x2(FloatIn[1], FloatIn[0], FloatIn[3], FloatIn[2], FloatIn[5], FloatIn[4], FloatIn[7], FloatIn[6]);
+  float3x3 FloatLELHS = float3x3(FloatIn[0], FloatIn[1], FloatIn[2], FloatIn[3], FloatIn[4], FloatIn[5], FloatIn[6], FloatIn[7], FloatIn[8]);
+  float3x3 FloatLERHS = float3x3(FloatIn[1], FloatIn[0], FloatIn[2], FloatIn[4], FloatIn[3], FloatIn[5], FloatIn[7], FloatIn[6], FloatIn[8]);
+  float3x4 FloatGELHS = float3x4(FloatIn[0], FloatIn[1], FloatIn[2], FloatIn[3], FloatIn[4], FloatIn[5], FloatIn[6], FloatIn[7], FloatIn[8], FloatIn[9], FloatIn[10], FloatIn[11]);
+  float3x4 FloatGERHS = float3x4(FloatIn[1], FloatIn[0], FloatIn[2], FloatIn[4], FloatIn[3], FloatIn[5], FloatIn[7], FloatIn[6], FloatIn[8], FloatIn[10], FloatIn[9], FloatIn[11]);
+  float4x3 FloatEQLHS = float4x3(FloatIn[0], FloatIn[1], FloatIn[2], FloatIn[3], FloatIn[4], FloatIn[5], FloatIn[6], FloatIn[7], FloatIn[8], FloatIn[9], FloatIn[10], FloatIn[11]);
+  float4x3 FloatEQRHS = float4x3(FloatIn[0], FloatIn[2], FloatIn[1], FloatIn[3], FloatIn[5], FloatIn[4], FloatIn[6], FloatIn[8], FloatIn[7], FloatIn[9], FloatIn[11], FloatIn[10]);
+  float4x4 FloatNELHS = float4x4(FloatIn[0], FloatIn[1], FloatIn[2], FloatIn[3], FloatIn[4], FloatIn[5], FloatIn[6], FloatIn[7], FloatIn[8], FloatIn[9], FloatIn[10], FloatIn[11], FloatIn[12], FloatIn[13], FloatIn[14], FloatIn[15]);
+  float4x4 FloatNERHS = float4x4(FloatIn[0], FloatIn[2], FloatIn[1], FloatIn[3], FloatIn[5], FloatIn[4], FloatIn[6], FloatIn[8], FloatIn[7], FloatIn[9], FloatIn[11], FloatIn[10], FloatIn[12], FloatIn[14], FloatIn[13], FloatIn[15]);
   bool2x3 FloatLT = FloatLTLHS < FloatLTRHS;
   bool4x2 FloatGT = FloatGTLHS > FloatGTRHS;
   bool3x3 FloatLE = FloatLELHS <= FloatLERHS;
@@ -48,13 +54,25 @@ Shaders:
 Buffers:
   - Name: FloatIn
     Format: Float32
-    Data: [ 1.0, 2.0, 3.0, 2.0, 2.0, 2.0, 3.0, 2.0, 5.0, 5.0, 6.0, 7.0 ]
+    Data: [ 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0,
+            9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0 ]
   - Name: BoolOut
     Format: Int32
     FillSize: 252
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ # float2x3 FloatLT
+            1, 0, 1, 0, 1, 0,
+            # float4x2 FloatGT
+            0, 1, 0, 1, 0, 1, 0, 1,
+            # float3x3 FloatLE
+            1, 0, 1, 1, 0, 1, 1, 0, 1,
+            # float3x4 FloatGE
+            0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1,
+            # float4x3 FloatEQ
+            1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+            # float4x4 FloatNE
+            0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact
