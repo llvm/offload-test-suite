@@ -5,12 +5,18 @@ RWStructuredBuffer<bool> BoolOut : register(u1);
 
 [numthreads(1, 1, 1)]
 void main() {
-  uint2x3 UintLTLHS = UintIn[0], UintLTRHS = UintIn[1];
-  uint4x2 UintGTLHS = UintIn[2], UintGTRHS = UintIn[3];
-  uint3x3 UintLELHS = UintIn[4], UintLERHS = UintIn[5];
-  uint3x4 UintGELHS = UintIn[6], UintGERHS = UintIn[7];
-  uint4x3 UintEQLHS = UintIn[8], UintEQRHS = UintIn[9];
-  uint4x4 UintNELHS = UintIn[10], UintNERHS = UintIn[11];
+  uint2x3 UintLTLHS = uint2x3(UintIn[0], UintIn[1], UintIn[2], UintIn[3], UintIn[4], UintIn[5]);
+  uint2x3 UintLTRHS = uint2x3(UintIn[1], UintIn[0], UintIn[3], UintIn[2], UintIn[5], UintIn[4]);
+  uint4x2 UintGTLHS = uint4x2(UintIn[0], UintIn[1], UintIn[2], UintIn[3], UintIn[4], UintIn[5], UintIn[6], UintIn[7]);
+  uint4x2 UintGTRHS = uint4x2(UintIn[1], UintIn[0], UintIn[3], UintIn[2], UintIn[5], UintIn[4], UintIn[7], UintIn[6]);
+  uint3x3 UintLELHS = uint3x3(UintIn[0], UintIn[1], UintIn[2], UintIn[3], UintIn[4], UintIn[5], UintIn[6], UintIn[7], UintIn[8]);
+  uint3x3 UintLERHS = uint3x3(UintIn[1], UintIn[0], UintIn[2], UintIn[4], UintIn[3], UintIn[5], UintIn[7], UintIn[6], UintIn[8]);
+  uint3x4 UintGELHS = uint3x4(UintIn[0], UintIn[1], UintIn[2], UintIn[3], UintIn[4], UintIn[5], UintIn[6], UintIn[7], UintIn[8], UintIn[9], UintIn[10], UintIn[11]);
+  uint3x4 UintGERHS = uint3x4(UintIn[1], UintIn[0], UintIn[2], UintIn[4], UintIn[3], UintIn[5], UintIn[7], UintIn[6], UintIn[8], UintIn[10], UintIn[9], UintIn[11]);
+  uint4x3 UintEQLHS = uint4x3(UintIn[0], UintIn[1], UintIn[2], UintIn[3], UintIn[4], UintIn[5], UintIn[6], UintIn[7], UintIn[8], UintIn[9], UintIn[10], UintIn[11]);
+  uint4x3 UintEQRHS = uint4x3(UintIn[0], UintIn[2], UintIn[1], UintIn[3], UintIn[5], UintIn[4], UintIn[6], UintIn[8], UintIn[7], UintIn[9], UintIn[11], UintIn[10]);
+  uint4x4 UintNELHS = uint4x4(UintIn[0], UintIn[1], UintIn[2], UintIn[3], UintIn[4], UintIn[5], UintIn[6], UintIn[7], UintIn[8], UintIn[9], UintIn[10], UintIn[11], UintIn[12], UintIn[13], UintIn[14], UintIn[15]);
+  uint4x4 UintNERHS = uint4x4(UintIn[0], UintIn[2], UintIn[1], UintIn[3], UintIn[5], UintIn[4], UintIn[6], UintIn[8], UintIn[7], UintIn[9], UintIn[11], UintIn[10], UintIn[12], UintIn[14], UintIn[13], UintIn[15]);
   bool2x3 UintLT = UintLTLHS < UintLTRHS;
   bool4x2 UintGT = UintGTLHS > UintGTRHS;
   bool3x3 UintLE = UintLELHS <= UintLERHS;
@@ -48,13 +54,24 @@ Shaders:
 Buffers:
   - Name: UintIn
     Format: UInt32
-    Data: [ 1, 2, 3, 2, 2, 2, 3, 2, 5, 5, 6, 7 ]
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
   - Name: BoolOut
     Format: Int32
     FillSize: 252
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ # uint2x3 UintLT
+            1, 0, 1, 0, 1, 0,
+            # uint4x2 UintGT
+            0, 1, 0, 1, 0, 1, 0, 1,
+            # uint3x3 UintLE
+            1, 0, 1, 1, 0, 1, 1, 0, 1,
+            # uint3x4 UintGE
+            0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1,
+            # uint4x3 UintEQ
+            1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+            # uint4x4 UintNE
+            0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact
