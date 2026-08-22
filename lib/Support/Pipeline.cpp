@@ -20,6 +20,30 @@ static bool isFloatingPointFormat(DataFormat Format) {
          Format == DataFormat::Float64;
 }
 
+// Checks that a texture resource's YAML description is self consistent, i.e.
+// that array slices are only requested for array kinds.
+static llvm::Error validateTextureResource(const Resource &R) {
+  if (!R.isTexture())
+    return llvm::Error::success();
+
+  const OutputProperties &Props = R.BufferPtr->OutputProps;
+  if (Props.Width <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires OutputProps with a non-zero Width.",
+        R.Name.c_str());
+
+  const uint32_t Slices = static_cast<uint32_t>(Props.ArraySlices);
+  if (!R.isTextureArray() && Slices != 1)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Resource '%s' is not an array texture, so ArraySlices must be 1 "
+        "(got %u).",
+        R.Name.c_str(), Slices);
+
+  return llvm::Error::success();
+}
+
 void PushConstantBlock::getContent(
     llvm::SmallVectorImpl<uint8_t> &Output) const {
   Output.resize(size());
@@ -105,6 +129,9 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           if (!R.BufferPtr)
             I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
         }
+        if (R.BufferPtr)
+          if (auto Err = validateTextureResource(R))
+            I.setError(llvm::toString(std::move(Err)));
       }
     }
 
@@ -425,17 +452,28 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
   I.mapOptional("OutputProps", B.OutputProps);
 
   if (!I.outputting() && B.OutputProps.Width > 0) {
-    uint32_t ExpectedSize = 0;
+    if (B.OutputProps.ArraySlices < 1) {
+      I.setError(Twine("Buffer '") + B.Name +
+                 "' has an invalid ArraySlices count (" +
+                 Twine(B.OutputProps.ArraySlices) + "); must be at least 1");
+      return;
+    }
+    // Array texture data is laid out slice-major: the full mip chain of slice
+    // 0, then the full mip chain of slice 1, and so on, matching D3D12's
+    // subresource ordering (`Mip + Slice * MipLevels`).
+    uint32_t MipChainSize = 0;
     uint32_t W = B.OutputProps.Width;
     uint32_t H = B.OutputProps.Height;
     uint32_t D = B.OutputProps.Depth;
     const uint32_t ElementSize = B.getElementSize();
     for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-      ExpectedSize += W * H * D * ElementSize;
+      MipChainSize += W * H * D * ElementSize;
       W = std::max(1u, W / 2);
       H = std::max(1u, H / 2);
       D = std::max(1u, D / 2);
     }
+    const uint32_t ExpectedSize =
+        MipChainSize * static_cast<uint32_t>(B.OutputProps.ArraySlices);
 
     if (B.Size != ExpectedSize)
       I.setError(Twine("Buffer '") + B.Name + "' size (" + Twine(B.Size) +
@@ -561,6 +599,7 @@ void MappingTraits<offloadtest::OutputProperties>::mapping(
   I.mapRequired("Width", P.Width);
   I.mapRequired("Depth", P.Depth);
   I.mapOptional("MipLevels", P.MipLevels, 1);
+  I.mapOptional("ArraySlices", P.ArraySlices, 1);
 }
 
 void MappingTraits<offloadtest::dx::RootResource>::mapping(

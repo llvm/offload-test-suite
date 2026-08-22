@@ -448,6 +448,11 @@ offloadtest::createSparseTextureWithData(
         "createSparseTextureWithData can only create "
         "textures with a sparse memory backing.");
 
+  // The staging layout below assumes a single subresource.
+  if (Desc.ArraySlices != 1)
+    return llvm::createStringError(
+        "Sparse array textures are not yet supported.");
+
   const uint64_t PackedRowStrideInBytes =
       Desc.Width * getFormatSizeInBytes(Desc.Fmt);
   if (SizeInBytes < PackedRowStrideInBytes * Desc.Height)
@@ -593,9 +598,10 @@ offloadtest::createTextureWithData(
 
   const TextureUploadLayout Layout = Dev.getTextureUploadLayout(Desc);
 
-  // The source data is tightly packed across mips, so its required size is the
-  // sum of each subresource's tight row size times its row count, independent
-  // of any backend row/offset padding in the upload buffer.
+  // The source data is tightly packed across mips and array slices, so its
+  // required size is the sum of each subresource's tight row size times its
+  // row count, independent of any backend row/offset padding in the upload
+  // buffer.
   if (SizeInBytes < Layout.getPackedSizeInBytes())
     return llvm::createStringError(
         "Data upload is not enough for texture size.");

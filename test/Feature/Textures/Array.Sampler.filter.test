@@ -1,0 +1,95 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerState Samp : register(s0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Each slice is 2x1. Texel centres are at u = 0.25 and u = 0.75, so
+  // sampling there returns that texel exactly even with a Linear filter.
+  // Texture2DArray::SampleLevel takes float3(u, v, arraySlice).
+
+  // Slice 0 is [Red, Green], slice 1 is [Blue, White]. Sampling each slice at
+  // its texel centres must return that slice's texels: filtering happens
+  // within a slice and never between slices.
+  Out[0] = Tex.SampleLevel(Samp, float3(0.25, 0.5, 0), 0.0); // Red
+  Out[1] = Tex.SampleLevel(Samp, float3(0.75, 0.5, 0), 0.0); // Green
+  Out[2] = Tex.SampleLevel(Samp, float3(0.25, 0.5, 1), 0.0); // Blue
+  Out[3] = Tex.SampleLevel(Samp, float3(0.75, 0.5, 1), 0.0); // White
+
+  // Midway between the two texels of a slice, Linear filtering does blend --
+  // within that slice only. If the slice coordinate were treated as a third
+  // texel axis these would pull in the other slice's colours instead.
+  Out[4] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 0), 0.0); // (0.5, 0.5, 0, 1)
+  Out[5] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 1), 0.0); // (0.5, 0.5, 1, 1)
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Slice-major: the whole of slice 0, then slice 1.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # slice 0, texel 0: Red
+            0.0, 1.0, 0.0, 1.0,   # slice 0, texel 1: Green
+            0.0, 0.0, 1.0, 1.0,   # slice 1, texel 0: Blue
+            1.0, 1.0, 1.0, 1.0 ]  # slice 1, texel 1: White
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 96 # 6 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # [0] slice 0 Red
+            0.0, 1.0, 0.0, 1.0,   # [1] slice 0 Green
+            0.0, 0.0, 1.0, 1.0,   # [2] slice 1 Blue
+            1.0, 1.0, 1.0, 1.0,   # [3] slice 1 White
+            0.5, 0.5, 0.0, 1.0,   # [4] slice 0 Red/Green blend
+            0.5, 0.5, 1.0, 1.0 ]  # [5] slice 1 Blue/White blend
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+
+Results:
+  - Result: ArraySamplerFilterTest
+    Rule: BufferFloatEpsilon
+    Actual: Out
+    Expected: Expected
+    Epsilon: 0.001
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
