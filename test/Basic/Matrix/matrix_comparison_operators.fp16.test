@@ -11,6 +11,13 @@ void main() {
   for (uint Row = 0; Row < 4; ++Row)
     for (uint Col = 0; Col < 3; ++Col)
       BoolOut[Row * 3 + Col] = HalfEQ[Row][Col];
+
+  HalfEQRHS = HalfIn[2];
+  HalfEQ = HalfEQLHS == HalfEQRHS;
+
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[12 + Row * 3 + Col] = HalfEQ[Row][Col];
 }
 
 #--- pipeline.yaml
@@ -22,14 +29,15 @@ Shaders:
 Buffers:
   - Name: HalfIn
     Format: Float16
-    Data: [ 0x4000, 0x4000 ]
-    #       2.0,    2.0
+    Data: [ 0x4000, 0x4000, 0x4200 ]
+    #       2.0,    2.0,    3.0
   - Name: BoolOut
     Format: Int32
-    FillSize: 48
+    FillSize: 96
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact

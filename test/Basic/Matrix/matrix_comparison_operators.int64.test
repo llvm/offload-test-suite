@@ -11,6 +11,13 @@ void main() {
   for (uint Row = 0; Row < 3; ++Row)
     for (uint Col = 0; Col < 3; ++Col)
       BoolOut[Row * 3 + Col] = Int64LE[Row][Col];
+
+  Int64LERHS = Int64In[2];
+  Int64LE = Int64LELHS <= Int64LERHS;
+
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[9 + Row * 3 + Col] = Int64LE[Row][Col];
 }
 
 #--- pipeline.yaml
@@ -22,13 +29,14 @@ Shaders:
 Buffers:
   - Name: Int64In
     Format: Int64
-    Data: [ 2, 2 ]
+    Data: [ 2, 2, 1 ]
   - Name: BoolOut
     Format: Int32
-    FillSize: 36
+    FillSize: 72
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact
