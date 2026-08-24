@@ -1,0 +1,182 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerComparisonState Samp : register(s0);        // Less
+[[vk::binding(2, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
+[[vk::binding(3, 0)]] RWBuffer<float> Out : register(u0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // Each slice is 2x2 of depth values, and the comparison result of each of
+  // the four taps is blended by the Linear filter.
+  //
+  // Slice 0 is [0.2, 0.8 / 0.2, 0.8], so at ref 0.5 half the taps pass and the
+  // blend is 0.5. Slice 1 is a uniform 0.9, so at the same ref every tap
+  // passes and the blend is 1.0. The two slices therefore give different
+  // results for identical arguments, and slice 1's uniformity means its result
+  // is exact rather than a filtered average.
+  float2 uv = float2(0.5, 0.5);
+
+  float r0 = Tex.SampleCmp(Samp, float3(uv, 0), 0.5); // 0.5<0.2=0, 0.5<0.8=1 -> 0.5
+  float r1 = Tex.SampleCmp(Samp, float3(uv, 1), 0.5); // 0.5<0.9 everywhere  -> 1.0
+
+  // A ref above slice 1's value fails every tap.
+  float r2 = Tex.SampleCmp(Samp, float3(uv, 1), 0.95); // 0.95<0.9 nowhere -> 0.0
+
+  // The comparison operator belongs to the sampler, so Greater inverts each
+  // per-tap result before the blend.
+  float r3 = Tex.SampleCmp(SampGreater, float3(uv, 0), 0.5); // -> 0.5
+  float r4 = Tex.SampleCmp(SampGreater, float3(uv, 1), 0.5); // 0.5>0.9 nowhere -> 0.0
+
+  // A texel offset moves the footprint within the selected slice. All four
+  // taps clamp onto texel (0,0) of that slice: 0.2 on slice 0, 0.9 on slice 1.
+  float r5 = Tex.SampleCmp(Samp, float3(uv, 0), 0.5, int2(-1, -1)); // -> 0.0
+  float r6 = Tex.SampleCmp(Samp, float3(uv, 1), 0.5, int2(-1, -1)); // -> 1.0
+
+  // SampleCmpLevelZero takes the same coordinate and must select the slice the
+  // same way, with the mip pinned to 0.
+  float r7 = Tex.SampleCmpLevelZero(Samp, float3(uv, 0), 0.5);        // -> 0.5
+  float r8 = Tex.SampleCmpLevelZero(Samp, float3(uv, 1), 0.5);        // -> 1.0
+  float r9 = Tex.SampleCmpLevelZero(SampGreater, float3(uv, 1), 0.5); // -> 0.0
+
+  if (all((int2)Pos.xy == 0)) {
+    Out[0] = r0;
+    Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+    Out[4] = r4;
+    Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
+  }
+  return float4(0, 0, 0, 0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  # Slice-major: the whole of slice 0, then slice 1.
+  - Name: Tex
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
+    Data: [ 0.2,   # slice 0 (0,0)
+            0.8,   # slice 0 (1,0)
+            0.2,   # slice 0 (0,1)
+            0.8,   # slice 0 (1,1)
+            0.9,   # slice 1 (0,0)
+            0.9,   # slice 1 (1,0)
+            0.9,   # slice 1 (0,1)
+            0.9 ]  # slice 1 (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 1
+    FillSize: 40 # 10 * sizeof(float)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 1
+    Data: [ 0.5,   # [0] slice 0, Less, ref 0.5
+            1.0,   # [1] slice 1, Less, ref 0.5 -- uniform 0.9
+            0.0,   # [2] slice 1, Less, ref 0.95
+            0.5,   # [3] slice 0, Greater, ref 0.5
+            0.0,   # [4] slice 1, Greater, ref 0.5
+            0.0,   # [5] slice 0, offset (-1,-1) onto 0.2
+            1.0,   # [6] slice 1, offset (-1,-1) onto 0.9
+            0.5,   # [7] slice 0, SampleCmpLevelZero
+            1.0,   # [8] slice 1, SampleCmpLevelZero
+            0.0 ]  # [9] slice 1, SampleCmpLevelZero, Greater
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps: { Width: 1, Height: 1, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: Samp
+    Kind: SamplerComparison
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+    ComparisonOp: Less
+  - Name: SampGreater
+    Kind: SamplerComparison
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+    ComparisonOp: Greater
+
+Results:
+  - Result: ArraySampleCmpTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: SampGreater
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

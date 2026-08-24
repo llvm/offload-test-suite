@@ -1,0 +1,133 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerComparisonState Samp : register(s0);        // Less, Clamp
+[[vk::binding(1, 1)]] SamplerComparisonState SampGreater : register(s1); // Greater, Clamp
+[[vk::binding(2, 1)]] SamplerComparisonState SampRepeat : register(s2);  // Less, Repeat
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Each slice is 2x2. Gather returns the four texels of the footprint in the
+  // order (0,1), (1,1), (1,0), (0,0).
+  //
+  // Slice 0 R values: (0,0)=0.2 (1,0)=0.8 (0,1)=0.2 (1,1)=0.8
+  //   -> gather order [0.2, 0.8, 0.8, 0.2]
+  // Slice 1 R values: (0,0)=0.9 (1,0)=0.1 (0,1)=0.9 (1,1)=0.1
+  //   -> gather order [0.9, 0.1, 0.1, 0.9]
+  //
+  // Slice 1 is deliberately the inverse of slice 0 under a ref of 0.5, so a
+  // gather that read the wrong slice produces the exactly opposite vector
+  // rather than something merely different.
+  float2 uv = float2(0.5, 0.5);
+
+  // ref = 0.5, Less. Slice 0: 0.5<0.2 = 0, 0.5<0.8 = 1, 0.5<0.8 = 1,
+  // 0.5<0.2 = 0. Slice 1 inverts every one of those comparisons.
+  Out[0] = Tex.GatherCmp(Samp, float3(uv, 0), 0.5); // [0, 1, 1, 0]
+  Out[1] = Tex.GatherCmp(Samp, float3(uv, 1), 0.5); // [1, 0, 0, 1]
+
+  // The comparison operator is a property of the sampler, not the slice, so
+  // Greater inverts each of the two results above.
+  Out[2] = Tex.GatherCmp(SampGreater, float3(uv, 0), 0.5); // [1, 0, 0, 1]
+  Out[3] = Tex.GatherCmp(SampGreater, float3(uv, 1), 0.5); // [0, 1, 1, 0]
+
+  // Repeat wraps (1.5, 1.5) back to (0.5, 0.5) but must leave the slice alone,
+  // so this has to match Out[1] and not slice 0's result.
+  Out[4] = Tex.GatherCmp(SampRepeat, float3(1.5, 1.5, 1), 0.5); // [1, 0, 0, 1]
+
+  // A texel offset shifts the footprint within the selected slice. Offsetting
+  // by (1, 0) moves it to (1,1), (2,1), (2,0), (1,0), which Clamp pulls back to
+  // (1,1), (1,1), (1,0), (1,0) -- the right-hand column of that slice, which is
+  // uniform in both slices and differs between them.
+  Out[5] = Tex.GatherCmp(Samp, float3(uv, 0), 0.5, int2(1, 0)); // all 0.8 -> 1
+  Out[6] = Tex.GatherCmp(Samp, float3(uv, 1), 0.5, int2(1, 0)); // all 0.1 -> 0
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Slice-major: the whole of slice 0, then slice 1.
+  - Name: Tex
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
+    Data: [ 0.2,   # slice 0 (0,0)
+            0.8,   # slice 0 (1,0)
+            0.2,   # slice 0 (0,1)
+            0.8,   # slice 0 (1,1)
+            0.9,   # slice 1 (0,0)
+            0.1,   # slice 1 (1,0)
+            0.9,   # slice 1 (0,1)
+            0.1 ]  # slice 1 (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 112 # 7 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.0, 1.0, 1.0, 0.0,   # [0] slice 0, Less
+            1.0, 0.0, 0.0, 1.0,   # [1] slice 1, Less -- inverse of [0]
+            1.0, 0.0, 0.0, 1.0,   # [2] slice 0, Greater
+            0.0, 1.0, 1.0, 0.0,   # [3] slice 1, Greater
+            1.0, 0.0, 0.0, 1.0,   # [4] slice 1, Repeat wraps uv, keeps slice
+            1.0, 1.0, 1.0, 1.0,   # [5] slice 0, offset (1,0): all 0.8
+            0.0, 0.0, 0.0, 0.0 ]  # [6] slice 1, offset (1,0): all 0.1
+
+Samplers:
+  - Name: Samp
+    Kind: SamplerComparison
+    Address: Clamp
+    ComparisonOp: Less
+  - Name: SampGreater
+    Kind: SamplerComparison
+    Address: Clamp
+    ComparisonOp: Greater
+  - Name: SampRepeat
+    Kind: SamplerComparison
+    Address: Repeat
+    ComparisonOp: Less
+
+Results:
+  - Result: ArrayGatherCmpTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: SampGreater
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: SampRepeat
+      Kind: Sampler
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
