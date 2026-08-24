@@ -1,6 +1,7 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(2, 0)]] RWTexture2DArray<float> RWTex : register(u1);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -9,6 +10,17 @@ void main() {
   Out[1] = Tex[uint3(1, 1, 0)]; // Slice 0 (1,1) White
   Out[2] = Tex[uint3(1, 1, 1)]; // Slice 1 (1,1) Grey
   Out[3] = Tex[uint3(0, 1, 2)]; // Slice 2 (0,1) Navy
+
+  // RWTexture2DArray::operator[] takes the same uint3(x, y, arraySlice) as the
+  // SRV form, so the third component selects the slice here too rather than
+  // being a mip or a depth.
+  //
+  // The UAV is single-channel on purpose: a typed UAV *load* is only
+  // guaranteed for the single-component 32-bit formats, so reading a float4
+  // UAV would additionally require TypedUAVLoadAdditionalFormats support.
+  // Each slice holds a distinct value, so one result covers all three.
+  Out[4] = float4(RWTex[uint3(0, 0, 0)], RWTex[uint3(1, 1, 1)],
+                  RWTex[uint3(0, 1, 2)], RWTex[uint3(1, 0, 2)]);
 }
 
 //--- pipeline.yaml
@@ -40,10 +52,19 @@ Buffers:
             0.0, 0.0, 0.5, 1.0,  # (0,1) Navy
             0.0, 0.5, 0.5, 1.0 ] # (1,1) Teal
 
+  # Slice-major, one distinct value per texel so a wrong slice is visible.
+  - Name: RWTex
+    Format: Float32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 3 }
+    Data: [ 0.1, 0.2, 0.3, 0.4,   # slice 0: (0,0) (1,0) (0,1) (1,1)
+            0.5, 0.6, 0.7, 0.8,   # slice 1
+            0.9, 0.95, 0.35, 0.45 ] # slice 2
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64 # 4 * sizeof(float4)
+    FillSize: 80 # 5 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -51,7 +72,8 @@ Buffers:
     Data: [ 1.0, 0.0, 0.0, 1.0,  # [0] Slice 0 (0,0) Red
             1.0, 1.0, 1.0, 1.0,  # [1] Slice 0 (1,1) White
             0.5, 0.5, 0.5, 1.0,  # [2] Slice 1 (1,1) Grey
-            0.0, 0.0, 0.5, 1.0 ] # [3] Slice 2 (0,1) Navy
+            0.0, 0.0, 0.5, 1.0,  # [3] Slice 2 (0,1) Navy
+            0.1, 0.8, 0.35, 0.95 ] # [4] UAV: s0(0,0) s1(1,1) s2(0,1) s2(1,0)
 
 DescriptorSets:
   - Resources:
@@ -59,6 +81,10 @@ DescriptorSets:
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
+    - Name: RWTex
+      Kind: RWTexture2DArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }

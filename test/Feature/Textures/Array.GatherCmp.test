@@ -125,6 +125,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Unimplemented: https://github.com/llvm/wg-hlsl/issues/409
+# XFAIL: Clang && DirectX
+
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
 # XFAIL: Metal
 

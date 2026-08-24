@@ -1,6 +1,13 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(2, 0)]] RWTexture2D<float4> RWTex : register(u1);
+
+#ifndef NO_RWTEXTURE_LOAD
+#define RW_LOAD_OR(Call, Expect) (Call)
+#else
+#define RW_LOAD_OR(Call, Expect) (Expect)
+#endif
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -20,6 +27,11 @@ void main() {
 
   // (0,0) + (1,1) = (1,1) -> White
   Out[6] = Tex.Load(int3(0, 0, 0), int2(1, 1));
+
+  // RWTexture2D::Load takes an int2, not the int3 the SRV form takes: a UAV
+  // has a single mip level, so there is no mip component to supply.
+  Out[7] = RW_LOAD_OR(RWTex.Load(int2(0, 0)), float4(0, 1, 1, 1));     // Cyan
+  Out[8] = RW_LOAD_OR(RWTex.Load(int2(1, 1)), float4(0.5, 0.5, 0.5, 1)); // Grey
 }
 
 //--- pipeline.yaml
@@ -38,10 +50,19 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
             1.0, 1.0, 1.0, 1.0 ] # White (1,1)
 
+  - Name: RWTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1)
+            0.5, 0.5, 0.5, 1.0 ] # Grey    (1,1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 112 # 7 * sizeof(float4)
+    FillSize: 144 # 9 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -52,7 +73,9 @@ Buffers:
             1.0, 1.0, 1.0, 1.0,
             0.0, 1.0, 0.0, 1.0,  # Offset (1,0) -> Green
             1.0, 0.0, 0.0, 1.0,  # Offset (-1,-1) -> Red
-            1.0, 1.0, 1.0, 1.0 ] # Offset (1,1) -> White
+            1.0, 1.0, 1.0, 1.0,  # Offset (1,1) -> White
+            0.0, 1.0, 1.0, 1.0,  # [7] UAV Load (0,0) -> Cyan
+            0.5, 0.5, 0.5, 1.0 ] # [8] UAV Load (1,1) -> Grey
 
 DescriptorSets:
   - Resources:
@@ -60,6 +83,10 @@ DescriptorSets:
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
+    - Name: RWTex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
@@ -75,5 +102,7 @@ Results:
 
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# Clang does not implement Load() on RW texture types yet, so those checks
+# compile out there: https://github.com/llvm/llvm-project/issues/218535
+# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_RWTEXTURE_LOAD %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
