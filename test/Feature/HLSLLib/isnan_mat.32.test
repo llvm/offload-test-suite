@@ -5,20 +5,22 @@ RWStructuredBuffer<bool4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  bool3x2 b32 = isnan(float3x2(In[0].xyz, In[0].wxy));
-  bool2x4 b24 = isnan(float2x4(In[0].xy, In[0].yz, In[0].zw, In[0].wx));
-  bool3x1 b31 = isnan(float3x1(In[0].yzw));
-  bool4x4 b44 = isnan(float4x4(In[0].xyzw, In[0].yzwx, In[0].zwxy, In[0].wxyz));
+  bool3x1 B31 = isnan(float3x1(In[0].xyz));
+  bool3x2 B32 = isnan(float3x2(In[1].xyz, In[2].xyz));
+  bool2x4 B24 = isnan(float2x4(In[3].xy, In[3].zw, In[4].xy, In[4].zw));
+  bool4x4 B44 = isnan(float4x4(In[5], In[6], In[7], In[8]));
+  bool2x2 B22 = isnan(float2x2(1.0/0.0, -1.0/0.0, 0.0, 0.0/0.0));
 
-  Out[0] = bool4(b31[0], b31[1], b31[2], 0);
-  Out[1] = bool4(b32[0], b32[1]);
-  Out[2] = bool4(b32[2], 0, 0);
-  Out[3] = b24[0];
-  Out[4] = b24[1];
-  Out[5] = b44[0];
-  Out[6] = b44[1];
-  Out[7] = b44[2];
-  Out[8] = b44[3];
+  Out[0] = bool4(B31[0], B31[1], B31[2], 0);
+  Out[1] = bool4(B32[0], B32[1]);
+  Out[2] = bool4(B32[2], 0, 0);
+  Out[3] = B24[0];
+  Out[4] = B24[1];
+  Out[5] = B44[0];
+  Out[6] = B44[1];
+  Out[7] = B44[2];
+  Out[8] = B44[3];
+  Out[9] = bool4(B22[0], B22[1]);
 }
 
 //--- pipeline.yaml
@@ -31,15 +33,32 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [inf, -inf, 0.0, nan] # Inf, -Inf, 0, NaN
+    Data: [inf, -inf, 0.0, nan,
+           -inf, 0.0, nan, inf,
+           0.0, nan, inf, -inf,
+           nan, inf, -inf, 0.0,
+           inf, -inf, 0.0, nan,
+           -inf, 0.0, nan, inf,
+           0.0, nan, inf, -inf,
+           nan, inf, -inf, 0.0,
+           inf, -inf, 0.0, nan]
   - Name: Out
     Format: Bool
     Stride: 16
-    FillSize: 144
+    FillSize: 160
   - Name: ExpectedOut # The result we expect
     Format: Bool
     Stride: 16
-    Data: [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0]
+    Data: [0, 0, 0, 0,
+           0, 0, 1, 0,
+           1, 0, 0, 0,
+           1, 0, 0, 0,
+           0, 0, 0, 1,
+           0, 0, 1, 0,
+           0, 1, 0, 0,
+           1, 0, 0, 0,
+           0, 0, 0, 1,
+           0, 0, 0, 1]
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -64,7 +83,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/140824
+# Bug https://github.com/llvm/llvm-project/issues/140824
 # XFAIL: Clang
 
 # RUN: split-file %s %t
