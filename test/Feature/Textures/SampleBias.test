@@ -18,6 +18,12 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(3, 0)]] SamplerState Samp2 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+#ifndef NO_TEXTURECUBE
+[[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
+#define CUBE_OR(Call, Expect) (Call)
+#else
+#define CUBE_OR(Call, Expect) (Expect)
+#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Setup UVs to have a derivative of exactly 0.5.
@@ -30,20 +36,50 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 1. Bias = -0.1 -> LOD = -0.1 -> Mag(Nearest) -> White
   float4 r0 = Tex.SampleBias(Samp, sample_uv, -0.1);
 
-  // 2. Bias = 0.1 -> LOD = 0.1 -> Min(Linear) -> Grey
-  float4 r1 = Tex.SampleBias(Samp, sample_uv, 0.1);
+  // 2. Bias = 1.0 -> LOD = 1.0 -> Min -> mip 1 -> Magenta.
+  // Mip selection is nearest, so a smaller positive bias such as 0.1 would
+  // round back to mip 0.
+  float4 r1 = Tex.SampleBias(Samp, sample_uv, 1.0);
 
   // 3. Bias = -0.1, Offset = (-1, -1) -> UV = (0.5, 0.5) -> Texel (1, 1). Offset (-1, -1) -> Texel (0, 0) -> Red
   float4 r2 = Tex.SampleBias(Samp, sample_uv, -0.1, int2(-1, -1));
 
-  // 4. Bias = -0.1, Clamp = 0.1 -> LOD = 0.1 -> Min(Linear) -> Grey
-  float4 r3 = Tex.SampleBias(Samp, sample_uv, -0.1, int2(0, 0), 0.1);
+  // 4. Bias = -0.1, Clamp = 1.0. The clamp is a *minimum* LOD, so it raises
+  // the magnifying -0.1 up to 1.0 -> mip 1 -> Magenta.
+  float4 r3 = Tex.SampleBias(Samp, sample_uv, -0.1, int2(0, 0), 1.0);
 
-  // 5. Bias = -0.1 -> LOD = -0.1 -> Mag(Linear) -> Grey
+  // 5. Bias = -0.1 -> LOD = -0.1 -> Mag(Linear) -> Grey (mip 0)
   float4 r4 = Tex.SampleBias(Samp2, sample_uv, -0.1);
 
   // 6. Sample at (0.25, 0.25) -> Red.
   float4 r5 = Tex.SampleBias(Samp, float2(0.25, 0.25), -0.1);
+
+  // TextureCube::SampleBias takes a float3 direction. The bias shifts the
+  // derivative-computed LOD exactly as for 2D, but within the sampled face's
+  // own mip chain. Face +X is Red at mip 0 and Yellow at mip 1.
+  // There is no offset overload for a cube; the clamp overload does exist.
+  float3 CubeDir = float3(1, 0, 0) + float3(float2(GTid.xy) * 0.5, 0);
+
+  // Large positive bias drives the LOD to the coarsest mip -> Yellow.
+  float4 r6 = CUBE_OR(TexCube.SampleBias(Samp, CubeDir, 4.0),
+                       float4(1, 1, 0, 1));
+
+  // Negative bias keeps it at mip 0 -> Red.
+  float4 r7 = CUBE_OR(TexCube.SampleBias(Samp, CubeDir, -4.0),
+                       float4(1, 0, 0, 1));
+
+  // The Clamp argument is a *minimum* LOD, as the 2D case above shows: a
+  // negative bias that would select mip 0 is raised back to mip 1 by a clamp
+  // of 1.0 -> Yellow. Contrast with r7, which is the same bias unclamped.
+  float4 r8 = CUBE_OR(TexCube.SampleBias(Samp, CubeDir, -4.0, 1.0),
+                       float4(1, 1, 0, 1));
+
+  // A second face, to show each face has its own mip chain: -Z is Blue at mip
+  // 0 and Green at mip 1, so a coarse LOD here must give Green rather than
+  // +X's Yellow.
+  float3 CubeDirNegZ = float3(float2(GTid.xy) * 0.5, -1);
+  float4 r9 = CUBE_OR(TexCube.SampleBias(Samp, CubeDirNegZ, 4.0),
+                       float4(0, 1, 0, 1));
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -52,6 +88,10 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[3] = r3;
     Out[4] = r4;
     Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
   }
   return float4(0,0,0,0);
 }
@@ -73,22 +113,57 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # Green (1,0)
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
             1.0, 1.0, 1.0, 1.0,  # White (1,1)
-            0.5, 0.5, 0.5, 1.0 ] # Mip 1 (Average)
+            1.0, 0.0, 1.0, 1.0 ] # Mip 1 (Magenta)
+
+
+  # Six 2x2 faces with 2 mips, slice-major, in the order +X, -X, +Y, -Y, +Z, -Z.
+  - Name: TexCube
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 6 }
+    Data: [ # --- Face 0 (+X): mip 0 Red, mip 1 Yellow ---
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            # --- Face 1 (-X): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 2 (+Y): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 3 (-Y): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 4 (+Z): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 5 (-Z): mip 0 Blue, mip 1 Green ---
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 1.0, 0.0, 1.0 ]
 
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 96 # 6 * sizeof(float4)
+    FillSize: 160 # 10 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
     Data: [ 1.0, 1.0, 1.0, 1.0,  # Bias -0.1 -> Mag(Nearest) -> White
-            0.5, 0.5, 0.5, 1.0,  # Bias 0.1 -> Min(Linear)  -> Grey
+            1.0, 0.0, 1.0, 1.0,  # Bias 1.0 -> mip 1 -> Magenta
             1.0, 0.0, 0.0, 1.0,  # Offset (-1, -1) -> Red
-            0.5, 0.5, 0.5, 1.0,  # Clamp 0.1 ->  Min(Linear)  -> Grey (Spec: LOD 0.1 is Minification. Lavapipe might fail this and give White)
-            0.5, 0.5, 0.5, 1.0,  # Bias -0.1 -> Mag(Linear) -> Grey
-            1.0, 0.0, 0.0, 1.0 ] # Sample at (0.25, 0.25) -> Red
+            1.0, 0.0, 1.0, 1.0,  # Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
+            0.5, 0.5, 0.5, 1.0,  # Bias -0.1 -> Mag(Linear) -> Grey (mip 0)
+            1.0, 0.0, 0.0, 1.0,  # Sample at (0.25, 0.25) -> Red
+            1.0, 1.0, 0.0, 1.0,  # Cube +X, bias +4 -> mip 1 Yellow
+            1.0, 0.0, 0.0, 1.0,  # Cube +X, bias -4 -> mip 0 Red
+            1.0, 1.0, 0.0, 1.0,  # Cube +X, bias -4 min-LOD-clamped to 1 -> Yellow
+            0.0, 1.0, 0.0, 1.0 ] # Cube -Z, bias +4 -> that face's mip 1 Green
 
   - Name: RT
     Format: Float32
@@ -140,6 +215,10 @@ DescriptorSets:
       Kind: Sampler
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: SampleBiasTest
@@ -165,5 +244,7 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# Clang does not implement TextureCube yet, so the cube checks compile out
+# there: https://github.com/llvm/llvm-project/issues/194740
+# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

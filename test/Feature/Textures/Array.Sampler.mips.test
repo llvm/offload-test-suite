@@ -9,10 +9,6 @@ void main() {
   // Every slice carries its own mip chain. Slice 0 is mip 0 [Red, Green] over
   // mip 1 [Yellow]; slice 1 is mip 0 [Blue, White] over mip 1 [Magenta].
   //
-  // Each mip 1 is a colour that is *not* the average of its own mip 0, so a
-  // result matching mip 1 can only have come from the stored mip 1 data and
-  // never from filtering mip 0.
-  //
   // Mip 0 texel centres are at u = 0.25 and u = 0.75. Sampling at u = 0.4
   // gives Nearest -> texel 0, and Linear -> lerp(texel0, texel1, 0.3).
   float2 uv = float2(0.4, 0.5);

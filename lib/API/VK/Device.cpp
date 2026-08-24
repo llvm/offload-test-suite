@@ -83,6 +83,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
 
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
   case ResourceKind::RWTexture2D:
@@ -173,6 +175,8 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -191,6 +195,10 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
     return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  case ResourceKind::TextureCube:
+    return VK_IMAGE_VIEW_TYPE_CUBE;
+  case ResourceKind::TextureCubeArray:
+    return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
@@ -228,6 +236,9 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::RWTexture2DArray:
     // Array textures are 2D images with more than one layer.
     return getVKImageType(TextureDimension::Two);
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
+    return getVKImageType(TextureDimension::Cube);
   default:
     llvm_unreachable("Unsupported image kind");
   }
@@ -3398,6 +3409,8 @@ public:
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
     ImageCreateInfo.arrayLayers = R.getTextureArraySlices();
+    if (R.isTextureCube())
+      ImageCreateInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;

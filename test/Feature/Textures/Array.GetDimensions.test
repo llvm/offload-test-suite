@@ -2,6 +2,7 @@
 [[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float> Out : register(u0);
 [[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex : register(u1); // 8x2, 4 slices
+[[vk::binding(3, 0)]] TextureCubeArray<float4> TexCubeArr : register(t1);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -37,6 +38,21 @@ void main() {
   Out[11] = (float)Width;    // 8
   Out[12] = (float)Height;   // 2
   Out[13] = (float)Elements; // 4
+
+  // A cube array is the other array texture kind. Its `Elements` counts
+  // *cubes*, not layers: this resource is 12 layers, which is 2 cubes, so it
+  // must report 2 rather than 12. That is the same units distinction as
+  // D3D12_SRV_DIMENSION_TEXTURECUBEARRAY's NumCubes.
+  TexCubeArr.GetDimensions(Width, Height, Elements);
+  Out[14] = (float)Width;    // 4
+  Out[15] = (float)Height;   // 4
+  Out[16] = (float)Elements; // 2 -- cubes, not the 12 layers
+
+  TexCubeArr.GetDimensions(0, Width, Height, Elements, Levels);
+  Out[17] = (float)Width;    // 4
+  Out[18] = (float)Height;   // 4
+  Out[19] = (float)Elements; // 2
+  Out[20] = (float)Levels;   // 1
 }
 
 //--- pipeline.yaml
@@ -62,10 +78,17 @@ Buffers:
     OutputProps: { Width: 8, Height: 2, Depth: 1, ArraySlices: 4 }
     FillSize: 1024 # 8*2*4 slices*4 channels*4 bytes
 
+  # 4x4 faces, 2 cubes = 12 layers, 1 mip. Contents are irrelevant here too.
+  - Name: TexCubeArr
+    Format: Float32
+    Channels: 4
+    FillSize: 3072 # 16 texels * 12 layers * sizeof(float4)
+    OutputProps: { Width: 4, Height: 4, Depth: 1, ArraySlices: 12 }
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 56 # 14 * sizeof(float)
+    FillSize: 84 # 21 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -73,7 +96,9 @@ Buffers:
     Data: [ 4.0, 2.0, 3.0,            # GetDimensions(w, h, elements)
             4.0, 2.0, 3.0, 2.0,       # mip 0: w, h, elements, levels
             2.0, 1.0, 3.0, 2.0,       # mip 1: extents halve, elements do not
-            8.0, 2.0, 4.0 ]           # RWTexture2DArray: w, h, elements
+            8.0, 2.0, 4.0,            # RWTexture2DArray: w, h, elements
+            4.0, 4.0, 2.0,            # cube array: w, h, cubes (not 12 layers)
+            4.0, 4.0, 2.0, 1.0 ]      # cube array: w, h, cubes, levels
 
 Results:
   - Result: ArrayGetDimensionsTest
@@ -91,6 +116,10 @@ DescriptorSets:
       Kind: RWTexture2DArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
+    - Name: TexCubeArr
+      Kind: TextureCubeArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }

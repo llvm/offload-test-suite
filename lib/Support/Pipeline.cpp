@@ -21,7 +21,8 @@ static bool isFloatingPointFormat(DataFormat Format) {
 }
 
 // Checks that a texture resource's YAML description is self consistent, i.e.
-// that array slices are only requested for array kinds.
+// that array slices are only requested for kinds that have layers, and that a
+// cube has whole faces.
 static llvm::Error validateTextureResource(const Resource &R) {
   if (!R.isTexture())
     return llvm::Error::success();
@@ -34,12 +35,28 @@ static llvm::Error validateTextureResource(const Resource &R) {
         R.Name.c_str());
 
   const uint32_t Slices = static_cast<uint32_t>(Props.ArraySlices);
-  if (!R.isTextureArray() && Slices != 1)
+  if (R.isTextureCube()) {
+    // Six layers make up one cube, so a cube is 6 slices and a cube array is a
+    // whole number of cubes.
+    if (Slices % 6 != 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Resource '%s' is a cube texture, so ArraySlices must be a multiple "
+          "of 6 (got %u).",
+          R.Name.c_str(), Slices);
+    if (!R.isTextureArray() && Slices != 6)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Resource '%s' is not a cube array, so ArraySlices must be 6 "
+          "(got %u).",
+          R.Name.c_str(), Slices);
+  } else if (!R.isTextureArray() && Slices != 1) {
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Resource '%s' is not an array texture, so ArraySlices must be 1 "
         "(got %u).",
         R.Name.c_str(), Slices);
+  }
 
   return llvm::Error::success();
 }

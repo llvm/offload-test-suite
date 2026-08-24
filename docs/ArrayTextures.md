@@ -8,13 +8,15 @@ array-aware indexing, sampling and readback:
 | `Texture2DArray`   | `Texture2DArray`     | SRV        |
 | `RWTexture2DArray` | `RWTexture2DArray`   | UAV        |
 
-1D and cube array textures are not supported yet.
+1D array textures are not supported yet. Cube textures are also built from
+array layers and reuse everything on this page; see
+[CubeTextures.md](CubeTextures.md).
 
 ## Defining Array Slices
 
 The number of slices (layers) is given by the `ArraySlices` field in
 `OutputProps`. It defaults to 1 and may only be greater than 1 for the array
-kinds above.
+kinds above and for the cube kinds, whose faces are layers.
 
 ```yaml
 Buffers:
