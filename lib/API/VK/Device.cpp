@@ -1601,7 +1601,6 @@ public:
     }
 #endif
 
-#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
     bool HasShaderAtomicFloatExt = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
@@ -1626,7 +1625,6 @@ public:
         Features.pNext = &FeaturesAtomicFloat;
       }
     }
-#endif
 
     const bool HasMeshShader = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
@@ -1727,7 +1725,6 @@ public:
     }
 #endif
 
-#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
     if (HasShaderAtomicFloatExt) {
       // Keep the 32-bit shared/buffer bools as reported; clear the rest so we
       // never request one that came back false.
@@ -1744,7 +1741,6 @@ public:
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
-#endif
 
     if (HasASExts) {
       if (!ASFeatures.accelerationStructure)
@@ -2940,13 +2936,11 @@ private:
     const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
 #endif
-#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
     VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
     FeaturesAtomicFloat.sType =
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
     const bool HasShaderAtomicFloatExt = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
-#endif
 
     Features.pNext = &Features11;
     if (HasVulkan12)
@@ -2978,13 +2972,11 @@ private:
         Features11.pNext = &FeaturesImageAtomicInt64;
     }
 #endif
-#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
     // pNext order is irrelevant, so splice in at the head.
     if (HasShaderAtomicFloatExt) {
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
     }
-#endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
@@ -3023,12 +3015,10 @@ private:
       #Name, makeCapability<bool>(#Name, HasShaderImageAtomicInt64Ext &&       \
                                              FeaturesImageAtomicInt64.Name)));
 #endif
-#ifdef VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME
 #define VULKAN_EXT_SHADER_ATOMIC_FLOAT_FEATURE_BOOL(Name)                      \
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
                                              FeaturesAtomicFloat.Name)));
-#endif
 #include "VKFeatures.def"
   }
 
