@@ -11,6 +11,12 @@ LLVM and DXC are built by two independent schedules:
 
 Test cells consume both through `test-callable.yaml`.
 
+Migration is incremental. Today `pr-matrix.yaml` routes only the
+`windows-nvidia` x64 cells (`check-hlsl-d3d12` and `check-hlsl-clang-d3d12`)
+this way; every other cell still builds its own toolchain via
+`build-and-test-callable.yaml` with `SplitBuild: true`. So "PRs never build
+LLVM or DXC" below describes the end state, not the current one.
+
 The two are separate for **failure isolation**: with a single builder, a
 broken LLVM `main` also withholds the DXC artifact, and vice versa. Split,
 each component ages independently. The cadences follow how fast each
@@ -93,11 +99,12 @@ by `<arch>`.
 
 ### Choosing which build to consume
 
-PR test cells do not hardcode a run. A resolver job queries the API for
-the newest successful run of each schedule and passes the two IDs to every
-cell as `LlvmRunId` and `DxcRunId`, so all cells in a PR test against one
-identical toolchain rather than some cells using one build and some
-another.
+PR test cells do not hardcode a run. `resolve-frequent-builds.yaml` queries
+the API for the newest successful run of each schedule and passes the two
+IDs to every cell as `LlvmRunId` and `DxcRunId`, so all cells in a PR test
+against one identical toolchain rather than some cells using one build and
+some another. It is a reusable workflow so `pr-matrix.yaml` and
+`validate-frequent-builder.yaml` resolve identically.
 
 The resolver accepts only `schedule` and `workflow_dispatch` runs
 originating from this repository, and neither event can be raised from a

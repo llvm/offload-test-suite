@@ -231,11 +231,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99123
-# XFAIL: Clang
+# Bug: https://github.com/llvm/llvm-project/issues/218034
+# XFAIL: Clang && (DirectX || Metal)
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/1164
-# XFAIL: Metal && DXC
+# Bug: https://github.com/llvm/llvm-project/issues/217831
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
