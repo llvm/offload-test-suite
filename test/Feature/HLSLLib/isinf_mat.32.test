@@ -9,7 +9,7 @@ void main() {
   bool3x2 B32 = isinf(float3x2(In[1].xyz, In[2].xyz));
   bool2x4 B24 = isinf(float2x4(In[3].xy, In[3].zw, In[4].xy, In[4].zw));
   bool4x4 B44 = isinf(float4x4(In[5], In[6], In[7], In[8]));
-  bool2x2 B22 = isinf(float2x2(1.0/0.0, -1.0/0.0, 0.0, 0.0/0.0));
+  bool2x2 B22 = isinf(float2x2(1.0/0.0, -1.0/0.0, 0.0, 0.0/0.0));  // inf, -inf, 0, nan
 
   Out[0] = bool4(B31[0], B31[1], B31[2], 0);
   Out[1] = bool4(B32[0], B32[1]);
