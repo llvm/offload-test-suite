@@ -1,29 +1,30 @@
 #--- source.hlsl
 
-// Tests InterlockedCompareExchangeFloatBitwise on groupshared destinations
-// with 256 concurrent threads. Comparison is on the bit pattern, not the
-// numeric value, so all checks use asuint(). Four checks:
+// Tests InterlockedCompareExchangeFloatBitwise on groupshared destinations.
+// 256 threads run at the same time. Each test value is exact in float, thus
+// the shader compares floats directly. There are four checks:
 //
-//   1. Private slots: a mismatching compare must not store, a following
-//      matching compare must, and both must report the original value.
-//   2. Contended locations: every thread proposes the same new value, so
-//      exactly one thread may observe the original compare value. A
-//      never-matching compare must leave the destination alone.
-//   3. Bitwise semantics: +0.0 compared against -0.0 must not store even
-//      though the two are numerically equal, and a NaN compared against an
-//      identical NaN bit pattern must store even though NaN != NaN.
-//   4. CounterZero: thread `i` only advances the counter from `i` to `i+1`,
-//      so over 256 barrier-separated attempts each thread succeeds exactly
-//      once and the counter ends at 256. It must never decrease.
+//   1. Private slots. A compare that does not match must not store. A later
+//      compare that matches must store. Both report the initial value.
+//   2. Contended locations. All threads propose the same value. Each thread
+//      reports the value that the winner replaced, or the value that the
+//      winner stored. Only one thread can report the replaced value. That
+//      thread claims a second location to prove that it is the only winner.
+//      A compare that never matches must not change the destination.
+//   3. Bit patterns. +0.0 against -0.0 must not store. A NaN against the
+//      same NaN bits must store. A buffer supplies the NaN, because HLSL
+//      has no NaN literal.
+//   4. CounterZero. Thread `i` moves the counter from `i` to `i+1` only.
+//      The shader makes 256 attempts, with a barrier between them. Each
+//      thread wins one time, the counter stops at 256, and the counter must
+//      never decrease.
 
 RWStructuredBuffer<uint> OutMono : register(u0);
 RWStructuredBuffer<uint> OutSlots : register(u1);
 RWStructuredBuffer<uint> OutOrig : register(u2);
 RWStructuredBuffer<uint> OutWins : register(u3);
-RWStructuredBuffer<uint> OutFinal : register(u4);
-
-static const uint NanBits = 0x7FC00000u; // quiet NaN
-static const uint NegZeroBits = 0x80000000u;
+RWStructuredBuffer<float> OutFinal : register(u4);
+RWStructuredBuffer<float> NanIn : register(u5);
 
 groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
 groupshared float MatchMinusFive;              // contended, compare matches
@@ -31,8 +32,7 @@ groupshared float NoMatchSeventySeven;         // contended, never matches
 groupshared float ZeroPositive;                // +0.0, compared against -0.0
 groupshared float NanQuiet;                    // NaN, compared against NaN
 groupshared float CounterZero;                 // stepped from 0.0 to 256.0
-groupshared uint  MatchWinCountZero;           // threads that saw -5.0
-groupshared uint  NanWinCountZero;             // threads that saw the NaN
+groupshared float ClaimZero;                   // 0.0, claimed by the winner
 
 [numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
@@ -41,50 +41,48 @@ void main(uint3 GTID : SV_GroupThreadID) {
     MatchMinusFive = -5.0f;
     NoMatchSeventySeven = 77.0f;
     ZeroPositive = 0.0f;
-    NanQuiet = asfloat(NanBits);
+    NanQuiet = NanIn[0];
     CounterZero = 0.0f;
-    MatchWinCountZero = 0u;
-    NanWinCountZero = 0u;
+    ClaimZero = 0.0f;
   }
   GroupMemoryBarrierWithGroupSync();
 
-  // Check 1: both calls report the initial value, only the second stores.
+  // Check 1. Both calls report the initial value. Only the second stores.
   float OrigNoStore, OrigStore;
   InterlockedCompareExchangeFloatBitwise(SlotsMinusTwoPointFive[GTID.x], 1.0f,
                                          99.0f, OrigNoStore);
   InterlockedCompareExchangeFloatBitwise(SlotsMinusTwoPointFive[GTID.x], -2.5f,
                                          (float)GTID.x + 1000.0f, OrigStore);
 
-  OutSlots[GTID.x] = (asuint(OrigNoStore) == asuint(-2.5f) &&
-                      asuint(OrigStore) == asuint(-2.5f) &&
-                      asuint(SlotsMinusTwoPointFive[GTID.x]) ==
-                          asuint((float)GTID.x + 1000.0f)) ? 1u : 0u;
+  OutSlots[GTID.x] = (OrigNoStore == -2.5f && OrigStore == -2.5f &&
+                      SlotsMinusTwoPointFive[GTID.x] ==
+                          (float)GTID.x + 1000.0f) ? 1u : 0u;
 
-  // Check 2: a matching compare reports either the value the winner replaced
-  // or the value it stored; a never-matching compare reports it untouched.
+  // Check 2. A compare that matches reports the value that the winner
+  // replaced, or the value that the winner stored. A compare that never
+  // matches reports the unchanged destination.
   float OrigMatch, OrigNoMatch;
   InterlockedCompareExchangeFloatBitwise(MatchMinusFive, -5.0f, 42.0f,
                                          OrigMatch);
   InterlockedCompareExchangeFloatBitwise(NoMatchSeventySeven, 78.0f, -1.0f,
                                          OrigNoMatch);
-  if (asuint(OrigMatch) == asuint(-5.0f))
-    InterlockedAdd(MatchWinCountZero, 1u);
 
-  // Check 3: -0.0 must not match +0.0, and NaN must match its own bits.
+  // Only the thread that received the original tries to claim. Thus a
+  // second claim shows that the exchange reported the original to more
+  // than one thread.
+  float Claim = 0.0f;
+  if (OrigMatch == -5.0f)
+    InterlockedCompareExchangeFloatBitwise(ClaimZero, 0.0f, 1.0f, Claim);
+
+  // Check 3. The final value shows whether each compare matched. A compare
+  // of NaN against NaN gives false, thus the reported value cannot show it.
   float OrigZero, OrigNan;
-  InterlockedCompareExchangeFloatBitwise(ZeroPositive, asfloat(NegZeroBits),
-                                         99.0f, OrigZero);
-  InterlockedCompareExchangeFloatBitwise(NanQuiet, asfloat(NanBits), 7.0f,
-                                         OrigNan);
-  if (asuint(OrigNan) == NanBits)
-    InterlockedAdd(NanWinCountZero, 1u);
+  InterlockedCompareExchangeFloatBitwise(ZeroPositive, -0.0f, 99.0f, OrigZero);
+  InterlockedCompareExchangeFloatBitwise(NanQuiet, NanIn[0], 7.0f, OrigNan);
 
-  OutOrig[GTID.x] = ((asuint(OrigMatch) == asuint(-5.0f) ||
-                      asuint(OrigMatch) == asuint(42.0f)) &&
-                     asuint(OrigNoMatch) == asuint(77.0f) &&
-                     asuint(OrigZero) == 0u &&
-                     (asuint(OrigNan) == NanBits ||
-                      asuint(OrigNan) == asuint(7.0f))) ? 1u : 0u;
+  OutOrig[GTID.x] = ((OrigMatch == -5.0f || OrigMatch == 42.0f) &&
+                     OrigNoMatch == 77.0f && OrigZero == 0.0f &&
+                     Claim == 0.0f) ? 1u : 0u;
 
   // Check 4.
   float CompareValue = (float)GTID.x;
@@ -96,7 +94,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
     float Orig;
     InterlockedCompareExchangeFloatBitwise(CounterZero, CompareValue, NewValue,
                                            Orig);
-    if (asuint(Orig) == asuint(CompareValue))
+    if (Orig == CompareValue)
       ++Wins;
     GroupMemoryBarrierWithGroupSync();
     float Cur = CounterZero;
@@ -110,13 +108,12 @@ void main(uint3 GTID : SV_GroupThreadID) {
   GroupMemoryBarrierWithGroupSync();
 
   if (GTID.x == 0) {
-    OutFinal[0] = asuint(CounterZero);         // 256.0
-    OutFinal[1] = asuint(MatchMinusFive);      // 42.0
-    OutFinal[2] = asuint(NoMatchSeventySeven); // 77.0
-    OutFinal[3] = asuint(ZeroPositive);        // +0.0, never stored
-    OutFinal[4] = asuint(NanQuiet);            // 7.0
-    OutFinal[5] = MatchWinCountZero;           // 1
-    OutFinal[6] = NanWinCountZero;             // 1
+    OutFinal[0] = CounterZero;         // 256.0
+    OutFinal[1] = MatchMinusFive;      // 42.0
+    OutFinal[2] = NoMatchSeventySeven; // 77.0
+    OutFinal[3] = ZeroPositive;        // +0.0, -0.0 must not have matched
+    OutFinal[4] = NanQuiet;            // 7.0, the NaN must have matched
+    OutFinal[5] = ClaimZero;           // 1.0, exactly one thread claimed
   }
 }
 
@@ -163,13 +160,17 @@ Buffers:
     Stride: 4
     FillSize: 1024
   - Name: OutFinal
-    Format: UInt32
+    Format: Float32
     Stride: 4
-    FillSize: 28
+    FillSize: 24
   - Name: ExpectedFinal
-    Format: Hex32
+    Format: Float32
     Stride: 4
-    Data: [ 0x43800000, 0x42280000, 0x429A0000, 0x0, 0x40E00000, 0x1, 0x1 ]
+    Data: [ 256.0, 42.0, 77.0, 0.0, 7.0, 1.0 ]
+  - Name: NanIn
+    Format: Float32
+    Stride: 4
+    Data: [ nan ]
 Results:
   - Result: TestMono
     Rule: BufferExact
@@ -228,6 +229,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 4
+    - Name: NanIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
 ...
 #--- end
 

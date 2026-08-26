@@ -1,20 +1,19 @@
 #--- source.hlsl
 
-// Tests InterlockedCompareExchangeFloatBitwise on the HLSL-legal
-// non-groupshared (resource) destination types:
+// Tests InterlockedCompareExchangeFloatBitwise on the resource destination
+// types that HLSL permits:
 //
 //   * RWStructuredBuffer<float>[i]                          (free function)
 //   * RWBuffer<float>[i]                                    (typed UAV)
 //   * RWTexture2D<float>[coord]                             (typed UAV)
 //   * RWByteAddressBuffer::InterlockedCompareExchangeFloatBitwise  (method)
 //
-// Every destination covers a matching and a never-matching compare and
-// checks the reported original. RWStructuredBuffer and RWByteAddressBuffer
-// additionally run the stepped counter, per-thread success count and
-// monotonicity check described in
-// InterlockedCompareExchangeFloatBitwise.32.test, which is also where the
-// bit-pattern semantics (-0.0 vs +0.0, NaN) are covered.
-
+// For each type, the shader makes one compare that matches and one compare
+// that never matches. It then checks the reported original value.
+// RWStructuredBuffer and RWByteAddressBuffer also run the stepped counter,
+// the count of wins for each thread, and the monotonicity check. The file
+// InterlockedCompareExchangeFloatBitwise.32.test describes these checks. It
+// also covers the bit patterns (-0.0 against +0.0, and NaN).
 RWStructuredBuffer<float> SBufF : register(u0);
 RWBuffer<float>           TBufF : register(u1);
 RWTexture2D<float>        Tex2D : register(u2);
@@ -34,9 +33,9 @@ void main(uint3 GTID : SV_GroupThreadID) {
     TBufF[1] = 9.0f;                  // compare never matches
     Tex2D[uint2(0, 0)] = -5.0f;       // compare matches
     Tex2D[uint2(1, 0)] = 9.0f;        // compare never matches
-    BABuf.Store(0, asuint(-5.0f));    // compare matches
-    BABuf.Store(4, asuint(44.0f));    // compare never matches
-    BABuf.Store(8, asuint(0.0f));     // stepped counter
+    BABuf.Store<float>(0, -5.0f);     // compare matches
+    BABuf.Store<float>(4, 44.0f);     // compare never matches
+    BABuf.Store<float>(8, 0.0f);      // stepped counter
   }
   DeviceMemoryBarrierWithGroupSync();
 
@@ -65,16 +64,13 @@ void main(uint3 GTID : SV_GroupThreadID) {
   BABuf.InterlockedCompareExchangeFloatBitwise(4, 45.0f, -1.0f,
                                                OrigBABufNoMatch);
 
-  OutOrig[GTID.x] = (asuint(OrigSBufF) == asuint(9.0f) &&
-                     (asuint(OrigTBufFMatch) == asuint(-5.0f) ||
-                      asuint(OrigTBufFMatch) == asuint(77.0f)) &&
-                     asuint(OrigTBufFNoMatch) == asuint(9.0f) &&
-                     (asuint(OrigTexMatch) == asuint(-5.0f) ||
-                      asuint(OrigTexMatch) == asuint(88.0f)) &&
-                     asuint(OrigTexNoMatch) == asuint(9.0f) &&
-                     (asuint(OrigBABufMatch) == asuint(-5.0f) ||
-                      asuint(OrigBABufMatch) == asuint(123.0f)) &&
-                     asuint(OrigBABufNoMatch) == asuint(44.0f)) ? 1u : 0u;
+  OutOrig[GTID.x] = (OrigSBufF == 9.0f &&
+                     (OrigTBufFMatch == -5.0f || OrigTBufFMatch == 77.0f) &&
+                     OrigTBufFNoMatch == 9.0f &&
+                     (OrigTexMatch == -5.0f || OrigTexMatch == 88.0f) &&
+                     OrigTexNoMatch == 9.0f &&
+                     (OrigBABufMatch == -5.0f || OrigBABufMatch == 123.0f) &&
+                     OrigBABufNoMatch == 44.0f) ? 1u : 0u;
 
   // Stepped counter on both a structured and a byte-address destination.
   float CompareValue = (float)GTID.x;
@@ -89,18 +85,18 @@ void main(uint3 GTID : SV_GroupThreadID) {
     float OrigS, OrigB;
     InterlockedCompareExchangeFloatBitwise(SBufF[0], CompareValue, NewValue,
                                            OrigS);
-    if (asuint(OrigS) == asuint(CompareValue))
+    if (OrigS == CompareValue)
       ++WinsSBufF;
     BABuf.InterlockedCompareExchangeFloatBitwise(8, CompareValue, NewValue,
                                                  OrigB);
-    if (asuint(OrigB) == asuint(CompareValue))
+    if (OrigB == CompareValue)
       ++WinsBABuf;
     DeviceMemoryBarrierWithGroupSync();
     float CurS = SBufF[0];
     if (CurS < PrevSBufF)
       MonoSBufF = 0u;
     PrevSBufF = CurS;
-    float CurB = asfloat(BABuf.Load(8));
+    float CurB = BABuf.Load<float>(8);
     if (CurB < PrevBABuf)
       MonoBABuf = 0u;
     PrevBABuf = CurB;
