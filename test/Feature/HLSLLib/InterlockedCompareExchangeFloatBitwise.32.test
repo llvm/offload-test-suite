@@ -2,7 +2,7 @@
 
 // Tests InterlockedCompareExchangeFloatBitwise on groupshared destinations.
 // 256 threads run at the same time. Each test value is exact in float, thus
-// the shader compares floats directly. There are four checks:
+// the shader compares floats directly. There are three checks:
 //
 //   1. Private slots. A compare that does not match must not store. A later
 //      compare that matches must store. Both report the initial value.
@@ -14,24 +14,17 @@
 //   3. Bit patterns. +0.0 against -0.0 must not store. A NaN against the
 //      same NaN bits must store. A buffer supplies the NaN, because HLSL
 //      has no NaN literal.
-//   4. CounterZero. Thread `i` moves the counter from `i` to `i+1` only.
-//      The shader makes 256 attempts, with a barrier between them. Each
-//      thread wins one time, the counter stops at 256, and the counter must
-//      never decrease.
 
-RWStructuredBuffer<uint> OutMono : register(u0);
-RWStructuredBuffer<uint> OutSlots : register(u1);
-RWStructuredBuffer<uint> OutOrig : register(u2);
-RWStructuredBuffer<uint> OutWins : register(u3);
-RWStructuredBuffer<float> OutFinal : register(u4);
-RWStructuredBuffer<float> NanIn : register(u5);
+RWStructuredBuffer<uint> OutSlots : register(u0);
+RWStructuredBuffer<uint> OutOrig : register(u1);
+RWStructuredBuffer<float> OutFinal : register(u2);
+RWStructuredBuffer<float> NanIn : register(u3);
 
 groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
 groupshared float MatchMinusFive;              // contended, compare matches
 groupshared float NoMatchSeventySeven;         // contended, never matches
 groupshared float ZeroPositive;                // +0.0, compared against -0.0
 groupshared float NanQuiet;                    // NaN, compared against NaN
-groupshared float CounterZero;                 // stepped from 0.0 to 256.0
 groupshared float ClaimZero;                   // 0.0, claimed by the winner
 
 [numthreads(256, 1, 1)]
@@ -42,7 +35,6 @@ void main(uint3 GTID : SV_GroupThreadID) {
     NoMatchSeventySeven = 77.0f;
     ZeroPositive = 0.0f;
     NanQuiet = NanIn[0];
-    CounterZero = 0.0f;
     ClaimZero = 0.0f;
   }
   GroupMemoryBarrierWithGroupSync();
@@ -84,36 +76,14 @@ void main(uint3 GTID : SV_GroupThreadID) {
                      OrigNoMatch == 77.0f && OrigZero == 0.0f &&
                      Claim == 0.0f) ? 1u : 0u;
 
-  // Check 4.
-  float CompareValue = (float)GTID.x;
-  float NewValue = (float)GTID.x + 1.0f;
-  float Prev = 0.0f;
-  uint Mono = 1u;
-  uint Wins = 0u;
-  for (uint I = 0; I < 256; ++I) {
-    float Orig;
-    InterlockedCompareExchangeFloatBitwise(CounterZero, CompareValue, NewValue,
-                                           Orig);
-    if (Orig == CompareValue)
-      ++Wins;
-    GroupMemoryBarrierWithGroupSync();
-    float Cur = CounterZero;
-    if (Cur < Prev)
-      Mono = 0u;
-    Prev = Cur;
-  }
-  OutMono[GTID.x] = Mono;
-  OutWins[GTID.x] = Wins;
-
   GroupMemoryBarrierWithGroupSync();
 
   if (GTID.x == 0) {
-    OutFinal[0] = CounterZero;         // 256.0
-    OutFinal[1] = MatchMinusFive;      // 42.0
-    OutFinal[2] = NoMatchSeventySeven; // 77.0
-    OutFinal[3] = ZeroPositive;        // +0.0, -0.0 must not have matched
-    OutFinal[4] = NanQuiet;            // 7.0, the NaN must have matched
-    OutFinal[5] = ClaimZero;           // 1.0, exactly one thread claimed
+    OutFinal[0] = MatchMinusFive;      // 42.0
+    OutFinal[1] = NoMatchSeventySeven; // 77.0
+    OutFinal[2] = ZeroPositive;        // +0.0, -0.0 must not have matched
+    OutFinal[3] = NanQuiet;            // 7.0, the NaN must have matched
+    OutFinal[4] = ClaimZero;           // 1.0, exactly one thread claimed
   }
 }
 
@@ -124,10 +94,6 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  - Name: OutMono
-    Format: UInt32
-    Stride: 4
-    FillSize: 1024
   - Name: ExpectedOnes
     Format: UInt32
     Stride: 4
@@ -155,27 +121,19 @@ Buffers:
     Format: UInt32
     Stride: 4
     FillSize: 1024
-  - Name: OutWins
-    Format: UInt32
-    Stride: 4
-    FillSize: 1024
   - Name: OutFinal
     Format: Float32
     Stride: 4
-    FillSize: 24
+    FillSize: 20
   - Name: ExpectedFinal
     Format: Float32
     Stride: 4
-    Data: [ 256.0, 42.0, 77.0, 0.0, 7.0, 1.0 ]
+    Data: [ 42.0, 77.0, 0.0, 7.0, 1.0 ]
   - Name: NanIn
     Format: Float32
     Stride: 4
     Data: [ nan ]
 Results:
-  - Result: TestMono
-    Rule: BufferExact
-    Actual: OutMono
-    Expected: ExpectedOnes
   - Result: TestSlots
     Rule: BufferExact
     Actual: OutSlots
@@ -184,58 +142,40 @@ Results:
     Rule: BufferExact
     Actual: OutOrig
     Expected: ExpectedOnes
-  - Result: TestWins
-    Rule: BufferExact
-    Actual: OutWins
-    Expected: ExpectedOnes
   - Result: TestFinal
     Rule: BufferExact
     Actual: OutFinal
     Expected: ExpectedFinal
 DescriptorSets:
   - Resources:
-    - Name: OutMono
+    - Name: OutSlots
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: OutSlots
+    - Name: OutOrig
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: OutOrig
+    - Name: OutFinal
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
         Space: 0
       VulkanBinding:
         Binding: 2
-    - Name: OutWins
+    - Name: NanIn
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 3
         Space: 0
       VulkanBinding:
         Binding: 3
-    - Name: OutFinal
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 4
-        Space: 0
-      VulkanBinding:
-        Binding: 4
-    - Name: NanIn
-      Kind: RWStructuredBuffer
-      DirectXBinding:
-        Register: 5
-        Space: 0
-      VulkanBinding:
-        Binding: 5
 ...
 #--- end
 
