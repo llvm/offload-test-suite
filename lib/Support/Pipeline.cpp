@@ -20,11 +20,10 @@ static bool isFloatingPointFormat(DataFormat Format) {
          Format == DataFormat::Float64;
 }
 
-// Checks that a texture resource's YAML description is self consistent, i.e.
-// that array slices are only requested for array kinds.
+// Checks that a texture resource's YAML description is self consistent.
 static llvm::Error validateTextureResource(const Resource &R) {
-  if (!R.isTexture())
-    return llvm::Error::success();
+  assert(R.isTexture() && R.BufferPtr &&
+         "validateTextureResource requires a resolved texture resource");
 
   const OutputProperties &Props = R.BufferPtr->OutputProps;
   if (Props.Width <= 0)
@@ -120,18 +119,23 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           R.BufferPtr = P.getBuffer(R.Name);
           if (!R.BufferPtr)
             I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+          else if (auto Err = validateTextureResource(R))
+            I.setError(llvm::toString(std::move(Err)));
         } else if (R.isSampler()) {
           R.SamplerPtr = P.getSampler(R.Name);
           if (!R.SamplerPtr)
             I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
+        } else if (R.isTexture()) {
+          R.BufferPtr = P.getBuffer(R.Name);
+          if (!R.BufferPtr)
+            I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+          else if (auto Err = validateTextureResource(R))
+            I.setError(llvm::toString(std::move(Err)));
         } else {
           R.BufferPtr = P.getBuffer(R.Name);
           if (!R.BufferPtr)
             I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
         }
-        if (R.BufferPtr)
-          if (auto Err = validateTextureResource(R))
-            I.setError(llvm::toString(std::move(Err)));
       }
     }
 
