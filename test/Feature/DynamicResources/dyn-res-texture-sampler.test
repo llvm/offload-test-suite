@@ -1,0 +1,136 @@
+#--- source.hlsl
+
+// This test is pretty much identical to Feature\Textures\Texture2D.Sampler.mips.test
+// except it uses dynamic resources.
+
+[[vk::binding(1, 0)]]
+RWBuffer<float4> Out : register(u1);
+
+[[vk::binding(0, 0)]]
+cbuffer DynResIndices : register(b0) {
+  uint TexIndex;
+  uint Samp0Index;
+  uint Samp1Index;
+}
+
+[numthreads(1, 1, 1)]
+void main() {
+
+  Texture2D<float4> Tex = ResourceDescriptorHeap[TexIndex];
+  SamplerState MagLinearMinPoint = SamplerDescriptorHeap[Samp0Index];
+  SamplerState MagPointMinLinear = SamplerDescriptorHeap[Samp1Index];
+
+  // Texture 2x1: [Red, Green]
+  // Centers at x=0.25, x=0.75.
+  // Sample at x=0.4.
+  // Nearest -> Red (closer to 0.25).
+  // Linear -> Lerp(Red, Green, 0.3) -> (0.7, 0.3, 0.0, 1.0).
+
+  float2 uv = float2(0.4, 0.5);
+
+  // 0: Mag Test (LOD -1) with Mag=Linear -> Linear Result
+  Out[0] = Tex.SampleLevel(MagLinearMinPoint, uv, -1.0);
+
+  // 1: Mag Test (LOD -1) with Mag=Point -> Nearest Result
+  Out[1] = Tex.SampleLevel(MagPointMinLinear, uv, -1.0);
+
+  // 2: Min Test (LOD 1) with Min=Point -> Nearest Result
+  Out[2] = Tex.SampleLevel(MagLinearMinPoint, uv, 1.0);
+
+  // 3: Min Test (LOD 1) with Min=Linear -> Linear Result
+  Out[3] = Tex.SampleLevel(MagPointMinLinear, uv, 1.0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: DynResIndices
+    Format: Hex32
+    Data:
+      [ 0x4, 0x0, 0x8 ]
+
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0,  # Green
+            0.5, 0.5, 0.0, 1.0 ] # Mip 1
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.7, 0.3, 0.0, 1.0,  # Linear
+            1.0, 0.0, 0.0, 1.0,  # Nearest
+            0.5, 0.5, 0.0, 1.0,  # Nearest (LOD 1)
+            0.5, 0.5, 0.0, 1.0 ] # Linear (LOD 1)
+
+Samplers:
+  - Name: MagLinearMinPoint
+    MinFilter: Nearest
+    MagFilter: Linear
+    Address: Clamp
+    
+  - Name: MagPointMinLinear
+    MinFilter: Linear
+    MagFilter: Nearest
+    Address: Clamp
+
+DescriptorSets:
+  - Resources:
+    - Name: DynResIndices
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+
+    - Name: Tex
+      Kind: Texture2D
+      HeapIndex: 4
+
+    - Name: MagLinearMinPoint
+      Kind: Sampler
+      HeapIndex: 0
+
+    - Name: MagPointMinLinear
+      Kind: Sampler
+      HeapIndex: 8
+
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results:
+  - Result: FilterTest
+    Rule: BufferFloatEpsilon
+    Actual: Out
+    Expected: Expected
+    Epsilon: 0.01
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/133831
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1413
+# XFAIL: Vulkan
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

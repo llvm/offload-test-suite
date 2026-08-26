@@ -114,6 +114,8 @@ static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   switch (Format) {
   case DataFormat::Int32:
     MTLFormats(32Sint) break;
+  case DataFormat::UInt32:
+    MTLFormats(32Uint) break;
   case DataFormat::Float32:
     MTLFormats(32Float) break;
   case DataFormat::UInt64:
@@ -1234,8 +1236,10 @@ public:
           llvm_unreachable("Not implemented yet."); // Requires a separate heap
         }
         Range.NumDescriptors = Binding.DescriptorCount;
-        Range.BaseShaderRegister = Binding.DXBinding.Register;
-        Range.RegisterSpace = Binding.DXBinding.Space;
+        assert(Binding.DXBinding.has_value() &&
+               "DXBinding must not be null when HeapIndex is not set.");
+        Range.BaseShaderRegister = Binding.DXBinding->Register;
+        Range.RegisterSpace = Binding.DXBinding->Space;
         Range.OffsetInDescriptorsFromTableStart = DescriptorIdx;
         llvm::outs() << "DescriptorRange[" << RangeIdx << "] {"
                      << " Type=" << static_cast<uint32_t>(Range.RangeType)
@@ -1473,13 +1477,16 @@ public:
   }
 
   llvm::Expected<ResourceBundle> createSRV(Resource &R) {
+    assert(R.DXBinding.has_value() &&
+           "DXBinding must not be null when HeapIndex is not set.");
+
     ResourceBundle Bundle;
 
     for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
          ++RegOffset) {
       llvm::outs() << "Creating SRV: { Size = " << R.size() << ", Register = t"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space;
+                   << R.DXBinding->Register + RegOffset
+                   << ", Space = " << R.DXBinding->Space;
       llvm::outs() << " }\n";
 
       auto ResourceOrErr = createResource(R, RegOffset);
@@ -1493,13 +1500,16 @@ public:
 
   // TODO: counter buffer via IRRuntimeCreateAppendBufferView?
   llvm::Expected<ResourceBundle> createUAV(Resource &R) {
+    assert(R.DXBinding.has_value() &&
+           "DXBinding must not be null when HeapIndex is not set.");
+
     ResourceBundle Bundle;
 
     for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
          ++RegOffset) {
       llvm::outs() << "Creating UAV: { Size = " << R.size() << ", Register = u"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space
+                   << R.DXBinding->Register + RegOffset
+                   << ", Space = " << R.DXBinding->Space
                    << ", HasCounter = " << R.HasCounter;
       llvm::outs() << " }\n";
 
@@ -1513,13 +1523,16 @@ public:
   }
 
   llvm::Expected<ResourceBundle> createCBV(Resource &R) {
+    assert(R.DXBinding.has_value() &&
+           "DXBinding must not be null when HeapIndex is not set.");
+
     ResourceBundle Bundle;
 
     for (size_t RegOffset = 0; RegOffset < R.BufferPtr->Data.size();
          ++RegOffset) {
       llvm::outs() << "Creating CBV: { Size = " << R.size() << ", Register = b"
-                   << R.DXBinding.Register + RegOffset
-                   << ", Space = " << R.DXBinding.Space << " }\n";
+                   << R.DXBinding->Register + RegOffset
+                   << ", Space = " << R.DXBinding->Space << " }\n";
 
       auto ResourceOrErr = createResource(R, RegOffset);
       if (!ResourceOrErr)
@@ -2885,8 +2898,7 @@ public:
       for (auto &R : S.Resources) {
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
-        ResourceBinding.DXBinding.Register = R.DXBinding.Register;
-        ResourceBinding.DXBinding.Space = R.DXBinding.Space;
+        ResourceBinding.DXBinding = R.DXBinding;
         ResourceBinding.VKBinding = R.VKBinding;
         ResourceBinding.DescriptorCount = R.getArraySize();
         Layout.ResourceBindings.push_back(ResourceBinding);

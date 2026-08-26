@@ -61,8 +61,9 @@ struct InputLayoutDesc {
 
 struct ResourceBindingDesc {
   ResourceKind Kind;
-  DirectXBinding DXBinding;
+  std::optional<DirectXBinding> DXBinding;
   std::optional<VulkanBinding> VKBinding;
+  std::optional<uint32_t> HeapIndex;
   uint32_t DescriptorCount;
 };
 
