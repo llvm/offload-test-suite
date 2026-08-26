@@ -190,9 +190,9 @@ struct TextureUploadLayout {
 
 // Copy a texture's contents between a tightly-packed host buffer and a
 // (possibly row/subresource padded) GPU-visible mapping described by `Layout`.
-// These are the single place that knows how to bridge the two layouts, so
-// backends with alignment requirements (e.g. D3D12's 256-byte
-// D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) work for arbitrary widths.
+// These methods know how to bridge the two layouts, so backends with alignment
+// requirements (e.g. D3D12's 256-byte D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) work
+// for arbitrary widths.
 void copyPackedToTextureLayout(void *Dst, const void *PackedSrc,
                                const TextureUploadLayout &Layout);
 void copyTextureLayoutToPacked(void *PackedDst, const void *Src,
