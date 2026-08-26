@@ -21,10 +21,8 @@ void main() {
   // Slice 1: (0,0) + (1,1) = (1,1) -> Grey
   Out[4] = Tex.Load(int4(0, 0, 1, 0), int2(1, 1));
 
-  // RWTexture2DArray::Load takes an int3(x, y, arraySlice), not the int4 the
-  // SRV form takes: a UAV has a single mip level, so the slice occupies the
-  // last component rather than the mip. Reading that component as a mip would
-  // return slice 0 for every one of these.
+  // RWTexture2DArray::Load takes int3(x, y, arraySlice), not the int4 the SRV
+  // form takes: a UAV has a single mip, so the slice occupies the last component.
   Out[5] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 0)), float4(1, 0, 0, 1));     // Red
   Out[6] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 1)), float4(0, 1, 1, 1));     // Cyan
   Out[7] = RW_LOAD_OR(RWTex.Load(int3(1, 0, 2)), float4(0.5, 0.5, 0, 1)); // Olive

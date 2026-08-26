@@ -7,17 +7,9 @@
 
 [numthreads(1, 1, 1)]
 void main() {
-  // Each slice is 2x2. Gather returns the four texels of the footprint in the
-  // order (0,1), (1,1), (1,0), (0,0).
-  //
-  // Slice 0 R values: (0,0)=0.2 (1,0)=0.8 (0,1)=0.2 (1,1)=0.8
-  //   -> gather order [0.2, 0.8, 0.8, 0.2]
-  // Slice 1 R values: (0,0)=0.9 (1,0)=0.1 (0,1)=0.9 (1,1)=0.1
-  //   -> gather order [0.9, 0.1, 0.1, 0.9]
-  //
-  // Slice 1 is deliberately the inverse of slice 0 under a ref of 0.5, so a
-  // gather that read the wrong slice produces the exactly opposite vector
-  // rather than something merely different.
+  // Gather returns the footprint in the order (0,1), (1,1), (1,0), (0,0).
+  // Slice 1 is the inverse of slice 0 under a ref of 0.5, so reading the wrong
+  // slice gives the opposite vector.
   float2 uv = float2(0.5, 0.5);
 
   // ref = 0.5, Less. Slice 0: 0.5<0.2 = 0, 0.5<0.8 = 1, 0.5<0.8 = 1,
@@ -34,10 +26,9 @@ void main() {
   // so this has to match Out[1] and not slice 0's result.
   Out[4] = Tex.GatherCmp(SampRepeat, float3(1.5, 1.5, 1), 0.5); // [1, 0, 0, 1]
 
-  // A texel offset shifts the footprint within the selected slice. Offsetting
-  // by (1, 0) moves it to (1,1), (2,1), (2,0), (1,0), which Clamp pulls back to
-  // (1,1), (1,1), (1,0), (1,0) -- the right-hand column of that slice, which is
-  // uniform in both slices and differs between them.
+  // A texel offset shifts the footprint within the selected slice. Offset (1, 0)
+  // clamps to the right-hand column, which is uniform per slice and differs
+  // between them.
   Out[5] = Tex.GatherCmp(Samp, float3(uv, 0), 0.5, int2(1, 0)); // all 0.8 -> 1
   Out[6] = Tex.GatherCmp(Samp, float3(uv, 1), 0.5, int2(1, 0)); // all 0.1 -> 0
 }

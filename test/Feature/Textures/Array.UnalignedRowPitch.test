@@ -13,10 +13,9 @@ Shaders:
     Entry: main
 
 Buffers:
-  # A 5-texel row of R32Float is 20 bytes, which is not a multiple of
-  # D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256). Both the upload and the readback
-  # therefore have to go through the padded per-subresource footprint rather
-  # than assuming a tightly-packed image.
+  # A 5-texel row of R32Float is 20 bytes, not a multiple of
+  # D3D12_TEXTURE_DATA_PITCH_ALIGNMENT (256), so upload and readback must use
+  # the padded per-subresource footprint.
   - Name: Out
     Format: Float32
     Channels: 1

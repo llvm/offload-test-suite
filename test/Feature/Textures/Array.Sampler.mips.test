@@ -6,15 +6,9 @@
 
 [numthreads(1, 1, 1)]
 void main() {
-  // Every slice carries its own mip chain. Slice 0 is mip 0 [Red, Green] over
-  // mip 1 [Yellow]; slice 1 is mip 0 [Blue, White] over mip 1 [Magenta].
-  //
-  // Each mip 1 is a colour that is *not* the average of its own mip 0, so a
-  // result matching mip 1 can only have come from the stored mip 1 data and
-  // never from filtering mip 0.
-  //
-  // Mip 0 texel centres are at u = 0.25 and u = 0.75. Sampling at u = 0.4
-  // gives Nearest -> texel 0, and Linear -> lerp(texel0, texel1, 0.3).
+  // Each slice carries its own mip chain. Mip 0 texel centres are at u = 0.25
+  // and u = 0.75, so sampling at u = 0.4 gives Nearest -> texel 0 and
+  // Linear -> lerp(texel0, texel1, 0.3).
   float2 uv = float2(0.4, 0.5);
 
   // Slice 0. A negative LOD magnifies and so selects the Mag filter; LOD 1
@@ -24,10 +18,8 @@ void main() {
   Out[2] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 0), 1.0);  // -> Yellow
   Out[3] = Tex.SampleLevel(MagPointMinLinear, float3(uv, 0), 1.0);  // -> Yellow
 
-  // Slice 1, identical calls. The mip 0 results must blend slice 1's texels,
-  // and the mip 1 results must be slice 1's Magenta rather than slice 0's
-  // Yellow: mip selection resolves within a slice, so a mip chain shared
-  // across slices or indexed as Mip * ArraySlices would show up here.
+  // Slice 1, identical calls: mip selection resolves within a slice, so mip 1
+  // here is slice 1's Magenta rather than slice 0's Yellow.
   Out[4] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 1), -1.0); // Linear
   Out[5] = Tex.SampleLevel(MagPointMinLinear, float3(uv, 1), -1.0); // Nearest
   Out[6] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 1), 1.0);  // -> Magenta

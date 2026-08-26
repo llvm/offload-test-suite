@@ -6,11 +6,8 @@
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
   uint2 GID = {GI / 2, GI % 2};
-  // Same swizzle across every slice. This proves the SRV and the UAV agree on
-  // slice indexing and that per-slice readback is not aliased. Both textures
-  // declare two mips, but a UAV only ever addresses the most detailed one, so
-  // mip 1 of Out must survive the round trip untouched -- which only holds if
-  // upload and readback both use (mip, slice) subresource indexing.
+  // Both textures declare two mips, but a UAV only addresses the most detailed
+  // one, so mip 1 of Out must survive the round trip untouched.
   for (uint Slice = 0; Slice < 2; ++Slice)
     Out[uint3(GID.xy, Slice)] = In[uint3(GID.xy, Slice)].bgra;
 }

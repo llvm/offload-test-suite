@@ -28,13 +28,9 @@ void main() {
   Out[6] = Tex.SampleLevel(BorderSamp, float3(1.25, 0.5, 1), 0); // -> border
   Out[7] = Tex.SampleLevel(MirrorSamp, float3(1.75, 0.5, 1), 0); // -> Blue
 
-  // The slice coordinate is *not* subject to the address mode: it is always
-  // clamped to [0, ArraySlices-1]. With u in range and only the slice out of
-  // range, every sampler must therefore return an edge slice.
-  //
-  // Slice 2 on a 2-slice array clamps to slice 1. A wrapping slice would give
-  // slice 0 (2 mod 2), and a mirrored one would also give slice 0, so Red here
-  // would mean the slice went through the address mode.
+  // The slice coordinate is not subject to the address mode; it is always
+  // clamped to [0, ArraySlices-1]. Slice 2 on a 2-slice array therefore clamps
+  // to slice 1 under every mode.
   Out[8]  = Tex.SampleLevel(RepeatSamp, float3(0.25, 0.5, 2), 0); // -> Blue
   Out[9]  = Tex.SampleLevel(MirrorSamp, float3(0.25, 0.5, 2), 0); // -> Blue
 

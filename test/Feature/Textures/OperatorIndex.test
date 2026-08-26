@@ -11,14 +11,8 @@ void main() {
   Out[2] = Tex[int2(0, 1)]; // Blue
   Out[3] = Tex[int2(1, 1)]; // White
 
-  // RWTexture2D::operator[] (uint2) reads a UAV rather than an SRV. The
-  // subscript addresses the single mip a UAV has, so unlike the SRV above it
-  // can never reach mip 1.
-  //
-  // The UAV is single-channel on purpose: a typed UAV *load* is only
-  // guaranteed for the single-component 32-bit formats, so reading a float4
-  // UAV would additionally require TypedUAVLoadAdditionalFormats support.
-  // All four texels are packed into one result.
+  // The UAV is single-channel: a typed UAV load is only guaranteed for the
+  // single-component 32-bit formats. All four texels are packed into one result.
   Out[4] = float4(RWTex[uint2(0, 0)], RWTex[uint2(1, 0)],
                   RWTex[uint2(0, 1)], RWTex[uint2(1, 1)]);
 }

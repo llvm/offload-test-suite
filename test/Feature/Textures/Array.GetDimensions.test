@@ -29,10 +29,8 @@ void main() {
   Out[9] = (float)Elements;  // 3 -- unchanged by the mip level
   Out[10] = (float)Levels;   // 2
 
-  // RWTexture2DArray (8x2 with 4 slices). A UAV has a single mip level, so
-  // this overload reports only the extents and the slice count -- but the
-  // slice count is still reported, and is still the layer count rather than
-  // anything derived from the extents.
+  // RWTexture2DArray (8x2, 4 slices). A UAV has a single mip, so this overload
+  // reports only the extents and the slice count.
   RWTex.GetDimensions(Width, Height, Elements);
   Out[11] = (float)Width;    // 8
   Out[12] = (float)Height;   // 2
@@ -46,10 +44,7 @@ Shaders:
     Entry: main
 
 Buffers:
-  # 4x2 with 2 mips across 3 slices. Contents are irrelevant here; only the
-  # dimensions are queried.
-  # Per slice: mip 0 (4x2 = 8) + mip 1 (2x1 = 2) = 10 texels.
-  # 10 * 3 slices * sizeof(float4) = 480 bytes.
+  # 4x2 with 2 mips across 3 slices: (8 + 2) * 3 * sizeof(float4) = 480 bytes.
   - Name: Tex
     Format: Float32
     Channels: 4
