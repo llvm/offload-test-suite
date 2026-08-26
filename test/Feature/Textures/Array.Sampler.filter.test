@@ -29,14 +29,9 @@ void main() {
   Out[4] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 0), 0.0); // (0.5, 0.5, 0, 1)
   Out[5] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 1), 0.0); // (0.5, 0.5, 1, 1)
 
-  // A cube array is the other array texture kind: N cubes of six faces each,
-  // so 6*N layers, in the face order +X, -X, +Y, -Y, +Z, -Z. The coordinate is
-  // a float4: xyz is the direction and w selects the cube. Cube 0 is layers
-  // 0-5 and cube 1 layers 6-11, so a cube index mistaken for a layer index
-  // would read cube 0 twice. Each direction points straight down an axis and
-  // so lands exactly on a face's texel centre, where a Linear filter returns
-  // that texel unchanged -- the same property the 2D array checks above rely
-  // on.
+  // TextureCubeArray: N cubes of six faces each (6*N layers) in the face order
+  // +X, -X, +Y, -Y, +Z, -Z. The coordinate is a float4: xyz (direction) and w
+  // (cube).
   Out[6]  = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 1, 0,  0, 0), 0),
                          float4(1.0, 0.0, 0.0, 1.0)); // cube 0 +X Red
   Out[7]  = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 0, 0, -1, 0), 0),
@@ -80,7 +75,7 @@ Buffers:
             1.0, 1.0, 0.0, 1.0,   # -Y Yellow
             1.0, 0.0, 1.0, 1.0,   # +Z Magenta
             0.0, 1.0, 1.0, 1.0,   # -Z Cyan
-            # --- Cube 1 (half intensity, so a wrong cube is unmistakable) ---
+            # --- Cube 1  ---
             0.5, 0.0, 0.0, 1.0,   # +X
             0.0, 0.5, 0.0, 1.0,   # -X
             0.0, 0.0, 0.5, 1.0,   # +Y
@@ -148,8 +143,6 @@ DescriptorSets:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# Clang does not implement TextureCubeArray yet, so the cube array checks
-# compile out there:
-# https://github.com/llvm/offload-test-suite/issues/1381
+# Clang does not implement TextureCubeArray yet: https://github.com/llvm/offload-test-suite/issues/1381
 # RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBEARRAY %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -39,14 +39,11 @@ void main() {
   Out[12] = (float)Height;   // 2
   Out[13] = (float)Elements; // 4
 
-  // A cube array is the other array texture kind. Its `Elements` counts
-  // *cubes*, not layers: this resource is 12 layers, which is 2 cubes, so it
-  // must report 2 rather than 12. That is the same units distinction as
-  // D3D12_SRV_DIMENSION_TEXTURECUBEARRAY's NumCubes.
+  // Note: TextureCubeArray `Elements` counts *cubes*, not layers.
   TexCubeArr.GetDimensions(Width, Height, Elements);
   Out[14] = (float)Width;    // 4
   Out[15] = (float)Height;   // 4
-  Out[16] = (float)Elements; // 2 -- cubes, not the 12 layers
+  Out[16] = (float)Elements; // 2
 
   TexCubeArr.GetDimensions(0, Width, Height, Elements, Levels);
   Out[17] = (float)Width;    // 4
@@ -78,7 +75,7 @@ Buffers:
     OutputProps: { Width: 8, Height: 2, Depth: 1, ArraySlices: 4 }
     FillSize: 1024 # 8*2*4 slices*4 channels*4 bytes
 
-  # 4x4 faces, 2 cubes = 12 layers, 1 mip. Contents are irrelevant here too.
+  # 4x4 faces, 2 cubes = 12 layers, 1 mip.
   - Name: TexCubeArr
     Format: Float32
     Channels: 4
@@ -97,7 +94,7 @@ Buffers:
             4.0, 2.0, 3.0, 2.0,       # mip 0: w, h, elements, levels
             2.0, 1.0, 3.0, 2.0,       # mip 1: extents halve, elements do not
             8.0, 2.0, 4.0,            # RWTexture2DArray: w, h, elements
-            4.0, 4.0, 2.0,            # cube array: w, h, cubes (not 12 layers)
+            4.0, 4.0, 2.0,            # cube array: w, h, cubes
             4.0, 4.0, 2.0, 1.0 ]      # cube array: w, h, cubes, levels
 
 Results:

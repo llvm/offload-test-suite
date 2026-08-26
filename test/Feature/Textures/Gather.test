@@ -196,7 +196,6 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# Clang does not implement TextureCube yet, so the cube checks compile out
-# there: https://github.com/llvm/llvm-project/issues/194740
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
 # RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

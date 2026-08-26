@@ -20,9 +20,7 @@ static bool isFloatingPointFormat(DataFormat Format) {
          Format == DataFormat::Float64;
 }
 
-// Checks that a texture resource's YAML description is self consistent, i.e.
-// that array slices are only requested for kinds that have layers, and that a
-// cube has whole faces.
+// Checks that a texture resource's YAML description is self consistent.
 static llvm::Error validateTextureResource(const Resource &R) {
   if (!R.isTexture())
     return llvm::Error::success();
@@ -36,8 +34,6 @@ static llvm::Error validateTextureResource(const Resource &R) {
 
   const uint32_t Slices = static_cast<uint32_t>(Props.ArraySlices);
   if (R.isTextureCube()) {
-    // Six layers make up one cube, so a cube is 6 slices and a cube array is a
-    // whole number of cubes.
     if (Slices % 6 != 0)
       return llvm::createStringError(
           std::errc::invalid_argument,

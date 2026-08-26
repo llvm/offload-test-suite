@@ -402,8 +402,6 @@ struct Resource {
     }
   }
 
-  // The shape of the underlying image. This is what drives the backends' view
-  // and resource dimension mappings.
   TextureDimension getTextureDimension() const {
     assert(isTexture() && "Only textures have a dimension");
     switch (Kind) {

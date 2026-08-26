@@ -207,7 +207,6 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# Clang does not implement TextureCube yet, so the cube checks compile out
-# there: https://github.com/llvm/llvm-project/issues/194740
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
 # RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
