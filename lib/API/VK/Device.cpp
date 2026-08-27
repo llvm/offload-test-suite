@@ -198,18 +198,18 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-static VkImageType getVKImageType(TextureDimension Dim) {
-  switch (Dim) {
-  case TextureDimension::One:
+static VkImageType getVKImageType(TextureShape Shape) {
+  switch (Shape) {
+  case TextureShape::Texture1D:
     return VK_IMAGE_TYPE_1D;
-  case TextureDimension::Two:
-  case TextureDimension::Cube:
+  case TextureShape::Texture2D:
+  case TextureShape::TextureCube:
     // A cube map is a 2D image with six layers per cube.
     return VK_IMAGE_TYPE_2D;
-  case TextureDimension::Three:
+  case TextureShape::Texture3D:
     return VK_IMAGE_TYPE_3D;
   }
-  llvm_unreachable("All texture dimensions handled");
+  llvm_unreachable("All texture shapes handled");
 }
 
 static VkImageType getVKImageType(const ResourceKind RK) {
@@ -217,7 +217,7 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
-    return getVKImageType(TextureDimension::Two);
+    return getVKImageType(TextureShape::Texture2D);
   default:
     llvm_unreachable("Unsupported image kind");
   }

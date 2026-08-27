@@ -23,6 +23,7 @@
 #include "llvm/Support/Error.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -68,14 +69,14 @@ struct ClearDepthStencil {
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
 // TODO: Currently only 2D textures are supported. When expanding to 1D, 3D,
-// cube, or array textures, add a TextureType enum and validation between usage
-// and type (e.g. 3D textures cannot be used as DepthStencil).
+// cube, or array textures, add validation between usage and TextureShape
+// (e.g. 3D textures cannot be used as DepthStencil).
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
   TextureUsage Usage = {};
   Format Fmt = Format::RGBA32Float;
-  TextureDimension Dim = TextureDimension::Two;
+  TextureShape Shape = TextureShape::Texture2D;
   uint32_t Width = 1;
   uint32_t Height = 1;
   uint32_t MipLevels = 1;
@@ -84,9 +85,11 @@ struct TextureCreateDesc {
   uint32_t getSubresourceCount() const { return MipLevels; }
 
   uint32_t getMipWidth(uint32_t Mip) const {
+    assert(Mip < MipLevels && "Mip level index out of bounds.");
     return std::max(1u, Width >> Mip);
   }
   uint32_t getMipHeight(uint32_t Mip) const {
+    assert(Mip < MipLevels && "Mip level index out of bounds.");
     return std::max(1u, Height >> Mip);
   }
   // Clear value for render target or depth/stencil textures.
@@ -104,7 +107,7 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         getFormatName(Desc.Fmt).data());
 
   // Only 2D textures are implemented for now.
-  if (Desc.Dim != TextureDimension::Two)
+  if (Desc.Shape != TextureShape::Texture2D)
     return llvm::createStringError(std::errc::not_supported,
                                    "Only 2D textures are supported.");
 

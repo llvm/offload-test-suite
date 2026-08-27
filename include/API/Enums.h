@@ -26,11 +26,11 @@ enum class ResourceKind {
   AccelerationStructure,
 };
 
-enum class TextureDimension {
-  One,
-  Two,
-  Three,
-  Cube,
+enum class TextureShape {
+  Texture1D,
+  Texture2D,
+  Texture3D,
+  TextureCube,
 };
 
 enum ShaderContainerType {

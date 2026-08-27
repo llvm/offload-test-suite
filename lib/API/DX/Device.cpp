@@ -104,25 +104,25 @@ static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
   return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 }
 
-static D3D12_RESOURCE_DIMENSION getDXResourceDimension(TextureDimension Dim) {
-  switch (Dim) {
-  case TextureDimension::One:
+static D3D12_RESOURCE_DIMENSION getDXResourceDimension(TextureShape Shape) {
+  switch (Shape) {
+  case TextureShape::Texture1D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE1D;
-  case TextureDimension::Two:
-  case TextureDimension::Cube:
+  case TextureShape::Texture2D:
+  case TextureShape::TextureCube:
     // A cube map is a 2D resource with six slices per cube.
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  case TextureDimension::Three:
+  case TextureShape::Texture3D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE3D;
   }
-  llvm_unreachable("All texture dimensions handled");
+  llvm_unreachable("All texture shapes handled");
 }
 
 // Only the fields GetCopyableFootprints consults are needed here; layout,
 // flags, and clear value do not affect the copyable footprint.
 static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   D3D12_RESOURCE_DESC TexDesc = {};
-  TexDesc.Dimension = getDXResourceDimension(Desc.Dim);
+  TexDesc.Dimension = getDXResourceDimension(Desc.Shape);
   TexDesc.Width = Desc.Width;
   TexDesc.Height = Desc.Height;
   TexDesc.DepthOrArraySize = 1;
@@ -133,27 +133,27 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
 }
 
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
-  switch (Desc.Dim) {
-  case TextureDimension::Two:
+  switch (Desc.Shape) {
+  case TextureShape::Texture2D:
     return D3D12_SRV_DIMENSION_TEXTURE2D;
-  case TextureDimension::One:
-  case TextureDimension::Three:
-  case TextureDimension::Cube:
-    llvm_unreachable("Texture dimension has no SRV mapping yet");
+  case TextureShape::Texture1D:
+  case TextureShape::Texture3D:
+  case TextureShape::TextureCube:
+    llvm_unreachable("Texture shape has no SRV mapping yet");
   }
-  llvm_unreachable("All texture dimensions handled");
+  llvm_unreachable("All texture shapes handled");
 }
 
 static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
-  switch (Desc.Dim) {
-  case TextureDimension::Two:
+  switch (Desc.Shape) {
+  case TextureShape::Texture2D:
     return D3D12_UAV_DIMENSION_TEXTURE2D;
-  case TextureDimension::One:
-  case TextureDimension::Three:
-  case TextureDimension::Cube:
-    llvm_unreachable("Texture dimension has no UAV mapping yet");
+  case TextureShape::Texture1D:
+  case TextureShape::Texture3D:
+  case TextureShape::TextureCube:
+    llvm_unreachable("Texture shape has no UAV mapping yet");
   }
-  llvm_unreachable("All texture dimensions handled");
+  llvm_unreachable("All texture shapes handled");
 }
 
 static D3D12_PRIMITIVE_TOPOLOGY_TYPE
