@@ -6,8 +6,8 @@ permissions:
 # Runs one lit suite on a GPU runner against distributions built by earlier
 # frequent-build-llvm.yaml and frequent-build-dxc.yaml runs, rebuilding the
 # offload-test-suite tools standalone from the PR head. Called by
-# pr-matrix.yaml for windows-nvidia and by validate-frequent-builder.yaml;
-# see docs/frequent-builder.md.
+# pr-matrix.yaml for its default x64 cells and by
+# validate-frequent-builder.yaml; see docs/frequent-builder.md.
 
 on:
   workflow_call:
