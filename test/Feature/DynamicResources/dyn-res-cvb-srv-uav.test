@@ -116,9 +116,6 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/133831
 # XFAIL: Clang
 
-# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1413
-# XFAIL: Vulkan
-
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
 # XFAIL: Metal
 
