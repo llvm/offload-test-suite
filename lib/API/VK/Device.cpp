@@ -107,25 +107,29 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-// DXC's SPIR-V backend lowers `ResourceDescriptorHeap` / `SamplerDescriptorHeap`
-// accesses into unbounded runtime arrays living in descriptor set 0. Each heap
-// takes a single binding, picked from the bindings left unused by the
-// explicitly bound resources, in the order resource heap then sampler heap. If
-// more than one resource type is read from the resource heap, DXC emits one
-// runtime array per type, all aliasing that same binding, which Vulkan can only
-// express with VK_DESCRIPTOR_TYPE_MUTABLE_EXT. See the
+// DXC's SPIR-V backend lowers `ResourceDescriptorHeap` /
+// `SamplerDescriptorHeap` accesses into unbounded runtime arrays living in
+// descriptor set 0. Each heap takes a single binding, picked from the bindings
+// left unused by the explicitly bound resources, in the order resource heap,
+// sampler heap, then the counters belonging to the resource heap. If more than
+// one resource type is read from the resource heap, DXC emits one runtime array
+// per type, all aliasing that same binding, which Vulkan can only express with
+// VK_DESCRIPTOR_TYPE_MUTABLE_EXT. See the
 // "ResourceDescriptorHeaps & SamplerDescriptorHeaps" section of DXC's
 // docs/SPIR-V.rst.
 struct DescriptorHeapLayout {
   static constexpr uint32_t NoBinding = ~0U;
   uint32_t ResourceHeapBinding = NoBinding;
   uint32_t SamplerHeapBinding = NoBinding;
+  uint32_t CounterHeapBinding = NoBinding;
   uint32_t ResourceHeapSize = 0;
   uint32_t SamplerHeapSize = 0;
+  uint32_t CounterHeapSize = 0;
   llvm::SmallVector<VkDescriptorType, 4> ResourceHeapTypes;
 
   bool hasResourceHeap() const { return ResourceHeapBinding != NoBinding; }
   bool hasSamplerHeap() const { return SamplerHeapBinding != NoBinding; }
+  bool hasCounterHeap() const { return CounterHeapBinding != NoBinding; }
   bool empty() const { return !hasResourceHeap() && !hasSamplerHeap(); }
   bool needsMutableDescriptorType() const {
     return ResourceHeapTypes.size() > 1;
@@ -147,6 +151,7 @@ computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
   DescriptorHeapLayout Layout;
   llvm::SmallDenseSet<uint32_t, 8> UsedBindings;
   bool UsesSamplerHeap = false;
+  bool UsesCounterHeap = false;
 
   for (size_t SetIdx = 0, SetCount = Bindings.DescriptorSetDescs.size();
        SetIdx < SetCount; ++SetIdx) {
@@ -168,6 +173,11 @@ computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
       } else {
         Layout.ResourceHeapSize = std::max(Layout.ResourceHeapSize, End);
         Layout.addResourceHeapType(RB.Kind);
+        // A counter shares the heap index of the resource it belongs to.
+        if (RB.HasCounter) {
+          UsesCounterHeap = true;
+          Layout.CounterHeapSize = std::max(Layout.CounterHeapSize, End);
+        }
       }
     }
   }
@@ -182,6 +192,8 @@ computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
     Layout.ResourceHeapBinding = TakeBinding();
   if (UsesSamplerHeap)
     Layout.SamplerHeapBinding = TakeBinding();
+  if (UsesCounterHeap)
+    Layout.CounterHeapBinding = TakeBinding();
   return Layout;
 }
 
@@ -2090,6 +2102,15 @@ public:
           Binds.push_back(B);
           BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
         }
+        if (HeapLayout.hasCounterHeap()) {
+          VkDescriptorSetLayoutBinding B = {};
+          B.binding = HeapLayout.CounterHeapBinding;
+          B.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+          B.descriptorCount = HeapLayout.CounterHeapSize;
+          B.stageFlags = StageFlags;
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
       }
 
       VkDescriptorSetLayoutCreateInfo SetCI = {};
@@ -3776,6 +3797,8 @@ public:
     if (HL.hasSamplerHeap())
       DescriptorCounts[VK_DESCRIPTOR_TYPE_SAMPLER] +=
           HL.SamplerHeapSize;
+    if (HL.hasCounterHeap())
+      DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += HL.CounterHeapSize;
 
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
     for (const VkDescriptorType Type : DescriptorTypes) {
@@ -4038,8 +4061,16 @@ public:
 
           VkWriteDescriptorSet CounterWDS = {};
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
-          CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          if (R.HeapIndex) {
+            // A heap-indexed counter sits at its resource's heap index in the
+            // counter heap.
+            CounterWDS.dstSet = IS.DescriptorSets[0];
+            CounterWDS.dstBinding = IS.HeapLayout.CounterHeapBinding;
+            CounterWDS.dstArrayElement = *R.HeapIndex;
+          } else {
+            CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
+            CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          }
           CounterWDS.descriptorCount = R.getArraySize();
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
@@ -4717,12 +4748,6 @@ public:
                 "Direct heap indexing of acceleration structures is not "
                 "supported ('%s')",
                 R.Name.c_str());
-          if (R.HasCounter)
-            return llvm::createStringError(
-                std::errc::invalid_argument,
-                "Direct heap indexing of resources with a counter is not "
-                "supported ('%s')",
-                R.Name.c_str());
         } else {
           if (!R.VKBinding)
             return llvm::createStringError(std::errc::invalid_argument,
@@ -4742,6 +4767,7 @@ public:
         ResourceBinding.DXBinding = R.DXBinding;
         ResourceBinding.VKBinding = R.VKBinding;
         ResourceBinding.HeapIndex = R.HeapIndex;
+        ResourceBinding.HasCounter = R.HasCounter;
         ResourceBinding.DescriptorCount = R.getArraySize();
         Layout.ResourceBindings.push_back(ResourceBinding);
       }
