@@ -148,9 +148,19 @@ jobs:
               echo "::error::clang-tidy missing from the downloaded distribution ($clang_tidy). The resolved frequent-build-llvm run predates clang-tidy being added to StandaloneDistribution.cmake; rebuild or resolve a newer run."
               exit 1
             fi
+            # The legacy build used clang-cl for these sources. Use clang-cl
+            # from the distribution to keep the same compiler.
+            clang_cl="$GITHUB_WORKSPACE/install/bin/clang-cl"
+            if [ -x "${clang_cl}.exe" ]; then clang_cl="${clang_cl}.exe"; fi
+            if [ ! -x "$clang_cl" ]; then
+              echo "::error::clang-cl missing from the downloaded distribution ($clang_cl). It is installed by the 'clang' component in StandaloneDistribution.cmake; rebuild or resolve a newer frequent-build-llvm run."
+              exit 1
+            fi
             cmake -G Ninja -S "$GITHUB_WORKSPACE/OffloadTest" -B "$GITHUB_WORKSPACE/standalone-build" \
               -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
               -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
+              -DCMAKE_C_COMPILER="$clang_cl" \
+              -DCMAKE_CXX_COMPILER="$clang_cl" \
               -DCMAKE_PREFIX_PATH="$GITHUB_WORKSPACE/install/lib/cmake/llvm" \
               -DLLVM_MAIN_SRC_DIR="$GITHUB_WORKSPACE/llvm-project/llvm" \
               -DDXC_DIR="$GITHUB_WORKSPACE/dxc-dist/bin" \
