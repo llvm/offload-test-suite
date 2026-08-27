@@ -1,21 +1,22 @@
 #--- source.hlsl
 
-// This test exercises InterlockedAdd against non-resource (groupshared)
-// destinations using 64-bit integer types. A single threadgroup of 64
-// threads concurrently updates shared counters, so the test actually
-// exercises atomic behavior.
+// Tests InterlockedAdd on groupshared destinations using 64-bit integer
+// types, with 256 concurrent threads. Three checks:
 //
-// Both the 2-argument and 3-argument overloads are covered for int64_t
-// and uint64_t.
-//
-// Atomicity of the 3-argument form is verified by using each thread's
-// returned original value as an index into a groupshared "seen" array.
-// If every original value is unique (i.e. no add was lost), the array is
-// all-ones after the dispatch.
+//   1. Overloads: the 2-argument and 3-argument forms for both int64_t and
+//      uint64_t, plus a negative addend for signedness and a counter
+//      starting above 2^32 to exercise the upper word.
+//   2. No lost updates: each thread uses the original value returned by
+//      the 3-argument form as an index into a "seen" array, so the array
+//      only comes back all-ones if every original was unique.
+//   3. MonoCounter: only ever incremented, so each fresh re-read must not
+//      be below the previous one. A thread's own successive originals must
+//      also strictly increase, since its own add lands between them.
 
 RWStructuredBuffer<uint> OutSlotsInt : register(u0);
 RWStructuredBuffer<uint> OutSlotsUInt : register(u1);
 RWStructuredBuffer<int64_t> OutFinal : register(u2);
+RWStructuredBuffer<uint> OutMono : register(u3);
 
 groupshared int64_t  CounterInt;          // 3-arg form, signed
 groupshared uint64_t CounterUInt;         // 3-arg form, unsigned
@@ -23,11 +24,12 @@ groupshared int64_t  CounterIntNoOrig;    // 2-arg form, signed
 groupshared uint64_t CounterUIntNoOrig;   // 2-arg form, unsigned
 groupshared int64_t  SignedCounter;       // 2-arg form with negative addend
 groupshared uint64_t LargeCounter;        // 2-arg form starting above 2^32
+groupshared uint64_t MonoCounter;         // incremented in a barrier-separated loop
 
-groupshared uint SlotsInt[64];
-groupshared uint SlotsUInt[64];
+groupshared uint SlotsInt[256];
+groupshared uint SlotsUInt[256];
 
-[numthreads(64, 1, 1)]
+[numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     CounterInt = 0;
@@ -36,6 +38,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
     CounterUIntNoOrig = 0;
     SignedCounter = 1000;
     LargeCounter = 0x100000000ull; // 2^32
+    MonoCounter = 0x100000000ull;  // above 2^32; upper word must be preserved
   }
   SlotsInt[GTID.x] = 0;
   SlotsUInt[GTID.x] = 0;
@@ -60,18 +63,38 @@ void main(uint3 GTID : SV_GroupThreadID) {
   // 2-argument form with a value that exercises the upper 32 bits.
   InterlockedAdd(LargeCounter, 0x100000000ull);
 
+  // MonoCounter, checked for monotonic non-decrease and for strictly
+  // increasing per-thread originals.
+  uint64_t Prev = 0;
+  uint64_t PrevOrig = 0;
+  uint Mono = 1u;
+  for (uint I = 0; I < 256; ++I) {
+    uint64_t Orig;
+    InterlockedAdd(MonoCounter, (uint64_t)1, Orig);
+    if (I > 0 && Orig <= PrevOrig)
+      Mono = 0u;
+    PrevOrig = Orig;
+    GroupMemoryBarrierWithGroupSync();
+    uint64_t Cur = MonoCounter;
+    if (Cur < Prev)
+      Mono = 0u;
+    Prev = Cur;
+  }
+  OutMono[GTID.x] = Mono;
+
   GroupMemoryBarrierWithGroupSync();
 
   OutSlotsInt[GTID.x] = SlotsInt[GTID.x];
   OutSlotsUInt[GTID.x] = SlotsUInt[GTID.x];
 
   if (GTID.x == 0) {
-    OutFinal[0] = CounterInt;                 // 64
-    OutFinal[1] = (int64_t)CounterUInt;       // 64
-    OutFinal[2] = CounterIntNoOrig;           // 128
-    OutFinal[3] = (int64_t)CounterUIntNoOrig; // 192
-    OutFinal[4] = SignedCounter;              // 1000 - 64 = 936
-    OutFinal[5] = (int64_t)LargeCounter;      // 2^32 + 64*2^32 = 65 * 2^32
+    OutFinal[0] = CounterInt;                 // 256
+    OutFinal[1] = (int64_t)CounterUInt;       // 256
+    OutFinal[2] = CounterIntNoOrig;           // 512
+    OutFinal[3] = (int64_t)CounterUIntNoOrig; // 768
+    OutFinal[4] = SignedCounter;              // 1000 - 256 = 744
+    OutFinal[5] = (int64_t)LargeCounter;      // 2^32 + 256*2^32 = 257 * 2^32
+    OutFinal[6] = (int64_t)MonoCounter;       // 2^32 + 256*256 = 4295032832
   }
 }
 
@@ -85,47 +108,60 @@ Buffers:
   - Name: OutSlotsInt
     Format: UInt32
     Stride: 4
-    FillSize: 256
-  - Name: ExpectedSlotsInt
+    FillSize: 1024
+  - Name: ExpectedOnes
     Format: UInt32
     Stride: 4
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
   - Name: OutSlotsUInt
     Format: UInt32
     Stride: 4
-    FillSize: 256
-  - Name: ExpectedSlotsUInt
-    Format: UInt32
-    Stride: 4
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+    FillSize: 1024
   - Name: OutFinal
     Format: Int64
     Stride: 8
-    FillSize: 48
+    FillSize: 56
   - Name: ExpectedFinal
     Format: Int64
     Stride: 8
-    Data: [ 64, 64, 128, 192, 936, 279172874240 ]
+    Data: [ 256, 256, 512, 768, 744, 1103806595072, 4295032832 ]
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
     
 Results:
   - Result: TestSlotsInt
     Rule: BufferExact
     Actual: OutSlotsInt
-    Expected: ExpectedSlotsInt
+    Expected: ExpectedOnes
   - Result: TestSlotsUInt
     Rule: BufferExact
     Actual: OutSlotsUInt
-    Expected: ExpectedSlotsUInt
+    Expected: ExpectedOnes
   - Result: TestFinal
     Rule: BufferExact
     Actual: OutFinal
     Expected: ExpectedFinal
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
 DescriptorSets:
   - Resources:
     - Name: OutSlotsInt
@@ -149,6 +185,13 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 2
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 
@@ -159,6 +202,12 @@ DescriptorSets:
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: DXC && Metal
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1402
+# XFAIL: Clang && DirectX
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1435
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
