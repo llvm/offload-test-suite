@@ -148,6 +148,8 @@ struct DescriptorHeapLayout {
   }
 };
 
+} // namespace
+
 static DescriptorHeapLayout
 computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
   DescriptorHeapLayout Layout;
@@ -198,8 +200,6 @@ computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
     Layout.CounterHeapBinding = TakeBinding();
   return Layout;
 }
-
-} // namespace
 
 static VkFilter getVKFilter(FilterMode Mode) {
   switch (Mode) {
