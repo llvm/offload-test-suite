@@ -4,10 +4,10 @@ RWStructuredBuffer<float4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  float3x2 R32 = radians(float3x2(In[0].xy, In[1].xy, In[2].xy));
-  float2x4 R24 = radians(float2x4(In[3], In[4]));
-  float3x1 R31 = radians(float3x1(In[5].x, In[6].x, In[7].x));
-  float4x4 R44 = radians(float4x4(In[8], In[9], In[10], In[11]));
+  float3x2 R32 = radians(float3x2(In[0].xyz, In[1].xyz));
+  float2x4 R24 = radians(float2x4(In[2], In[3]));
+  float3x1 R31 = radians(float3x1(In[4].xyz));
+  float4x4 R44 = radians(float4x4(In[5], In[6], In[7], In[8]));
   float2x2 R22 = radians(float2x2(0.0, 90.0, 180.0, -90.0));
 
   Out[0] = float4(R32[0], R32[1]);
@@ -32,14 +32,11 @@ Buffers:
   - Name: In
     Format: Float32
     Stride: 16
-    Data: [ 0.0, 30.0, 0.0, 0.0,
-            45.0, 60.0, 0.0, 0.0,
-            90.0, 180.0, 0.0, 0.0,
+    Data: [ 0.0, 30.0, 45.0, 0.0,
+            60.0, 90.0, 180.0, 0.0,
             270.0, 360.0, -45.0, -90.0,
             -180.0, 15.0, 0.0, 30.0,
-            0.0, 0.0, 0.0, 0.0,
-            -45.0, 0.0, 0.0, 0.0,
-            -90.0, 0.0, 0.0, 0.0,
+            0.0, -45.0, -90.0, 0.0,
             0.0, 30.0, 45.0, 60.0,
             90.0, 180.0, 270.0, 360.0,
             -45.0, -90.0, -180.0, 15.0,
