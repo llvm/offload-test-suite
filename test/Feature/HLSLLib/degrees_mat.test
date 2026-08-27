@@ -9,6 +9,7 @@ void main() {
   float3x1 R31 = degrees(float3x1(In[4].xyz));
   float4x4 R44 = degrees(float4x4(In[5], In[6], In[7], In[8]));
   float2x2 R22 = degrees(float2x2(0.0, 1.5707963, 3.1415927, -1.5707963));
+  // 0, pi/2, pi, -pi/2
 
   Out[0] = float4(R32[0], R32[1]);
   Out[1] = float4(R32[2], 0.0, 0.0);
@@ -46,7 +47,6 @@ Buffers:
     # 3x1: 0, -pi/4, -pi/2, _
     # 4x4: 0, pi/6, pi/4, pi/3, pi/2, pi, 3pi/2, 2pi,
     #      -pi/4, -pi/2, -pi, pi/12, pi/6, pi/2, pi/12, pi/4
-    # 2x2 const: 0, pi/2, pi, -pi/2
   - Name: Out
     Format: Float32
     Stride: 16
