@@ -1,0 +1,99 @@
+#--- source.hlsl
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 R32 = radians(float3x2(In[0].xy, In[1].xy, In[2].xy));
+  float2x4 R24 = radians(float2x4(In[3], In[4]));
+  float3x1 R31 = radians(float3x1(In[5].x, In[6].x, In[7].x));
+  float4x4 R44 = radians(float4x4(In[8], In[9], In[10], In[11]));
+  float2x2 R22 = radians(float2x2(0.0, 90.0, 180.0, -90.0));
+
+  Out[0] = float4(R32[0], R32[1]);
+  Out[1] = float4(R32[2], 0.0, 0.0);
+  Out[2] = R24[0];
+  Out[3] = R24[1];
+  Out[4] = float4(R31[0], R31[1], R31[2], 0.0);
+  Out[5] = R44[0];
+  Out[6] = R44[1];
+  Out[7] = R44[2];
+  Out[8] = R44[3];
+  Out[9] = float4(R22[0], R22[1]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 30.0, 0.0, 0.0,
+            45.0, 60.0, 0.0, 0.0,
+            90.0, 180.0, 0.0, 0.0,
+            270.0, 360.0, -45.0, -90.0,
+            -180.0, 15.0, 0.0, 30.0,
+            0.0, 0.0, 0.0, 0.0,
+            -45.0, 0.0, 0.0, 0.0,
+            -90.0, 0.0, 0.0, 0.0,
+            0.0, 30.0, 45.0, 60.0,
+            90.0, 180.0, 270.0, 360.0,
+            -45.0, -90.0, -180.0, 15.0,
+            30.0, 90.0, 15.0, 45.0 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 0.52359878, 0.78539816, 1.04719755,
+            1.57079633, 3.14159265, 0.0, 0.0,
+            4.71238898, 6.28318531, -0.78539816, -1.57079633,
+            -3.14159265, 0.26179939, 0.0, 0.52359878,
+            0.0, -0.78539816, -1.57079633, 0.0,
+            0.0, 0.52359878, 0.78539816, 1.04719755,
+            1.57079633, 3.14159265, 4.71238898, 6.28318531,
+            -0.78539816, -1.57079633, -3.14159265, 0.26179939,
+            0.52359878, 1.57079633, 0.26179939, 0.78539816,
+            0.0, 1.57079633, 3.14159265, -1.57079633 ]
+    # 3x2: 0, pi/6, pi/4, pi/3, pi/2, pi, _, _
+    # 2x4: 3pi/2, 2pi, -pi/4, -pi/2, -pi, pi/12, 0, pi/6
+    # 3x1: 0, -pi/4, -pi/2, _
+    # 4x4: 0, pi/6, pi/4, pi/3, pi/2, pi, 3pi/2, 2pi,
+    #      -pi/4, -pi/2, -pi, pi/12, pi/6, pi/2, pi/12, pi/4
+    # 2x2 const: 0, pi/2, pi, -pi/2
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184485
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
