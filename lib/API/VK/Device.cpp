@@ -107,6 +107,8 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+namespace {
+
 // DXC's SPIR-V backend lowers `ResourceDescriptorHeap` /
 // `SamplerDescriptorHeap` accesses into unbounded runtime arrays living in
 // descriptor set 0. Each heap takes a single binding, picked from the bindings
@@ -196,6 +198,8 @@ computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
     Layout.CounterHeapBinding = TakeBinding();
   return Layout;
 }
+
+} // namespace
 
 static VkFilter getVKFilter(FilterMode Mode) {
   switch (Mode) {
