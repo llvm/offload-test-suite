@@ -86,7 +86,7 @@ DescriptorSets:
 
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
 # Unsupported https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbitlow.64bit.hlsl
-# UNSUPPORTED: DXC && Vulkan
+# XFAIL: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -Fo %t.o %t/source.hlsl

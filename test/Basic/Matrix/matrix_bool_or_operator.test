@@ -147,9 +147,8 @@ DescriptorSets:
 # Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8129
 # XFAIL: DXC && Vulkan
 
-# Note: Metal does not support boolean matrix types. For
-# Vulkan KosmicKrisp and MoltenVK the output is always False.
-# UNSUPPORTED: Metal || KosmicKrisp || MoltenVK
+# Note: For Vulkan KosmicKrisp and MoltenVK the output is always False.
+# UNSUPPORTED: KosmicKrisp || MoltenVK
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

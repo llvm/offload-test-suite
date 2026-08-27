@@ -4,8 +4,8 @@ RWBuffer<int> Out : register(u1);
 
 [numthreads(8,1,1)]
 void main(uint3 TID : SV_GroupThreadID) {
+    int X = In[TID.x];
     [flatten]
-      int X = In[TID.x];
     switch (TID.x % 3) {
       case 0:
         Out[TID.x] = -X;
@@ -51,7 +51,6 @@ DescriptorSets:
 ...
 #--- end
 
-# UNSUPPORTED: Clang
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o | FileCheck %s
