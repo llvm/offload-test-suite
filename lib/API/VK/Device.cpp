@@ -1708,7 +1708,8 @@ public:
     const bool HasMutableDescriptorTypeExt =
         isExtensionSupported(AvailableDeviceExtensions,
                              VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
-    VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT MutableDescriptorFeatures{};
+    VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT
+        MutableDescriptorFeatures{};
     if (HasMutableDescriptorTypeExt) {
       MutableDescriptorFeatures.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT;
@@ -1898,7 +1899,8 @@ public:
 
     // Directly indexed resources are bound as sparsely populated unbounded
     // arrays, which needs the descriptor indexing features core since 1.2.
-    Dev->HasDescriptorIndexing = HasVulkan12 && Features12.runtimeDescriptorArray &&
+    Dev->HasDescriptorIndexing = HasVulkan12 &&
+                                 Features12.runtimeDescriptorArray &&
                                  Features12.descriptorBindingPartiallyBound;
     Dev->HasMutableDescriptorType = HasMutableDescriptorTypeExt;
 
@@ -3790,13 +3792,11 @@ public:
       }
     }
     const DescriptorHeapLayout &HL = IS.HeapLayout;
-    if (HL.hasResourceHeap() &&
-        !HL.needsMutableDescriptorType())
+    if (HL.hasResourceHeap() && !HL.needsMutableDescriptorType())
       DescriptorCounts[HL.getResourceHeapDescriptorType()] +=
           HL.ResourceHeapSize;
     if (HL.hasSamplerHeap())
-      DescriptorCounts[VK_DESCRIPTOR_TYPE_SAMPLER] +=
-          HL.SamplerHeapSize;
+      DescriptorCounts[VK_DESCRIPTOR_TYPE_SAMPLER] += HL.SamplerHeapSize;
     if (HL.hasCounterHeap())
       DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += HL.CounterHeapSize;
 
@@ -3828,8 +3828,7 @@ public:
       MutableLists.assign(PoolSizes.size(), VkMutableDescriptorTypeListEXT{});
       MutableLists.back().descriptorTypeCount =
           static_cast<uint32_t>(HL.ResourceHeapTypes.size());
-      MutableLists.back().pDescriptorTypes =
-          HL.ResourceHeapTypes.data();
+      MutableLists.back().pDescriptorTypes = HL.ResourceHeapTypes.data();
       MutableCI.sType =
           VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
       MutableCI.mutableDescriptorTypeListCount =
