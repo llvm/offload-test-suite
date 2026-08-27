@@ -8,10 +8,9 @@
 // Useful for calculating the size for an upload or readback buffer.
 size_t
 offloadtest::Texture::calculateLinearSizeInBytes(const Device &Dev) const {
-  const auto &Desc = getDesc();
-  const uint32_t Stride = Dev.getTextureUploadRowStrideInBytes(Desc);
-  return (Desc.Height - 1) * Stride +
-         Desc.Width * getFormatSizeInBytes(Desc.Fmt);
+  // The backend's own layout already accounts for every (mip, slice)
+  // subresource as well as any row and subresource alignment it requires.
+  return Dev.getTextureUploadLayout(getDesc()).TotalSizeInBytes;
 }
 
 offloadtest::TextureUploadLayout
