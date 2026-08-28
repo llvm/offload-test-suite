@@ -1,122 +1,94 @@
-#--- vertex.hlsl
-struct PSInput
-{
-    float4 position : SV_POSITION;
-    float4 color : COLOR;
-};
+#--- source.hlsl
 
-PSInput main(float4 position : POSITION, float4 color : COLOR)
-{
-    PSInput result;
+// This test verifies that a texture with a zero extent is rejected with a
+// clear error rather than being handed to the driver.
 
-    result.position = position;
-    result.color = color;
+Texture2D<float4> Tex : register(t0);
+RWBuffer<float4> Out : register(u0);
 
-    return result;
+[numthreads(1, 1, 1)]
+void main() {
+  Out[0] = Tex.Load(int3(0, 0, 0));
 }
 
-#--- pixel.hlsl
-struct PSInput
-{
-    float4 position : SV_POSITION;
-    float4 color : COLOR;
-};
-
-float4 main(PSInput input) : SV_TARGET
-{
-    return input.color;
-}
-
-#--- zero-width.yaml
+//--- zero-width.yaml
 ---
 Shaders:
-  - Stage: Vertex
+  - Stage: Compute
     Entry: main
-  - Stage: Pixel
-    Entry: main
+
 Buffers:
-  - Name: VertexData
-    Format: Float32
-    Stride: 28
-    Data: [ 0.0, 0.25, 0.0, 1.0, 0.0, 0.0, 1.0,
-            0.25, -0.25, 0.0, 0.0, 1.0, 0.0, 1.0,
-           -0.25, -0.25, 0.0, 0.0, 0.0, 1.0, 1.0 ]
-  - Name: Output
+  # Pipeline.cpp only size-checks OutputProps when Width > 0, so a zero width
+  # reaches the texture validation with the data below left as-is.
+  - Name: Tex
     Format: Float32
     Channels: 4
-    # The render target extent is taken from OutputProps. An empty buffer is
-    # required so that the CPUBuffer size still matches width * height *
-    # element size (0), otherwise that earlier check reports first and this
-    # test would no longer exercise the extent validation.
-    Data: []
-    OutputProps:
-      Height: 256
-      Width: 0
-      Depth: 1
-Bindings:
-  VertexBuffer: VertexData
-  VertexAttributes:
-    - Format: Float32
-      Channels: 3
-      Offset: 0
-      Name: POSITION
-    - Format: Float32
-      Channels: 4
-      Offset: 12
-      Name: COLOR
-  RenderTarget: Output
-DescriptorSets: []
+    OutputProps: { Width: 0, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+
+Results: []
 ...
 
-#--- zero-height.yaml
+//--- zero-height.yaml
 ---
 Shaders:
-  - Stage: Vertex
+  - Stage: Compute
     Entry: main
-  - Stage: Pixel
-    Entry: main
+
 Buffers:
-  - Name: VertexData
-    Format: Float32
-    Stride: 28
-    Data: [ 0.0, 0.25, 0.0, 1.0, 0.0, 0.0, 1.0,
-            0.25, -0.25, 0.0, 0.0, 1.0, 0.0, 1.0,
-           -0.25, -0.25, 0.0, 0.0, 0.0, 1.0, 1.0 ]
-  - Name: Output
+  # Width is non-zero here, so the expected size is 2 * 0 * 16 = 0 and the
+  # buffer must be empty to get past that check.
+  - Name: Tex
     Format: Float32
     Channels: 4
+    OutputProps: { Width: 2, Height: 0, Depth: 1 }
     Data: []
-    OutputProps:
-      Height: 0
-      Width: 256
-      Depth: 1
-Bindings:
-  VertexBuffer: VertexData
-  VertexAttributes:
-    - Format: Float32
-      Channels: 3
-      Offset: 0
-      Name: POSITION
-    - Format: Float32
-      Channels: 4
-      Offset: 12
-      Name: COLOR
-  RenderTarget: Output
-DescriptorSets: []
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+
+Results: []
 ...
 #--- end
 
-# Verifies that a render target with a zero extent is rejected with a clear
-# error instead of being handed to the driver.
+# Only DirectX routes texture resources through TextureCreateDesc today; the
+# Vulkan and Metal backends still create images directly from the pipeline
+# description, so they never reach this validation.
+# UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 
-# RUN: not %offloader %t/zero-width.yaml %t-vertex.o %t-pixel.o -r Output 2>&1 \
+# RUN: not %offloader %t/zero-width.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ZERO-WIDTH
-# ZERO-WIDTH: error: Texture dimensions must be non-zero, got 0x256.
+# ZERO-WIDTH: error: Texture dimensions must be non-zero, got 0x2.
 
-# RUN: not %offloader %t/zero-height.yaml %t-vertex.o %t-pixel.o -r Output 2>&1 \
+# RUN: not %offloader %t/zero-height.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ZERO-HEIGHT
-# ZERO-HEIGHT: error: Texture dimensions must be non-zero, got 256x0.
+# ZERO-HEIGHT: error: Texture dimensions must be non-zero, got 2x0.
