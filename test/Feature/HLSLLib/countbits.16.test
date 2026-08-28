@@ -119,7 +119,7 @@ DescriptorSets:
 # REQUIRES: Int16
 
 # Bug https://github.com/llvm/llvm-project/issues/219327
-# XFAIL: Clang && DirectX
+# XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
