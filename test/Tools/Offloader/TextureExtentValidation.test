@@ -1,0 +1,122 @@
+#--- vertex.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+PSInput main(float4 position : POSITION, float4 color : COLOR)
+{
+    PSInput result;
+
+    result.position = position;
+    result.color = color;
+
+    return result;
+}
+
+#--- pixel.hlsl
+struct PSInput
+{
+    float4 position : SV_POSITION;
+    float4 color : COLOR;
+};
+
+float4 main(PSInput input) : SV_TARGET
+{
+    return input.color;
+}
+
+#--- zero-width.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 28
+    Data: [ 0.0, 0.25, 0.0, 1.0, 0.0, 0.0, 1.0,
+            0.25, -0.25, 0.0, 0.0, 1.0, 0.0, 1.0,
+           -0.25, -0.25, 0.0, 0.0, 0.0, 1.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    # The render target extent is taken from OutputProps. An empty buffer is
+    # required so that the CPUBuffer size still matches width * height *
+    # element size (0), otherwise that earlier check reports first and this
+    # test would no longer exercise the extent validation.
+    Data: []
+    OutputProps:
+      Height: 256
+      Width: 0
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+    - Format: Float32
+      Channels: 4
+      Offset: 12
+      Name: COLOR
+  RenderTarget: Output
+DescriptorSets: []
+...
+
+#--- zero-height.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 28
+    Data: [ 0.0, 0.25, 0.0, 1.0, 0.0, 0.0, 1.0,
+            0.25, -0.25, 0.0, 0.0, 1.0, 0.0, 1.0,
+           -0.25, -0.25, 0.0, 0.0, 0.0, 1.0, 1.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    Data: []
+    OutputProps:
+      Height: 0
+      Width: 256
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+    - Format: Float32
+      Channels: 4
+      Offset: 12
+      Name: COLOR
+  RenderTarget: Output
+DescriptorSets: []
+...
+#--- end
+
+# Verifies that a render target with a zero extent is rejected with a clear
+# error instead of being handed to the driver.
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+
+# RUN: not %offloader %t/zero-width.yaml %t-vertex.o %t-pixel.o -r Output 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-WIDTH
+# ZERO-WIDTH: error: Texture dimensions must be non-zero, got 0x256.
+
+# RUN: not %offloader %t/zero-height.yaml %t-vertex.o %t-pixel.o -r Output 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-HEIGHT
+# ZERO-HEIGHT: error: Texture dimensions must be non-zero, got 256x0.

@@ -111,6 +111,29 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
     return llvm::createStringError(std::errc::not_supported,
                                    "Only 2D textures are supported.");
 
+  if (Desc.Width == 0 || Desc.Height == 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture dimensions must be non-zero, got %ux%u.", Desc.Width,
+        Desc.Height);
+
+  if (Desc.MipLevels == 0)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "Texture must have at least one mip level.");
+
+  // A full mip chain halves the largest extent until it reaches 1x1, so the
+  // texture supports floor(log2(max(Width, Height))) + 1 levels.
+  // TODO: Account for Depth when 3D textures are supported.
+  uint32_t MaxMipLevels = 0;
+  for (uint32_t Extent = std::max(Desc.Width, Desc.Height); Extent != 0;
+       Extent >>= 1)
+    ++MaxMipLevels;
+  if (Desc.MipLevels > MaxMipLevels)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture dimensions %ux%u support at most %u mip levels, got %u.",
+        Desc.Width, Desc.Height, MaxMipLevels, Desc.MipLevels);
+
   const bool IsDepth = isDepthFormat(Desc.Fmt);
   const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
   const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
