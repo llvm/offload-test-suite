@@ -69,14 +69,14 @@ struct ClearDepthStencil {
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
 // TODO: Currently only 2D textures are supported. When expanding to 1D, 3D,
-// cube, or array textures, add validation between usage and TextureShape
+// cube, or array textures, add validation between usage and ResourceDimension
 // (e.g. 3D textures cannot be used as DepthStencil).
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
   TextureUsage Usage = {};
   Format Fmt = Format::RGBA32Float;
-  TextureShape Shape = TextureShape::Texture2D;
+  ResourceDimension Dim = ResourceDimension::Dim2D;
   uint32_t Width = 1;
   uint32_t Height = 1;
   uint32_t MipLevels = 1;
@@ -107,7 +107,7 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         getFormatName(Desc.Fmt).data());
 
   // Only 2D textures are implemented for now.
-  if (Desc.Shape != TextureShape::Texture2D)
+  if (Desc.Dim != ResourceDimension::Dim2D)
     return llvm::createStringError(std::errc::not_supported,
                                    "Only 2D textures are supported.");
 
