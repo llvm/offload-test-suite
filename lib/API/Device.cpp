@@ -451,7 +451,7 @@ offloadtest::createSparseTextureWithData(
   // The staging layout below assumes a single subresource.
   if (Desc.ArraySlices != 1)
     return llvm::createStringError(
-        "Sparse array textures are not yet supported.");
+        "Sparse texture arrays are not yet supported.");
 
   const uint64_t PackedRowStrideInBytes =
       Desc.Width * getFormatSizeInBytes(Desc.Fmt);

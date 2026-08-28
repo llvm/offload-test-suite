@@ -226,7 +226,7 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::SampledTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
-    // Array textures are 2D images with more than one layer.
+    // Texture arrays are 2D images with more than one layer.
     return getVKImageType(TextureDimension::Two);
   default:
     llvm_unreachable("Unsupported image kind");

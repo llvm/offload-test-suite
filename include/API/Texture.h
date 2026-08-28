@@ -67,7 +67,7 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
-// TODO: only 2D textures (and 2D array textures) are supported. 1D, 3D, and
+// TODO: only 2D textures (and 2D texture arrays) are supported. 1D, 3D, and
 // cube textures need their TextureDimension cases filled in, plus validation
 // between usage and shape (e.g. 3D textures cannot be used as DepthStencil).
 struct TextureCreateDesc {
@@ -79,7 +79,6 @@ struct TextureCreateDesc {
   uint32_t Width = 1;
   uint32_t Height = 1;
   uint32_t MipLevels = 1;
-  // Number of array slices (layers).
   uint32_t ArraySlices = 1;
   bool IsArray = false;
   // Clear value for render target or depth/stencil textures.
@@ -117,7 +116,7 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
   if (Desc.ArraySlices > 1 && !Desc.IsArray)
     return llvm::createStringError(
         std::errc::invalid_argument,
-        "A texture with %u slices must be created as an array texture.",
+        "A texture with %u slices must be created as a texture array.",
         Desc.ArraySlices);
 
   const bool IsDepth = isDepthFormat(Desc.Fmt);

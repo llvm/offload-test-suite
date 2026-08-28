@@ -36,7 +36,7 @@ static llvm::Error validateTextureResource(const Resource &R) {
   if (!R.isTextureArray() && Slices != 1)
     return llvm::createStringError(
         std::errc::invalid_argument,
-        "Resource '%s' is not an array texture, so ArraySlices must be 1 "
+        "Resource '%s' is not a texture array, so ArraySlices must be 1 "
         "(got %u).",
         R.Name.c_str(), Slices);
 
@@ -462,7 +462,7 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
                  Twine(B.OutputProps.ArraySlices) + "); must be at least 1");
       return;
     }
-    // Array texture data is laid out slice-major: the full mip chain of slice
+    // Texture array data is laid out slice-major: the full mip chain of slice
     // 0, then the full mip chain of slice 1, and so on, matching D3D12's
     // subresource ordering (`Mip + Slice * MipLevels`).
     uint32_t MipChainSize = 0;
