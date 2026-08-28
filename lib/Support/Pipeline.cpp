@@ -465,18 +465,21 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
     // Texture array data is laid out slice-major: the full mip chain of slice
     // 0, then the full mip chain of slice 1, and so on, matching D3D12's
     // subresource ordering (`Mip + Slice * MipLevels`).
-    uint32_t MipChainSize = 0;
+    uint64_t MipChainSize = 0;
     uint32_t W = B.OutputProps.Width;
     uint32_t H = B.OutputProps.Height;
     uint32_t D = B.OutputProps.Depth;
     const uint32_t ElementSize = B.getElementSize();
     for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-      MipChainSize += W * H * D * ElementSize;
+      MipChainSize += static_cast<uint64_t>(W) * H * D * ElementSize;
       W = std::max(1u, W / 2);
       H = std::max(1u, H / 2);
       D = std::max(1u, D / 2);
     }
-    const uint32_t ExpectedSize =
+    // Computed in 64 bits: a large texture's mip chain, or that chain times a
+    // large slice count, overflows 32 bits and would let a mismatched buffer
+    // compare equal.
+    const uint64_t ExpectedSize =
         MipChainSize * static_cast<uint32_t>(B.OutputProps.ArraySlices);
 
     if (B.Size != ExpectedSize)
