@@ -85,7 +85,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # 16/64 bit firstbithigh doesn't have a DXC-Vulkan lowering
-# https://github.com/microsoft/DirectXShaderCompiler/blob/main/tools/clang/test/CodeGenSPIRV/intrinsics.firstbithigh.64bit.hlsl
+# Unsupported https://github.com/microsoft/DirectXShaderCompiler/issues/8536
 # XFAIL: DXC && Vulkan
 
 # Bug https://github.com/llvm/offload-test-suite/issues/567
