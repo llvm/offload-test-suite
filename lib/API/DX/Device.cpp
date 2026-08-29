@@ -130,6 +130,12 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   // exist; they need their own extent on TextureCreateDesc.
   assert(Desc.Dim != TextureDimension::Three &&
          "3D resources need a depth extent, not a slice count");
+  // Both fields are UINT16. Callers must reject out-of-range values before
+  // getting here, otherwise these casts wrap silently.
+  assert(Desc.ArraySlices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION &&
+         "Slice count must be range-checked before narrowing to UINT16");
+  assert(Desc.MipLevels <= D3D12_REQ_MIP_LEVELS &&
+         "Mip level count must be range-checked before narrowing to UINT16");
   TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
   TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
   TexDesc.Format = getDXGIFormat(Desc.Fmt);
@@ -2099,6 +2105,17 @@ public:
   createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
+
+    if (Desc.ArraySlices > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u texture array slices; got %u.",
+          D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, Desc.ArraySlices);
+    if (Desc.MipLevels > D3D12_REQ_MIP_LEVELS)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u mip levels; got %u.", D3D12_REQ_MIP_LEVELS,
+          Desc.MipLevels);
 
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
