@@ -22,15 +22,34 @@ static bool isFloatingPointFormat(DataFormat Format) {
 
 // Checks that a texture resource's YAML description is self consistent.
 static llvm::Error validateTextureResource(const Resource &R) {
-  if (!R.isTexture())
-    return llvm::Error::success();
+  assert(R.isTexture() && R.BufferPtr &&
+         "validateTextureResource requires a resolved texture resource");
 
   const OutputProperties &Props = R.BufferPtr->OutputProps;
+
   if (Props.Width <= 0)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Texture resource '%s' requires OutputProps with a non-zero Width.",
         R.Name.c_str());
+
+  if (Props.Height <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires OutputProps with a non-zero Height.",
+        R.Name.c_str());
+
+  if (Props.Depth <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires OutputProps with a non-zero Depth.",
+        R.Name.c_str());
+
+  if (Props.MipLevels <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires at least one mip level (got %d).",
+        R.Name.c_str(), Props.MipLevels);
 
   const uint32_t Slices = static_cast<uint32_t>(Props.ArraySlices);
   if (R.isTextureCube()) {
@@ -49,7 +68,7 @@ static llvm::Error validateTextureResource(const Resource &R) {
   } else if (!R.isTextureArray() && Slices != 1) {
     return llvm::createStringError(
         std::errc::invalid_argument,
-        "Resource '%s' is not an array texture, so ArraySlices must be 1 "
+        "Resource '%s' is not a texture array, so ArraySlices must be 1 "
         "(got %u).",
         R.Name.c_str(), Slices);
   }
@@ -133,18 +152,23 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
           R.BufferPtr = P.getBuffer(R.Name);
           if (!R.BufferPtr)
             I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+          else if (auto Err = validateTextureResource(R))
+            I.setError(llvm::toString(std::move(Err)));
         } else if (R.isSampler()) {
           R.SamplerPtr = P.getSampler(R.Name);
           if (!R.SamplerPtr)
             I.setError(Twine("Referenced sampler ") + R.Name + " not found!");
+        } else if (R.isTexture()) {
+          R.BufferPtr = P.getBuffer(R.Name);
+          if (!R.BufferPtr)
+            I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
+          else if (auto Err = validateTextureResource(R))
+            I.setError(llvm::toString(std::move(Err)));
         } else {
           R.BufferPtr = P.getBuffer(R.Name);
           if (!R.BufferPtr)
             I.setError(Twine("Referenced buffer ") + R.Name + " not found!");
         }
-        if (R.BufferPtr)
-          if (auto Err = validateTextureResource(R))
-            I.setError(llvm::toString(std::move(Err)));
       }
     }
 
@@ -471,21 +495,24 @@ void MappingTraits<offloadtest::CPUBuffer>::mapping(IO &I,
                  Twine(B.OutputProps.ArraySlices) + "); must be at least 1");
       return;
     }
-    // Array texture data is laid out slice-major: the full mip chain of slice
+    // Texture array data is laid out slice-major: the full mip chain of slice
     // 0, then the full mip chain of slice 1, and so on, matching D3D12's
     // subresource ordering (`Mip + Slice * MipLevels`).
-    uint32_t MipChainSize = 0;
+    uint64_t MipChainSize = 0;
     uint32_t W = B.OutputProps.Width;
     uint32_t H = B.OutputProps.Height;
     uint32_t D = B.OutputProps.Depth;
     const uint32_t ElementSize = B.getElementSize();
     for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-      MipChainSize += W * H * D * ElementSize;
+      MipChainSize += static_cast<uint64_t>(W) * H * D * ElementSize;
       W = std::max(1u, W / 2);
       H = std::max(1u, H / 2);
       D = std::max(1u, D / 2);
     }
-    const uint32_t ExpectedSize =
+    // Computed in 64 bits: a large texture's mip chain, or that chain times a
+    // large slice count, overflows 32 bits and would let a mismatched buffer
+    // compare equal.
+    const uint64_t ExpectedSize =
         MipChainSize * static_cast<uint32_t>(B.OutputProps.ArraySlices);
 
     if (B.Size != ExpectedSize)

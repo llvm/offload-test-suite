@@ -102,7 +102,7 @@ Buffers:
     Format: Float32
     Channels: 4
     OutputProps: { Width: 8, Height: 2, Depth: 1 }
-    FillSize: 256 # 8*2*4*4
+    FillSize: 256 # 8 * 2 * 4 * 4
 
   # 4x4 faces with 3 mips across 6 faces: (16 + 4 + 1) * 6 texels of float4.
   - Name: TexCube

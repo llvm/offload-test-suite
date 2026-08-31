@@ -20,14 +20,9 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(3, 0)]] RWBuffer<float> Out : register(u0);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
-  // Each slice is 2x2 of depth values, and the comparison result of each of
-  // the four taps is blended by the Linear filter.
-  //
-  // Slice 0 is [0.2, 0.8 / 0.2, 0.8], so at ref 0.5 half the taps pass and the
-  // blend is 0.5. Slice 1 is a uniform 0.9, so at the same ref every tap
-  // passes and the blend is 1.0. The two slices therefore give different
-  // results for identical arguments, and slice 1's uniformity means its result
-  // is exact rather than a filtered average.
+  // Each of the four taps is compared against the reference and the results are
+  // blended by the Linear filter. At ref 0.5 slice 0 blends to 0.5, and the
+  // uniform slice 1 to 1.0.
   float2 uv = float2(0.5, 0.5);
 
   float r0 = Tex.SampleCmp(Samp, float3(uv, 0), 0.5); // 0.5<0.2=0, 0.5<0.8=1 -> 0.5

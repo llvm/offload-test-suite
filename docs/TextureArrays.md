@@ -1,6 +1,6 @@
-# Array Textures
+# Texture Arrays
 
-The test suite supports the 2D array texture types, so tests can verify
+The test suite supports the 2D texture array types, so tests can verify
 array-aware indexing, sampling and readback:
 
 | YAML `Kind`        | HLSL type            | Descriptor |
@@ -8,7 +8,7 @@ array-aware indexing, sampling and readback:
 | `Texture2DArray`   | `Texture2DArray`     | SRV        |
 | `RWTexture2DArray` | `RWTexture2DArray`   | UAV        |
 
-1D array textures are not supported yet. Cube textures are built from
+1D texture arrays are not supported yet. Cube textures are built from
 array layers and reuse everything on this page; see
 [CubeTextures.md](CubeTextures.md).
 
@@ -37,7 +37,7 @@ layers each of those textures has.
 
 ## Data Layout
 
-Array texture data is laid out **slice-major**: the complete mip chain of slice
+Texture array data is laid out **slice-major**: the complete mip chain of slice
 0, then the complete mip chain of slice 1, and so on. This matches D3D12's
 subresource indexing, where subresource `N` is `Mip + Slice * MipLevels`, and
 is the order both the DirectX and Vulkan backends use for upload and readback.

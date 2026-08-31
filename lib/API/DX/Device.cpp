@@ -104,15 +104,15 @@ static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
   return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 }
 
-static D3D12_RESOURCE_DIMENSION getDXResourceDimension(TextureDimension Dim) {
+static D3D12_RESOURCE_DIMENSION getDXResourceDimension(ResourceDimension Dim) {
   switch (Dim) {
-  case TextureDimension::One:
+  case ResourceDimension::Dim1D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE1D;
-  case TextureDimension::Two:
-  case TextureDimension::Cube:
+  case ResourceDimension::Dim2D:
+  case ResourceDimension::Cube:
     // A cube map is a 2D resource with six slices per cube.
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  case TextureDimension::Three:
+  case ResourceDimension::Dim3D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE3D;
   }
   llvm_unreachable("All texture dimensions handled");
@@ -128,8 +128,14 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   // DepthOrArraySize is the layer count for 1D/2D resources but the depth
   // extent for 3D ones, so it cannot take the slice count once 3D textures
   // exist; they need their own extent on TextureCreateDesc.
-  assert(Desc.Dim != TextureDimension::Three &&
+  assert(Desc.Dim != ResourceDimension::Dim3D &&
          "3D resources need a depth extent, not a slice count");
+  // Both fields are UINT16. Callers must reject out-of-range values before
+  // getting here, otherwise these casts wrap silently.
+  assert(Desc.ArraySlices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION &&
+         "Slice count must be range-checked before narrowing to UINT16");
+  assert(Desc.MipLevels <= D3D12_REQ_MIP_LEVELS &&
+         "Mip level count must be range-checked before narrowing to UINT16");
   TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
   TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
   TexDesc.Format = getDXGIFormat(Desc.Fmt);
@@ -139,14 +145,14 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
 
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
-  case TextureDimension::Two:
+  case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
-  case TextureDimension::Cube:
+  case ResourceDimension::Cube:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
                         : D3D12_SRV_DIMENSION_TEXTURECUBE;
-  case TextureDimension::One:
-  case TextureDimension::Three:
+  case ResourceDimension::Dim1D:
+  case ResourceDimension::Dim3D:
     llvm_unreachable("Texture dimension has no SRV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
@@ -154,13 +160,13 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
 
 static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
-  case TextureDimension::Two:
+  case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
-  case TextureDimension::Cube:
+  case ResourceDimension::Cube:
     llvm_unreachable("Cube textures cannot be used as a UAV");
-  case TextureDimension::One:
-  case TextureDimension::Three:
+  case ResourceDimension::Dim1D:
+  case ResourceDimension::Dim3D:
     llvm_unreachable("Texture dimension has no UAV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
@@ -2102,6 +2108,17 @@ public:
   createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
+
+    if (Desc.ArraySlices > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u texture array slices; got %u.",
+          D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, Desc.ArraySlices);
+    if (Desc.MipLevels > D3D12_REQ_MIP_LEVELS)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u mip levels; got %u.", D3D12_REQ_MIP_LEVELS,
+          Desc.MipLevels);
 
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));

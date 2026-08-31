@@ -21,7 +21,7 @@ A cube is six array layers, one per face, always in this order:
 | 5     | `-Z` |
 
 Because faces are layers, cube textures reuse the `ArraySlices` field and the
-slice-major data layout described in [ArrayTextures.md](ArrayTextures.md)
+slice-major data layout described in [TextureArrays.md](TextureArrays.md)
 unchanged. `ArraySlices` is a **layer** count, not a count of cubes:
 
 * a `TextureCube` requires `ArraySlices: 6`
@@ -50,7 +50,7 @@ DescriptorSets:
       VulkanBinding: { Binding: 0 }
 ```
 
-With mip levels the ordering is the same as for array textures: the complete
+With mip levels the ordering is the same as for texture arrays: the complete
 mip chain of face 0, then the complete mip chain of face 1, and so on, matching
 D3D12's `Mip + Slice * MipLevels` subresource indexing.
 

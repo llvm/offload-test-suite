@@ -1,0 +1,131 @@
+#--- source.hlsl
+
+// This test verifies that a texture with a zero extent is rejected with a
+// clear error rather than being handed to the driver.
+
+Texture2D<float4> Tex : register(t0);
+RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  Out[0] = Tex.Load(int3(0, 0, 0));
+}
+
+//--- zero-width.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Pipeline.cpp only size-checks OutputProps when Width > 0, so a zero width
+  # reaches the texture validation with the data below left as-is.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 0, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results: []
+...
+
+//--- zero-height.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Width is non-zero here, so the expected size is 2 * 0 * 16 = 0 and the
+  # buffer must be empty to get past that check.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 0, Depth: 1 }
+    Data: []
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results: []
+...
+
+//--- zero-depth.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Depth is only used by the expected-size computation for now, so a zero
+  # depth also collapses that check to 0 and needs an empty buffer to reach
+  # the texture validation.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 0 }
+    Data: []
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results: []
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+
+# RUN: not %offloader %t/zero-width.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-WIDTH
+# ZERO-WIDTH: error: Texture resource 'Tex' requires OutputProps with a non-zero Width.
+
+# RUN: not %offloader %t/zero-height.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-HEIGHT
+# ZERO-HEIGHT: error: Texture resource 'Tex' requires OutputProps with a non-zero Height.
+
+# RUN: not %offloader %t/zero-depth.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-DEPTH
+# ZERO-DEPTH: error: Texture resource 'Tex' requires OutputProps with a non-zero Depth.

@@ -1,0 +1,190 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareExchangeFloatBitwise on groupshared destinations.
+// 256 threads run at the same time. Each test value is exact in float, thus
+// the shader compares floats directly. There are three checks:
+//
+//   1. Private slots. A compare that does not match must not store. A later
+//      compare that matches must store. Both report the initial value.
+//   2. Contended locations. All threads propose the same value. Each thread
+//      reports the value that the winner replaced, or the value that the
+//      winner stored. Only one thread can report the replaced value. That
+//      thread claims a second location to prove that it is the only winner.
+//      A compare that never matches must not change the destination.
+//   3. Bit patterns. +0.0 against -0.0 must not store. A NaN against the
+//      same NaN bits must store. A buffer supplies the NaN, because HLSL
+//      has no NaN literal.
+
+RWStructuredBuffer<uint> OutSlots : register(u0);
+RWStructuredBuffer<uint> OutOrig : register(u1);
+RWStructuredBuffer<float> OutFinal : register(u2);
+RWStructuredBuffer<float> NanIn : register(u3);
+
+groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
+groupshared float MatchMinusFive;              // contended, compare matches
+groupshared float NoMatchSeventySeven;         // contended, never matches
+groupshared float ZeroPositive;                // +0.0, compared against -0.0
+groupshared float NanQuiet;                    // NaN, compared against NaN
+groupshared float ClaimZero;                   // 0.0, claimed by the winner
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsMinusTwoPointFive[GTID.x] = -2.5f;
+  if (GTID.x == 0) {
+    MatchMinusFive = -5.0f;
+    NoMatchSeventySeven = 77.0f;
+    ZeroPositive = 0.0f;
+    NanQuiet = NanIn[0];
+    ClaimZero = 0.0f;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // Check 1. Both calls report the initial value. Only the second stores.
+  float OrigNoStore, OrigStore;
+  InterlockedCompareExchangeFloatBitwise(SlotsMinusTwoPointFive[GTID.x], 1.0f,
+                                         99.0f, OrigNoStore);
+  InterlockedCompareExchangeFloatBitwise(SlotsMinusTwoPointFive[GTID.x], -2.5f,
+                                         (float)GTID.x + 1000.0f, OrigStore);
+
+  OutSlots[GTID.x] = (OrigNoStore == -2.5f && OrigStore == -2.5f &&
+                      SlotsMinusTwoPointFive[GTID.x] ==
+                          (float)GTID.x + 1000.0f) ? 1u : 0u;
+
+  // Check 2. A compare that matches reports the value that the winner
+  // replaced, or the value that the winner stored. A compare that never
+  // matches reports the unchanged destination.
+  float OrigMatch, OrigNoMatch;
+  InterlockedCompareExchangeFloatBitwise(MatchMinusFive, -5.0f, 42.0f,
+                                         OrigMatch);
+  InterlockedCompareExchangeFloatBitwise(NoMatchSeventySeven, 78.0f, -1.0f,
+                                         OrigNoMatch);
+
+  // Only the thread that received the original tries to claim. Thus a
+  // second claim shows that the exchange reported the original to more
+  // than one thread.
+  float Claim = 0.0f;
+  if (OrigMatch == -5.0f)
+    InterlockedCompareExchangeFloatBitwise(ClaimZero, 0.0f, 1.0f, Claim);
+
+  // Check 3. The final value shows whether each compare matched. A compare
+  // of NaN against NaN gives false, thus the reported value cannot show it.
+  float OrigZero, OrigNan;
+  InterlockedCompareExchangeFloatBitwise(ZeroPositive, -0.0f, 99.0f, OrigZero);
+  InterlockedCompareExchangeFloatBitwise(NanQuiet, NanIn[0], 7.0f, OrigNan);
+
+  OutOrig[GTID.x] = ((OrigMatch == -5.0f || OrigMatch == 42.0f) &&
+                     OrigNoMatch == 77.0f && OrigZero == 0.0f &&
+                     Claim == 0.0f) ? 1u : 0u;
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = MatchMinusFive;      // 42.0
+    OutFinal[1] = NoMatchSeventySeven; // 77.0
+    OutFinal[2] = ZeroPositive;        // +0.0, -0.0 must not have matched
+    OutFinal[3] = NanQuiet;            // 7.0, the NaN must have matched
+    OutFinal[4] = ClaimZero;           // 1.0, exactly one thread claimed
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlots
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: Float32
+    Stride: 4
+    FillSize: 20
+  - Name: ExpectedFinal
+    Format: Float32
+    Stride: 4
+    Data: [ 42.0, 77.0, 0.0, 7.0, 1.0 ]
+  - Name: NanIn
+    Format: Float32
+    Stride: 4
+    Data: [ nan ]
+Results:
+  - Result: TestSlots
+    Rule: BufferExact
+    Actual: OutSlots
+    Expected: ExpectedOnes
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutSlots
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: NanIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99203
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/7782
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -19,22 +19,14 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
-  // Set the UVs up to have a derivative of exactly 0.5, so
-  // LOD = log2(max(abs(ddx), abs(ddy)) * TextureSize) = log2(0.5 * 2) = 0.0
-  // before the bias is applied. Only the width and height enter that
-  // calculation; the slice count does not, so the LOD is the same on every
-  // slice and the bias alone decides the mip.
+  // The UVs have a derivative of exactly 0.5, so LOD = log2(0.5 * 2) = 0.0
+  // before the bias. The slice count does not enter that calculation.
   uint2 GTid = (uint2)Pos.xy;
   float2 uv = 0.5 + float2(GTid.xy) * 0.5;
 
-  // Each slice has its own two-level mip chain, and each mip 1 is deliberately
-  // *not* the average of its own mip 0. A mip 1 result therefore cannot be
-  // confused with Linear minification within mip 0, which is what averaging
-  // the four mip 0 texels would produce.
-  //
   // Mip selection is nearest, so a bias of 1.0 lands exactly on mip 1 while a
-  // small positive bias would still round back to mip 0. A negative bias keeps
-  // LOD below 0 and so magnifies, selecting Mag=Nearest on mip 0.
+  // small positive bias would round back to mip 0. A negative bias keeps LOD
+  // below 0 and so magnifies.
   float4 r0 = Tex.SampleBias(Samp, float3(uv, 0), -0.1); // slice 0 mip 0
   float4 r1 = Tex.SampleBias(Samp, float3(uv, 0), 1.0);  // slice 0 mip 1
 

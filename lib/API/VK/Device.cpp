@@ -213,15 +213,15 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
-static VkImageType getVKImageType(TextureDimension Dim) {
+static VkImageType getVKImageType(ResourceDimension Dim) {
   switch (Dim) {
-  case TextureDimension::One:
+  case ResourceDimension::Dim1D:
     return VK_IMAGE_TYPE_1D;
-  case TextureDimension::Two:
-  case TextureDimension::Cube:
+  case ResourceDimension::Dim2D:
+  case ResourceDimension::Cube:
     // A cube map is a 2D image with six layers per cube.
     return VK_IMAGE_TYPE_2D;
-  case TextureDimension::Three:
+  case ResourceDimension::Dim3D:
     return VK_IMAGE_TYPE_3D;
   }
   llvm_unreachable("All texture dimensions handled");
@@ -234,11 +234,11 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::SampledTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
-    // Array textures are 2D images with more than one layer.
-    return getVKImageType(TextureDimension::Two);
+    // Texture arrays are 2D images with more than one layer.
+    return getVKImageType(ResourceDimension::Dim2D);
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
-    return getVKImageType(TextureDimension::Cube);
+    return getVKImageType(ResourceDimension::Cube);
   default:
     llvm_unreachable("Unsupported image kind");
   }
@@ -1268,12 +1268,11 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
-    const llvm::SmallVector<VkBufferImageCopy> Regions =
-        getTextureCopyRegions(VKSrc.Desc);
-
     insertDebugSignpost(
         llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
+    const llvm::SmallVector<VkBufferImageCopy> Regions =
+        getTextureCopyRegions(VKSrc.Desc);
     vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
                            Regions.size(), Regions.data());

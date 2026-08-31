@@ -402,7 +402,7 @@ struct Resource {
     }
   }
 
-  TextureDimension getTextureDimension() const {
+  ResourceDimension getTextureDimension() const {
     assert(isTexture() && "Only textures have a dimension");
     switch (Kind) {
     case ResourceKind::Texture2D:
@@ -410,10 +410,10 @@ struct Resource {
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::SampledTexture2D:
-      return TextureDimension::Two;
+      return ResourceDimension::Dim2D;
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
-      return TextureDimension::Cube;
+      return ResourceDimension::Cube;
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::StructuredBuffer:

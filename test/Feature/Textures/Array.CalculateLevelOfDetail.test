@@ -21,13 +21,8 @@ VSOutput mainVS(VSInput input) {
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   uint2 GTid = (uint2)Pos.xy;
 
-  // Texture2DArray::CalculateLevelOfDetail takes a **float2**, not the float3
-  // the sampling methods take: there is no slice argument, because the array
-  // dimension plays no part in the LOD computation. The resource here has four
-  // slices, and the expected LODs below are exactly those of a plain 4x4
-  // Texture2D with three mips -- so an implementation that folded ArraySlices
-  // into the size term, as it would for a 3D texture's depth, would shift
-  // every one of these by log2 of the slice count.
+  // CalculateLevelOfDetail takes a float2: there is no slice argument, because
+  // the array dimension plays no part in the LOD computation.
 
   // Derivative = 0.5, texture size = 4 -> LOD = log2(0.5 * 4) = 1.0
   float2 uv0 = 0.25 + float2(GTid.xy) * 0.5;

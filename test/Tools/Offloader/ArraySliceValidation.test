@@ -112,7 +112,7 @@ Results: []
 # RUN: split-file %s %t
 
 # RUN: not %offloader %t/non-array.yaml 2>&1 | FileCheck %s --check-prefix=NON-ARRAY
-# NON-ARRAY: Resource 'Tex' is not an array texture, so ArraySlices must be 1 (got 2).
+# NON-ARRAY: Resource 'Tex' is not a texture array, so ArraySlices must be 1 (got 2).
 
 # RUN: not %offloader %t/slice-size.yaml 2>&1 | FileCheck %s --check-prefix=SLICE-SIZE
 # SLICE-SIZE: Buffer 'Tex' size (64) does not match OutputProps dimensions (192)

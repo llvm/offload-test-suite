@@ -11,14 +11,9 @@ void main() {
   Out[2] = Tex[uint3(1, 1, 1)]; // Slice 1 (1,1) Grey
   Out[3] = Tex[uint3(0, 1, 2)]; // Slice 2 (0,1) Navy
 
-  // RWTexture2DArray::operator[] takes the same uint3(x, y, arraySlice) as the
-  // SRV form, so the third component selects the slice here too rather than
-  // being a mip or a depth.
-  //
-  // The UAV is single-channel on purpose: a typed UAV *load* is only
-  // guaranteed for the single-component 32-bit formats, so reading a float4
-  // UAV would additionally require TypedUAVLoadAdditionalFormats support.
-  // Each slice holds a distinct value, so one result covers all three.
+  // operator[] takes uint3(x, y, arraySlice); the third component is the slice,
+  // not a mip. The UAV is single-channel: a typed UAV load is only guaranteed
+  // for the single-component 32-bit formats.
   Out[4] = float4(RWTex[uint3(0, 0, 0)], RWTex[uint3(1, 1, 1)],
                   RWTex[uint3(0, 1, 2)], RWTex[uint3(1, 0, 2)]);
 }
