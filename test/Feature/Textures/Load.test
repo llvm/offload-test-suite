@@ -30,7 +30,7 @@ void main() {
 
   // RWTexture2D::Load takes an int2, not the int3 the SRV form takes: a UAV
   // has a single mip level, so there is no mip component to supply.
-  Out[7] = RW_LOAD_OR(RWTex.Load(int2(0, 0)), float4(0, 1, 1, 1));     // Cyan
+  Out[7] = RW_LOAD_OR(RWTex.Load(int2(0, 0)), float4(0, 1, 1, 1));       // Cyan
   Out[8] = RW_LOAD_OR(RWTex.Load(int2(1, 1)), float4(0.5, 0.5, 0.5, 1)); // Grey
 }
 

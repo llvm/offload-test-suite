@@ -84,7 +84,7 @@ Buffers:
     Format: Float32
     Channels: 4
     OutputProps: { Width: 8, Height: 2, Depth: 1 }
-    FillSize: 256 # 8*2*4*4
+    FillSize: 256 # 8 * 2 * 4 * 4
 
   - Name: Out
     Format: Float32

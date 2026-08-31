@@ -64,10 +64,10 @@ Buffers:
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 0.3, 0.4, 0.2, 0.1,     # [0] slice 0 red
-            0.3, 0.4, 0.2, 0.1,     # [1] slice 0 red (GatherRed)
-            0.7, 0.8, 0.6, 0.5,     # [2] slice 0 green
-            0.7, 0.6, 0.8, 0.9,     # [3] slice 1 red
+    Data: [ 0.3, 0.4, 0.2, 0.1,      # [0] slice 0 red
+            0.3, 0.4, 0.2, 0.1,      # [1] slice 0 red (GatherRed)
+            0.7, 0.8, 0.6, 0.5,      # [2] slice 0 green
+            0.7, 0.6, 0.8, 0.9,      # [3] slice 1 red
             0.35, 0.45, 0.25, 0.15,  # [4] slice 1 green
             0.25, 0.35, 0.15, 0.05,  # [5] slice 0 blue
             0.75, 0.85, 0.65, 0.55,  # [6] slice 0 alpha
