@@ -1,0 +1,152 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareStoreFloatBitwise on groupshared destinations.
+// 256 threads run at the same time. Each test value is exact in float, thus
+// the shader compares floats directly. The intrinsic does not report the
+// original value, thus each check reads the destination. There are three
+// checks:
+//
+//   1. Private slots. A compare that does not match must not store. A later
+//      compare that matches must store.
+//   2. Contended locations. All threads propose the same value, thus the
+//      final value is the same whichever thread stores it. A compare that
+//      never matches must not change the destination.
+//   3. Bit patterns. +0.0 against -0.0 must not store. A NaN against the
+//      same NaN bits must store. A buffer supplies the NaN, because HLSL
+//      has no NaN literal.
+
+RWStructuredBuffer<uint> OutSlots : register(u0);
+RWStructuredBuffer<float> OutFinal : register(u1);
+RWStructuredBuffer<float> NanIn : register(u2);
+
+groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
+groupshared float MatchMinusFive;              // contended, compare matches
+groupshared float NoMatchSeventySeven;         // contended, never matches
+groupshared float ZeroPositive;                // +0.0, compared against -0.0
+groupshared float NanQuiet;                    // NaN, compared against NaN
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsMinusTwoPointFive[GTID.x] = -2.5f;
+  if (GTID.x == 0) {
+    MatchMinusFive = -5.0f;
+    NoMatchSeventySeven = 77.0f;
+    ZeroPositive = 0.0f;
+    NanQuiet = NanIn[0];
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // Check 1. Only the second call stores. If the first call stored, the
+  // second compare cannot match and the slot keeps the wrong value.
+  InterlockedCompareStoreFloatBitwise(SlotsMinusTwoPointFive[GTID.x], 1.0f,
+                                      99.0f);
+  InterlockedCompareStoreFloatBitwise(SlotsMinusTwoPointFive[GTID.x], -2.5f,
+                                      (float)GTID.x + 1000.0f);
+
+  OutSlots[GTID.x] = (SlotsMinusTwoPointFive[GTID.x] ==
+                      (float)GTID.x + 1000.0f) ? 1u : 0u;
+
+  // Check 2.
+  InterlockedCompareStoreFloatBitwise(MatchMinusFive, -5.0f, 42.0f);
+  InterlockedCompareStoreFloatBitwise(NoMatchSeventySeven, 78.0f, -1.0f);
+
+  // Check 3.
+  InterlockedCompareStoreFloatBitwise(ZeroPositive, -0.0f, 99.0f);
+  InterlockedCompareStoreFloatBitwise(NanQuiet, NanIn[0], 7.0f);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = MatchMinusFive;      // 42.0
+    OutFinal[1] = NoMatchSeventySeven; // 77.0
+    OutFinal[2] = ZeroPositive;        // +0.0, -0.0 must not have matched
+    OutFinal[3] = NanQuiet;            // 7.0, the NaN must have matched
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlots
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: Float32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedFinal
+    Format: Float32
+    Stride: 4
+    Data: [ 42.0, 77.0, 0.0, 7.0 ]
+  - Name: NanIn
+    Format: Float32
+    Stride: 4
+    Data: [ nan ]
+Results:
+  - Result: TestSlots
+    Rule: BufferExact
+    Actual: OutSlots
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutSlots
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: NanIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99202
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8864
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
