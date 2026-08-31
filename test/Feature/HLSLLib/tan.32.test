@@ -7,10 +7,9 @@ RWStructuredBuffer<float4> Out : register(u1);
 [numthreads(1,1,1)]
 void main() {
   Out[0] = tan(In[0]);
-  float4 Tmp = {tan(In[1].xyz), tan(In[1].w)};
-  Out[1] = Tmp;
-  float4 Tmp2 = {tan(In[2].xy), tan(In[2].zw)};
-  Out[2] = Tmp2;
+  Out[1] = float4(tan(In[1].xyz), tan(In[1].w));
+  Out[2] = float4(tan(In[2].xy), tan(In[2].zw));
+  Out[3] = float4(tan(-314.16), tan(-100), tan(100), tan(314.16));
 }
 
 //--- pipeline.yaml
@@ -32,16 +31,18 @@ Buffers:
   - Name: Out
     Format: Float32
     Stride: 16
-    FillSize: 48
+    FillSize: 64
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
     Data: [ -1.73205, -1.0, -0.57735, -0.26795,
              0.0, 0.26795, 0.57735, 1.0,
-             1.73205, -1.73205, 0.26795, -0.26795 ]
-    # -sqrt3, -1, -sqrt3/3, sqrt3-2
+             1.73205, -1.73205, 0.26795, -0.26795,
+             -0.0007346412, 0.5872139, -0.5872139, 0.0007346412 ]
+    # -sqrt3, -1, -1/sqrt3, sqrt3-2
     # 0, 2-sqrt3, sqrt3/3, 1
-    # sqrt3, -sqrt3, sqrt3-2, 2-sqrt3
+    # sqrt3, -sqrt3, 2-sqrt3, sqrt3-2
+    # tan(-314.16), tan(-100), tan(100), tan(314.16)
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
