@@ -124,10 +124,6 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
       const void *DataPtr = *DataPtrOrErr;
 
       if (R.first->isTexture()) {
-        // The GPU-visible copy may carry row and subresource padding (e.g.
-        // D3D12's 256-byte aligned rows), while the CPU buffer is tightly
-        // packed across every subresource. Let the backend's layout drive the
-        // un-padding so arbitrary widths work.
         const TextureUploadLayout Layout =
             Dev.getTextureUploadLayout(RSIt->Tex->getDesc());
         copyTextureLayoutToPacked(DataIt->get(), DataPtr, Layout);

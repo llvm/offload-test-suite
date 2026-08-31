@@ -28,10 +28,10 @@ enum class ResourceKind {
   AccelerationStructure,
 };
 
-enum class TextureDimension {
-  One,
-  Two,
-  Three,
+enum class ResourceDimension {
+  Dim1D,
+  Dim2D,
+  Dim3D,
   Cube,
 };
 

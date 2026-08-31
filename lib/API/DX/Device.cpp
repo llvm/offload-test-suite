@@ -104,15 +104,15 @@ static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
   return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 }
 
-static D3D12_RESOURCE_DIMENSION getDXResourceDimension(TextureDimension Dim) {
+static D3D12_RESOURCE_DIMENSION getDXResourceDimension(ResourceDimension Dim) {
   switch (Dim) {
-  case TextureDimension::One:
+  case ResourceDimension::Dim1D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE1D;
-  case TextureDimension::Two:
-  case TextureDimension::Cube:
+  case ResourceDimension::Dim2D:
+  case ResourceDimension::Cube:
     // A cube map is a 2D resource with six slices per cube.
     return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-  case TextureDimension::Three:
+  case ResourceDimension::Dim3D:
     return D3D12_RESOURCE_DIMENSION_TEXTURE3D;
   }
   llvm_unreachable("All texture dimensions handled");
@@ -128,7 +128,7 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   // DepthOrArraySize is the layer count for 1D/2D resources but the depth
   // extent for 3D ones, so it cannot take the slice count once 3D textures
   // exist; they need their own extent on TextureCreateDesc.
-  assert(Desc.Dim != TextureDimension::Three &&
+  assert(Desc.Dim != ResourceDimension::Dim3D &&
          "3D resources need a depth extent, not a slice count");
   // Both fields are UINT16. Callers must reject out-of-range values before
   // getting here, otherwise these casts wrap silently.
@@ -145,12 +145,12 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
 
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
-  case TextureDimension::Two:
+  case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
-  case TextureDimension::One:
-  case TextureDimension::Three:
-  case TextureDimension::Cube:
+  case ResourceDimension::Dim1D:
+  case ResourceDimension::Dim3D:
+  case ResourceDimension::Cube:
     llvm_unreachable("Texture dimension has no SRV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
@@ -158,12 +158,12 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
 
 static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
-  case TextureDimension::Two:
+  case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
-  case TextureDimension::One:
-  case TextureDimension::Three:
-  case TextureDimension::Cube:
+  case ResourceDimension::Dim1D:
+  case ResourceDimension::Dim3D:
+  case ResourceDimension::Cube:
     llvm_unreachable("Texture dimension has no UAV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
