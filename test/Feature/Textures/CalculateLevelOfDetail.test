@@ -46,22 +46,28 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float lod2 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv0);
   float lod3 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv1);
 
-  // TextureCube::CalculateLevelOfDetail takes a float3 direction. A direction
-  // is projected onto the selected face before the derivative is taken, so the
-  // LOD is not a simple function of the raw float3 delta the way the 2D case
-  // is of its uv delta. Only the two endpoints are asserted here, which hold
-  // regardless of that projection:
-  //   - a negligible derivative cannot minify, so the clamped LOD is 0
-  //   - an enormous derivative saturates at the coarsest level, MipLevels-1 = 2
-  // The intermediate values are left to the 2D cases above rather than pinning
-  // down driver-specific cube projection math.
+  // TextureCube::CalculateLevelOfDetail takes a float3 direction. The direction
+  // is projected onto the cube face that the major axis selects, and only then
+  // is the derivative taken. Every pixel of the 2x2 quad must therefore land on
+  // the same face: when a quad straddles two faces the derivative has no
+  // defined meaning. Both directions below keep |x| larger than |y| and |z| for
+  // all four pixels, so all four stay on the +X face.
+  //   - CubeFlat has a negligible derivative, which cannot minify, so the
+  //     clamped LOD is 0.
+  //   - CubeSteep slides z from +0.5 to -0.5 across the quad, which moves the
+  //     face coordinate u from 0.25 to 0.75. That is half of the 4-texel face
+  //     per pixel, so LOD = log2(0.5 * 4) = 1.
+  // Clamping to MipLevels-1 is already covered by the lod1/lod3 pair above, so
+  // there is no need to saturate a cube LOD here. A cube cannot do it portably
+  // anyway: the face coordinate spans [0, 1], so a single-face derivative
+  // cannot exceed one face width.
   float3 CubeFlat = float3(1, 0, 0) + float3(float2(GTid.xy) * 0.00001, 0);
-  float3 CubeSteep = float3(1, 0, 0) + float3(float2(GTid.xy) * 64.0, 0);
+  float3 CubeSteep = float3(1, 0, 0.5 - float(GTid.x));
 
   float lod4 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeFlat),
                         0.0);
   float lod5 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeSteep),
-                        2.0);
+                        1.0);
 
   if (all(GTid.xy == 0)) {
     Out[0] = lod0;
@@ -106,7 +112,7 @@ Buffers:
     Channels: 1
     Data: [ 1.0, 2.0, 1.0, 3.0,   # Texture2D: clamped, clamped, unclamped x2
             0.0,                  # TextureCube: no minification -> LOD 0
-            2.0 ]                 # TextureCube: saturates at MipLevels-1
+            1.0 ]                 # TextureCube: half a 4-texel face -> LOD 1
 
   - Name: RT
     Format: Float32
