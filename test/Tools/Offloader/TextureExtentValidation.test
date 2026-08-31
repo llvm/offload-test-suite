@@ -1,0 +1,94 @@
+#--- source.hlsl
+
+// This test verifies that a texture with a zero extent is rejected with a
+// clear error rather than being handed to the driver.
+
+Texture2D<float4> Tex : register(t0);
+RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  Out[0] = Tex.Load(int3(0, 0, 0));
+}
+
+//--- zero-width.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Pipeline.cpp only size-checks OutputProps when Width > 0, so a zero width
+  # reaches the texture validation with the data below left as-is.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 0, Height: 2, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+
+Results: []
+...
+
+//--- zero-height.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Width is non-zero here, so the expected size is 2 * 0 * 16 = 0 and the
+  # buffer must be empty to get past that check.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 0, Depth: 1 }
+    Data: []
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+
+Results: []
+...
+#--- end
+
+# Only DirectX routes texture resources through TextureCreateDesc today; the
+# Vulkan and Metal backends still create images directly from the pipeline
+# description, so they never reach this validation.
+# UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+
+# RUN: not %offloader %t/zero-width.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-WIDTH
+# ZERO-WIDTH: error: Texture dimensions must be non-zero, got 0x2.
+
+# RUN: not %offloader %t/zero-height.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-HEIGHT
+# ZERO-HEIGHT: error: Texture dimensions must be non-zero, got 2x0.

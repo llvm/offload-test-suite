@@ -1,0 +1,103 @@
+#--- source.hlsl
+
+// This test verifies that a texture declaring more mip levels than its
+// dimensions can support, or no mip levels at all, is rejected with a clear
+// error rather than being handed to the driver.
+
+Texture2D<float4> Tex : register(t0);
+RWBuffer<float4> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  Out[0] = Tex.mips[0][int2(0, 0)];
+}
+
+//--- too-many-mips.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # A 2x2 texture supports floor(log2(2)) + 1 = 2 mip levels, but declares 3.
+  # The data is sized to the declared 3-level chain (2x2 + 1x1 + 1x1 texels)
+  # so that the buffer-size check in Pipeline.cpp passes and this test still
+  # reaches the texture validation.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 3 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            0.0, 1.0, 1.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+
+Results: []
+...
+
+//--- zero-mips.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # MipLevels: 0 makes the expected data size zero, so the buffer must be
+  # empty for the buffer-size check to pass and hand off to the texture
+  # validation.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 0 }
+    Data: []
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+
+Results: []
+...
+#--- end
+
+# Only DirectX routes texture resources through TextureCreateDesc today; the
+# Vulkan and Metal backends still create images directly from the pipeline
+# description, so they never reach this validation.
+# UNSUPPORTED: Vulkan
+# UNSUPPORTED: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+
+# RUN: not %offloader %t/too-many-mips.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=TOO-MANY
+# TOO-MANY: error: Texture dimensions 2x2 support at most 2 mip levels, got 3.
+
+# RUN: not %offloader %t/zero-mips.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-MIPS
+# ZERO-MIPS: error: Texture must have at least one mip level.

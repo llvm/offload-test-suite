@@ -26,6 +26,13 @@ enum class ResourceKind {
   AccelerationStructure,
 };
 
+enum class ResourceDimension {
+  Dim1D,
+  Dim2D,
+  Dim3D,
+  Cube,
+};
+
 enum ShaderContainerType {
   DXIL,
   SPIRV,

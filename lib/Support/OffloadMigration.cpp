@@ -120,22 +120,9 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
       const void *DataPtr = *DataPtrOrErr;
 
       if (R.first->isTexture()) {
-        const TextureCreateDesc &Desc = RSIt->Tex->getDesc();
-        const uint32_t SrcStrideInBytes =
-            Dev.getTextureUploadRowStrideInBytes(Desc);
-        const uint32_t DstStrideInBytes =
-            Desc.Width * getFormatSizeInBytes(Desc.Fmt);
-        assert(DstStrideInBytes <= SrcStrideInBytes &&
-               "Destination should not have padding and thus should be <= "
-               "than SrcStride where we do expect potential padding.");
-        uint8_t *Dst = (uint8_t *)DataIt->get();
-        const uint8_t *Src = (const uint8_t *)DataPtr;
-
-        for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
-          memcpy(Dst, Src, DstStrideInBytes);
-          Dst += DstStrideInBytes;
-          Src += SrcStrideInBytes;
-        }
+        const TextureUploadLayout Layout =
+            Dev.getTextureUploadLayout(RSIt->Tex->getDesc());
+        copyTextureLayoutToPacked(DataIt->get(), DataPtr, Layout);
       } else {
         memcpy(DataIt->get(), DataPtr, R.first->size());
       }

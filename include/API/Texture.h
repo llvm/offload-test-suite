@@ -13,6 +13,7 @@
 #define OFFLOADTEST_API_TEXTURE_H
 
 #include "API/API.h"
+#include "API/Enums.h"
 #include "API/Resources.h"
 
 #include "llvm/ADT/BitmaskEnum.h"
@@ -21,6 +22,8 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Error.h"
 
+#include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -66,16 +69,29 @@ struct ClearDepthStencil {
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
 // TODO: Currently only 2D textures are supported. When expanding to 1D, 3D,
-// cube, or array textures, add a TextureType enum and validation between usage
-// and type (e.g. 3D textures cannot be used as DepthStencil).
+// cube, or array textures, add validation between usage and ResourceDimension
+// (e.g. 3D textures cannot be used as DepthStencil).
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
   TextureUsage Usage = {};
   Format Fmt = Format::RGBA32Float;
+  ResourceDimension Dim = ResourceDimension::Dim2D;
   uint32_t Width = 1;
   uint32_t Height = 1;
   uint32_t MipLevels = 1;
+
+  // The total number of subresources: one per mip level today.
+  uint32_t getSubresourceCount() const { return MipLevels; }
+
+  uint32_t getMipWidth(uint32_t Mip) const {
+    assert(Mip < MipLevels && "Mip level index out of bounds.");
+    return std::max(1u, Width >> Mip);
+  }
+  uint32_t getMipHeight(uint32_t Mip) const {
+    assert(Mip < MipLevels && "Mip level index out of bounds.");
+    return std::max(1u, Height >> Mip);
+  }
   // Clear value for render target or depth/stencil textures.
   // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time
@@ -89,6 +105,34 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         std::errc::invalid_argument,
         "Format '%s' is not compatible with texture creation.",
         getFormatName(Desc.Fmt).data());
+
+  // Only 2D textures are implemented for now.
+  if (Desc.Dim != ResourceDimension::Dim2D)
+    return llvm::createStringError(std::errc::not_supported,
+                                   "Only 2D textures are supported.");
+
+  if (Desc.Width == 0 || Desc.Height == 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture dimensions must be non-zero, got %ux%u.", Desc.Width,
+        Desc.Height);
+
+  if (Desc.MipLevels == 0)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "Texture must have at least one mip level.");
+
+  // A full mip chain halves the largest extent until it reaches 1x1, so the
+  // texture supports floor(log2(max(Width, Height))) + 1 levels.
+  // TODO: Account for Depth when 3D textures are supported.
+  uint32_t MaxMipLevels = 0;
+  for (uint32_t Extent = std::max(Desc.Width, Desc.Height); Extent != 0;
+       Extent >>= 1)
+    ++MaxMipLevels;
+  if (Desc.MipLevels > MaxMipLevels)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture dimensions %ux%u support at most %u mip levels, got %u.",
+        Desc.Width, Desc.Height, MaxMipLevels, Desc.MipLevels);
 
   const bool IsDepth = isDepthFormat(Desc.Fmt);
   const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
@@ -159,7 +203,26 @@ struct SubresourceFootprint {
 struct TextureUploadLayout {
   llvm::SmallVector<SubresourceFootprint> Subresources; // One entry per mip.
   uint64_t TotalSizeInBytes = 0;
+
+  // The size of the tightly-packed host-side representation of this texture:
+  // every subresource's rows back to back with no row or subresource padding.
+  uint64_t getPackedSizeInBytes() const {
+    uint64_t Size = 0;
+    for (const SubresourceFootprint &Sub : Subresources)
+      Size += uint64_t(Sub.RowSizeInBytes) * Sub.NumRows;
+    return Size;
+  }
 };
+
+// Copy a texture's contents between a tightly-packed host buffer and a
+// (possibly row/subresource padded) GPU-visible mapping described by `Layout`.
+// These methods know how to bridge the two layouts, so backends with alignment
+// requirements (e.g. D3D12's 256-byte D3D12_TEXTURE_DATA_PITCH_ALIGNMENT) work
+// for arbitrary widths.
+void copyPackedToTextureLayout(void *Dst, const void *PackedSrc,
+                               const TextureUploadLayout &Layout);
+void copyTextureLayoutToPacked(void *PackedDst, const void *Src,
+                               const TextureUploadLayout &Layout);
 
 // Compute a tightly-packed upload layout (no row or subresource padding) for
 // the given texture description. Suitable for backends whose buffer-to-texture

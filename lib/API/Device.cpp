@@ -596,10 +596,7 @@ offloadtest::createTextureWithData(
   // The source data is tightly packed across mips, so its required size is the
   // sum of each subresource's tight row size times its row count, independent
   // of any backend row/offset padding in the upload buffer.
-  uint64_t PackedSizeInBytes = 0;
-  for (const SubresourceFootprint &Sub : Layout.Subresources)
-    PackedSizeInBytes += uint64_t(Sub.RowSizeInBytes) * Sub.NumRows;
-  if (SizeInBytes < PackedSizeInBytes)
+  if (SizeInBytes < Layout.getPackedSizeInBytes())
     return llvm::createStringError(
         "Data upload is not enough for texture size.");
 
@@ -614,17 +611,8 @@ offloadtest::createTextureWithData(
   auto MappedPtrOrErr = (*OutUploadBuffer)->map();
   if (!MappedPtrOrErr)
     return MappedPtrOrErr.takeError();
-  auto *const DstBase = static_cast<uint8_t *>(*MappedPtrOrErr);
-  const auto *SrcPtr = static_cast<const uint8_t *>(Data);
 
-  for (const SubresourceFootprint &Sub : Layout.Subresources) {
-    uint8_t *DstPtr = DstBase + Sub.Offset;
-    for (uint32_t Row = 0; Row < Sub.NumRows; ++Row) {
-      memcpy(DstPtr, SrcPtr, Sub.RowSizeInBytes);
-      DstPtr += Sub.RowPitchInBytes;
-      SrcPtr += Sub.RowSizeInBytes;
-    }
-  }
+  copyPackedToTextureLayout(*MappedPtrOrErr, Data, Layout);
   (*OutUploadBuffer)->unmap();
 
   if (auto Err = Encoder->copyBufferToTexture(**OutUploadBuffer, *Texture))
