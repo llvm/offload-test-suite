@@ -317,7 +317,7 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
-# Bug: # Bug: https://github.com/llvm/offload-test-suite/issues/1083
+# Bug: https://github.com/llvm/llvm-project/issues/217826
 # XFAIL: Clang && Vulkan
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/961

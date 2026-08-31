@@ -1257,12 +1257,11 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
-    const llvm::SmallVector<VkBufferImageCopy> Regions =
-        getTextureCopyRegions(VKSrc.Desc);
-
     insertDebugSignpost(
         llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
+    const llvm::SmallVector<VkBufferImageCopy> Regions =
+        getTextureCopyRegions(VKSrc.Desc);
     vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
                            Regions.size(), Regions.data());

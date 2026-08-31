@@ -22,3 +22,9 @@ WARP:
   explicit WARP version, and the configuration step will pull WARP from NuGet.
   See the [NuGet package listing](https://www.nuget.org/packages/Microsoft.Direct3D.WARP)
   to identify valid versions.
+
+When `nuget.exe` is available on `PATH`, CMake uses it to download WARP,
+including its configured NuGet sources and authentication. If it is not
+available, CMake downloads WARP directly from nuget.org. Set
+**OFFLOADTEST_USE_NUGET_EXE**, which defaults to `ON`, to `OFF` to force the
+direct download.
