@@ -1462,7 +1462,7 @@ public:
       llvm_unreachable("Texture arrays aren't supported in Metal.");
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
-      llvm_unreachable("Cube textures aren't supported in Metal.");
+      llvm_unreachable("Texture cubes aren't supported in Metal.");
     case ResourceKind::SampledTexture2D:
       llvm_unreachable("SampledTextures aren't supported in Metal.");
     case ResourceKind::StructuredBuffer:

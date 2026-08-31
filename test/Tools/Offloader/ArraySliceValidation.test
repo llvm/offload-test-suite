@@ -121,7 +121,7 @@ Results: []
 # ZERO-SLICES: Buffer 'Tex' has an invalid ArraySlices count (0); must be at least 1
 
 # RUN: not %offloader %t/cube-not-multiple-of-6.yaml 2>&1 | FileCheck %s --check-prefix=CUBE-PARTIAL
-# CUBE-PARTIAL: Resource 'Tex' is a cube texture, so ArraySlices must be a multiple of 6 (got 4).
+# CUBE-PARTIAL: Resource 'Tex' is a texture cube, so ArraySlices must be a multiple of 6 (got 4).
 
 # RUN: not %offloader %t/cube-too-many-slices.yaml 2>&1 | FileCheck %s --check-prefix=CUBE-MULTI
 # CUBE-MULTI: Resource 'Tex' is not a cube array, so ArraySlices must be 6 (got 12).

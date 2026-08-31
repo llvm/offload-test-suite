@@ -1,6 +1,6 @@
-# Cube Textures
+# Texture Cubes
 
-The test suite supports the cube texture types:
+The test suite supports the texture cube types:
 
 | YAML `Kind`         | HLSL type           | Descriptor |
 | ------------------- | ------------------- | ---------- |
@@ -20,7 +20,7 @@ A cube is six array layers, one per face, always in this order:
 | 4     | `+Z` |
 | 5     | `-Z` |
 
-Because faces are layers, cube textures reuse the `ArraySlices` field and the
+Because faces are layers, texture cubes reuse the `ArraySlices` field and the
 slice-major data layout described in [TextureArrays.md](TextureArrays.md)
 unchanged. `ArraySlices` is a **layer** count, not a count of cubes:
 
@@ -64,7 +64,7 @@ Note that `ArraySlices` and the `Elements` returned by a shader's
 
 ## Backend Support
 
-Cube textures are supported on DirectX and Vulkan.
+Texture cubes are supported on DirectX and Vulkan.
 
 * **Vulkan** creates the image with `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT` and
   views it as `VK_IMAGE_VIEW_TYPE_CUBE` / `VK_IMAGE_VIEW_TYPE_CUBE_ARRAY`. A
@@ -73,4 +73,4 @@ Cube textures are supported on DirectX and Vulkan.
   layer count, and gives it a `D3D12_SRV_DIMENSION_TEXTURECUBE` /
   `TEXTURECUBEARRAY` view. Note that `TextureCubeArray.NumCubes` is a count of
   *cubes*, so it is the layer count divided by six.
-* **Metal** does not support cube textures; tests are marked `XFAIL: Metal`.
+* **Metal** does not support texture cubes; tests are marked `XFAIL: Metal`.

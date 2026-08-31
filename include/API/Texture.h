@@ -68,9 +68,10 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
-// TODO: only 2D textures (2D texture arrays, and cube maps) are supported. 1D
-// and 3D textures need their ResourceDimension cases filled in, plus validation
-// between usage and shape (e.g. 3D textures cannot be used as DepthStencil).
+// TODO: only 2D textures (2D texture arrays, and texture cubes) are supported.
+// 1D and 3D textures need their ResourceDimension cases filled in, plus
+// validation between usage and shape (e.g. 3D textures cannot be used as
+// DepthStencil).
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
@@ -111,8 +112,9 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
   // 1D and 3D textures are not implemented yet.
   if (Desc.Dim == ResourceDimension::Dim1D ||
       Desc.Dim == ResourceDimension::Dim3D)
-    return llvm::createStringError(std::errc::not_supported,
-                                   "Only 2D and cube textures are supported.");
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Only 2D textures and texture cubes are supported.");
 
   if (Desc.Width == 0 || Desc.Height == 0)
     return llvm::createStringError(
@@ -146,12 +148,12 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
     if (Desc.ArraySlices % 6 != 0)
       return llvm::createStringError(
           std::errc::invalid_argument,
-          "A cube texture requires a multiple of 6 slices, got %u.",
+          "A texture cube requires a multiple of 6 slices, got %u.",
           Desc.ArraySlices);
     if (Desc.ArraySlices > 6 && !Desc.IsArray)
       return llvm::createStringError(
           std::errc::invalid_argument,
-          "A cube texture with %u slices must be created as a cube array.",
+          "A texture cube with %u slices must be created as a cube array.",
           Desc.ArraySlices);
   } else if (Desc.ArraySlices > 1 && !Desc.IsArray) {
     return llvm::createStringError(

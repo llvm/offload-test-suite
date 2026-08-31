@@ -8,9 +8,9 @@ array-aware indexing, sampling and readback:
 | `Texture2DArray`   | `Texture2DArray`     | SRV        |
 | `RWTexture2DArray` | `RWTexture2DArray`   | UAV        |
 
-1D texture arrays are not supported yet. Cube textures are built from
+1D texture arrays are not supported yet. Texture cubes are built from
 array layers and reuse everything on this page; see
-[CubeTextures.md](CubeTextures.md).
+[TextureCubes.md](TextureCubes.md).
 
 ## Defining Array Slices
 

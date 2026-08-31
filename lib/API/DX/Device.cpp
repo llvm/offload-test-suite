@@ -164,7 +164,7 @@ static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
   case ResourceDimension::Cube:
-    llvm_unreachable("Cube textures cannot be used as a UAV");
+    llvm_unreachable("Texture cubes cannot be used as a UAV");
   case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
     llvm_unreachable("Texture dimension has no UAV mapping yet");

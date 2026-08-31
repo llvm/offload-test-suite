@@ -56,7 +56,7 @@ static llvm::Error validateTextureResource(const Resource &R) {
     if (Slices % 6 != 0)
       return llvm::createStringError(
           std::errc::invalid_argument,
-          "Resource '%s' is a cube texture, so ArraySlices must be a multiple "
+          "Resource '%s' is a texture cube, so ArraySlices must be a multiple "
           "of 6 (got %u).",
           R.Name.c_str(), Slices);
     if (!R.isTextureArray() && Slices != 6)
