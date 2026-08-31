@@ -26,11 +26,30 @@ static llvm::Error validateTextureResource(const Resource &R) {
          "validateTextureResource requires a resolved texture resource");
 
   const OutputProperties &Props = R.BufferPtr->OutputProps;
+
   if (Props.Width <= 0)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Texture resource '%s' requires OutputProps with a non-zero Width.",
         R.Name.c_str());
+
+  if (Props.Height <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires OutputProps with a non-zero Height.",
+        R.Name.c_str());
+
+  if (Props.Depth <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires OutputProps with a non-zero Depth.",
+        R.Name.c_str());
+
+  if (Props.MipLevels <= 0)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Texture resource '%s' requires at least one mip level (got %d).",
+        R.Name.c_str(), Props.MipLevels);
 
   const uint32_t Slices = static_cast<uint32_t>(Props.ArraySlices);
   if (!R.isTextureArray() && Slices != 1)

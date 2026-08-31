@@ -36,9 +36,11 @@ DescriptorSets:
     - Name: Tex
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
 
 Results: []
 ...
@@ -68,27 +70,62 @@ DescriptorSets:
     - Name: Tex
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results: []
+...
+
+//--- zero-depth.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Depth is only used by the expected-size computation for now, so a zero
+  # depth also collapses that check to 0 and needs an empty buffer to reach
+  # the texture validation.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 0 }
+    Data: []
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
 
 Results: []
 ...
 #--- end
-
-# Only DirectX routes texture resources through TextureCreateDesc today; the
-# Vulkan and Metal backends still create images directly from the pipeline
-# description, so they never reach this validation.
-# UNSUPPORTED: Vulkan
-# UNSUPPORTED: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 
 # RUN: not %offloader %t/zero-width.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ZERO-WIDTH
-# ZERO-WIDTH: error: Texture dimensions must be non-zero, got 0x2.
+# ZERO-WIDTH: error: Texture resource 'Tex' requires OutputProps with a non-zero Width.
 
 # RUN: not %offloader %t/zero-height.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ZERO-HEIGHT
-# ZERO-HEIGHT: error: Texture dimensions must be non-zero, got 2x0.
+# ZERO-HEIGHT: error: Texture resource 'Tex' requires OutputProps with a non-zero Height.
+
+# RUN: not %offloader %t/zero-depth.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=ZERO-DEPTH
+# ZERO-DEPTH: error: Texture resource 'Tex' requires OutputProps with a non-zero Depth.
