@@ -1,0 +1,151 @@
+#--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerState Samp : register(s0);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  // Texture2DArray::Sample derives the LOD from screen-space derivatives, so
+  // this needs a pixel shader. The slice is part of the float3 coordinate but
+  // takes no part in the derivative: each slice is filtered on its own.
+  uint2 GTid = (uint2)Pos.xy;
+  float2 Offset = float2(GTid.xy);
+
+  // Small delta -> magnification -> mip 0. Large delta -> minification.
+  float2 UVMag = float2(0.5, 0.5) + Offset * 0.0001;
+  float2 UVMin = float2(0.5, 0.5) + Offset * 2.0;
+
+  // Slice 0: mip 0 all Red, mip 1 Yellow.
+  float4 R0 = Tex.Sample(Samp, float3(UVMag, 0));
+  float4 R1 = Tex.Sample(Samp, float3(UVMin, 0));
+
+  // Slice 1: mip 0 all Blue, mip 1 Green. Minification must stay inside the
+  // slice's own mip chain rather than reaching into slice 0.
+  float4 R2 = Tex.Sample(Samp, float3(UVMag, 1));
+  float4 R3 = Tex.Sample(Samp, float3(UVMin, 1));
+
+  if (all(GTid.xy == 0)) {
+    Out[0] = R0;
+    Out[1] = R1;
+    Out[2] = R2;
+    Out[3] = R3;
+  }
+  return float4(0, 0, 0, 0);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  # 2x2 with 2 mips across 2 slices, slice-major.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+    Data: [ # --- Slice 0, Mip 0 (all Red) ---
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            # --- Slice 0, Mip 1 (Yellow) ---
+            1.0, 1.0, 0.0, 1.0,
+
+            # --- Slice 1, Mip 0 (all Blue) ---
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            # --- Slice 1, Mip 1 (Green) ---
+            0.0, 1.0, 0.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # [0] slice 0 magnified -> mip 0 Red
+            1.0, 1.0, 0.0, 1.0,   # [1] slice 0 minified  -> mip 1 Yellow
+            0.0, 0.0, 1.0, 1.0,   # [2] slice 1 magnified -> mip 0 Blue
+            0.0, 1.0, 0.0, 1.0 ]  # [3] slice 1 minified  -> mip 1 Green
+
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [-1.0, -1.0, 0.0,
+            3.0, -1.0, 0.0,
+           -1.0,  3.0, 0.0]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Samplers:
+  - Name: Samp
+    Address: Clamp
+    MinFilter: Linear
+    MagFilter: Linear
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+
+Results:
+  - Result: ArraySampleTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/143523
+# XFAIL: Clang && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

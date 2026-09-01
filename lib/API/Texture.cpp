@@ -19,14 +19,18 @@ offloadtest::computeTightTextureUploadLayout(const TextureCreateDesc &Desc) {
   TextureUploadLayout Layout;
   Layout.Subresources.reserve(Desc.getSubresourceCount());
   uint64_t Offset = 0;
-  for (uint32_t Mip = 0; Mip < Desc.MipLevels; ++Mip) {
-    SubresourceFootprint Sub;
-    Sub.Offset = Offset;
-    Sub.RowSizeInBytes = Desc.getMipWidth(Mip) * ElementSize;
-    Sub.RowPitchInBytes = Sub.RowSizeInBytes;
-    Sub.NumRows = Desc.getMipHeight(Mip);
-    Layout.Subresources.push_back(Sub);
-    Offset += uint64_t(Sub.RowSizeInBytes) * Sub.NumRows;
+  // Slice-major ordering keeps this layout index-compatible with D3D12's
+  // subresource indexing (`Mip + Slice * MipLevels`).
+  for (uint32_t Slice = 0; Slice < Desc.ArraySlices; ++Slice) {
+    for (uint32_t Mip = 0; Mip < Desc.MipLevels; ++Mip) {
+      SubresourceFootprint Sub;
+      Sub.Offset = Offset;
+      Sub.RowSizeInBytes = Desc.getMipWidth(Mip) * ElementSize;
+      Sub.RowPitchInBytes = Sub.RowSizeInBytes;
+      Sub.NumRows = Desc.getMipHeight(Mip);
+      Layout.Subresources.push_back(Sub);
+      Offset += uint64_t(Sub.RowSizeInBytes) * Sub.NumRows;
+    }
   }
   Layout.TotalSizeInBytes = Offset;
   return Layout;

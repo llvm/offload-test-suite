@@ -87,7 +87,7 @@ Results: []
 
 # Only DirectX routes texture resources through TextureCreateDesc today; the
 # Vulkan and Metal backends still create images directly from the pipeline
-# description, so they never reach this validation.
+# description, so they never reach the mip-chain-length validation.
 # UNSUPPORTED: Vulkan
 # UNSUPPORTED: Metal
 
@@ -100,4 +100,4 @@ Results: []
 
 # RUN: not %offloader %t/zero-mips.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ZERO-MIPS
-# ZERO-MIPS: error: Texture must have at least one mip level.
+# ZERO-MIPS: error: Texture resource 'Tex' requires at least one mip level (got 0).

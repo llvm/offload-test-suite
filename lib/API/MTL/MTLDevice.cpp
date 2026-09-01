@@ -1457,6 +1457,9 @@ public:
       break;
     case ResourceKind::Sampler:
       llvm_unreachable("Not implemented yet.");
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
+      llvm_unreachable("Texture arrays aren't supported in Metal.");
     case ResourceKind::SampledTexture2D:
       llvm_unreachable("SampledTextures aren't supported in Metal.");
     case ResourceKind::StructuredBuffer:

@@ -125,7 +125,18 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   TexDesc.Dimension = getDXResourceDimension(Desc.Dim);
   TexDesc.Width = Desc.Width;
   TexDesc.Height = Desc.Height;
-  TexDesc.DepthOrArraySize = 1;
+  // DepthOrArraySize is the layer count for 1D/2D resources but the depth
+  // extent for 3D ones, so it cannot take the slice count once 3D textures
+  // exist; they need their own extent on TextureCreateDesc.
+  assert(Desc.Dim != ResourceDimension::Dim3D &&
+         "3D resources need a depth extent, not a slice count");
+  // Both fields are UINT16. Callers must reject out-of-range values before
+  // getting here, otherwise these casts wrap silently.
+  assert(Desc.ArraySlices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION &&
+         "Slice count must be range-checked before narrowing to UINT16");
+  assert(Desc.MipLevels <= D3D12_REQ_MIP_LEVELS &&
+         "Mip level count must be range-checked before narrowing to UINT16");
+  TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
   TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
   TexDesc.Format = getDXGIFormat(Desc.Fmt);
   TexDesc.SampleDesc.Count = 1;
@@ -135,7 +146,8 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
   case ResourceDimension::Dim2D:
-    return D3D12_SRV_DIMENSION_TEXTURE2D;
+    return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
+                        : D3D12_SRV_DIMENSION_TEXTURE2D;
   case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
   case ResourceDimension::Cube:
@@ -147,7 +159,8 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
 static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
   case ResourceDimension::Dim2D:
-    return D3D12_UAV_DIMENSION_TEXTURE2D;
+    return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
+                        : D3D12_UAV_DIMENSION_TEXTURE2D;
   case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
   case ResourceDimension::Cube:
@@ -2093,6 +2106,17 @@ public:
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 
+    if (Desc.ArraySlices > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u texture array slices; got %u.",
+          D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, Desc.ArraySlices);
+    if (Desc.MipLevels > D3D12_REQ_MIP_LEVELS)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u mip levels; got %u.", D3D12_REQ_MIP_LEVELS,
+          Desc.MipLevels);
+
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
 
@@ -2158,14 +2182,28 @@ public:
       SRVHandle = *SRVHandleOrErr;
 
       D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-      SRVDesc.ViewDimension = getDXSRVDimension(Desc);
       SRVDesc.Shader4ComponentMapping =
           D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
       SRVDesc.Format = getDXGIFormatSRV(Desc.Fmt);
-      SRVDesc.Texture2D.MostDetailedMip = 0;
-      SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
-      SRVDesc.Texture2D.PlaneSlice = 0;
-      SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+      SRVDesc.ViewDimension = getDXSRVDimension(Desc);
+      switch (SRVDesc.ViewDimension) {
+      case D3D12_SRV_DIMENSION_TEXTURE2D:
+        SRVDesc.Texture2D.MostDetailedMip = 0;
+        SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture2D.PlaneSlice = 0;
+        SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURE2DARRAY:
+        SRVDesc.Texture2DArray.MostDetailedMip = 0;
+        SRVDesc.Texture2DArray.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture2DArray.FirstArraySlice = 0;
+        SRVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
+        SRVDesc.Texture2DArray.PlaneSlice = 0;
+        SRVDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
+        break;
+      default:
+        llvm_unreachable("Unhandled texture SRV dimension");
+      }
 
       Device->CreateShaderResourceView(TextureObject.Get(), &SRVDesc,
                                        SRVHandle);
@@ -2184,6 +2222,12 @@ public:
       case D3D12_UAV_DIMENSION_TEXTURE2D:
         UAVDesc.Texture2D.MipSlice = 0;
         UAVDesc.Texture2D.PlaneSlice = 0;
+        break;
+      case D3D12_UAV_DIMENSION_TEXTURE2DARRAY:
+        UAVDesc.Texture2DArray.MipSlice = 0;
+        UAVDesc.Texture2DArray.FirstArraySlice = 0;
+        UAVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
+        UAVDesc.Texture2DArray.PlaneSlice = 0;
         break;
       default:
         llvm_unreachable("Unhandled texture UAV dimension");

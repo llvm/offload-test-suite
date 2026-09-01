@@ -68,9 +68,9 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
-// TODO: Currently only 2D textures are supported. When expanding to 1D, 3D,
-// cube, or array textures, add validation between usage and ResourceDimension
-// (e.g. 3D textures cannot be used as DepthStencil).
+// TODO: only 2D textures (and 2D texture arrays) are supported. 1D, 3D, and
+// cube textures need their ResourceDimension cases filled in, plus validation
+// between usage and shape (e.g. 3D textures cannot be used as DepthStencil).
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
@@ -80,9 +80,16 @@ struct TextureCreateDesc {
   uint32_t Width = 1;
   uint32_t Height = 1;
   uint32_t MipLevels = 1;
+  uint32_t ArraySlices = 1;
+  bool IsArray = false;
+  // Clear value for render target or depth/stencil textures.
+  // How and when this is applied depends on the backend:
+  // - DX uses it as an optimized clear hint at resource creation time
+  // - VK and MTL apply it at render pass begin
+  std::optional<ClearValue> OptimizedClearValue;
 
-  // The total number of subresources: one per mip level today.
-  uint32_t getSubresourceCount() const { return MipLevels; }
+  // The total number of subresources: one per (mip, slice) pair.
+  uint32_t getSubresourceCount() const { return MipLevels * ArraySlices; }
 
   uint32_t getMipWidth(uint32_t Mip) const {
     assert(Mip < MipLevels && "Mip level index out of bounds.");
@@ -92,11 +99,6 @@ struct TextureCreateDesc {
     assert(Mip < MipLevels && "Mip level index out of bounds.");
     return std::max(1u, Height >> Mip);
   }
-  // Clear value for render target or depth/stencil textures.
-  // How and when this is applied depends on the backend:
-  // - DX uses it as an optimized clear hint at resource creation time
-  // - VK and MTL apply it at render pass begin
-  std::optional<ClearValue> OptimizedClearValue;
 };
 
 inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
@@ -134,6 +136,15 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "Texture dimensions %ux%u support at most %u mip levels, got %u.",
         Desc.Width, Desc.Height, MaxMipLevels, Desc.MipLevels);
 
+  if (Desc.ArraySlices == 0)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "A texture requires at least one slice.");
+  if (Desc.ArraySlices > 1 && !Desc.IsArray)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "A texture with %u slices must be created as a texture array.",
+        Desc.ArraySlices);
+
   const bool IsDepth = isDepthFormat(Desc.Fmt);
   const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;
   const bool IsDS = (Desc.Usage & TextureUsage::DepthStencil) != 0;
@@ -162,6 +173,13 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         std::errc::not_supported,
         "Multiple mip levels are not supported for render target or "
         "depth/stencil textures.");
+
+  // Layered rendering is not plumbed through the render pass API yet.
+  if ((IsRT || IsDS) && Desc.ArraySlices != 1)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Array slices are not supported for render target or depth/stencil "
+        "textures.");
 
   // A clear value requires RenderTarget or DepthStencil usage, and the
   // variant must match.
@@ -201,7 +219,10 @@ struct SubresourceFootprint {
 };
 
 struct TextureUploadLayout {
-  llvm::SmallVector<SubresourceFootprint> Subresources; // One entry per mip.
+  // One entry per subresource, ordered slice-major (all mips of slice 0, then
+  // all mips of slice 1, ...), matching D3D12's `Mip + Slice * MipLevels`
+  // subresource indexing.
+  llvm::SmallVector<SubresourceFootprint> Subresources;
   uint64_t TotalSizeInBytes = 0;
 
   // The size of the tightly-packed host-side representation of this texture:

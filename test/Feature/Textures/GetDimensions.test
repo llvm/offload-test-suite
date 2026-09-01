@@ -3,6 +3,7 @@
 [[vk::binding(1, 0)]] Texture2D<float4> Tex2 : register(t1);
 [[vk::binding(3, 0)]] Texture2D<float4> Tex3 : register(t2); // 4x4 with 3 mips
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+[[vk::binding(4, 0)]] RWTexture2D<float4> RWTex : register(u1); // 8x2
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -46,6 +47,12 @@ void main() {
   Tex3.GetDimensions(2, w, h, levels);
   Out[15] = w;
   Out[16] = h;
+
+  // RWTexture2D (8x2). A UAV has a single mip level, so its GetDimensions has
+  // no mip or level parameters at all -- just the two extents.
+  RWTex.GetDimensions(uwidth, uheight);
+  Out[17] = (float)uwidth;
+  Out[18] = (float)uheight;
 }
 
 //--- pipeline.yaml
@@ -73,10 +80,16 @@ Buffers:
     OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
     FillSize: 336 # (16 + 4 + 1) * 4 * 4 = 21 * 16 = 336
 
+  - Name: RWTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 8, Height: 2, Depth: 1 }
+    FillSize: 256 # 8 * 2 * 4 * 4
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 68 # 17 * sizeof(float)
+    FillSize: 76 # 19 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -85,7 +98,8 @@ Buffers:
             16.0, 32.0, 1.0, 16.0, 32.0, # Tex2
             4.0, 4.0, 3.0,               # Tex3 Mip 0
             2.0, 2.0,                    # Tex3 Mip 1
-            1.0, 1.0 ]                   # Tex3 Mip 2
+            1.0, 1.0,                    # Tex3 Mip 2
+            8.0, 2.0 ]                   # RWTex
 
 DescriptorSets:
   - Resources:
@@ -105,6 +119,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 2 }
+    - Name: RWTex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: GetDimensionsTest
