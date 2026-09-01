@@ -68,9 +68,10 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
-// TODO: only 2D textures (and 2D texture arrays) are supported. 1D, 3D, and
-// cube textures need their ResourceDimension cases filled in, plus validation
-// between usage and shape (e.g. 3D textures cannot be used as DepthStencil).
+// TODO: only 2D textures (2D texture arrays, and texture cubes) are supported.
+// 1D and 3D textures need their ResourceDimension cases filled in, plus
+// validation between usage and shape (e.g. 3D textures cannot be used as
+// DepthStencil).
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
@@ -108,10 +109,12 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "Format '%s' is not compatible with texture creation.",
         getFormatName(Desc.Fmt).data());
 
-  // Only 2D textures are implemented for now.
-  if (Desc.Dim != ResourceDimension::Dim2D)
-    return llvm::createStringError(std::errc::not_supported,
-                                   "Only 2D textures are supported.");
+  // 1D and 3D textures are not implemented yet.
+  if (Desc.Dim == ResourceDimension::Dim1D ||
+      Desc.Dim == ResourceDimension::Dim3D)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Only 2D textures and texture cubes are supported.");
 
   if (Desc.Width == 0 || Desc.Height == 0)
     return llvm::createStringError(
@@ -139,11 +142,25 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
   if (Desc.ArraySlices == 0)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "A texture requires at least one slice.");
-  if (Desc.ArraySlices > 1 && !Desc.IsArray)
+
+  if (Desc.Dim == ResourceDimension::Cube) {
+    // A cube is six layers, one per face.
+    if (Desc.ArraySlices % 6 != 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "A texture cube requires a multiple of 6 slices, got %u.",
+          Desc.ArraySlices);
+    if (Desc.ArraySlices > 6 && !Desc.IsArray)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "A texture cube with %u slices must be created as a cube array.",
+          Desc.ArraySlices);
+  } else if (Desc.ArraySlices > 1 && !Desc.IsArray) {
     return llvm::createStringError(
         std::errc::invalid_argument,
         "A texture with %u slices must be created as a texture array.",
         Desc.ArraySlices);
+  }
 
   const bool IsDepth = isDepthFormat(Desc.Fmt);
   const bool IsRT = (Desc.Usage & TextureUsage::RenderTarget) != 0;

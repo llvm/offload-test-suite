@@ -17,6 +17,12 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0);
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
+#ifndef NO_TEXTURECUBE
+[[vk::binding(3, 0)]] TextureCube<float4> TexCube : register(t1); // 4x4 faces, 3 mips
+#define CUBE_OR(Call, Expect) (Call)
+#else
+#define CUBE_OR(Call, Expect) (Expect)
+#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Use SV_Position (pixel coordinates) to simulate the grid logic.
@@ -40,11 +46,36 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float lod2 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv0);
   float lod3 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv1);
 
+  // TextureCube::CalculateLevelOfDetail takes a float3 direction. The direction
+  // is projected onto the cube face that the major axis selects, and only then
+  // is the derivative taken. Every pixel of the 2x2 quad must therefore land on
+  // the same face: when a quad straddles two faces the derivative has no
+  // defined meaning. Both directions below keep |x| larger than |y| and |z| for
+  // all four pixels, so all four stay on the +X face.
+  //   - CubeFlat has a negligible derivative, which cannot minify, so the
+  //     clamped LOD is 0.
+  //   - CubeSteep slides z from +0.5 to -0.5 across the quad, which moves the
+  //     face coordinate u from 0.25 to 0.75. That is half of the 4-texel face
+  //     per pixel, so LOD = log2(0.5 * 4) = 1.
+  // Clamping to MipLevels-1 is already covered by the lod1/lod3 pair above, so
+  // there is no need to saturate a cube LOD here. A cube cannot do it portably
+  // anyway: the face coordinate spans [0, 1], so a single-face derivative
+  // cannot exceed one face width.
+  float3 CubeFlat = float3(1, 0, 0) + float3(float2(GTid.xy) * 0.00001, 0);
+  float3 CubeSteep = float3(1, 0, 0.5 - float(GTid.x));
+
+  float lod4 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeFlat),
+                        0.0);
+  float lod5 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeSteep),
+                        1.0);
+
   if (all(GTid.xy == 0)) {
     Out[0] = lod0;
     Out[1] = lod1;
     Out[2] = lod2;
     Out[3] = lod3;
+    Out[4] = lod4;
+    Out[5] = lod5;
   }
   return float4(0, 0, 0, 0);
 }
@@ -64,15 +95,24 @@ Buffers:
     OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
     FillSize: 336 # (16+4+1)*16
 
+  # Six 4x4 faces with 3 mips: (16+4+1) * 6 texels of float4.
+  - Name: TexCube
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3, ArraySlices: 6 }
+    FillSize: 2016 # 21 * 6 * 16
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 16 # 4 * sizeof(float)
+    FillSize: 24 # 6 * sizeof(float)
 
   - Name: Expected
     Format: Float32
     Channels: 1
-    Data: [ 1.0, 2.0, 1.0, 3.0 ]
+    Data: [ 1.0, 2.0, 1.0, 3.0,   # Texture2D: clamped, clamped, unclamped x2
+            0.0,                  # TextureCube: no minification -> LOD 0
+            1.0 ]                 # TextureCube: half a 4-texel face -> LOD 1
 
   - Name: RT
     Format: Float32
@@ -116,6 +156,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 2 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
 
 Results:
   - Result: LODTest
@@ -138,5 +182,6 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
+# RUN: %dxc_target -T ps_6_6 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

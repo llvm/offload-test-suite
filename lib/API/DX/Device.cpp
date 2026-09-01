@@ -148,9 +148,11 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
   case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Cube:
+    return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
+                        : D3D12_SRV_DIMENSION_TEXTURECUBE;
   case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
-  case ResourceDimension::Cube:
     llvm_unreachable("Texture dimension has no SRV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
@@ -161,9 +163,10 @@ static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Cube:
+    llvm_unreachable("Texture cubes cannot be used as a UAV");
   case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
-  case ResourceDimension::Cube:
     llvm_unreachable("Texture dimension has no UAV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
@@ -2200,6 +2203,18 @@ public:
         SRVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
         SRVDesc.Texture2DArray.PlaneSlice = 0;
         SRVDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURECUBE:
+        SRVDesc.TextureCube.MostDetailedMip = 0;
+        SRVDesc.TextureCube.MipLevels = Desc.MipLevels;
+        SRVDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURECUBEARRAY:
+        SRVDesc.TextureCubeArray.MostDetailedMip = 0;
+        SRVDesc.TextureCubeArray.MipLevels = Desc.MipLevels;
+        SRVDesc.TextureCubeArray.First2DArrayFace = 0;
+        SRVDesc.TextureCubeArray.NumCubes = Desc.ArraySlices / 6;
+        SRVDesc.TextureCubeArray.ResourceMinLODClamp = 0.0f;
         break;
       default:
         llvm_unreachable("Unhandled texture SRV dimension");

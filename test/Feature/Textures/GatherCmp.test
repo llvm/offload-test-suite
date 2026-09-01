@@ -4,6 +4,12 @@
 [[vk::binding(3, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
 [[vk::binding(4, 0)]] SamplerComparisonState SampRepeat : register(s2); // Less, Repeat
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+#ifndef NO_TEXTURECUBE
+[[vk::binding(5, 0)]] TextureCube<float4> TexCube : register(t1);
+#define CUBE_OR(Call, Expect) (Call)
+#else
+#define CUBE_OR(Call, Expect) (Expect)
+#endif
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -58,6 +64,26 @@ void main() {
   // R values: (0,0)=0.2, (0,0)=0.2, (0,0)=0.2, (0,0)=0.2
   // Results: (0.5<0.2)=0, (0.5<0.2)=0, (0.5<0.2)=0, (0.5<0.2)=0
   Out[7] = Tex.GatherCmp(Samp, uv, 0.5, int2(-1, -1));
+
+  // TextureCube::GatherCmp takes a float3 direction. Like the plain cube
+  // gather it has no offset overload, since an integer texel offset has no
+  // meaning once it would cross a face edge.
+  //
+  // 8: face +X holds the same values as the 2D texture above, so ref=0.5 with
+  // Less gives the same [0, 1, 1, 0].
+  Out[8] = CUBE_OR(TexCube.GatherCmp(Samp, float3(1, 0, 0), 0.5),
+                   float4(0, 1, 1, 0));
+
+  // 9: the same face with Greater inverts every comparison -> [1, 0, 0, 1].
+  Out[9] = CUBE_OR(TexCube.GatherCmp(SampGreater, float3(1, 0, 0), 0.5),
+                   float4(1, 0, 0, 1));
+
+  // 10: face -Z holds 0.9/0.1 instead, so ref=0.5 with Less gives
+  // [ (0,1)=0.9 -> 1, (1,1)=0.1 -> 0, (1,0)=0.1 -> 0, (0,0)=0.9 -> 1 ].
+  // The faces in between are a uniform 0.5, so straying over a face edge
+  // would not produce this pattern.
+  Out[10] = CUBE_OR(TexCube.GatherCmp(Samp, float3(0, 0, -1), 0.5),
+                    float4(1, 0, 0, 1));
 }
 
 //--- pipeline.yaml
@@ -76,10 +102,22 @@ Buffers:
             0.2,  # (0,1) R=0.2
             0.8 ] # (1,1) R=0.8
 
+  # Six 2x2 depth faces, slice-major, in the order +X, -X, +Y, -Y, +Z, -Z.
+  - Name: TexCube
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 6 }
+    Data: [ 0.2, 0.8, 0.2, 0.8,   # face 0 (+X), as the 2D texture above
+            0.5, 0.5, 0.5, 0.5,   # face 1 (-X)
+            0.5, 0.5, 0.5, 0.5,   # face 2 (+Y)
+            0.5, 0.5, 0.5, 0.5,   # face 3 (-Y)
+            0.5, 0.5, 0.5, 0.5,   # face 4 (+Z)
+            0.9, 0.1, 0.9, 0.1 ]  # face 5 (-Z)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 128 # 8 * sizeof(float4)
+    FillSize: 176 # 11 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -91,7 +129,10 @@ Buffers:
             0.0, 1.0, 1.0, 0.0,
             0.0, 1.0, 1.0, 0.0,
             1.0, 1.0, 1.0, 1.0,
-            0.0, 0.0, 0.0, 0.0 ]
+            0.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 1.0, 0.0,  # 8: cube +X, Less
+            1.0, 0.0, 0.0, 1.0,  # 9: cube +X, Greater
+            1.0, 0.0, 0.0, 1.0 ] # 10: cube -Z, Less
 
 Samplers:
   - Name: Samp
@@ -129,6 +170,10 @@ DescriptorSets:
       Kind: Sampler
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: GatherCmpTest
@@ -145,5 +190,6 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
+# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

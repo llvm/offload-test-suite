@@ -3,6 +3,12 @@
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0);
 [[vk::binding(3, 0)]] SamplerState SampRepeat : register(s1);
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+#ifndef NO_TEXTURECUBE
+[[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
+#define CUBE_OR(Call, Expect) (Call)
+#else
+#define CUBE_OR(Call, Expect) (Expect)
+#endif
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -42,6 +48,32 @@ void main() {
   // Alpha
   Out[11] = Tex.GatherAlpha(Samp, uv_outside);
   Out[12] = Tex.GatherAlpha(SampRepeat, uv_outside);
+
+  // TextureCube::Gather takes a float3 direction instead of a uv. Gathering
+  // down an axis lands in the centre of that face, so the four texels are
+  // exactly that face's, in the same [ (0,1), (1,1), (1,0), (0,0) ] order.
+  // There is no offset overload: an integer texel offset has no meaning once
+  // it would cross a face edge.
+  float3 PosX = float3(1, 0,  0);
+  float3 NegZ = float3(0, 0, -1);
+
+  // Face +X holds a distinct value in every channel of every texel, so all
+  // four single-channel gathers are distinguishable.
+  Out[13] = CUBE_OR(TexCube.Gather(Samp, PosX),      // equivalent to GatherRed
+                    float4(0.375, 0.5, 0.25, 0.125));
+  Out[14] = CUBE_OR(TexCube.GatherRed(Samp, PosX),
+                    float4(0.375, 0.5, 0.25, 0.125));
+  Out[15] = CUBE_OR(TexCube.GatherGreen(Samp, PosX),
+                    float4(0.75, 0.875, 0.625, 0.5));
+  Out[16] = CUBE_OR(TexCube.GatherBlue(Samp, PosX),
+                    float4(0.5, 0.625, 0.375, 0.25));
+  Out[17] = CUBE_OR(TexCube.GatherAlpha(Samp, PosX),
+                    float4(0.125, 0.25, 0.875, 0.75));
+
+  // A gather on another face must collect only that face's texels. The faces
+  // in between are uniform, so straying over an edge shows as a constant.
+  Out[18] = CUBE_OR(TexCube.GatherRed(Samp, NegZ),
+                    float4(0.625, 0.5, 0.75, 0.875));
 }
 
 //--- pipeline.yaml
@@ -60,10 +92,40 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1) -> R=0, G=0, B=1, A=1
             1.0, 1.0, 1.0, 0.5 ] # White (1,1) -> R=1, G=1, B=1, A=0.5
 
+  # Six 2x2 faces, slice-major, in the order +X, -X, +Y, -Y, +Z, -Z. Texels
+  # within a face are row-major: (0,0), (1,0), (0,1), (1,1). Values are
+  # multiples of 1/16 so they are exact in float32 for the BufferExact rule.
+  - Name: TexCube
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 6 }
+    Data: [ # --- Face 0 (+X): every channel of every texel distinct ---
+            0.125, 0.5,   0.25,  0.75,    # (0,0)
+            0.25,  0.625, 0.375, 0.875,   # (1,0)
+            0.375, 0.75,  0.5,   0.125,   # (0,1)
+            0.5,   0.875, 0.625, 0.25,    # (1,1)
+            # --- Face 1 (-X): uniform ---
+            0.0625, 0.0625, 0.0625, 1.0,  0.0625, 0.0625, 0.0625, 1.0,
+            0.0625, 0.0625, 0.0625, 1.0,  0.0625, 0.0625, 0.0625, 1.0,
+            # --- Face 2 (+Y): uniform ---
+            0.125, 0.125, 0.125, 1.0,  0.125, 0.125, 0.125, 1.0,
+            0.125, 0.125, 0.125, 1.0,  0.125, 0.125, 0.125, 1.0,
+            # --- Face 3 (-Y): uniform ---
+            0.1875, 0.1875, 0.1875, 1.0,  0.1875, 0.1875, 0.1875, 1.0,
+            0.1875, 0.1875, 0.1875, 1.0,  0.1875, 0.1875, 0.1875, 1.0,
+            # --- Face 4 (+Z): uniform ---
+            0.25, 0.25, 0.25, 1.0,  0.25, 0.25, 0.25, 1.0,
+            0.25, 0.25, 0.25, 1.0,  0.25, 0.25, 0.25, 1.0,
+            # --- Face 5 (-Z): descending, so gather order is observable ---
+            0.875, 0.0, 0.0, 1.0,   # (0,0)
+            0.75,  0.0, 0.0, 1.0,   # (1,0)
+            0.625, 0.0, 0.0, 1.0,   # (0,1)
+            0.5,   0.0, 0.0, 1.0 ]  # (1,1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 208 # 13 * sizeof(float4)
+    FillSize: 304 # 19 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -80,7 +142,13 @@ Buffers:
             1.0, 1.0, 1.0, 1.0,  # 9: Blue Clamp (1.5, 1.5)
             1.0, 1.0, 0.0, 0.0,  # 10: Blue Repeat (1.5, 1.5)
             0.5, 0.5, 0.5, 0.5,  # 11: Alpha Clamp (1.5, 1.5)
-            1.0, 0.5, 1.0, 1.0 ] # 12: Alpha Repeat (1.5, 1.5)
+            1.0, 0.5, 1.0, 1.0,  # 12: Alpha Repeat (1.5, 1.5)
+            0.375, 0.5,   0.25,  0.125,   # 13: Cube Gather (Red) +X
+            0.375, 0.5,   0.25,  0.125,   # 14: Cube GatherRed +X
+            0.75,  0.875, 0.625, 0.5,     # 15: Cube GatherGreen +X
+            0.5,   0.625, 0.375, 0.25,    # 16: Cube GatherBlue +X
+            0.125, 0.25,  0.875, 0.75,    # 17: Cube GatherAlpha +X
+            0.625, 0.5,   0.75,  0.875 ]  # 18: Cube GatherRed -Z
 
 Samplers:
   - Name: Samp
@@ -108,6 +176,10 @@ DescriptorSets:
       Kind: Sampler
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: GatherTest
@@ -124,5 +196,6 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
+# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

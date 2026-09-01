@@ -4,6 +4,7 @@
 [[vk::binding(3, 0)]] Texture2D<float4> Tex3 : register(t2); // 4x4 with 3 mips
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
 [[vk::binding(4, 0)]] RWTexture2D<float4> RWTex : register(u1); // 8x2
+[[vk::binding(5, 0)]] TextureCube<float4> TexCube : register(t3); // 4x4, 3 mips
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -53,6 +54,23 @@ void main() {
   RWTex.GetDimensions(uwidth, uheight);
   Out[17] = (float)uwidth;
   Out[18] = (float)uheight;
+
+  // TexCube (4x4 faces, 3 mips). A cube reports its face dimensions and has
+  // no element count: the six faces are not an array dimension.
+  TexCube.GetDimensions(0, width, height, levels);
+  Out[19] = width;
+  Out[20] = height;
+  Out[21] = levels;
+
+  // Mip 1 halves the face extents; the face count is not a texel dimension so
+  // nothing else changes.
+  TexCube.GetDimensions(1, uwidth, uheight, ulevels);
+  Out[22] = (float)uwidth;
+  Out[23] = (float)uheight;
+
+  TexCube.GetDimensions(w, h);
+  Out[24] = w;
+  Out[25] = h;
 }
 
 //--- pipeline.yaml
@@ -86,10 +104,17 @@ Buffers:
     OutputProps: { Width: 8, Height: 2, Depth: 1 }
     FillSize: 256 # 8 * 2 * 4 * 4
 
+  # 4x4 faces with 3 mips across 6 faces: (16 + 4 + 1) * 6 texels of float4.
+  - Name: TexCube
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3, ArraySlices: 6 }
+    FillSize: 2016 # 21 * 6 * 4 * 4
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 76 # 19 * sizeof(float)
+    FillSize: 104 # 26 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -99,7 +124,10 @@ Buffers:
             4.0, 4.0, 3.0,               # Tex3 Mip 0
             2.0, 2.0,                    # Tex3 Mip 1
             1.0, 1.0,                    # Tex3 Mip 2
-            8.0, 2.0 ]                   # RWTex
+            8.0, 2.0,                    # RWTex
+            4.0, 4.0, 3.0,               # TexCube Mip 0 (w, h, levels)
+            2.0, 2.0,                    # TexCube Mip 1
+            4.0, 4.0 ]                   # TexCube (w, h)
 
 DescriptorSets:
   - Resources:
@@ -123,6 +151,10 @@ DescriptorSets:
       Kind: RWTexture2D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: GetDimensionsTest

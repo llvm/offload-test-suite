@@ -52,12 +52,26 @@ static llvm::Error validateTextureResource(const Resource &R) {
         R.Name.c_str(), Props.MipLevels);
 
   const uint32_t Slices = static_cast<uint32_t>(Props.ArraySlices);
-  if (!R.isTextureArray() && Slices != 1)
+  if (R.isTextureCube()) {
+    if (Slices % 6 != 0)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Resource '%s' is a texture cube, so ArraySlices must be a multiple "
+          "of 6 (got %u).",
+          R.Name.c_str(), Slices);
+    if (!R.isTextureArray() && Slices != 6)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Resource '%s' is not a cube array, so ArraySlices must be 6 "
+          "(got %u).",
+          R.Name.c_str(), Slices);
+  } else if (!R.isTextureArray() && Slices != 1) {
     return llvm::createStringError(
         std::errc::invalid_argument,
         "Resource '%s' is not a texture array, so ArraySlices must be 1 "
         "(got %u).",
         R.Name.c_str(), Slices);
+  }
 
   return llvm::Error::success();
 }

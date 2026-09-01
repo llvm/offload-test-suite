@@ -123,6 +123,8 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
   case ResourceKind::AccelerationStructure:
     return DescriptorKind::SRV;
 
@@ -278,6 +280,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
@@ -307,6 +311,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
       return false;
@@ -329,6 +335,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
       return false;
@@ -342,6 +350,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
       return true;
     case ResourceKind::Buffer:
@@ -362,6 +372,7 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::TextureCubeArray:
       return true;
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
@@ -372,10 +383,47 @@ struct Resource {
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::TextureCube:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
     case ResourceKind::AccelerationStructure:
       return false;
+    }
+    llvm_unreachable("All cases handled");
+  }
+
+  bool isTextureCube() const {
+    switch (Kind) {
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
+      return true;
+    default:
+      return false;
+    }
+  }
+
+  ResourceDimension getTextureDimension() const {
+    assert(isTexture() && "Only textures have a dimension");
+    switch (Kind) {
+    case ResourceKind::Texture2D:
+    case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture2DArray:
+    case ResourceKind::RWTexture2DArray:
+    case ResourceKind::SampledTexture2D:
+      return ResourceDimension::Dim2D;
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
+      return ResourceDimension::Cube;
+    case ResourceKind::Buffer:
+    case ResourceKind::RWBuffer:
+    case ResourceKind::StructuredBuffer:
+    case ResourceKind::RWStructuredBuffer:
+    case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::ConstantBuffer:
+    case ResourceKind::Sampler:
+    case ResourceKind::AccelerationStructure:
+      llvm_unreachable("Not a texture kind");
     }
     llvm_unreachable("All cases handled");
   }
@@ -440,6 +488,8 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture2D:
     case ResourceKind::Texture2DArray:
+    case ResourceKind::TextureCube:
+    case ResourceKind::TextureCubeArray:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -1008,6 +1058,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(AccelerationStructure);
     ENUM_CASE(Texture2DArray);
     ENUM_CASE(RWTexture2DArray);
+    ENUM_CASE(TextureCube);
+    ENUM_CASE(TextureCubeArray);
 #undef ENUM_CASE
   }
 };

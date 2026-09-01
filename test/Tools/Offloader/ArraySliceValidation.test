@@ -1,3 +1,52 @@
+#--- cube-not-multiple-of-6.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # A cube needs whole faces; 4 layers cannot be viewed as one.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 1, Height: 1, Depth: 1, ArraySlices: 4 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0 ]
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: TextureCube
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+
+Results: []
+...
+#--- cube-too-many-slices.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # 12 layers is two cubes, which requires the array kind.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 1, Height: 1, Depth: 1, ArraySlices: 12 }
+    FillSize: 192
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: TextureCube
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+
+Results: []
+...
 #--- non-array.yaml
 ---
 Shaders:
@@ -70,3 +119,9 @@ Results: []
 
 # RUN: not %offloader %t/zero-slices.yaml 2>&1 | FileCheck %s --check-prefix=ZERO-SLICES
 # ZERO-SLICES: Buffer 'Tex' has an invalid ArraySlices count (0); must be at least 1
+
+# RUN: not %offloader %t/cube-not-multiple-of-6.yaml 2>&1 | FileCheck %s --check-prefix=CUBE-PARTIAL
+# CUBE-PARTIAL: Resource 'Tex' is a texture cube, so ArraySlices must be a multiple of 6 (got 4).
+
+# RUN: not %offloader %t/cube-too-many-slices.yaml 2>&1 | FileCheck %s --check-prefix=CUBE-MULTI
+# CUBE-MULTI: Resource 'Tex' is not a cube array, so ArraySlices must be 6 (got 12).

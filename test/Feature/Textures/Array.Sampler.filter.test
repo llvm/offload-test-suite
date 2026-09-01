@@ -1,6 +1,12 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+#ifndef NO_TEXTURECUBEARRAY
+[[vk::binding(2, 0)]] TextureCubeArray<float4> TexCubeArray : register(t1);
+#define CUBEARRAY_OR(Call, Expect) (Call)
+#else
+#define CUBEARRAY_OR(Call, Expect) (Expect)
+#endif
 [[vk::binding(0, 1)]] SamplerState Samp : register(s0);
 
 [numthreads(1, 1, 1)]
@@ -22,6 +28,22 @@ void main() {
   // texel axis these would pull in the other slice's colours instead.
   Out[4] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 0), 0.0); // (0.5, 0.5, 0, 1)
   Out[5] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 1), 0.0); // (0.5, 0.5, 1, 1)
+
+  // TextureCubeArray: N cubes of six faces each (6*N layers) in the face order
+  // +X, -X, +Y, -Y, +Z, -Z. The coordinate is a float4: xyz (direction) and w
+  // (cube).
+  Out[6]  = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 1, 0,  0, 0), 0),
+                         float4(1.0, 0.0, 0.0, 1.0)); // cube 0 +X Red
+  Out[7]  = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 0, 0, -1, 0), 0),
+                         float4(0.0, 1.0, 1.0, 1.0)); // cube 0 -Z Cyan
+  Out[8]  = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 0, 1,  0, 0), 0),
+                         float4(0.0, 0.0, 1.0, 1.0)); // cube 0 +Y Blue
+  Out[9]  = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 1, 0,  0, 1), 0),
+                         float4(0.5, 0.0, 0.0, 1.0)); // cube 1 +X
+  Out[10] = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 0, 0, -1, 1), 0),
+                         float4(0.0, 0.5, 0.5, 1.0)); // cube 1 -Z
+  Out[11] = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 0, 1,  0, 1), 0),
+                         float4(0.0, 0.0, 0.5, 1.0)); // cube 1 +Y
 }
 
 //--- pipeline.yaml
@@ -41,10 +63,30 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,   # slice 1, texel 0: Blue
             1.0, 1.0, 1.0, 1.0 ]  # slice 1, texel 1: White
 
+  # Two cubes of six 1x1 faces: cube 0 is layers 0-5, cube 1 layers 6-11.
+  - Name: TexCubeArray
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 1, Height: 1, Depth: 1, ArraySlices: 12 }
+    Data: [ # --- Cube 0 ---
+            1.0, 0.0, 0.0, 1.0,   # +X Red
+            0.0, 1.0, 0.0, 1.0,   # -X Green
+            0.0, 0.0, 1.0, 1.0,   # +Y Blue
+            1.0, 1.0, 0.0, 1.0,   # -Y Yellow
+            1.0, 0.0, 1.0, 1.0,   # +Z Magenta
+            0.0, 1.0, 1.0, 1.0,   # -Z Cyan
+            # --- Cube 1  ---
+            0.5, 0.0, 0.0, 1.0,   # +X
+            0.0, 0.5, 0.0, 1.0,   # -X
+            0.0, 0.0, 0.5, 1.0,   # +Y
+            0.5, 0.5, 0.0, 1.0,   # -Y
+            0.5, 0.0, 0.5, 1.0,   # +Z
+            0.0, 0.5, 0.5, 1.0 ]  # -Z
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 96 # 6 * sizeof(float4)
+    FillSize: 192 # 12 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -54,7 +96,13 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,   # [2] slice 1 Blue
             1.0, 1.0, 1.0, 1.0,   # [3] slice 1 White
             0.5, 0.5, 0.0, 1.0,   # [4] slice 0 Red/Green blend
-            0.5, 0.5, 1.0, 1.0 ]  # [5] slice 1 Blue/White blend
+            0.5, 0.5, 1.0, 1.0,   # [5] slice 1 Blue/White blend
+            1.0, 0.0, 0.0, 1.0,   # [6]  cube array, cube 0 +X Red
+            0.0, 1.0, 1.0, 1.0,   # [7]  cube array, cube 0 -Z Cyan
+            0.0, 0.0, 1.0, 1.0,   # [8]  cube array, cube 0 +Y Blue
+            0.5, 0.0, 0.0, 1.0,   # [9]  cube array, cube 1 +X
+            0.0, 0.5, 0.5, 1.0,   # [10] cube array, cube 1 -Z
+            0.0, 0.0, 0.5, 1.0 ]  # [11] cube array, cube 1 +Y
 
 Samplers:
   - Name: Samp
@@ -79,6 +127,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 1 }
+    - Name: TexCubeArray
+      Kind: TextureCubeArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
   - Resources:
     - Name: Samp
       Kind: Sampler
@@ -91,5 +143,6 @@ DescriptorSets:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# Clang does not implement TextureCubeArray yet: https://github.com/llvm/offload-test-suite/issues/1381
+# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBEARRAY %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
