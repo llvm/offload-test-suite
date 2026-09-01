@@ -39,10 +39,10 @@ Buffers:
              0.26795, 0.57735, 1.0, 1.73205,
              0.0, -0.0007346, -0.5872139, 0.0007346,
              0.0, -1.73205, 1.73205, -0.5872139 ]
-    # -sqrt3, -1, -1/sqrt3, sqrt3-2
-    # 2-sqrt3, sqrt3/3, 1, sqrt3
+    # -sqrt(3), -1, -1/sqrt(3), sqrt(3)-2
+    # 2-sqrt(3), 1/sqrt(3), 1, sqrt(3)
     # 0, tan(-100pi), tan(100), tan(100pi)
-    # 0, -sqrt3, sqrt3, tan(100)
+    # 0, -sqrt(3), sqrt(3), tan(100)
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon

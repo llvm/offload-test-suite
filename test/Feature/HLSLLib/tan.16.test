@@ -23,11 +23,11 @@ Buffers:
     Format: Float16
     Stride: 8
     Data: [ 0xBC30, 0xBA48, 0xB830, 0xB430,
-            0x0000, 0x3430, 0x3830, 0x3A48,
-            0x3C30, 0xBC30, 0x3430, 0xB430 ]
+            0x3430, 0x3830, 0x3A48, 0x3C30,
+            0x0000, 0xDCE9, 0x5640, 0x5CE9 ]
     # -pi/3, -pi/4, -pi/6, -pi/12
-    # 0, pi/12, pi/6, pi/4
-    # pi/3, -pi/3, pi/12, -pi/12
+    # pi/12, pi/6, pi/4, pi/3
+    # 0, -100pi, 100, 100pi
   - Name: Out
     Format: Float16
     Stride: 8
@@ -35,14 +35,14 @@ Buffers:
   - Name: ExpectedOut
     Format: Float16
     Stride: 8
-    Data: [ 0xBEEE, 0xBC00, 0xB89E, 0xB44A,
-            0x0000, 0x344A, 0x389E, 0x3C00,
-            0x3EEE, 0xBEEE, 0x344A, 0xB44A,
-            0x0000, 0xBEEE, 0x3EEE, 0xB8B3 ]
-    # -sqrt3, -1, -1/sqrt3, sqrt3-2
-    # 0, 2-sqrt3, sqrt3/3, 1
-    # sqrt3, -sqrt3, 2-sqrt3, sqrt3-2
-    # 0, -sqrt3, sqrt3, tan(100)
+    Data: [ 0xBEEC, 0xBBFF, 0xB89E, 0xB449,
+            0x3449, 0x389E, 0x3BFF, 0x3EEC,
+            0x0000, 0xADD3, 0xB8B3, 0x2DD3,
+            0x0000, 0xBEEC, 0x3EEC, 0xB8B3 ]
+    # -sqrt(3), -1, -1/sqrt(3), sqrt(3)-2
+    # 2-sqrt(3), 1/sqrt(3), 1, sqrt(3)
+    # 0, tan(-100pi), tan(100), tan(100pi)
+    # 0, -sqrt(3), sqrt(3), tan(100)
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
