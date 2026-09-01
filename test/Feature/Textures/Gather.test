@@ -3,12 +3,7 @@
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0);
 [[vk::binding(3, 0)]] SamplerState SampRepeat : register(s1);
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -59,21 +54,15 @@ void main() {
 
   // Face +X holds a distinct value in every channel of every texel, so all
   // four single-channel gathers are distinguishable.
-  Out[13] = CUBE_OR(TexCube.Gather(Samp, PosX),      // equivalent to GatherRed
-                    float4(0.375, 0.5, 0.25, 0.125));
-  Out[14] = CUBE_OR(TexCube.GatherRed(Samp, PosX),
-                    float4(0.375, 0.5, 0.25, 0.125));
-  Out[15] = CUBE_OR(TexCube.GatherGreen(Samp, PosX),
-                    float4(0.75, 0.875, 0.625, 0.5));
-  Out[16] = CUBE_OR(TexCube.GatherBlue(Samp, PosX),
-                    float4(0.5, 0.625, 0.375, 0.25));
-  Out[17] = CUBE_OR(TexCube.GatherAlpha(Samp, PosX),
-                    float4(0.125, 0.25, 0.875, 0.75));
+  Out[13] = TexCube.Gather(Samp, PosX); // equivalent to GatherRed
+  Out[14] = TexCube.GatherRed(Samp, PosX);
+  Out[15] = TexCube.GatherGreen(Samp, PosX);
+  Out[16] = TexCube.GatherBlue(Samp, PosX);
+  Out[17] = TexCube.GatherAlpha(Samp, PosX);
 
   // A gather on another face must collect only that face's texels. The faces
   // in between are uniform, so straying over an edge shows as a constant.
-  Out[18] = CUBE_OR(TexCube.GatherRed(Samp, NegZ),
-                    float4(0.625, 0.5, 0.75, 0.875));
+  Out[18] = TexCube.GatherRed(Samp, NegZ);
 }
 
 //--- pipeline.yaml
@@ -196,6 +185,5 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
