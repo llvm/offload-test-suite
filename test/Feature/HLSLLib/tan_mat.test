@@ -8,8 +8,7 @@ void main() {
   float2x4 R24 = tan(float2x4(In[2], In[3]));
   float3x1 R31 = tan(float3x1(In[4].xyz));
   float4x4 R44 = tan(float4x4(In[5], In[6], In[7], In[8]));
-  float2x2 R22 = tan(float2x2(0.0, 0.52359878, 0.78539816, 1.04719755));
-  // 0, pi/6, pi/4, pi/3
+  float2x2 R22 = tan(float2x2(0.0, 0.52359878, 0.78539816, 1.04719755)); // 0, pi/6, pi/4, pi/3
 
   Out[0] = float4(R32[0], R32[1]);
   Out[1] = float4(R32[2], 0.0, 0.0);

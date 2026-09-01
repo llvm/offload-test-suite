@@ -9,7 +9,7 @@ void main() {
   Out[0] = tan(In[0]);
   Out[1] = half4(tan(In[1].xyz), tan(In[1].w));
   Out[2] = half4(tan(In[2].xy), tan(In[2].zw));
-  Out[3] = half4(tan(-314.16), tan(-100), tan(100), tan(314.16));
+  Out[3] = tan(half4(0, -1.04719755, 1.04719755, 100)); // 0, -pi/3, pi/3, 100
 }
 
 //--- pipeline.yaml
@@ -38,11 +38,11 @@ Buffers:
     Data: [ 0xBEEE, 0xBC00, 0xB89E, 0xB44A,
             0x0000, 0x344A, 0x389E, 0x3C00,
             0x3EEE, 0xBEEE, 0x344A, 0xB44A,
-            0x9205, 0x38B3, 0xB8B3, 0x1205 ]
+            0x0000, 0xBEEE, 0x3EEE, 0xB8B3 ]
     # -sqrt3, -1, -1/sqrt3, sqrt3-2
     # 0, 2-sqrt3, sqrt3/3, 1
     # sqrt3, -sqrt3, 2-sqrt3, sqrt3-2
-    # tan(-314.16), tan(-100), tan(100), tan(314.16)
+    # 0, -sqrt3, sqrt3, tan(100)
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
