@@ -76,7 +76,7 @@ DescriptorSets:
 #--- end
 
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
-# XFAIL: Vulkan
+# XFAIL: Vulkan && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
