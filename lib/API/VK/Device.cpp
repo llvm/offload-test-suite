@@ -1603,27 +1603,20 @@ public:
 
     bool HasShaderAtomicFloatExt = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
-    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT SupportedAtomicFloat{};
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT EnabledAtomicFloat{};
     if (HasShaderAtomicFloatExt) {
-      // Probe separately: float atomics are optional per-type, so an
-      // advertised extension with both 32-bit bools false is dropped rather
-      // than hard-errored like the extensions above. Probing keeps a struct
-      // we decided against out of the vkCreateDevice chain.
-      VkPhysicalDeviceShaderAtomicFloatFeaturesEXT Probe{};
-      Probe.sType =
+      // Probe on a separate chain: float atomics are optional per-type, thus
+      // an extension with both 32-bit bools false is dropped, not an error.
+      SupportedAtomicFloat.sType =
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
       VkPhysicalDeviceFeatures2 ProbeFeatures{};
       ProbeFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-      ProbeFeatures.pNext = &Probe;
+      ProbeFeatures.pNext = &SupportedAtomicFloat;
       vkGetPhysicalDeviceFeatures2(PhysicalDevice, &ProbeFeatures);
       HasShaderAtomicFloatExt =
-          Probe.shaderSharedFloat32Atomics || Probe.shaderBufferFloat32Atomics;
-      if (HasShaderAtomicFloatExt) {
-        FeaturesAtomicFloat.sType =
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
-        FeaturesAtomicFloat.pNext = Features.pNext;
-        Features.pNext = &FeaturesAtomicFloat;
-      }
+          SupportedAtomicFloat.shaderSharedFloat32Atomics ||
+          SupportedAtomicFloat.shaderBufferFloat32Atomics;
     }
 
     const bool HasMeshShader = isExtensionSupported(
@@ -1726,18 +1719,16 @@ public:
 #endif
 
     if (HasShaderAtomicFloatExt) {
-      // Keep the 32-bit shared/buffer bools as reported; clear the rest so we
-      // never request one that came back false.
-      FeaturesAtomicFloat.shaderBufferFloat32AtomicAdd = 0;
-      FeaturesAtomicFloat.shaderBufferFloat64Atomics = 0;
-      FeaturesAtomicFloat.shaderBufferFloat64AtomicAdd = 0;
-      FeaturesAtomicFloat.shaderSharedFloat32AtomicAdd = 0;
-      FeaturesAtomicFloat.shaderSharedFloat64Atomics = 0;
-      FeaturesAtomicFloat.shaderSharedFloat64AtomicAdd = 0;
-      FeaturesAtomicFloat.shaderImageFloat32Atomics = 0;
-      FeaturesAtomicFloat.shaderImageFloat32AtomicAdd = 0;
-      FeaturesAtomicFloat.sparseImageFloat32Atomics = 0;
-      FeaturesAtomicFloat.sparseImageFloat32AtomicAdd = 0;
+      // Copy only the two bools the probe reported; the rest stay zero. This
+      // joins the chain after the query, which would overwrite these fields.
+      EnabledAtomicFloat.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+      EnabledAtomicFloat.shaderSharedFloat32Atomics =
+          SupportedAtomicFloat.shaderSharedFloat32Atomics;
+      EnabledAtomicFloat.shaderBufferFloat32Atomics =
+          SupportedAtomicFloat.shaderBufferFloat32Atomics;
+      EnabledAtomicFloat.pNext = Features.pNext;
+      Features.pNext = &EnabledAtomicFloat;
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
