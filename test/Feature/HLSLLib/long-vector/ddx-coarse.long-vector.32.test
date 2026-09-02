@@ -75,7 +75,7 @@ DescriptorSets: []
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
 # XFAIL: Vulkan
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/217716
+# Unimplemented https://github.com/llvm/llvm-project/issues/220628
 # XFAIL: Clang
 
 # RUN: split-file %s %t
