@@ -77,6 +77,9 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
 # XFAIL: Vulkan
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1494
+# XFAIL: Metal && DXC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

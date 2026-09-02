@@ -77,10 +77,8 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
 # XFAIL: Vulkan
 
-# CI machines don't have SM 6.9 support yet
-    # XFAIL: Metal
-
-# REQUIRES: !DXC || SM_6_9
+# Bug https://github.com/llvm/offload-test-suite/issues/1495
+# XFAIL: Metal && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
