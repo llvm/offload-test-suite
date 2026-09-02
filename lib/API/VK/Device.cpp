@@ -2090,7 +2090,7 @@ public:
       // The descriptor heaps always live in set 0. Their entries are sparse,
       // so the unwritten slots are declared as partially bound.
       const bool AddHeaps = (SetIdx == 0) && !HeapLayout.empty();
-      llvm::SmallVector<VkDescriptorBindingFlags, 8> BindingFlags;
+      llvm::SmallVector<VkDescriptorBindingFlags> BindingFlags;
       size_t ResourceHeapBindIdx = 0;
       if (AddHeaps) {
         // Clear flags for all resources added to Binds so far.
@@ -4035,6 +4035,7 @@ public:
         if (R.HeapIndex) {
           // The heaps live in set 0 regardless of which set declared the
           // resource; the heap index selects the slot within the binding.
+          assert(!IS.DescriptorSets.empty());
           WDS.dstSet = IS.DescriptorSets[0];
           WDS.dstBinding = R.isSampler() ? IS.HeapLayout.SamplerHeapBinding
                                          : IS.HeapLayout.ResourceHeapBinding;
