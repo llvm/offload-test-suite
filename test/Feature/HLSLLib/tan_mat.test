@@ -63,11 +63,11 @@ Buffers:
             1.73205, -1.73205, 0.26795, -0.26795,
             -1.0, 1.0, -1.73205, -0.57735,
             0.0, 0.57735, 1.0, 1.73205 ]
-    # 3x2: -sqrt3, -1, -sqrt3/3, sqrt3-2, 0, 2-sqrt3, _, _
-    # 2x4: 0, 2-sqrt3, sqrt3/3, 1, sqrt3, -sqrt3, 2-sqrt3, sqrt3-2
-    # 3x1: -sqrt3, 0, sqrt3, _
-    # 4x4: -sqrt3, -1, -sqrt3/3, sqrt3-2, 0, 2-sqrt3, sqrt3/3, 1,
-    #      sqrt3, -sqrt3, 2-sqrt3, sqrt3-2, -1, 1, -sqrt3, -sqrt3/3
+    # 3x2: -sqrt(3), -1, -1/sqrt(3), sqrt(3)-2, 0, 2-sqrt(3), _, _
+    # 2x4: 0, 2-sqrt(3), 1/sqrt(3), 1, sqrt(3), -sqrt(3), 2-sqrt(3), sqrt(3)-2
+    # 3x1: -sqrt(3), 0, sqrt(3), _
+    # 4x4: -sqrt(3), -1, -1/sqrt(3), sqrt(3)-2, 0, 2-sqrt(3), 1/sqrt(3), 1,
+    #      sqrt(3), -sqrt(3), 2-sqrt(3), sqrt(3)-2, -1, 1, -sqrt(3), -1/sqrt(3)
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon
