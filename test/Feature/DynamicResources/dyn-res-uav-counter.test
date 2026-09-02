@@ -1,7 +1,7 @@
 #--- source.hlsl
 
-// This test verifies handling of dynamic resource for
-// a constant buffer, SRV and UAV resources.
+// This test verifies a dynamically indexed RWStructuredBuffer
+// with an associated UAV counter.
 
 cbuffer DynResIndices : register(b0) {
   uint Index;
@@ -39,7 +39,7 @@ Buffers:
 
   - Name: UavCounterBuf
     Format: Float32
-    Stride: 16
+    Stride: 4
     Data:
      [ 0.1, 0.2, 0.3, 0.4 ]
 
@@ -86,6 +86,10 @@ DescriptorSets:
 
 ...
 #--- end
+
+# REQUIRES: SM_6_6
+# REQUIRES: !DirectX || ResourceBindingTier3
+# REQUIRES: !Vulkan || (VulkanRuntimeDescriptorArray && VulkanDescriptorBindingPartiallyBound)
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/133831
 # XFAIL: Clang

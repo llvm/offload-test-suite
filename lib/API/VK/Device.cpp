@@ -1797,7 +1797,6 @@ public:
       EnabledDeviceExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
     }
 
-    // ????
     if (HasMutableDescriptorTypeExt) {
       if (!MutableDescriptorFeatures.mutableDescriptorType)
         return llvm::createStringError(
@@ -2042,6 +2041,17 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  static VkDescriptorSetLayoutBinding createVkDescriptorSetLayoutBinding(
+      uint32_t Binding, VkDescriptorType DescriptorType,
+      uint32_t DescriptorCount, VkShaderStageFlags StageFlags) {
+    VkDescriptorSetLayoutBinding B = {};
+    B.binding = Binding;
+    B.descriptorType = DescriptorType;
+    B.descriptorCount = DescriptorCount;
+    B.stageFlags = StageFlags;
+    return B;
+  }
+
   llvm::Error
   createPipelineLayout(const BindingsDesc &BindingsDesc,
                        VkShaderStageFlags StageFlags,
@@ -2064,19 +2074,15 @@ public:
           continue;
         const VulkanBinding VKBinding = RB.VKBinding.value();
 
-        VkDescriptorSetLayoutBinding B = {};
-        B.binding = VKBinding.Binding;
-        B.descriptorType = getDescriptorType(RB.Kind);
-        B.descriptorCount = RB.DescriptorCount;
-        B.stageFlags = StageFlags;
+        VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+            VKBinding.Binding, getDescriptorType(RB.Kind), RB.DescriptorCount,
+            StageFlags);
         Binds.push_back(B);
 
         if (VKBinding.CounterBinding) {
-          VkDescriptorSetLayoutBinding CB = {};
-          CB.binding = *VKBinding.CounterBinding;
-          CB.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CB.descriptorCount = RB.DescriptorCount;
-          CB.stageFlags = StageFlags;
+          VkDescriptorSetLayoutBinding CB = createVkDescriptorSetLayoutBinding(
+              *VKBinding.CounterBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              RB.DescriptorCount, StageFlags);
           Binds.push_back(CB);
         }
       }
@@ -2090,30 +2096,25 @@ public:
         // Clear flags for all resources added to Binds so far.
         BindingFlags.assign(Binds.size(), 0u);
         if (HeapLayout.hasResourceHeap()) {
-          VkDescriptorSetLayoutBinding B = {};
-          B.binding = HeapLayout.ResourceHeapBinding;
-          B.descriptorType = HeapLayout.getResourceHeapDescriptorType();
-          B.descriptorCount = HeapLayout.ResourceHeapSize;
-          B.stageFlags = StageFlags;
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.ResourceHeapBinding,
+              HeapLayout.getResourceHeapDescriptorType(),
+              HeapLayout.ResourceHeapSize, StageFlags);
           ResourceHeapBindIdx = Binds.size();
           Binds.push_back(B);
           BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
         }
         if (HeapLayout.hasSamplerHeap()) {
-          VkDescriptorSetLayoutBinding B = {};
-          B.binding = HeapLayout.SamplerHeapBinding;
-          B.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-          B.descriptorCount = HeapLayout.SamplerHeapSize;
-          B.stageFlags = StageFlags;
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.SamplerHeapBinding, VK_DESCRIPTOR_TYPE_SAMPLER,
+              HeapLayout.SamplerHeapSize, StageFlags);
           Binds.push_back(B);
           BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
         }
         if (HeapLayout.hasCounterHeap()) {
-          VkDescriptorSetLayoutBinding B = {};
-          B.binding = HeapLayout.CounterHeapBinding;
-          B.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          B.descriptorCount = HeapLayout.CounterHeapSize;
-          B.stageFlags = StageFlags;
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.CounterHeapBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              HeapLayout.CounterHeapSize, StageFlags);
           Binds.push_back(B);
           BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
         }
