@@ -64,6 +64,7 @@ struct ResourceBindingDesc {
   std::optional<DirectXBinding> DXBinding;
   std::optional<VulkanBinding> VKBinding;
   std::optional<uint32_t> HeapIndex;
+  bool HasCounter = false;
   uint32_t DescriptorCount;
 };
 

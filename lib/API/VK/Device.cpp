@@ -16,6 +16,7 @@
 #include "Support/VkError.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -108,6 +109,100 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   }
   llvm_unreachable("All cases handled");
+}
+
+namespace {
+
+// DXC's SPIR-V backend lowers `ResourceDescriptorHeap` /
+// `SamplerDescriptorHeap` accesses into unbounded runtime arrays living in
+// descriptor set 0. Each heap takes a single binding, picked from the bindings
+// left unused by the explicitly bound resources, in the order resource heap,
+// sampler heap, then the counters belonging to the resource heap. If more than
+// one resource type is read from the resource heap, DXC emits one runtime array
+// per type, all aliasing that same binding, which Vulkan can only express with
+// VK_DESCRIPTOR_TYPE_MUTABLE_EXT. See the
+// "ResourceDescriptorHeaps & SamplerDescriptorHeaps" section of DXC's
+// docs/SPIR-V.rst.
+struct DescriptorHeapLayout {
+  static constexpr uint32_t NoBinding = ~0U;
+  uint32_t ResourceHeapBinding = NoBinding;
+  uint32_t SamplerHeapBinding = NoBinding;
+  uint32_t CounterHeapBinding = NoBinding;
+  uint32_t ResourceHeapSize = 0;
+  uint32_t SamplerHeapSize = 0;
+  uint32_t CounterHeapSize = 0;
+  llvm::SmallVector<VkDescriptorType, 4> ResourceHeapTypes;
+
+  bool hasResourceHeap() const { return ResourceHeapBinding != NoBinding; }
+  bool hasSamplerHeap() const { return SamplerHeapBinding != NoBinding; }
+  bool hasCounterHeap() const { return CounterHeapBinding != NoBinding; }
+  bool empty() const { return !hasResourceHeap() && !hasSamplerHeap(); }
+  bool needsMutableDescriptorType() const {
+    return ResourceHeapTypes.size() > 1;
+  }
+  VkDescriptorType getResourceHeapDescriptorType() const {
+    assert(hasResourceHeap() && "No resource heap in this pipeline");
+    return needsMutableDescriptorType() ? VK_DESCRIPTOR_TYPE_MUTABLE_EXT
+                                        : ResourceHeapTypes[0];
+  }
+  void addResourceHeapType(ResourceKind RK) {
+    const VkDescriptorType Type = getDescriptorType(RK);
+    if (!llvm::is_contained(ResourceHeapTypes, Type))
+      ResourceHeapTypes.push_back(Type);
+  }
+};
+
+} // namespace
+
+static DescriptorHeapLayout
+computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
+  DescriptorHeapLayout Layout;
+  llvm::SmallDenseSet<uint32_t, 8> UsedBindings;
+  bool UsesSamplerHeap = false;
+  bool UsesCounterHeap = false;
+
+  for (size_t SetIdx = 0, SetCount = Bindings.DescriptorSetDescs.size();
+       SetIdx < SetCount; ++SetIdx) {
+    for (const ResourceBindingDesc &RB :
+         Bindings.DescriptorSetDescs[SetIdx].ResourceBindings) {
+      if (!RB.HeapIndex) {
+        // The heaps are allocated out of the bindings left free in set 0.
+        if (SetIdx == 0 && RB.VKBinding) {
+          UsedBindings.insert(RB.VKBinding->Binding);
+          if (RB.VKBinding->CounterBinding)
+            UsedBindings.insert(*RB.VKBinding->CounterBinding);
+        }
+        continue;
+      }
+      const uint32_t End = *RB.HeapIndex + RB.DescriptorCount;
+      if (RB.Kind == ResourceKind::Sampler) {
+        UsesSamplerHeap = true;
+        Layout.SamplerHeapSize = std::max(Layout.SamplerHeapSize, End);
+      } else {
+        Layout.ResourceHeapSize = std::max(Layout.ResourceHeapSize, End);
+        Layout.addResourceHeapType(RB.Kind);
+        // A counter shares the heap index of the resource it belongs to.
+        if (RB.HasCounter) {
+          UsesCounterHeap = true;
+          Layout.CounterHeapSize = std::max(Layout.CounterHeapSize, End);
+        }
+      }
+    }
+  }
+
+  uint32_t NextBinding = 0;
+  auto TakeBinding = [&]() {
+    while (UsedBindings.contains(NextBinding))
+      ++NextBinding;
+    return NextBinding++;
+  };
+  if (!Layout.ResourceHeapTypes.empty())
+    Layout.ResourceHeapBinding = TakeBinding();
+  if (UsesSamplerHeap)
+    Layout.SamplerHeapBinding = TakeBinding();
+  if (UsesCounterHeap)
+    Layout.CounterHeapBinding = TakeBinding();
+  return Layout;
 }
 
 static VkFilter getVKFilter(FilterMode Mode) {
@@ -1489,6 +1584,8 @@ private:
 
   bool HasASSupport = false;
   bool HasRTPipelineSupport = false;
+  bool HasDescriptorIndexing = false;
+  bool HasMutableDescriptorType = false;
   struct ASFunctions {
     PFN_vkCreateAccelerationStructureKHR Create = nullptr;
     PFN_vkDestroyAccelerationStructureKHR Destroy = nullptr;
@@ -1573,6 +1670,7 @@ private:
   struct InvocationState {
     std::unique_ptr<VulkanCommandBuffer> CB;
     VkDescriptorPool Pool = VK_NULL_HANDLE;
+    DescriptorHeapLayout HeapLayout;
 
     std::unique_ptr<PipelineState> Pipeline;
     // Lifetime-tied to the pipeline; only set for RT pipelines.
@@ -1728,6 +1826,18 @@ public:
       Features.pNext = &MeshFeatures;
     }
 
+    const bool HasMutableDescriptorTypeExt =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
+    VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT
+        MutableDescriptorFeatures{};
+    if (HasMutableDescriptorTypeExt) {
+      MutableDescriptorFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT;
+      MutableDescriptorFeatures.pNext = Features.pNext;
+      Features.pNext = &MutableDescriptorFeatures;
+    }
+
     const bool HasASExts =
         isExtensionSupported(AvailableDeviceExtensions,
                              VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
@@ -1802,6 +1912,16 @@ public:
       MeshFeatures.primitiveFragmentShadingRateMeshShader = 0;
       MeshFeatures.meshShaderQueries = 0;
       EnabledDeviceExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    }
+
+    if (HasMutableDescriptorTypeExt) {
+      if (!MutableDescriptorFeatures.mutableDescriptorType)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports mutableDescriptorType=0",
+            VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
     }
 
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
@@ -1911,6 +2031,13 @@ public:
     auto Dev = std::make_unique<VulkanDevice>(
         Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
         std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
+
+    // Directly indexed resources are bound as sparsely populated unbounded
+    // arrays, which needs the descriptor indexing features core since 1.2.
+    Dev->HasDescriptorIndexing = HasVulkan12 &&
+                                 Features12.runtimeDescriptorArray &&
+                                 Features12.descriptorBindingPartiallyBound;
+    Dev->HasMutableDescriptorType = HasMutableDescriptorTypeExt;
 
     // Load acceleration-structure and ray-tracing-pipeline function pointers
     // after device creation. These two feature sets are independent; the RT
@@ -2046,6 +2173,17 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  static VkDescriptorSetLayoutBinding createVkDescriptorSetLayoutBinding(
+      uint32_t Binding, VkDescriptorType DescriptorType,
+      uint32_t DescriptorCount, VkShaderStageFlags StageFlags) {
+    VkDescriptorSetLayoutBinding B = {};
+    B.binding = Binding;
+    B.descriptorType = DescriptorType;
+    B.descriptorCount = DescriptorCount;
+    B.stageFlags = StageFlags;
+    return B;
+  }
+
   llvm::Error
   createPipelineLayout(const BindingsDesc &BindingsDesc,
                        VkShaderStageFlags StageFlags,
@@ -2053,33 +2191,99 @@ public:
                        VkPipelineLayout &PipelineLayout) {
     assert(SetLayouts.empty() && "Output vector SetLayouts must be empty.");
 
+    const DescriptorHeapLayout HeapLayout =
+        computeDescriptorHeapLayout(BindingsDesc);
+
     // Build descriptor set layouts from BindingsDesc.
-    for (const DescriptorSetLayoutDesc &SetDesc :
-         BindingsDesc.DescriptorSetDescs) {
+    for (size_t SetIdx = 0, SetCount = BindingsDesc.DescriptorSetDescs.size();
+         SetIdx < SetCount; ++SetIdx) {
       std::vector<VkDescriptorSetLayoutBinding> Binds;
-      for (const ResourceBindingDesc &RB : SetDesc.ResourceBindings) {
+      for (const ResourceBindingDesc &RB :
+           BindingsDesc.DescriptorSetDescs[SetIdx].ResourceBindings) {
+        // Heap-indexed resources are reached through the heap bindings added
+        // below instead of through a binding of their own.
+        if (RB.HeapIndex)
+          continue;
         const VulkanBinding VKBinding = RB.VKBinding.value();
 
-        VkDescriptorSetLayoutBinding B = {};
-        B.binding = VKBinding.Binding;
-        B.descriptorType = getDescriptorType(RB.Kind);
-        B.descriptorCount = RB.DescriptorCount;
-        B.stageFlags = StageFlags;
+        VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+            VKBinding.Binding, getDescriptorType(RB.Kind), RB.DescriptorCount,
+            StageFlags);
         Binds.push_back(B);
 
         if (VKBinding.CounterBinding) {
-          VkDescriptorSetLayoutBinding CB = {};
-          CB.binding = *VKBinding.CounterBinding;
-          CB.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CB.descriptorCount = RB.DescriptorCount;
-          CB.stageFlags = StageFlags;
+          VkDescriptorSetLayoutBinding CB = createVkDescriptorSetLayoutBinding(
+              *VKBinding.CounterBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              RB.DescriptorCount, StageFlags);
           Binds.push_back(CB);
         }
       }
+
+      // The descriptor heaps always live in set 0. Their entries are sparse,
+      // so the unwritten slots are declared as partially bound.
+      const bool AddHeaps = (SetIdx == 0) && !HeapLayout.empty();
+      llvm::SmallVector<VkDescriptorBindingFlags> BindingFlags;
+      size_t ResourceHeapBindIdx = 0;
+      if (AddHeaps) {
+        // Clear flags for all resources added to Binds so far.
+        BindingFlags.assign(Binds.size(), 0u);
+        if (HeapLayout.hasResourceHeap()) {
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.ResourceHeapBinding,
+              HeapLayout.getResourceHeapDescriptorType(),
+              HeapLayout.ResourceHeapSize, StageFlags);
+          ResourceHeapBindIdx = Binds.size();
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
+        if (HeapLayout.hasSamplerHeap()) {
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.SamplerHeapBinding, VK_DESCRIPTOR_TYPE_SAMPLER,
+              HeapLayout.SamplerHeapSize, StageFlags);
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
+        if (HeapLayout.hasCounterHeap()) {
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.CounterHeapBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              HeapLayout.CounterHeapSize, StageFlags);
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
+      }
+
       VkDescriptorSetLayoutCreateInfo SetCI = {};
       SetCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
       SetCI.bindingCount = static_cast<uint32_t>(Binds.size());
       SetCI.pBindings = Binds.data();
+
+      llvm::SmallVector<VkMutableDescriptorTypeListEXT, 8> MutableLists;
+      VkMutableDescriptorTypeCreateInfoEXT MutableCI = {};
+      VkDescriptorSetLayoutBindingFlagsCreateInfo FlagsCI = {};
+      if (AddHeaps) {
+        if (HeapLayout.needsMutableDescriptorType()) {
+          MutableLists.assign(Binds.size(), VkMutableDescriptorTypeListEXT{});
+          MutableLists[ResourceHeapBindIdx].descriptorTypeCount =
+              static_cast<uint32_t>(HeapLayout.ResourceHeapTypes.size());
+          MutableLists[ResourceHeapBindIdx].pDescriptorTypes =
+              HeapLayout.ResourceHeapTypes.data();
+          MutableCI.sType =
+              VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+          MutableCI.mutableDescriptorTypeListCount =
+              static_cast<uint32_t>(MutableLists.size());
+          MutableCI.pMutableDescriptorTypeLists = MutableLists.data();
+          MutableCI.pNext = SetCI.pNext;
+          SetCI.pNext = &MutableCI;
+        }
+        // Add descriptor binding flags.
+        FlagsCI.sType =
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        FlagsCI.bindingCount = static_cast<uint32_t>(BindingFlags.size());
+        FlagsCI.pBindingFlags = BindingFlags.data();
+        FlagsCI.pNext = SetCI.pNext;
+        SetCI.pNext = &FlagsCI;
+      }
+
       VkDescriptorSetLayout SetLayout = VK_NULL_HANDLE;
       if (auto Err = VK::toError(
               vkCreateDescriptorSetLayout(Device, &SetCI, nullptr, &SetLayout),
@@ -3727,6 +3931,9 @@ public:
     uint32_t ASDescriptorCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
+        // Heap-indexed resources are accounted for by the heap sizes below.
+        if (R.HeapIndex)
+          continue;
         if (R.isAccelerationStructure()) {
           ASDescriptorCount += R.getArraySize();
           continue;
@@ -3737,6 +3944,15 @@ public:
               R.getArraySize();
       }
     }
+    const DescriptorHeapLayout &HL = IS.HeapLayout;
+    if (HL.hasResourceHeap() && !HL.needsMutableDescriptorType())
+      DescriptorCounts[HL.getResourceHeapDescriptorType()] +=
+          HL.ResourceHeapSize;
+    if (HL.hasSamplerHeap())
+      DescriptorCounts[VK_DESCRIPTOR_TYPE_SAMPLER] += HL.SamplerHeapSize;
+    if (HL.hasCounterHeap())
+      DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += HL.CounterHeapSize;
+
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
     for (const VkDescriptorType Type : DescriptorTypes) {
       if (DescriptorCounts[Type] > 0) {
@@ -3755,12 +3971,32 @@ public:
           {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, ASDescriptorCount});
     }
 
+    llvm::SmallVector<VkMutableDescriptorTypeListEXT, 8> MutableLists;
+    VkMutableDescriptorTypeCreateInfoEXT MutableCI = {};
+    if (HL.needsMutableDescriptorType()) {
+      llvm::outs() << "Descriptors: { type = MUTABLE_EXT"
+                   << ", count = " << HL.ResourceHeapSize << " }\n";
+      PoolSizes.push_back(
+          {VK_DESCRIPTOR_TYPE_MUTABLE_EXT, HL.ResourceHeapSize});
+      MutableLists.assign(PoolSizes.size(), VkMutableDescriptorTypeListEXT{});
+      MutableLists.back().descriptorTypeCount =
+          static_cast<uint32_t>(HL.ResourceHeapTypes.size());
+      MutableLists.back().pDescriptorTypes = HL.ResourceHeapTypes.data();
+      MutableCI.sType =
+          VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+      MutableCI.mutableDescriptorTypeListCount =
+          static_cast<uint32_t>(MutableLists.size());
+      MutableCI.pMutableDescriptorTypeLists = MutableLists.data();
+    }
+
     if (P.Sets.size() > 0) {
       VkDescriptorPoolCreateInfo PoolCreateInfo = {};
       PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
+      if (HL.needsMutableDescriptorType())
+        PoolCreateInfo.pNext = &MutableCI;
       if (auto Err = VK::toError(vkCreateDescriptorPool(Device, &PoolCreateInfo,
                                                         nullptr, &IS.Pool),
                                  "Failed to create descriptor pool."))
@@ -3846,6 +4082,7 @@ public:
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         if (R.isAccelerationStructure()) {
+          assert(!R.HeapIndex && "AS heap indexing is rejected earlier");
           const auto &Refs = IS.Resources[OverallResIdx].ResourceRefs;
           assert(Refs.size() == R.getArraySize() &&
                  "AS bundle must hold one ResourceRef per array element");
@@ -3944,8 +4181,18 @@ public:
 
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        WDS.dstSet = IS.DescriptorSets[SetIdx];
-        WDS.dstBinding = R.VKBinding->Binding;
+        if (R.HeapIndex) {
+          // The heaps live in set 0 regardless of which set declared the
+          // resource; the heap index selects the slot within the binding.
+          assert(!IS.DescriptorSets.empty());
+          WDS.dstSet = IS.DescriptorSets[0];
+          WDS.dstBinding = R.isSampler() ? IS.HeapLayout.SamplerHeapBinding
+                                         : IS.HeapLayout.ResourceHeapBinding;
+          WDS.dstArrayElement = *R.HeapIndex;
+        } else {
+          WDS.dstSet = IS.DescriptorSets[SetIdx];
+          WDS.dstBinding = R.VKBinding->Binding;
+        }
         WDS.descriptorCount = R.getArraySize();
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (R.isTexture() || R.isSampler())
@@ -3968,8 +4215,16 @@ public:
 
           VkWriteDescriptorSet CounterWDS = {};
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
-          CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          if (R.HeapIndex) {
+            // A heap-indexed counter sits at its resource's heap index in the
+            // counter heap.
+            CounterWDS.dstSet = IS.DescriptorSets[0];
+            CounterWDS.dstBinding = IS.HeapLayout.CounterHeapBinding;
+            CounterWDS.dstArrayElement = *R.HeapIndex;
+          } else {
+            CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
+            CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          }
           CounterWDS.descriptorCount = R.getArraySize();
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
@@ -4587,28 +4842,35 @@ public:
     for (auto &S : P.Sets) {
       DescriptorSetLayoutDesc Layout;
       for (auto &R : S.Resources) {
-        // FIXME: https://github.com/llvm/offload-test-suite/issues/1413
-        assert(!R.HeapIndex && "Direct heap indexing is not yet supported.");
-        if (!R.VKBinding)
-          return llvm::createStringError(std::errc::invalid_argument,
-                                         "No VulkanBinding provided for '%s'",
-                                         R.Name.c_str());
+        if (R.HeapIndex) {
+          if (R.isAccelerationStructure())
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "Direct heap indexing of acceleration structures is not "
+                "supported ('%s')",
+                R.Name.c_str());
+        } else {
+          if (!R.VKBinding)
+            return llvm::createStringError(std::errc::invalid_argument,
+                                           "No VulkanBinding provided for '%s'",
+                                           R.Name.c_str());
+          if (R.HasCounter && !R.VKBinding->CounterBinding)
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "No CounterBinding provided for resource '%s' with a counter",
+                R.Name.c_str());
+          assert(R.DXBinding &&
+                 "DXBinding must not be null when HeapIndex is not set.");
+        }
 
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
-        assert(R.DXBinding &&
-               "DXBinding must not be null when HeapIndex is not set.");
         ResourceBinding.DXBinding = R.DXBinding;
         ResourceBinding.VKBinding = R.VKBinding;
         ResourceBinding.HeapIndex = R.HeapIndex;
+        ResourceBinding.HasCounter = R.HasCounter;
         ResourceBinding.DescriptorCount = R.getArraySize();
         Layout.ResourceBindings.push_back(ResourceBinding);
-
-        if (R.HasCounter && !R.VKBinding->CounterBinding)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "No CounterBinding provided for resource '%s' with a counter",
-              R.Name.c_str());
       }
       BindingsDesc.DescriptorSetDescs.push_back(Layout);
     }
@@ -4617,6 +4879,22 @@ public:
       Range.OffsetInBytes = 0;
       Range.SizeInBytes = PCB.size();
       BindingsDesc.PushConstantRanges.push_back(Range);
+    }
+
+    State.HeapLayout = computeDescriptorHeapLayout(BindingsDesc);
+    if (!State.HeapLayout.empty()) {
+      if (!HasDescriptorIndexing)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Directly indexed resources require the runtimeDescriptorArray and "
+            "descriptorBindingPartiallyBound features of Vulkan 1.2.");
+      if (State.HeapLayout.needsMutableDescriptorType() &&
+          !HasMutableDescriptorType)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Reading more than one resource type from ResourceDescriptorHeap "
+            "requires the %s extension.",
+            VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
     }
 
     if (P.isCompute()) {
