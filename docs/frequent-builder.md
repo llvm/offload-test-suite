@@ -9,7 +9,10 @@ LLVM and DXC are built by two independent schedules:
 | `frequent-build-llvm.yaml`| LLVM/Clang | every 2 hours| `build-llvm-callable.yaml` |
 | `frequent-build-dxc.yaml` | DXC        | daily        | `build-dxc-callable.yaml`  |
 
-Test cells consume both through `test-callable.yaml`.
+Test cells consume both through `test-callable.yaml`. A **test cell** is one
+entry in a `pr-matrix.yaml` job matrix, that is one SKU and test-target pair
+such as `(windows-intel, check-hlsl-d3d12)`. Each cell shows as one check on
+the PR.
 
 Migration is incremental. Today `pr-matrix.yaml` routes its default x64
 cells (`Exec-Tests-Windows`: `windows-intel` and `windows-nvidia`) this way;

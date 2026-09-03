@@ -148,8 +148,6 @@ jobs:
               echo "::error::clang-tidy missing from the downloaded distribution ($clang_tidy). The resolved frequent-build-llvm run predates clang-tidy being added to StandaloneDistribution.cmake; rebuild or resolve a newer run."
               exit 1
             fi
-            # The legacy build used clang-cl for these sources. Use clang-cl
-            # from the distribution to keep the same compiler.
             clang_cl="$GITHUB_WORKSPACE/install/bin/clang-cl"
             if [ -x "${clang_cl}.exe" ]; then clang_cl="${clang_cl}.exe"; fi
             if [ ! -x "$clang_cl" ]; then
