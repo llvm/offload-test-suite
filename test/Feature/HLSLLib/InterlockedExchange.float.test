@@ -1,0 +1,212 @@
+#--- source.hlsl
+
+// Tests the float overload of InterlockedExchange on groupshared
+// destinations, with 256 concurrent threads. Float atomics are an optional
+// capability, surfaced to lit as `Float32GroupSharedAtomics`:
+//
+//   * DirectX: core DXIL, no capability bit to query
+//   * Vulkan:  shaderSharedFloat32Atomics, from the (non-core) extension
+//              VK_EXT_shader_atomic_float
+//
+// Checks 1, 2 and 4 are as described in InterlockedExchange.32.test. There
+// is no float analogue of check 3, which relies on signed values. Every
+// value in play is a whole number, so it is exactly representable in float
+// and all compares are exact.
+
+RWStructuredBuffer<uint> OutSlots : register(u0);
+RWStructuredBuffer<uint> OutSeen : register(u1);
+RWStructuredBuffer<uint> OutMono : register(u2);
+RWStructuredBuffer<int> OutFinal : register(u3);
+
+groupshared float SlotsMinusTwoPointFive[256]; // private slots, each -2.5
+groupshared float HandoffZero;                 // contended, starts at 0.0
+groupshared uint  SeenZero[257];               // one flag per value in play
+groupshared float MonoSlotZero;                // exchanged in a loop, from 0.0
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsMinusTwoPointFive[GTID.x] = -2.5f;
+  SeenZero[GTID.x] = 0u;
+  if (GTID.x == 0) {
+    HandoffZero = 0.0f;
+    SeenZero[256] = 0u;
+    MonoSlotZero = 0.0f;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // Check 1: no contention, so original and stored value are both known.
+  float OrigSlot;
+  InterlockedExchange(SlotsMinusTwoPointFive[GTID.x], (float)GTID.x + 3000.0f,
+                      OrigSlot);
+
+  OutSlots[GTID.x] = (OrigSlot == -2.5f &&
+                      SlotsMinusTwoPointFive[GTID.x] ==
+                          (float)GTID.x + 3000.0f) ? 1u : 0u;
+
+  // Check 2: thread i hands in i+1, so values in play are 0 to 256. They
+  // stay whole, so indexing the seen array by the original is exact.
+  float OrigHandoff;
+  InterlockedExchange(HandoffZero, (float)(GTID.x + 1u), OrigHandoff);
+  SeenZero[(uint)OrigHandoff] = 1u;
+
+  // Check 4. Two barriers per iteration: the second stops a fast thread
+  // reaching the next exchange while a slow one is still reading.
+  float Prev = 0.0f;
+  uint Mono = 1u;
+  for (uint I = 1; I <= 256; ++I) {
+    float OrigMono;
+    InterlockedExchange(MonoSlotZero, (float)I, OrigMono);
+    if (OrigMono != (float)I && OrigMono != (float)(I - 1u))
+      Mono = 0u;
+    GroupMemoryBarrierWithGroupSync();
+    float Cur = MonoSlotZero;
+    if (Cur < Prev || Cur != (float)I)
+      Mono = 0u;
+    Prev = Cur;
+    GroupMemoryBarrierWithGroupSync();
+  }
+  OutMono[GTID.x] = Mono;
+
+  GroupMemoryBarrierWithGroupSync();
+
+  // The value left behind is the one original nobody received.
+  if (GTID.x == 0)
+    SeenZero[(uint)HandoffZero] = 1u;
+  GroupMemoryBarrierWithGroupSync();
+
+  OutSeen[GTID.x] = SeenZero[GTID.x];
+
+  if (GTID.x == 0) {
+    OutSeen[256] = SeenZero[256];
+    OutFinal[0] = (int)MonoSlotZero; // 256
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutSlots
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    # Pass flags, one per thread, not test data. A thread writes 1 only
+    # when its check holds, thus a single 0 fails the comparison.
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSeen
+    Format: UInt32
+    Stride: 4
+    FillSize: 1028
+  - Name: ExpectedSeen
+    Format: UInt32
+    Stride: 4
+    # Flags, one per value handed in. Each value must turn up either as
+    # an original or as the value left behind, thus all of them are 1.
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1 ]
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: Int32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedFinal
+    Format: Int32
+    Stride: 4
+    Data: [ 256 ]
+Results:
+  - Result: TestSlots
+    Rule: BufferExact
+    Actual: OutSlots
+    Expected: ExpectedOnes
+  - Result: TestSeen
+    Rule: BufferExact
+    Actual: OutSeen
+    Expected: ExpectedSeen
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutSlots
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutSeen
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Float32GroupSharedAtomics
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99129
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -85,6 +85,20 @@ float4 val2 = Tex.Load(int3(0,0,2));
 
 ## Implementation Notes
 
+### Writing to Mip Levels
+
+Writes through an `RWTexture*` resource only ever reach mip 0. This is a
+limitation of the test suite, not of the underlying APIs: a UAV descriptor binds
+a single mip level — D3D12's `MipSlice`, Vulkan's image view `baseMipLevel` —
+and HLSL gives the shader no way to select one, since `RWTexture2D` has no
+`.mips[]`. The level therefore comes from the binding, which the suite hardcodes
+to 0. It is not configurable via YAML, though binding a higher level is
+perfectly legal in both APIs.
+
+A resource declaring `MipLevels > 1` consequently keeps whatever the test
+uploaded in every mip above 0. Readback still walks each mip, so a test can seed
+a higher mip and verify that a dispatch left it untouched.
+
 ### Mipmap Filtering
 
 Currently, the test suite hardcodes the mipmap sampling mode to **Nearest**

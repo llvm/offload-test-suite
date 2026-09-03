@@ -164,9 +164,6 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/977
 # XFAIL: Vulkan && Clang
 
-# Not implemented: https://github.com/llvm/llvm-project/issues/99166
-# UNSUPPORTED: Clang
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,144 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerState ClampSamp : register(s0);
+[[vk::binding(1, 1)]] SamplerState RepeatSamp : register(s1);
+[[vk::binding(2, 1)]] SamplerState BorderSamp : register(s2);
+[[vk::binding(3, 1)]] SamplerState MirrorSamp : register(s3);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Each slice is 2x1. Slice 0 is [Red, Green], slice 1 is [Blue, White].
+  // Red/Blue cover u = [0.0, 0.5], Green/White cover u = [0.5, 1.0].
+  // Texture2DArray::SampleLevel takes float3(u, v, arraySlice).
+
+  // The address mode applies to u exactly as it does for a 2D texture, and
+  // resolves within the selected slice. u = 1.25 is off the right edge.
+  Out[0] = Tex.SampleLevel(ClampSamp, float3(1.25, 0.5, 0), 0);  // -> Green
+  Out[1] = Tex.SampleLevel(RepeatSamp, float3(1.25, 0.5, 0), 0); // -> Red
+  Out[2] = Tex.SampleLevel(BorderSamp, float3(1.25, 0.5, 0), 0); // -> border
+  // Mirror: [1.0, 2.0] mirrors to [1.0, 0.0], so 1.75 -> 0.25, the Red centre.
+  Out[3] = Tex.SampleLevel(MirrorSamp, float3(1.75, 0.5, 0), 0); // -> Red
+
+  // The same four on slice 1 must land on slice 1's texels. If the address
+  // mode reached the slice coordinate, or if wrapping u could spill across
+  // slices, these would return slice 0's colours instead.
+  Out[4] = Tex.SampleLevel(ClampSamp, float3(1.25, 0.5, 1), 0);  // -> White
+  Out[5] = Tex.SampleLevel(RepeatSamp, float3(1.25, 0.5, 1), 0); // -> Blue
+  Out[6] = Tex.SampleLevel(BorderSamp, float3(1.25, 0.5, 1), 0); // -> border
+  Out[7] = Tex.SampleLevel(MirrorSamp, float3(1.75, 0.5, 1), 0); // -> Blue
+
+  // The slice coordinate is not subject to the address mode; it is always
+  // clamped to [0, ArraySlices-1]. Slice 2 on a 2-slice array therefore clamps
+  // to slice 1 under every mode.
+  Out[8]  = Tex.SampleLevel(RepeatSamp, float3(0.25, 0.5, 2), 0); // -> Blue
+  Out[9]  = Tex.SampleLevel(MirrorSamp, float3(0.25, 0.5, 2), 0); // -> Blue
+
+  // Slice -1 clamps to slice 0; a wrapping slice would give slice 1 (Blue).
+  Out[10] = Tex.SampleLevel(RepeatSamp, float3(0.25, 0.5, -1), 0); // -> Red
+
+  // Border is the sharpest case: an out-of-range *slice* still clamps, so this
+  // returns a real texel rather than the border colour. Only u and v can put a
+  // sample outside the image.
+  Out[11] = Tex.SampleLevel(BorderSamp, float3(0.25, 0.5, 2), 0); // -> Blue
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Slice-major: the whole of slice 0, then slice 1.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # slice 0, texel 0: Red
+            0.0, 1.0, 0.0, 1.0,   # slice 0, texel 1: Green
+            0.0, 0.0, 1.0, 1.0,   # slice 1, texel 0: Blue
+            1.0, 1.0, 1.0, 1.0 ]  # slice 1, texel 1: White
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 192 # 12 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.0, 1.0, 0.0, 1.0,   # [0]  slice 0, Clamp  -> Green
+            1.0, 0.0, 0.0, 1.0,   # [1]  slice 0, Repeat -> Red
+            0.0, 0.0, 0.0, 0.0,   # [2]  slice 0, Border -> transparent black
+            1.0, 0.0, 0.0, 1.0,   # [3]  slice 0, Mirror -> Red
+            1.0, 1.0, 1.0, 1.0,   # [4]  slice 1, Clamp  -> White
+            0.0, 0.0, 1.0, 1.0,   # [5]  slice 1, Repeat -> Blue
+            0.0, 0.0, 0.0, 0.0,   # [6]  slice 1, Border -> transparent black
+            0.0, 0.0, 1.0, 1.0,   # [7]  slice 1, Mirror -> Blue
+            0.0, 0.0, 1.0, 1.0,   # [8]  slice 2 clamps to 1, Repeat -> Blue
+            0.0, 0.0, 1.0, 1.0,   # [9]  slice 2 clamps to 1, Mirror -> Blue
+            1.0, 0.0, 0.0, 1.0,   # [10] slice -1 clamps to 0, Repeat -> Red
+            0.0, 0.0, 1.0, 1.0 ]  # [11] slice 2 clamps to 1, Border -> Blue
+
+Samplers:
+  - Name: ClampSamp
+    Address: Clamp
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: RepeatSamp
+    Address: Repeat
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: BorderSamp
+    Address: Border
+    MinFilter: Nearest
+    MagFilter: Nearest
+  - Name: MirrorSamp
+    Address: Mirror
+    MinFilter: Nearest
+    MagFilter: Nearest
+
+Results:
+  - Result: ArrayAddressTest
+    Rule: BufferFloatULP
+    Actual: Out
+    Expected: Expected
+    ULPT: 1
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: ClampSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: RepeatSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: BorderSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: MirrorSamp
+      Kind: Sampler
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

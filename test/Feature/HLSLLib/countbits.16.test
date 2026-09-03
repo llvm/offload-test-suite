@@ -59,7 +59,7 @@ Buffers:
   - Name: ExpectedOut # The result we expect
     Format: UInt32
     Stride: 16
-    Data: [3, 0, 8, 16, 3, 0, 8, 16, 3, 0, 0, 0]
+    Data: [3, 0, 8, 16, 0, 8, 16, 16, 3, 0, 0, 0]
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -118,16 +118,8 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
-# Bug in DXC-Vulkan
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7494
-# Bug in Clang-Vulkan
-# https://github.com/llvm/llvm-project/issues/142677
-# However, the behaviour is also inconsistent across GPUs when using directx
-# and requires an HLK test so we will mark everything as UNSUPPORTED.
-# For more context see here:
-# https://github.com/microsoft/DirectXShaderCompiler/issues/7499
-# UNSUPPORTED: DXC
-# UNSUPPORTED: Clang
+# Bug https://github.com/llvm/llvm-project/issues/219327
+# XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
