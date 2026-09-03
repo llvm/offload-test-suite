@@ -1,0 +1,286 @@
+#--- source.hlsl
+
+// Tests InterlockedExchange against the HLSL-legal 64-bit non-groupshared
+// (resource) destination types. 64-bit atomics on UAVs were introduced in
+// Shader Model 6.6.
+//
+//   * RWStructuredBuffer<uint64_t>[i]             (free function)
+//   * RWStructuredBuffer<int64_t>[i]              (free function, signed)
+//   * RWByteAddressBuffer::InterlockedExchange64  (method)
+//
+// Typed RWBuffer / RWTexture 64-bit atomics need an optional capability and
+// are covered in InterlockedExchange.resources.typed.int64.test.
+//
+// Checks are as described in InterlockedExchange.32.test. Values sit above
+// 2^32 so the upper word is exercised throughout.
+
+RWStructuredBuffer<uint64_t> SBufUTwoPow32 : register(u0);
+RWStructuredBuffer<int64_t>  SBufIMinusOneThousand : register(u1);
+RWByteAddressBuffer          BABufTwoPow32 : register(u2);
+
+RWStructuredBuffer<uint> OutSeenSBufU : register(u3);
+RWStructuredBuffer<uint> OutSeenBABuf : register(u4);
+RWStructuredBuffer<uint> OutOrig : register(u5);
+RWStructuredBuffer<uint> OutMono : register(u6);
+RWStructuredBuffer<uint> OutFinal : register(u7);
+
+groupshared uint SeenSBufUZero[257];
+groupshared uint SeenBABufZero[257];
+groupshared uint SawInitialCountZero;
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufUTwoPow32[0] = 0x100000000ull;
+    SBufIMinusOneThousand[0] = -1000;
+    BABufTwoPow32.Store<uint64_t>(0, 0x100000000ull); // handoff chain
+    BABufTwoPow32.Store<uint64_t>(8, 0x100000000ull); // exchange loop
+    SeenSBufUZero[256] = 0u;
+    SeenBABufZero[256] = 0u;
+    SawInitialCountZero = 0u;
+  }
+  SeenSBufUZero[GTID.x] = 0u;
+  SeenBABufZero[GTID.x] = 0u;
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint64_t>: values in play are 2^32 to 2^32 + 256.
+  // Index the seen array by the offset from 2^32.
+  uint64_t OrigSBufU;
+  InterlockedExchange(SBufUTwoPow32[0], 0x100000000ull + GTID.x + 1u,
+                      OrigSBufU);
+  SeenSBufUZero[(uint)(OrigSBufU - 0x100000000ull)] = 1u;
+
+  // RWStructuredBuffer<int64_t>: values in play are -1000 and -1 to -256.
+  int64_t OrigSBufI;
+  InterlockedExchange(SBufIMinusOneThousand[0], -(int64_t)(GTID.x + 1u),
+                      OrigSBufI);
+  if (OrigSBufI == -1000)
+    InterlockedAdd(SawInitialCountZero, 1u);
+
+  OutOrig[GTID.x] = (OrigSBufI == -1000 ||
+                     (OrigSBufI >= -256 && OrigSBufI <= -1)) ? 1u : 0u;
+
+  // RWByteAddressBuffer 64-bit method.
+  uint64_t OrigBABuf;
+  BABufTwoPow32.InterlockedExchange64(0, 0x100000000ull + GTID.x + 1u,
+                                      OrigBABuf);
+  SeenBABufZero[(uint)(OrigBABuf - 0x100000000ull)] = 1u;
+
+  // Check 4 on the byte-address counter, exchanging 2^32 + I.
+  uint64_t Prev = 0x100000000ull;
+  uint Mono = 1u;
+  for (uint I = 1; I <= 256; ++I) {
+    uint64_t OrigMono;
+    BABufTwoPow32.InterlockedExchange64(8, 0x100000000ull + I, OrigMono);
+    if (OrigMono != 0x100000000ull + I && OrigMono != 0x100000000ull + I - 1u)
+      Mono = 0u;
+    DeviceMemoryBarrierWithGroupSync();
+    uint64_t Cur = BABufTwoPow32.Load<uint64_t>(8);
+    if (Cur < Prev || Cur != 0x100000000ull + I)
+      Mono = 0u;
+    Prev = Cur;
+    DeviceMemoryBarrierWithGroupSync();
+  }
+  OutMono[GTID.x] = Mono;
+
+  if (GTID.x == 0) {
+    SeenSBufUZero[(uint)(SBufUTwoPow32[0] - 0x100000000ull)] = 1u;
+    SeenBABufZero[(uint)(BABufTwoPow32.Load<uint64_t>(0) -
+                         0x100000000ull)] = 1u;
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  OutSeenSBufU[GTID.x] = SeenSBufUZero[GTID.x];
+  OutSeenBABuf[GTID.x] = SeenBABufZero[GTID.x];
+
+  if (GTID.x == 0) {
+    OutSeenSBufU[256] = SeenSBufUZero[256];
+    OutSeenBABuf[256] = SeenBABufZero[256];
+    OutFinal[0] = SawInitialCountZero;                // 1
+    OutFinal[1] = (SBufIMinusOneThousand[0] >= -256 &&
+                   SBufIMinusOneThousand[0] <= -1) ? 1u : 0u;
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufUTwoPow32
+    Format: UInt64
+    Stride: 8
+    FillSize: 8
+  - Name: SBufIMinusOneThousand
+    Format: Int64
+    Stride: 8
+    FillSize: 8
+  - Name: BABufTwoPow32
+    Format: UInt64
+    Stride: 8
+    FillSize: 16
+  - Name: OutSeenSBufU
+    Format: UInt32
+    Stride: 4
+    FillSize: 1028
+  - Name: ExpectedSeen
+    Format: UInt32
+    Stride: 4
+    # Flags, one per value handed in. Each value must turn up either as
+    # an original or as the value left behind, thus all of them are 1.
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1 ]
+  - Name: OutSeenBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1028
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    # Pass flags, one per thread, not test data. A thread writes 1 only
+    # when its check holds, thus a single 0 fails the comparison.
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: ExpectedFinal
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1 ]
+Results:
+  - Result: TestSeenSBufU
+    Rule: BufferExact
+    Actual: OutSeenSBufU
+    Expected: ExpectedSeen
+  - Result: TestSeenBABuf
+    Rule: BufferExact
+    Actual: OutSeenBABuf
+    Expected: ExpectedSeen
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedOnes
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: SBufUTwoPow32
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufIMinusOneThousand
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BABufTwoPow32
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutSeenSBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutSeenBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+...
+#--- end
+
+# REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99129
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
