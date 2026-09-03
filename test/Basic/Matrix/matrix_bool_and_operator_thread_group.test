@@ -129,9 +129,6 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/696
 # XFAIL: Clang && Intel-Gen-Current && DirectX
 
-# Note: For Vulkan KosmicKrisp and MoltenVK the output is always False.
-# UNSUPPORTED: KosmicKrisp || MoltenVK
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
