@@ -60,6 +60,17 @@ Buffers:
       Height: 4
       Width: 4
       Depth: 1
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    Data: [15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1,
+           15, 36, 136, 1, 15, 36, 136, 1]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
@@ -69,6 +80,11 @@ Bindings:
       Name: POSITION
   RenderTarget: Output
 DescriptorSets: []
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Output
+    Expected: ExpectedOut
 ...
 #--- end
 
@@ -81,23 +97,4 @@ DescriptorSets: []
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T %if Clang %{ps_6_0%} %else %{ps_6_9%} -Fo %t-pixel.o %t/pixel.hlsl
-# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o | FileCheck %s
-
-# CHECK: Name: Output
-# CHECK: Data: [
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
-# CHECK: 15, 36, 136, 1
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
