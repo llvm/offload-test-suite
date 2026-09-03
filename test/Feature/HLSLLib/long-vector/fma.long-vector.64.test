@@ -122,7 +122,7 @@ DescriptorSets:
 #--- end
 
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
-# XFAIL: Vulkan
+# XFAIL: Vulkan && DXC
 
 # REQUIRES: Double
 
