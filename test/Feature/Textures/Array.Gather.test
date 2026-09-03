@@ -1,0 +1,116 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerState Samp : register(s0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture2DArray::Gather takes a float3 location. Gathering at the centre of
+  // a 2x2 slice collects that slice's four texels in the order
+  // [ (0,1), (1,1), (1,0), (0,0) ] -- all four must come from the named slice.
+  float3 Centre0 = float3(0.5, 0.5, 0);
+  float3 Centre1 = float3(0.5, 0.5, 1);
+
+  // Slice 0 red channels are   [0.1 0.2 / 0.3 0.4] laid out row-major.
+  // Gather order gives         [ (0,1)=0.3, (1,1)=0.4, (1,0)=0.2, (0,0)=0.1 ].
+  Out[0] = Tex.Gather(Samp, Centre0);
+  Out[1] = Tex.GatherRed(Samp, Centre0);   // equivalent to Gather
+  Out[2] = Tex.GatherGreen(Samp, Centre0);
+
+  // Slice 1 holds a disjoint set of values, so a gather that strayed across
+  // slices would show up here immediately.
+  Out[3] = Tex.GatherRed(Samp, Centre1);
+  Out[4] = Tex.GatherGreen(Samp, Centre1);
+
+  // The remaining two channel forms, on both slices. Every channel of every
+  // texel holds a distinct value, so picking the wrong channel and picking the
+  // wrong slice are separately detectable.
+  Out[5] = Tex.GatherBlue(Samp, Centre0);
+  Out[6] = Tex.GatherAlpha(Samp, Centre0);
+  Out[7] = Tex.GatherBlue(Samp, Centre1);
+  Out[8] = Tex.GatherAlpha(Samp, Centre1);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # 2x2 across 2 slices, slice-major. Red and green channels carry distinct
+  # values per texel so the gather order and the slice are both observable.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
+    Data: [ # --- Slice 0 ---
+            0.1, 0.5, 0.05, 0.55,   # (0,0) r=0.1 g=0.5 b=0.05 a=0.55
+            0.2, 0.6, 0.15, 0.65,   # (1,0) r=0.2 g=0.6 b=0.15 a=0.65
+            0.3, 0.7, 0.25, 0.75,   # (0,1) r=0.3 g=0.7 b=0.25 a=0.75
+            0.4, 0.8, 0.35, 0.85,   # (1,1) r=0.4 g=0.8 b=0.35 a=0.85
+            # --- Slice 1 ---
+            0.9, 0.15, 0.95, 0.12,  # (0,0)
+            0.8, 0.25, 0.85, 0.22,  # (1,0)
+            0.7, 0.35, 0.75, 0.32,  # (0,1)
+            0.6, 0.45, 0.65, 0.42 ] # (1,1)
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 144 # 9 * sizeof(float4)
+
+  # Gather returns [ (0,1), (1,1), (1,0), (0,0) ] of the selected channel.
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.3, 0.4, 0.2, 0.1,      # [0] slice 0 red
+            0.3, 0.4, 0.2, 0.1,      # [1] slice 0 red (GatherRed)
+            0.7, 0.8, 0.6, 0.5,      # [2] slice 0 green
+            0.7, 0.6, 0.8, 0.9,      # [3] slice 1 red
+            0.35, 0.45, 0.25, 0.15,  # [4] slice 1 green
+            0.25, 0.35, 0.15, 0.05,  # [5] slice 0 blue
+            0.75, 0.85, 0.65, 0.55,  # [6] slice 0 alpha
+            0.75, 0.65, 0.85, 0.95,  # [7] slice 1 blue
+            0.32, 0.42, 0.22, 0.12 ] # [8] slice 1 alpha
+
+Samplers:
+  - Name: Samp
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+
+Results:
+  - Result: ArrayGatherTest
+    Rule: BufferFloatEpsilon
+    Actual: Out
+    Expected: Expected
+    Epsilon: 0.001
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# Unimplemented: https://github.com/llvm/wg-hlsl/issues/409
+# XFAIL: Clang && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

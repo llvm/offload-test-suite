@@ -82,9 +82,13 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
   case ResourceKind::ByteAddressBuffer:
@@ -169,6 +173,10 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -184,6 +192,13 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+    return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  case ResourceKind::TextureCube:
+    return VK_IMAGE_VIEW_TYPE_CUBE;
+  case ResourceKind::TextureCubeArray:
+    return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
@@ -198,16 +213,115 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+static VkImageType getVKImageType(ResourceDimension Dim) {
+  switch (Dim) {
+  case ResourceDimension::Dim1D:
+    return VK_IMAGE_TYPE_1D;
+  case ResourceDimension::Dim2D:
+  case ResourceDimension::Cube:
+    // A cube map is a 2D image with six layers per cube.
+    return VK_IMAGE_TYPE_2D;
+  case ResourceDimension::Dim3D:
+    return VK_IMAGE_TYPE_3D;
+  }
+  llvm_unreachable("All texture dimensions handled");
+}
+
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
-    return VK_IMAGE_TYPE_2D;
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+    // Texture arrays are 2D images with more than one layer.
+    return getVKImageType(ResourceDimension::Dim2D);
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
+    return getVKImageType(ResourceDimension::Cube);
   default:
     llvm_unreachable("Unsupported image kind");
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkImageAspectFlags getVKAspectMask(const CPUBuffer &B) {
+  return B.Format == DataFormat::Depth32 ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                         : VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+// The full subresource range (every mip of every array slice) of a pipeline
+// texture resource.
+static VkImageSubresourceRange getVKFullSubresourceRange(const CPUBuffer &B) {
+  VkImageSubresourceRange SubRange = {};
+  SubRange.aspectMask = getVKAspectMask(B);
+  SubRange.baseMipLevel = 0;
+  SubRange.levelCount = B.OutputProps.MipLevels;
+  SubRange.baseArrayLayer = 0;
+  SubRange.layerCount = B.OutputProps.ArraySlices;
+  return SubRange;
+}
+
+// Build the buffer <-> image copy regions covering every (mip, slice)
+// subresource of a texture. Vulkan staging buffers are tightly packed and
+// ordered slice-major (the full mip chain of slice 0, then the mip chain of
+// slice 1, and so on), matching `computeTightTextureUploadLayout` and D3D12's
+// `Mip + Slice * MipLevels` subresource ordering, so the same data feeds both
+// backends.
+static llvm::SmallVector<VkBufferImageCopy>
+getTextureCopyRegions(const TextureCreateDesc &Desc) {
+  const VkImageAspectFlags AspectMask = isDepthFormat(Desc.Fmt)
+                                            ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                            : VK_IMAGE_ASPECT_COLOR_BIT;
+  const uint32_t ElementSize = getFormatSizeInBytes(Desc.Fmt);
+  llvm::SmallVector<VkBufferImageCopy> Regions;
+  Regions.reserve(Desc.getSubresourceCount());
+  uint64_t CurrentOffset = 0;
+  for (uint32_t Slice = 0; Slice < Desc.ArraySlices; ++Slice) {
+    for (uint32_t Mip = 0; Mip < Desc.MipLevels; ++Mip) {
+      const uint32_t MipWidth = Desc.getMipWidth(Mip);
+      const uint32_t MipHeight = Desc.getMipHeight(Mip);
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = Mip;
+      Region.imageSubresource.baseArrayLayer = Slice;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent = {MipWidth, MipHeight, 1};
+      Regions.push_back(Region);
+      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
+    }
+  }
+  return Regions;
+}
+
+// As above, for a legacy pipeline texture resource.
+static llvm::SmallVector<VkBufferImageCopy>
+getTextureCopyRegions(const CPUBuffer &B) {
+  const VkImageAspectFlags AspectMask = getVKAspectMask(B);
+  llvm::SmallVector<VkBufferImageCopy> Regions;
+  uint64_t CurrentOffset = 0;
+  for (int Slice = 0; Slice < B.OutputProps.ArraySlices; ++Slice) {
+    for (int Mip = 0; Mip < B.OutputProps.MipLevels; ++Mip) {
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = Mip;
+      Region.imageSubresource.baseArrayLayer = Slice;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent.width =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> Mip);
+      Region.imageExtent.height =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> Mip);
+      Region.imageExtent.depth =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> Mip);
+      Regions.push_back(Region);
+      CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
+                       Region.imageExtent.height * Region.imageExtent.depth *
+                       B.getElementSize();
+    }
+  }
+  return Regions;
 }
 
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
@@ -1097,25 +1211,8 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
-    const VkImageAspectFlags AspectMask = isDepthFormat(VKDst.Desc.Fmt)
-                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                              : VK_IMAGE_ASPECT_COLOR_BIT;
-    const uint32_t ElementSize = getFormatSizeInBytes(VKDst.Desc.Fmt);
-    llvm::SmallVector<VkBufferImageCopy> Regions;
-    uint64_t CurrentOffset = 0;
-    for (uint32_t I = 0; I < VKDst.Desc.MipLevels; ++I) {
-      const uint32_t MipWidth = std::max(1u, VKDst.Desc.Width >> I);
-      const uint32_t MipHeight = std::max(1u, VKDst.Desc.Height >> I);
-      VkBufferImageCopy Region = {};
-      Region.bufferOffset = CurrentOffset;
-      Region.imageSubresource.aspectMask = AspectMask;
-      Region.imageSubresource.mipLevel = I;
-      Region.imageSubresource.baseArrayLayer = 0;
-      Region.imageSubresource.layerCount = 1;
-      Region.imageExtent = {MipWidth, MipHeight, 1};
-      Regions.push_back(Region);
-      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
-    }
+    const llvm::SmallVector<VkBufferImageCopy> Regions =
+        getTextureCopyRegions(VKDst.Desc);
 
     insertDebugSignpost(
         llvm::formatv("copyBufferToTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
@@ -1174,9 +1271,11 @@ public:
     insertDebugSignpost(
         llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
+    const llvm::SmallVector<VkBufferImageCopy> Regions =
+        getTextureCopyRegions(VKSrc.Desc);
     vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
-                           0, nullptr);
+                           Regions.size(), Regions.data());
 
     CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,              /*DstAccessMask*/
@@ -2722,7 +2821,7 @@ public:
     ImageInfo.format = getVulkanFormat(Desc.Fmt);
     ImageInfo.extent = {Desc.Width, Desc.Height, 1};
     ImageInfo.mipLevels = Desc.MipLevels;
-    ImageInfo.arrayLayers = 1;
+    ImageInfo.arrayLayers = Desc.ArraySlices;
     ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
                            ? VK_IMAGE_TILING_OPTIMAL
@@ -2773,11 +2872,11 @@ public:
         FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
     }
     const VkImageSubresourceRange FullRange{
-        FullAspectMask,
-        0, /*baseMipLevel*/
-        Desc.MipLevels,
-        0, /*baseArrayLayer*/
-        1, /*layerCount*/
+        /*aspectMask=*/FullAspectMask,
+        /*baseMipLevel=*/0,
+        /*levelCount=*/Desc.MipLevels,
+        /*baseArrayLayer=*/0,
+        /*layerCount=*/Desc.ArraySlices,
     };
 
     VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -3308,7 +3407,9 @@ public:
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
-    ImageCreateInfo.arrayLayers = 1;
+    ImageCreateInfo.arrayLayers = R.getTextureArraySlices();
+    if (R.isTextureCube())
+      ImageCreateInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -3750,7 +3851,8 @@ public:
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-          ViewCreateInfo.subresourceRange.layerCount = 1;
+          ViewCreateInfo.subresourceRange.layerCount =
+              R.getTextureArraySlices();
           ViewCreateInfo.subresourceRange.levelCount =
               R.BufferPtr->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
@@ -3980,36 +4082,9 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      llvm::SmallVector<VkBufferImageCopy> Regions;
-      uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
-      }
-
-      VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
-      SubRange.baseMipLevel = 0;
-      SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      const llvm::SmallVector<VkBufferImageCopy> Regions =
+          getTextureCopyRegions(B);
+      const VkImageSubresourceRange SubRange = getVKFullSubresourceRange(B);
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -4126,13 +4201,7 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
-      SubRange.baseMipLevel = 0;
-      SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      const VkImageSubresourceRange SubRange = getVKFullSubresourceRange(B);
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -4152,28 +4221,8 @@ public:
                              nullptr, 1, &ImageBarrier);
       }
 
-      llvm::SmallVector<VkBufferImageCopy> Regions;
-      uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
-      }
+      const llvm::SmallVector<VkBufferImageCopy> Regions =
+          getTextureCopyRegions(B);
 
       for (auto &ResRef : R.ResourceRefs)
         vkCmdCopyImageToBuffer(IS.CB->CmdBuffer, ResRef.Image.Image,

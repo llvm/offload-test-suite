@@ -19,8 +19,9 @@ A complete deployment consists of two install prefixes:
    Contains:
    - `bin/` — clang, FileCheck, split-file, not, obj2yaml, api-query,
      offloader, and the other tools created by `add_offloadtest_tool`.
-   - `include/`, `lib/clang/<ver>/include/` — clang resource headers
-     (`hlsl-resource-headers` component).
+   - `include/`, `lib/clang/<ver>/include/` — HLSL resource headers
+     (`hlsl-resource-headers` component): `hlsl.h` and the `hlsl/`
+     subdirectory.
    - `share/hlsl-test-suite/` — test sources, `lit.site.cfg.py.in` template,
      `configure-test-suite.py`, and golden images.
 

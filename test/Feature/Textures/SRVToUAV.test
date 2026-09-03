@@ -29,22 +29,30 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64
+    # A UAV only ever addresses mip 0, so mip 1 must come back exactly as it was.
+    Data: [0.25, 0.25, 0.25, 1.0,
+           0.25, 0.25, 0.25, 1.0,
+           0.25, 0.25, 0.25, 1.0,
+           0.25, 0.25, 0.25, 1.0,
+           1.0, 0.0, 1.0, 1.0]
     OutputProps:
       Height: 2
       Width: 2
       Depth: 1
+      MipLevels: 2
   - Name: ExpectedOut
     Format: Float32
     Channels: 4
     Data: [0.0, 0.0, 1.0, 1.0,
            0.0, 1.0, 0.0, 1.0,
            1.0, 0.0, 0.0, 1.0,
-           0.0, 1.0, 1.0, 1.0]
+           0.0, 1.0, 1.0, 1.0,
+           1.0, 0.0, 1.0, 1.0]
     OutputProps:
       Height: 2
       Width: 2
       Depth: 1
+      MipLevels: 2
 Results:
   - Result: Test1
     Rule: BufferExact

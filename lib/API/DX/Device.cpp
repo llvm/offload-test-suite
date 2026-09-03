@@ -104,6 +104,74 @@ static uint32_t getAlignedTexturePitch(uint32_t Width, uint32_t ElementSize) {
   return llvm::alignTo(Width * ElementSize, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
 }
 
+static D3D12_RESOURCE_DIMENSION getDXResourceDimension(ResourceDimension Dim) {
+  switch (Dim) {
+  case ResourceDimension::Dim1D:
+    return D3D12_RESOURCE_DIMENSION_TEXTURE1D;
+  case ResourceDimension::Dim2D:
+  case ResourceDimension::Cube:
+    // A cube map is a 2D resource with six slices per cube.
+    return D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Dim3D:
+    return D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+  }
+  llvm_unreachable("All texture dimensions handled");
+}
+
+// Only the fields GetCopyableFootprints consults are needed here; layout,
+// flags, and clear value do not affect the copyable footprint.
+static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
+  D3D12_RESOURCE_DESC TexDesc = {};
+  TexDesc.Dimension = getDXResourceDimension(Desc.Dim);
+  TexDesc.Width = Desc.Width;
+  TexDesc.Height = Desc.Height;
+  // DepthOrArraySize is the layer count for 1D/2D resources but the depth
+  // extent for 3D ones, so it cannot take the slice count once 3D textures
+  // exist; they need their own extent on TextureCreateDesc.
+  assert(Desc.Dim != ResourceDimension::Dim3D &&
+         "3D resources need a depth extent, not a slice count");
+  // Both fields are UINT16. Callers must reject out-of-range values before
+  // getting here, otherwise these casts wrap silently.
+  assert(Desc.ArraySlices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION &&
+         "Slice count must be range-checked before narrowing to UINT16");
+  assert(Desc.MipLevels <= D3D12_REQ_MIP_LEVELS &&
+         "Mip level count must be range-checked before narrowing to UINT16");
+  TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
+  TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
+  TexDesc.Format = getDXGIFormat(Desc.Fmt);
+  TexDesc.SampleDesc.Count = 1;
+  return TexDesc;
+}
+
+static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
+  switch (Desc.Dim) {
+  case ResourceDimension::Dim2D:
+    return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
+                        : D3D12_SRV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Cube:
+    return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
+                        : D3D12_SRV_DIMENSION_TEXTURECUBE;
+  case ResourceDimension::Dim1D:
+  case ResourceDimension::Dim3D:
+    llvm_unreachable("Texture dimension has no SRV mapping yet");
+  }
+  llvm_unreachable("All texture dimensions handled");
+}
+
+static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
+  switch (Desc.Dim) {
+  case ResourceDimension::Dim2D:
+    return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
+                        : D3D12_UAV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Cube:
+    llvm_unreachable("Texture cubes cannot be used as a UAV");
+  case ResourceDimension::Dim1D:
+  case ResourceDimension::Dim3D:
+    llvm_unreachable("Texture dimension has no UAV mapping yet");
+  }
+  llvm_unreachable("All texture dimensions handled");
+}
+
 static D3D12_PRIMITIVE_TOPOLOGY_TYPE
 getDXPrimitiveTopologyType(PrimitiveTopology Topology) {
   switch (Topology) {
@@ -890,7 +958,7 @@ public:
     CB.flushBarrier();
 
     const D3D12_RESOURCE_DESC TexDesc = DXDst.Resource->GetDesc();
-    const uint32_t NumSubresources = TexDesc.MipLevels;
+    const uint32_t NumSubresources = DXDst.Desc.getSubresourceCount();
     llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Layouts(
         NumSubresources);
     ComPtr<ID3D12DeviceX> Device;
@@ -964,15 +1032,23 @@ public:
 
     CB.flushBarrier();
 
-    const uint32_t ElementSize = getFormatSizeInBytes(DXSrc.Desc.Fmt);
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{
-        0,
-        CD3DX12_SUBRESOURCE_FOOTPRINT(
-            getDXGIFormat(DXSrc.Desc.Fmt), DXSrc.Desc.Width, DXSrc.Desc.Height,
-            1, getAlignedTexturePitch(DXSrc.Desc.Width, ElementSize))};
-    const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Buffer.Get(), Footprint);
-    const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Resource.Get(), 0);
-    CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    // Read back every subresource into the destination buffer using the same
+    // footprints the upload path uses, so the readback is laid out exactly
+    // like getTextureUploadLayout() describes.
+    const D3D12_RESOURCE_DESC TexDesc = DXSrc.Resource->GetDesc();
+    const uint32_t NumSubresources = DXSrc.Desc.getSubresourceCount();
+    llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Layouts(
+        NumSubresources);
+    ComPtr<ID3D12DeviceX> Device;
+    DXSrc.Resource->GetDevice(IID_PPV_ARGS(&Device));
+    Device->GetCopyableFootprints(&TexDesc, 0, NumSubresources, 0,
+                                  Layouts.data(), nullptr, nullptr, nullptr);
+    for (uint32_t Sub = 0; Sub < NumSubresources; ++Sub) {
+      const CD3DX12_TEXTURE_COPY_LOCATION DstLoc(DXDst.Buffer.Get(),
+                                                 Layouts[Sub]);
+      const CD3DX12_TEXTURE_COPY_LOCATION SrcLoc(DXSrc.Resource.Get(), Sub);
+      CB.CmdList->CopyTextureRegion(&DstLoc, 0, 0, 0, &SrcLoc, nullptr);
+    }
 
     if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
       CB.addResourceTransition(DXSrc.Resource.Get(),
@@ -2033,17 +2109,21 @@ public:
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
 
+    if (Desc.ArraySlices > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u texture array slices; got %u.",
+          D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, Desc.ArraySlices);
+    if (Desc.MipLevels > D3D12_REQ_MIP_LEVELS)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports at most %u mip levels; got %u.", D3D12_REQ_MIP_LEVELS,
+          Desc.MipLevels);
+
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
 
-    D3D12_RESOURCE_DESC TexDesc = {};
-    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    TexDesc.Width = Desc.Width;
-    TexDesc.Height = Desc.Height;
-    TexDesc.DepthOrArraySize = 1;
-    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
-    TexDesc.Format = getDXGIFormat(Desc.Fmt);
-    TexDesc.SampleDesc.Count = 1;
+    D3D12_RESOURCE_DESC TexDesc = getDXResourceDesc(Desc);
     if (Desc.Location == MemoryLocation::GpuOnly) {
       if (Desc.Backing == MemoryBacking::Sparse)
         TexDesc.Layout = D3D12_TEXTURE_LAYOUT_64KB_UNDEFINED_SWIZZLE;
@@ -2105,15 +2185,40 @@ public:
       SRVHandle = *SRVHandleOrErr;
 
       D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
-      SRVDesc.ViewDimension =
-          D3D12_SRV_DIMENSION_TEXTURE2D; // assume this is correct for now.
       SRVDesc.Shader4ComponentMapping =
           D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
       SRVDesc.Format = getDXGIFormatSRV(Desc.Fmt);
-      SRVDesc.Texture2D.MostDetailedMip = 0;
-      SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
-      SRVDesc.Texture2D.PlaneSlice = 0;
-      SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+      SRVDesc.ViewDimension = getDXSRVDimension(Desc);
+      switch (SRVDesc.ViewDimension) {
+      case D3D12_SRV_DIMENSION_TEXTURE2D:
+        SRVDesc.Texture2D.MostDetailedMip = 0;
+        SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture2D.PlaneSlice = 0;
+        SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURE2DARRAY:
+        SRVDesc.Texture2DArray.MostDetailedMip = 0;
+        SRVDesc.Texture2DArray.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture2DArray.FirstArraySlice = 0;
+        SRVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
+        SRVDesc.Texture2DArray.PlaneSlice = 0;
+        SRVDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURECUBE:
+        SRVDesc.TextureCube.MostDetailedMip = 0;
+        SRVDesc.TextureCube.MipLevels = Desc.MipLevels;
+        SRVDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURECUBEARRAY:
+        SRVDesc.TextureCubeArray.MostDetailedMip = 0;
+        SRVDesc.TextureCubeArray.MipLevels = Desc.MipLevels;
+        SRVDesc.TextureCubeArray.First2DArrayFace = 0;
+        SRVDesc.TextureCubeArray.NumCubes = Desc.ArraySlices / 6;
+        SRVDesc.TextureCubeArray.ResourceMinLODClamp = 0.0f;
+        break;
+      default:
+        llvm_unreachable("Unhandled texture SRV dimension");
+      }
 
       Device->CreateShaderResourceView(TextureObject.Get(), &SRVDesc,
                                        SRVHandle);
@@ -2127,9 +2232,21 @@ public:
       UAVHandle = *UAVHandleOrErr;
 
       D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
-      UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-      UAVDesc.Texture2D.MipSlice = 0;
-      UAVDesc.Texture2D.PlaneSlice = 0;
+      UAVDesc.ViewDimension = getDXUAVDimension(Desc);
+      switch (UAVDesc.ViewDimension) {
+      case D3D12_UAV_DIMENSION_TEXTURE2D:
+        UAVDesc.Texture2D.MipSlice = 0;
+        UAVDesc.Texture2D.PlaneSlice = 0;
+        break;
+      case D3D12_UAV_DIMENSION_TEXTURE2DARRAY:
+        UAVDesc.Texture2DArray.MipSlice = 0;
+        UAVDesc.Texture2DArray.FirstArraySlice = 0;
+        UAVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
+        UAVDesc.Texture2DArray.PlaneSlice = 0;
+        break;
+      default:
+        llvm_unreachable("Unhandled texture UAV dimension");
+      }
 
       Device->CreateUnorderedAccessView(TextureObject.Get(), nullptr, &UAVDesc,
                                         UAVHandle);
@@ -2203,18 +2320,8 @@ public:
 
   TextureUploadLayout
   getTextureUploadLayout(const TextureCreateDesc &Desc) const override {
-    // Only the fields GetCopyableFootprints consults are needed here; layout,
-    // flags, and clear value do not affect the copyable footprint.
-    D3D12_RESOURCE_DESC TexDesc = {};
-    TexDesc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    TexDesc.Width = Desc.Width;
-    TexDesc.Height = Desc.Height;
-    TexDesc.DepthOrArraySize = 1;
-    TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
-    TexDesc.Format = getDXGIFormat(Desc.Fmt);
-    TexDesc.SampleDesc.Count = 1;
-
-    const uint32_t NumSubresources = Desc.MipLevels;
+    const D3D12_RESOURCE_DESC TexDesc = getDXResourceDesc(Desc);
+    const uint32_t NumSubresources = Desc.getSubresourceCount();
     llvm::SmallVector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints(
         NumSubresources);
     llvm::SmallVector<UINT> NumRows(NumSubresources);
