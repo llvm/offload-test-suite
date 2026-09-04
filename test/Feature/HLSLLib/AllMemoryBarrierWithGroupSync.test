@@ -1,0 +1,90 @@
+#--- source.hlsl
+
+RWStructuredBuffer<uint> Data : register(u0);
+RWStructuredBuffer<uint> Out : register(u1);
+
+groupshared uint GroupPayload;
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  // Thread 255 initializes both shared values.
+  if (GTID.x == 255) {
+    GroupPayload = 1u;
+    Data[0] = 1u;
+  }
+
+  // Publish both initial values before thread 0 reads them.
+  AllMemoryBarrierWithGroupSync();
+
+  // Record both initial values.
+  if (GTID.x == 0) {
+    Out[0] = GroupPayload;
+    Out[1] = Data[0];
+  }
+
+  // Complete both initial reads before the updates start.
+  AllMemoryBarrierWithGroupSync();
+
+  // Select one writer in each loop step.
+  for (uint I = 0; I < 256; ++I) {
+    if (GTID.x == I) {
+      GroupPayload = GroupPayload + 1u;
+      Data[0] = Data[0] + 1u;
+    }
+
+    // Complete both writes before the next thread starts its writes.
+    AllMemoryBarrierWithGroupSync();
+  }
+
+  // Record both values after all 256 updates.
+  if (GTID.x == 128) {
+    Out[2] = GroupPayload;
+    Out[3] = Data[0];
+  }
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Data
+    Format: UInt32
+    Stride: 4
+    Data: [ 0 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 16
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 257, 257 ]
+Results:
+  - Result: AllMemoryBarrierWithGroupSync
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Data
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
