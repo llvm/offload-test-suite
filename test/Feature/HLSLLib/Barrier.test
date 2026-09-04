@@ -76,7 +76,7 @@ DescriptorSets:
 #--- end
 
 # Clang does not implement Barrier: https://github.com/llvm/llvm-project/issues/99234
-# UNSUPPORTED: Clang
+# XFAIL: Clang
 # REQUIRES: SM_6_8
 
 # RUN: split-file %s %t
