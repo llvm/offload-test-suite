@@ -9,11 +9,14 @@ LLVM and DXC are built by two independent schedules:
 | `frequent-build-llvm.yaml`| LLVM/Clang | every 2 hours| `build-llvm-callable.yaml` |
 | `frequent-build-dxc.yaml` | DXC        | daily        | `build-dxc-callable.yaml`  |
 
-Test cells consume both through `test-callable.yaml`.
+Test cells consume both through `test-callable.yaml`. A **test cell** is one
+entry in a `pr-matrix.yaml` job matrix, that is one SKU and test-target pair
+such as `(windows-intel, check-hlsl-d3d12)`. Each cell shows as one check on
+the PR.
 
-Migration is incremental. Today `pr-matrix.yaml` routes only the
-`windows-nvidia` x64 cells (`check-hlsl-d3d12` and `check-hlsl-clang-d3d12`)
-this way; every other cell still builds its own toolchain via
+Migration is incremental. Today `pr-matrix.yaml` routes its default x64
+cells (`Exec-Tests-Windows`: `windows-intel` and `windows-nvidia`) this way;
+the warp, `test-all` and macOS cells still build their own toolchain via
 `build-and-test-callable.yaml` with `SplitBuild: true`. So "PRs never build
 LLVM or DXC" below describes the end state, not the current one.
 
