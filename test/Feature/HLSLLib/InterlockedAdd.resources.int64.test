@@ -222,7 +222,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
 # UNSUPPORTED: WARP && DXC
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/1435
+# TODO: Bug: Unsupported ptrcast user. Please fix.
 # XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
