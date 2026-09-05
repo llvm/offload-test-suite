@@ -1,0 +1,104 @@
+#--- source.hlsl
+
+RWBuffer<int> IntIn : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int2x3 IntLTLHS = int2x3(IntIn[0], IntIn[1], IntIn[2], IntIn[3], IntIn[4], IntIn[5]);
+  int2x3 IntLTRHS = int2x3(IntIn[1], IntIn[0], IntIn[3], IntIn[2], IntIn[5], IntIn[4]);
+  int4x2 IntGTLHS = int4x2(IntIn[0], IntIn[1], IntIn[2], IntIn[3], IntIn[4], IntIn[5], IntIn[6], IntIn[7]);
+  int4x2 IntGTRHS = int4x2(IntIn[1], IntIn[0], IntIn[3], IntIn[2], IntIn[5], IntIn[4], IntIn[7], IntIn[6]);
+  int3x3 IntLELHS = int3x3(IntIn[0], IntIn[1], IntIn[2], IntIn[3], IntIn[4], IntIn[5], IntIn[6], IntIn[7], IntIn[8]);
+  int3x3 IntLERHS = int3x3(IntIn[1], IntIn[0], IntIn[2], IntIn[4], IntIn[3], IntIn[5], IntIn[7], IntIn[6], IntIn[8]);
+  int3x4 IntGELHS = int3x4(IntIn[0], IntIn[1], IntIn[2], IntIn[3], IntIn[4], IntIn[5], IntIn[6], IntIn[7], IntIn[8], IntIn[9], IntIn[10], IntIn[11]);
+  int3x4 IntGERHS = int3x4(IntIn[1], IntIn[0], IntIn[2], IntIn[4], IntIn[3], IntIn[5], IntIn[7], IntIn[6], IntIn[8], IntIn[10], IntIn[9], IntIn[11]);
+  int4x3 IntEQLHS = int4x3(IntIn[0], IntIn[1], IntIn[2], IntIn[3], IntIn[4], IntIn[5], IntIn[6], IntIn[7], IntIn[8], IntIn[9], IntIn[10], IntIn[11]);
+  int4x3 IntEQRHS = int4x3(IntIn[0], IntIn[2], IntIn[1], IntIn[3], IntIn[5], IntIn[4], IntIn[6], IntIn[8], IntIn[7], IntIn[9], IntIn[11], IntIn[10]);
+  int4x4 IntNELHS = int4x4(IntIn[0], IntIn[1], IntIn[2], IntIn[3], IntIn[4], IntIn[5], IntIn[6], IntIn[7], IntIn[8], IntIn[9], IntIn[10], IntIn[11], IntIn[12], IntIn[13], IntIn[14], IntIn[15]);
+  int4x4 IntNERHS = int4x4(IntIn[0], IntIn[2], IntIn[1], IntIn[3], IntIn[5], IntIn[4], IntIn[6], IntIn[8], IntIn[7], IntIn[9], IntIn[11], IntIn[10], IntIn[12], IntIn[14], IntIn[13], IntIn[15]);
+  bool2x3 IntLT = IntLTLHS < IntLTRHS;
+  bool4x2 IntGT = IntGTLHS > IntGTRHS;
+  bool3x3 IntLE = IntLELHS <= IntLERHS;
+  bool3x4 IntGE = IntGELHS >= IntGERHS;
+  bool4x3 IntEQ = IntEQLHS == IntEQRHS;
+  bool4x4 IntNE = IntNELHS != IntNERHS;
+
+  uint Offset = 0;
+  for (uint Row = 0; Row < 2; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = IntLT[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 2; ++Col)
+      BoolOut[Offset++] = IntGT[Row][Col];
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = IntLE[Row][Col];
+  for (uint Row = 0; Row < 3; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Offset++] = IntGE[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Offset++] = IntEQ[Row][Col];
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 4; ++Col)
+      BoolOut[Offset++] = IntNE[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: IntIn
+    Format: Int32
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 252
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ # int2x3 IntLT
+            1, 0, 1, 0, 1, 0,
+            # int4x2 IntGT
+            0, 1, 0, 1, 0, 1, 0, 1,
+            # int3x3 IntLE
+            1, 0, 1, 1, 0, 1, 1, 0, 1,
+            # int3x4 IntGE
+            0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1,
+            # int4x3 IntEQ
+            1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0,
+            # int4x4 IntNE
+            0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0, 1, 1, 0 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: IntIn
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

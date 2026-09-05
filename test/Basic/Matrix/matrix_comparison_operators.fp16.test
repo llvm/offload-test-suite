@@ -1,0 +1,72 @@
+#--- source.hlsl
+
+RWStructuredBuffer<half> HalfIn : register(u0);
+RWStructuredBuffer<bool> BoolOut : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  half4x3 HalfEQLHS = HalfIn[0], HalfEQRHS = HalfIn[1];
+  bool4x3 HalfEQ = HalfEQLHS == HalfEQRHS;
+
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Row * 3 + Col] = HalfEQ[Row][Col];
+
+  HalfEQRHS = HalfIn[2];
+  HalfEQ = HalfEQLHS == HalfEQRHS;
+
+  for (uint Row = 0; Row < 4; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[12 + Row * 3 + Col] = HalfEQ[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: HalfIn
+    Format: Float16
+    Data: [ 0x4000, 0x4000, 0x4200 ]
+    #       2.0,    2.0,    3.0
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 96
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: HalfIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Half
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_2 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
