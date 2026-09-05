@@ -1,0 +1,56 @@
+#--- source.hlsl
+
+RWStructuredBuffer<uint> Out : register(u0);
+
+groupshared uint Data;
+
+// This is a compile-and-run smoke test. Full memory-order validation is out
+// of scope because this barrier does not synchronize threads.
+[numthreads(1, 1, 1)]
+void main() {
+  Data = 1u;
+  Barrier(GROUP_SHARED_MEMORY, 0);
+  Out[0] = Data;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1 ]
+Results:
+  - Result: BarrierGroupSharedNoScope
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# FIXME(DXC-SPIRV-BARRIER): Replace with the DXC issue URL.
+# DXC SPIR-V validation failure: https://godbolt.org/z/6zxnbPzsr
+# XFAIL: DXC && Vulkan
+# Clang does not implement Barrier: https://github.com/llvm/llvm-project/issues/99234
+# XFAIL: Clang
+# REQUIRES: SM_6_8
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_8 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
