@@ -220,8 +220,11 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99125
-# XFAIL: Clang
+# Unimplemented texture atomics: https://github.com/llvm/llvm-project/issues/186154
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug: https://github.com/llvm/llvm-project/issues/221370
+# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
