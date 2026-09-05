@@ -1,0 +1,83 @@
+#--- source.hlsl
+
+StructuredBuffer<float> In0 : register(t0);
+RWStructuredBuffer<float> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  vector<float, 5> Input0_5;
+  for (uint I = 0; I < 5; ++I)
+    Input0_5[I] = In0[0 + I];
+  vector<float, 5> Result5 = sinh(Input0_5);
+  for (uint I = 0; I < 5; ++I)
+    Out[0 + I] = Result5[I];
+
+  vector<float, 8> Input0_8;
+  for (uint I = 0; I < 8; ++I)
+    Input0_8[I] = In0[5 + I];
+  vector<float, 8> Result8 = sinh(Input0_8);
+  for (uint I = 0; I < 8; ++I)
+    Out[5 + I] = Result8[I];
+
+  vector<float, 16> Input0_16;
+  for (uint I = 0; I < 16; ++I)
+    Input0_16[I] = In0[13 + I];
+  vector<float, 16> Result16 = sinh(Input0_16);
+  for (uint I = 0; I < 16; ++I)
+    Out[13 + I] = Result16[I];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In0
+    Format: Float32
+    Stride: 4
+    Data: [-2, -1, -0.5, 0, 0.5,
+           1, 2, -2, -1, -0.5, 0, 0.5, 1,
+           2, -2, -1, -0.5, 0, 0.5, 1, 2, -2, -1, -0.5, 0, 0.5, 1, 2, -2]
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    FillSize: 116
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [-3.62686041, -1.17520119, -0.521095305, 0, 0.521095305,
+           1.17520119, 3.62686041, -3.62686041, -1.17520119, -0.521095305, 0, 0.521095305, 1.17520119,
+           3.62686041, -3.62686041, -1.17520119, -0.521095305, 0, 0.521095305, 1.17520119, 3.62686041, -3.62686041, -1.17520119, -0.521095305, 0, 0.521095305, 1.17520119, 3.62686041, -3.62686041]
+Results:
+  - Result: Test
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
