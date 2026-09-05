@@ -1,0 +1,65 @@
+#--- source.hlsl
+
+StructuredBuffer<uint> In : register(t0);
+RWStructuredBuffer<int16_t> Out : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int8_t4_packed packedVals = In[0];
+  int16_t4 unpackedVals = unpack_s8s16(packedVals);
+  Out[0] = unpackedVals.x;
+  Out[1] = unpackedVals.y;
+  Out[2] = unpackedVals.z;
+  Out[3] = unpackedVals.w;
+}
+
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 4
+    Data: [ 2155839744 ]
+  - Name: Out
+    Format: Int16
+    Stride: 2
+    FillSize: 8
+  - Name: ExpectedOut
+    Format: Int16
+    Stride: 2
+    Data: [ 0, -127, 127, -128 ]
+Results:
+  - Result: Test1
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99222
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -enable-16bit-types -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
