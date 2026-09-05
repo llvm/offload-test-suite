@@ -17,12 +17,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0);
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(3, 0)]] TextureCube<float4> TexCube : register(t1); // 4x4 faces, 3 mips
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Use SV_Position (pixel coordinates) to simulate the grid logic.
@@ -64,10 +59,8 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float3 CubeFlat = float3(1, 0, 0) + float3(float2(GTid.xy) * 0.00001, 0);
   float3 CubeSteep = float3(1, 0, 0.5 - float(GTid.x));
 
-  float lod4 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeFlat),
-                        0.0);
-  float lod5 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeSteep),
-                        1.0);
+  float lod4 = TexCube.CalculateLevelOfDetail(Samp, CubeFlat);
+  float lod5 = TexCube.CalculateLevelOfDetail(Samp, CubeSteep);
 
   if (all(GTid.xy == 0)) {
     Out[0] = lod0;
@@ -182,6 +175,5 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T ps_6_6 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
