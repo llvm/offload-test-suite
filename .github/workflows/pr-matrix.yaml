@@ -107,7 +107,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Lavapipe is only installed on the AMD (x64) and QC (arm64) boxes.
+        # Lavapipe is only installed on the AMD (x64) and QC (arm64) workers.
         # See docs/CI.md.
         SKU: [windows-amd, windows-qc]
         TestTarget: [check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
