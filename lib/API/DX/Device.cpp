@@ -909,6 +909,15 @@ public:
     auto &DXSrc = static_cast<DXBuffer &>(Src);
     auto &DXDst = static_cast<DXBuffer &>(Dst);
 
+    // A GPU-only RW buffer with COMMON as its preferred state is implicitly
+    // promoted to UNORDERED_ACCESS by dispatch. It does not decay back to
+    // COMMON until ExecuteCommandLists completes.
+    const D3D12_RESOURCE_STATES SrcStateBeforeCopy =
+        DXSrc.PreferredState == D3D12_RESOURCE_STATE_COMMON &&
+                DXDst.getDesc().Location == MemoryLocation::GpuToCpu
+            ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
+            : DXSrc.PreferredState;
+
     // NOTE: Edge case in case of all the following being the case
     // - multiple calls of copyBufferToBuffer with the same Dst Buffer
     // - The Dst Buffer having a PreferredState of
@@ -920,8 +929,8 @@ public:
     // legacy barriers, but switching to enhanced barriers is a better solution
     // to this problem.
 
-    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_COPY_SOURCE)
-      CB.addResourceTransition(DXSrc.Buffer.Get(), DXSrc.PreferredState,
+    if (SrcStateBeforeCopy != D3D12_RESOURCE_STATE_COPY_SOURCE)
+      CB.addResourceTransition(DXSrc.Buffer.Get(), SrcStateBeforeCopy,
                                D3D12_RESOURCE_STATE_COPY_SOURCE);
     if (DXDst.PreferredState != D3D12_RESOURCE_STATE_COPY_DEST)
       CB.addResourceTransition(DXDst.Buffer.Get(), DXDst.PreferredState,
