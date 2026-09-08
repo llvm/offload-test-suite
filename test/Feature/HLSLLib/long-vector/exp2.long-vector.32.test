@@ -5,7 +5,7 @@ RWByteAddressBuffer Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  Out.Store<vector<float, 16>>(0, exp2(In0.Load<vector<float, 16>>(0)));
+  Out.Store<vector<float, 16> >(0, exp2(In0.Load<vector<float, 16> >(0)));
 }
 
 //--- pipeline.yaml

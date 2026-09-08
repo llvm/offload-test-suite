@@ -7,8 +7,8 @@ RWByteAddressBuffer ExtraOut : register(u2);
 [numthreads(1,1,1)]
 void main() {
   vector<int, 8> Extra;
-  Out.Store<vector<float, 8>>(0, frexp(In.Load<vector<float, 8>>(0), Extra));
-  ExtraOut.Store<vector<int, 8>>(0, Extra);
+  Out.Store<vector<float, 8> >(0, frexp(In.Load<vector<float, 8> >(0), Extra));
+  ExtraOut.Store<vector<int, 8> >(0, Extra);
 }
 
 //--- pipeline.yaml
