@@ -7,9 +7,9 @@ RWByteAddressBuffer Out : register(u3);
 
 [numthreads(1,1,1)]
 void main() {
-  Out.Store<vector<float, 8>>(0, lerp(In0.Load<vector<float, 8>>(0),
-      In1.Load<vector<float, 8>>(0),
-      In2.Load<vector<float, 8>>(0)));
+  Out.Store<vector<float, 8> >(0, lerp(In0.Load<vector<float, 8> >(0),
+      In1.Load<vector<float, 8> >(0),
+      In2.Load<vector<float, 8> >(0)));
 }
 
 //--- pipeline.yaml
