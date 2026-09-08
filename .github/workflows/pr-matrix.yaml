@@ -107,7 +107,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        SKU: [windows-amd, windows-sw-rasterizer-x86_64, windows-qc]
+        # Lavapipe is only installed on the AMD (x64) and QC (arm64) boxes.
+        # See docs/CI.md.
+        SKU: [windows-amd, windows-qc]
         TestTarget: [check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
 
     uses: ./.github/workflows/build-and-test-callable.yaml
