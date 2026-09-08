@@ -54,6 +54,9 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
 # XFAIL: Vulkan
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1506
+# Note We fail for DXC because today Clang scalairzed and does
+# Not hit  IRErrorCodeUnsupportedInstruction on vector @dx.op.*
 # Bug https://github.com/llvm/offload-test-suite/issues/1495
 # XFAIL: Metal && DXC
 
