@@ -615,6 +615,9 @@ struct Shader {
 struct DispatchParametersSet {
   std::array<uint32_t, 3> DispatchGroupCount = {1, 1, 1};
   std::optional<uint32_t> VertexCount;
+  uint32_t InstanceCount = 1;
+  uint32_t FirstVertex = 0;
+  uint32_t FirstInstance = 0;
 };
 
 struct TriangleGeometry {
