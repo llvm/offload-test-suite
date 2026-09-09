@@ -1,0 +1,91 @@
+#--- source.hlsl
+
+ByteAddressBuffer In : register(t0);
+RWByteAddressBuffer Out : register(u1);
+RWByteAddressBuffer ExtraOut : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  vector<int, 8> Extra;
+  Out.Store<vector<float, 8> >(0, frexp(In.Load<vector<float, 8> >(0), Extra));
+  ExtraOut.Store<vector<int, 8> >(0, Extra);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 4
+    Data: [0.125, 0.25, 0.5, 1, 2, 4, 8, 0.125]
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    FillSize: 32
+  - Name: ExtraOut
+    Format: Int32
+    Stride: 4
+    FillSize: 32
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+  - Name: ExpectedExtraOut
+    Format: Int32
+    Stride: 4
+    Data: [-2, -1, 0, 1, 2, 3, 4, -2]
+Results:
+  - Result: ReturnValue
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.008
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: OutParameter
+    Rule: BufferExact
+    Actual: ExtraOut
+    Expected: ExpectedExtraOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: ExtraOut
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99119
+# Unimplemented https://github.com/llvm/llvm-project/issues/220654
+# XFAIL: Clang
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1506
+# Note We fail for DXC because today Clang scalairzed and does
+# Not hit  IRErrorCodeUnsupportedInstruction on vector @dx.op.*
+# XFAIL: Metal && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

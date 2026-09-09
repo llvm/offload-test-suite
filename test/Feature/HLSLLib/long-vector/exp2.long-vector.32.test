@@ -1,0 +1,66 @@
+#--- source.hlsl
+
+ByteAddressBuffer In0 : register(t0);
+RWByteAddressBuffer Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out.Store<vector<float, 16> >(0, exp2(In0.Load<vector<float, 16> >(0)));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In0
+    Format: Float32
+    Stride: 4
+    Data: [-2, -1, -0.5, 0, 0.5, 1, 2, -2, -1, -0.5, 0, 0.5, 1, 2, -2, -1]
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    Data: [0.25, 0.5, 0.707106781, 1, 1.41421356, 2, 4, 0.25, 0.5, 0.707106781, 1, 1.41421356, 2, 4, 0.25, 0.5]
+Results:
+  - Result: Test
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan && DXC
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1506
+# Note We fail for DXC because today Clang scalairzed and does
+# Not hit  IRErrorCodeUnsupportedInstruction on vector @dx.op.*
+# XFAIL: Metal && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+
