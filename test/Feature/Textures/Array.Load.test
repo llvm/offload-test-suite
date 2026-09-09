@@ -1,0 +1,121 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex : register(u1);
+
+#ifndef NO_RWTEXTURE_LOAD
+#define RW_LOAD_OR(Call, Expect) (Call)
+#else
+#define RW_LOAD_OR(Call, Expect) (Expect)
+#endif
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture2DArray::Load takes int4(x, y, arraySlice, mip).
+  Out[0] = Tex.Load(int4(0, 0, 0, 0)); // Slice 0 (0,0) Red
+  Out[1] = Tex.Load(int4(1, 1, 0, 0)); // Slice 0 (1,1) White
+  Out[2] = Tex.Load(int4(0, 0, 1, 0)); // Slice 1 (0,0) Cyan
+  Out[3] = Tex.Load(int4(1, 0, 2, 0)); // Slice 2 (1,0) Olive
+
+  // With an offset, which applies to the xy coordinate only.
+  // Slice 1: (0,0) + (1,1) = (1,1) -> Grey
+  Out[4] = Tex.Load(int4(0, 0, 1, 0), int2(1, 1));
+
+  // RWTexture2DArray::Load takes int3(x, y, arraySlice), not the int4 the SRV
+  // form takes: a UAV has a single mip, so the slice occupies the last component.
+  Out[5] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 0)), float4(1, 0, 0, 1));     // Red
+  Out[6] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 1)), float4(0, 1, 1, 1));     // Cyan
+  Out[7] = RW_LOAD_OR(RWTex.Load(int3(1, 0, 2)), float4(0.5, 0.5, 0, 1)); // Olive
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 3 }
+    # Array data is laid out slice-major: the whole mip chain of slice 0,
+    # then slice 1, and so on.
+    Data: [ # --- Slice 0 ---
+            1.0, 0.0, 0.0, 1.0,  # (0,0) Red
+            0.0, 1.0, 0.0, 1.0,  # (1,0) Green
+            0.0, 0.0, 1.0, 1.0,  # (0,1) Blue
+            1.0, 1.0, 1.0, 1.0,  # (1,1) White
+
+            # --- Slice 1 ---
+            0.0, 1.0, 1.0, 1.0,  # (0,0) Cyan
+            1.0, 0.0, 1.0, 1.0,  # (1,0) Magenta
+            1.0, 1.0, 0.0, 1.0,  # (0,1) Yellow
+            0.5, 0.5, 0.5, 1.0,  # (1,1) Grey
+
+            # --- Slice 2 ---
+            0.5, 0.0, 0.0, 1.0,  # (0,0) Maroon
+            0.5, 0.5, 0.0, 1.0,  # (1,0) Olive
+            0.0, 0.0, 0.5, 1.0,  # (0,1) Navy
+            0.0, 0.5, 0.5, 1.0 ] # (1,1) Teal
+
+  # The same contents as Tex, reached through a UAV instead of an SRV.
+  - Name: RWTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 3 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,  1.0, 1.0, 1.0, 1.0,   # slice 0
+            0.0, 1.0, 1.0, 1.0,  1.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,  0.5, 0.5, 0.5, 1.0,   # slice 1
+            0.5, 0.0, 0.0, 1.0,  0.5, 0.5, 0.0, 1.0,
+            0.0, 0.0, 0.5, 1.0,  0.0, 0.5, 0.5, 1.0 ]  # slice 2
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 128 # 8 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # [0] Slice 0 (0,0) Red
+            1.0, 1.0, 1.0, 1.0,  # [1] Slice 0 (1,1) White
+            0.0, 1.0, 1.0, 1.0,  # [2] Slice 1 (0,0) Cyan
+            0.5, 0.5, 0.0, 1.0,  # [3] Slice 2 (1,0) Olive
+            0.5, 0.5, 0.5, 1.0,  # [4] Slice 1 offset (1,1) Grey
+            1.0, 0.0, 0.0, 1.0,  # [5] UAV slice 0 (0,0) Red
+            0.0, 1.0, 1.0, 1.0,  # [6] UAV slice 1 (0,0) Cyan
+            0.5, 0.5, 0.0, 1.0 ] # [7] UAV slice 2 (1,0) Olive
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: RWTex
+      Kind: RWTexture2DArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+
+Results:
+  - Result: ArrayLoadTest
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# Clang does not implement Load() on RW texture types yet, so those checks
+# compile out there: https://github.com/llvm/llvm-project/issues/218535
+# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_RWTEXTURE_LOAD %} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

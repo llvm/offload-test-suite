@@ -1,0 +1,98 @@
+#--- source.hlsl
+
+StructuredBuffer<uint> X : register(t0);
+StructuredBuffer<uint> Y : register(t1);
+RWStructuredBuffer<uint> Out : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  vector<uint, 5> X5;
+  vector<uint, 5> Y5;
+  for (uint I = 0; I < 5; ++I) {
+    X5[I] = X[I];
+    Y5[I] = Y[I];
+  }
+  Out[0] = dot(X5, Y5);
+
+  vector<uint, 8> X8;
+  vector<uint, 8> Y8;
+  for (uint I = 0; I < 8; ++I) {
+    X8[I] = X[5 + I];
+    Y8[I] = Y[5 + I];
+  }
+  Out[1] = dot(X8, Y8);
+
+  vector<uint, 16> X16;
+  vector<uint, 16> Y16;
+  for (uint I = 0; I < 16; ++I) {
+    X16[I] = X[13 + I];
+    Y16[I] = Y[13 + I];
+  }
+  Out[2] = dot(X16, Y16);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X
+    Format: UInt32
+    Stride: 4
+    Data: [1, 2, 3, 4, 5,
+           6, 7, 8, 9, 10, 11, 12, 13,
+           14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29]
+  - Name: Y
+    Format: UInt32
+    Stride: 4
+    Data: [2, 2, 2, 2, 2,
+           2, 2, 2, 2, 2, 2, 2, 2,
+           2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 12
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [30, 152, 688]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+#  Unimplemented https://github.com/llvm/wg-hlsl/issues/467 
+# XFAIL: Vulkan
+
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

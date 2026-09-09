@@ -16,6 +16,7 @@
 #include "Support/VkError.h"
 #include "VKResources.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -82,9 +83,13 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
   case ResourceKind::RWTexture2D:
+  case ResourceKind::RWTexture2DArray:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
   case ResourceKind::ByteAddressBuffer:
@@ -104,6 +109,100 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   }
   llvm_unreachable("All cases handled");
+}
+
+namespace {
+
+// DXC's SPIR-V backend lowers `ResourceDescriptorHeap` /
+// `SamplerDescriptorHeap` accesses into unbounded runtime arrays living in
+// descriptor set 0. Each heap takes a single binding, picked from the bindings
+// left unused by the explicitly bound resources, in the order resource heap,
+// sampler heap, then the counters belonging to the resource heap. If more than
+// one resource type is read from the resource heap, DXC emits one runtime array
+// per type, all aliasing that same binding, which Vulkan can only express with
+// VK_DESCRIPTOR_TYPE_MUTABLE_EXT. See the
+// "ResourceDescriptorHeaps & SamplerDescriptorHeaps" section of DXC's
+// docs/SPIR-V.rst.
+struct DescriptorHeapLayout {
+  static constexpr uint32_t NoBinding = ~0U;
+  uint32_t ResourceHeapBinding = NoBinding;
+  uint32_t SamplerHeapBinding = NoBinding;
+  uint32_t CounterHeapBinding = NoBinding;
+  uint32_t ResourceHeapSize = 0;
+  uint32_t SamplerHeapSize = 0;
+  uint32_t CounterHeapSize = 0;
+  llvm::SmallVector<VkDescriptorType, 4> ResourceHeapTypes;
+
+  bool hasResourceHeap() const { return ResourceHeapBinding != NoBinding; }
+  bool hasSamplerHeap() const { return SamplerHeapBinding != NoBinding; }
+  bool hasCounterHeap() const { return CounterHeapBinding != NoBinding; }
+  bool empty() const { return !hasResourceHeap() && !hasSamplerHeap(); }
+  bool needsMutableDescriptorType() const {
+    return ResourceHeapTypes.size() > 1;
+  }
+  VkDescriptorType getResourceHeapDescriptorType() const {
+    assert(hasResourceHeap() && "No resource heap in this pipeline");
+    return needsMutableDescriptorType() ? VK_DESCRIPTOR_TYPE_MUTABLE_EXT
+                                        : ResourceHeapTypes[0];
+  }
+  void addResourceHeapType(ResourceKind RK) {
+    const VkDescriptorType Type = getDescriptorType(RK);
+    if (!llvm::is_contained(ResourceHeapTypes, Type))
+      ResourceHeapTypes.push_back(Type);
+  }
+};
+
+} // namespace
+
+static DescriptorHeapLayout
+computeDescriptorHeapLayout(const BindingsDesc &Bindings) {
+  DescriptorHeapLayout Layout;
+  llvm::SmallDenseSet<uint32_t, 8> UsedBindings;
+  bool UsesSamplerHeap = false;
+  bool UsesCounterHeap = false;
+
+  for (size_t SetIdx = 0, SetCount = Bindings.DescriptorSetDescs.size();
+       SetIdx < SetCount; ++SetIdx) {
+    for (const ResourceBindingDesc &RB :
+         Bindings.DescriptorSetDescs[SetIdx].ResourceBindings) {
+      if (!RB.HeapIndex) {
+        // The heaps are allocated out of the bindings left free in set 0.
+        if (SetIdx == 0 && RB.VKBinding) {
+          UsedBindings.insert(RB.VKBinding->Binding);
+          if (RB.VKBinding->CounterBinding)
+            UsedBindings.insert(*RB.VKBinding->CounterBinding);
+        }
+        continue;
+      }
+      const uint32_t End = *RB.HeapIndex + RB.DescriptorCount;
+      if (RB.Kind == ResourceKind::Sampler) {
+        UsesSamplerHeap = true;
+        Layout.SamplerHeapSize = std::max(Layout.SamplerHeapSize, End);
+      } else {
+        Layout.ResourceHeapSize = std::max(Layout.ResourceHeapSize, End);
+        Layout.addResourceHeapType(RB.Kind);
+        // A counter shares the heap index of the resource it belongs to.
+        if (RB.HasCounter) {
+          UsesCounterHeap = true;
+          Layout.CounterHeapSize = std::max(Layout.CounterHeapSize, End);
+        }
+      }
+    }
+  }
+
+  uint32_t NextBinding = 0;
+  auto TakeBinding = [&]() {
+    while (UsedBindings.contains(NextBinding))
+      ++NextBinding;
+    return NextBinding++;
+  };
+  if (!Layout.ResourceHeapTypes.empty())
+    Layout.ResourceHeapBinding = TakeBinding();
+  if (UsesSamplerHeap)
+    Layout.SamplerHeapBinding = TakeBinding();
+  if (UsesCounterHeap)
+    Layout.CounterHeapBinding = TakeBinding();
+  return Layout;
 }
 
 static VkFilter getVKFilter(FilterMode Mode) {
@@ -169,6 +268,10 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -184,6 +287,13 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
     return VK_IMAGE_VIEW_TYPE_2D;
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+    return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  case ResourceKind::TextureCube:
+    return VK_IMAGE_VIEW_TYPE_CUBE;
+  case ResourceKind::TextureCubeArray:
+    return VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
   case ResourceKind::Buffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::ByteAddressBuffer:
@@ -198,16 +308,115 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   llvm_unreachable("All cases handled");
 }
 
+static VkImageType getVKImageType(ResourceDimension Dim) {
+  switch (Dim) {
+  case ResourceDimension::Dim1D:
+    return VK_IMAGE_TYPE_1D;
+  case ResourceDimension::Dim2D:
+  case ResourceDimension::Cube:
+    // A cube map is a 2D image with six layers per cube.
+    return VK_IMAGE_TYPE_2D;
+  case ResourceDimension::Dim3D:
+    return VK_IMAGE_TYPE_3D;
+  }
+  llvm_unreachable("All texture dimensions handled");
+}
+
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
-    return VK_IMAGE_TYPE_2D;
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+    // Texture arrays are 2D images with more than one layer.
+    return getVKImageType(ResourceDimension::Dim2D);
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
+    return getVKImageType(ResourceDimension::Cube);
   default:
     llvm_unreachable("Unsupported image kind");
   }
   llvm_unreachable("All cases handled");
+}
+
+static VkImageAspectFlags getVKAspectMask(const CPUBuffer &B) {
+  return B.Format == DataFormat::Depth32 ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                         : VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+// The full subresource range (every mip of every array slice) of a pipeline
+// texture resource.
+static VkImageSubresourceRange getVKFullSubresourceRange(const CPUBuffer &B) {
+  VkImageSubresourceRange SubRange = {};
+  SubRange.aspectMask = getVKAspectMask(B);
+  SubRange.baseMipLevel = 0;
+  SubRange.levelCount = B.OutputProps.MipLevels;
+  SubRange.baseArrayLayer = 0;
+  SubRange.layerCount = B.OutputProps.ArraySlices;
+  return SubRange;
+}
+
+// Build the buffer <-> image copy regions covering every (mip, slice)
+// subresource of a texture. Vulkan staging buffers are tightly packed and
+// ordered slice-major (the full mip chain of slice 0, then the mip chain of
+// slice 1, and so on), matching `computeTightTextureUploadLayout` and D3D12's
+// `Mip + Slice * MipLevels` subresource ordering, so the same data feeds both
+// backends.
+static llvm::SmallVector<VkBufferImageCopy>
+getTextureCopyRegions(const TextureCreateDesc &Desc) {
+  const VkImageAspectFlags AspectMask = isDepthFormat(Desc.Fmt)
+                                            ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                            : VK_IMAGE_ASPECT_COLOR_BIT;
+  const uint32_t ElementSize = getFormatSizeInBytes(Desc.Fmt);
+  llvm::SmallVector<VkBufferImageCopy> Regions;
+  Regions.reserve(Desc.getSubresourceCount());
+  uint64_t CurrentOffset = 0;
+  for (uint32_t Slice = 0; Slice < Desc.ArraySlices; ++Slice) {
+    for (uint32_t Mip = 0; Mip < Desc.MipLevels; ++Mip) {
+      const uint32_t MipWidth = Desc.getMipWidth(Mip);
+      const uint32_t MipHeight = Desc.getMipHeight(Mip);
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = Mip;
+      Region.imageSubresource.baseArrayLayer = Slice;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent = {MipWidth, MipHeight, 1};
+      Regions.push_back(Region);
+      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
+    }
+  }
+  return Regions;
+}
+
+// As above, for a legacy pipeline texture resource.
+static llvm::SmallVector<VkBufferImageCopy>
+getTextureCopyRegions(const CPUBuffer &B) {
+  const VkImageAspectFlags AspectMask = getVKAspectMask(B);
+  llvm::SmallVector<VkBufferImageCopy> Regions;
+  uint64_t CurrentOffset = 0;
+  for (int Slice = 0; Slice < B.OutputProps.ArraySlices; ++Slice) {
+    for (int Mip = 0; Mip < B.OutputProps.MipLevels; ++Mip) {
+      VkBufferImageCopy Region = {};
+      Region.bufferOffset = CurrentOffset;
+      Region.imageSubresource.aspectMask = AspectMask;
+      Region.imageSubresource.mipLevel = Mip;
+      Region.imageSubresource.baseArrayLayer = Slice;
+      Region.imageSubresource.layerCount = 1;
+      Region.imageExtent.width =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> Mip);
+      Region.imageExtent.height =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> Mip);
+      Region.imageExtent.depth =
+          std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> Mip);
+      Regions.push_back(Region);
+      CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
+                       Region.imageExtent.height * Region.imageExtent.depth *
+                       B.getElementSize();
+    }
+  }
+  return Regions;
 }
 
 static VkShaderStageFlagBits getShaderStageFlag(Stages Stage) {
@@ -1097,25 +1306,8 @@ public:
                              VK_ACCESS_TRANSFER_WRITE_BIT);
     CB.flushBarrier();
 
-    const VkImageAspectFlags AspectMask = isDepthFormat(VKDst.Desc.Fmt)
-                                              ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                              : VK_IMAGE_ASPECT_COLOR_BIT;
-    const uint32_t ElementSize = getFormatSizeInBytes(VKDst.Desc.Fmt);
-    llvm::SmallVector<VkBufferImageCopy> Regions;
-    uint64_t CurrentOffset = 0;
-    for (uint32_t I = 0; I < VKDst.Desc.MipLevels; ++I) {
-      const uint32_t MipWidth = std::max(1u, VKDst.Desc.Width >> I);
-      const uint32_t MipHeight = std::max(1u, VKDst.Desc.Height >> I);
-      VkBufferImageCopy Region = {};
-      Region.bufferOffset = CurrentOffset;
-      Region.imageSubresource.aspectMask = AspectMask;
-      Region.imageSubresource.mipLevel = I;
-      Region.imageSubresource.baseArrayLayer = 0;
-      Region.imageSubresource.layerCount = 1;
-      Region.imageExtent = {MipWidth, MipHeight, 1};
-      Regions.push_back(Region);
-      CurrentOffset += uint64_t(MipWidth) * MipHeight * ElementSize;
-    }
+    const llvm::SmallVector<VkBufferImageCopy> Regions =
+        getTextureCopyRegions(VKDst.Desc);
 
     insertDebugSignpost(
         llvm::formatv("copyBufferToTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
@@ -1174,9 +1366,11 @@ public:
     insertDebugSignpost(
         llvm::formatv("copyTextureToBuffer {0} -> {1}", VKSrc.Name, VKDst.Name)
             .str());
+    const llvm::SmallVector<VkBufferImageCopy> Regions =
+        getTextureCopyRegions(VKSrc.Desc);
     vkCmdCopyImageToBuffer(CB.CmdBuffer, VKSrc.Image,
                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Buffer,
-                           0, nullptr);
+                           Regions.size(), Regions.data());
 
     CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
                           VK_ACCESS_NONE,              /*DstAccessMask*/
@@ -1390,6 +1584,8 @@ private:
 
   bool HasASSupport = false;
   bool HasRTPipelineSupport = false;
+  bool HasDescriptorIndexing = false;
+  bool HasMutableDescriptorType = false;
   struct ASFunctions {
     PFN_vkCreateAccelerationStructureKHR Create = nullptr;
     PFN_vkDestroyAccelerationStructureKHR Destroy = nullptr;
@@ -1474,6 +1670,7 @@ private:
   struct InvocationState {
     std::unique_ptr<VulkanCommandBuffer> CB;
     VkDescriptorPool Pool = VK_NULL_HANDLE;
+    DescriptorHeapLayout HeapLayout;
 
     std::unique_ptr<PipelineState> Pipeline;
     // Lifetime-tied to the pipeline; only set for RT pipelines.
@@ -1601,6 +1798,24 @@ public:
     }
 #endif
 
+    bool HasShaderAtomicFloatExt = isExtensionSupported(
+        AvailableDeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT SupportedAtomicFloat{};
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT EnabledAtomicFloat{};
+    if (HasShaderAtomicFloatExt) {
+      // Probe on a separate chain: float atomics are optional per-type, thus
+      // an extension with both 32-bit bools false is dropped, not an error.
+      SupportedAtomicFloat.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+      VkPhysicalDeviceFeatures2 ProbeFeatures{};
+      ProbeFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      ProbeFeatures.pNext = &SupportedAtomicFloat;
+      vkGetPhysicalDeviceFeatures2(PhysicalDevice, &ProbeFeatures);
+      HasShaderAtomicFloatExt =
+          SupportedAtomicFloat.shaderSharedFloat32Atomics ||
+          SupportedAtomicFloat.shaderBufferFloat32Atomics;
+    }
+
     const bool HasMeshShader = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
@@ -1609,6 +1824,18 @@ public:
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT;
       MeshFeatures.pNext = Features.pNext;
       Features.pNext = &MeshFeatures;
+    }
+
+    const bool HasMutableDescriptorTypeExt =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
+    VkPhysicalDeviceMutableDescriptorTypeFeaturesEXT
+        MutableDescriptorFeatures{};
+    if (HasMutableDescriptorTypeExt) {
+      MutableDescriptorFeatures.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MUTABLE_DESCRIPTOR_TYPE_FEATURES_EXT;
+      MutableDescriptorFeatures.pNext = Features.pNext;
+      Features.pNext = &MutableDescriptorFeatures;
     }
 
     const bool HasASExts =
@@ -1687,6 +1914,16 @@ public:
       EnabledDeviceExtensions.push_back(VK_EXT_MESH_SHADER_EXTENSION_NAME);
     }
 
+    if (HasMutableDescriptorTypeExt) {
+      if (!MutableDescriptorFeatures.mutableDescriptorType)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports mutableDescriptorType=0",
+            VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
+    }
+
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
     if (HasShaderImageAtomicInt64Ext) {
       if (!FeaturesImageAtomicInt64.shaderImageInt64Atomics)
@@ -1699,6 +1936,21 @@ public:
           VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
     }
 #endif
+
+    if (HasShaderAtomicFloatExt) {
+      // Copy only the two bools the probe reported; the rest stay zero. This
+      // joins the chain after the query, which would overwrite these fields.
+      EnabledAtomicFloat.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+      EnabledAtomicFloat.shaderSharedFloat32Atomics =
+          SupportedAtomicFloat.shaderSharedFloat32Atomics;
+      EnabledAtomicFloat.shaderBufferFloat32Atomics =
+          SupportedAtomicFloat.shaderBufferFloat32Atomics;
+      EnabledAtomicFloat.pNext = Features.pNext;
+      Features.pNext = &EnabledAtomicFloat;
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+    }
 
     if (HasASExts) {
       if (!ASFeatures.accelerationStructure)
@@ -1779,6 +2031,13 @@ public:
     auto Dev = std::make_unique<VulkanDevice>(
         Instance, PhysicalDevice, Props, Device, std::move(GraphicsQueue),
         std::move(InstanceLayers), std::move(AvailableDeviceExtensions));
+
+    // Directly indexed resources are bound as sparsely populated unbounded
+    // arrays, which needs the descriptor indexing features core since 1.2.
+    Dev->HasDescriptorIndexing = HasVulkan12 &&
+                                 Features12.runtimeDescriptorArray &&
+                                 Features12.descriptorBindingPartiallyBound;
+    Dev->HasMutableDescriptorType = HasMutableDescriptorTypeExt;
 
     // Load acceleration-structure and ray-tracing-pipeline function pointers
     // after device creation. These two feature sets are independent; the RT
@@ -1914,6 +2173,17 @@ public:
 
   Queue &getGraphicsQueue() override { return GraphicsQueue; }
 
+  static VkDescriptorSetLayoutBinding createVkDescriptorSetLayoutBinding(
+      uint32_t Binding, VkDescriptorType DescriptorType,
+      uint32_t DescriptorCount, VkShaderStageFlags StageFlags) {
+    VkDescriptorSetLayoutBinding B = {};
+    B.binding = Binding;
+    B.descriptorType = DescriptorType;
+    B.descriptorCount = DescriptorCount;
+    B.stageFlags = StageFlags;
+    return B;
+  }
+
   llvm::Error
   createPipelineLayout(const BindingsDesc &BindingsDesc,
                        VkShaderStageFlags StageFlags,
@@ -1921,33 +2191,99 @@ public:
                        VkPipelineLayout &PipelineLayout) {
     assert(SetLayouts.empty() && "Output vector SetLayouts must be empty.");
 
+    const DescriptorHeapLayout HeapLayout =
+        computeDescriptorHeapLayout(BindingsDesc);
+
     // Build descriptor set layouts from BindingsDesc.
-    for (const DescriptorSetLayoutDesc &SetDesc :
-         BindingsDesc.DescriptorSetDescs) {
+    for (size_t SetIdx = 0, SetCount = BindingsDesc.DescriptorSetDescs.size();
+         SetIdx < SetCount; ++SetIdx) {
       std::vector<VkDescriptorSetLayoutBinding> Binds;
-      for (const ResourceBindingDesc &RB : SetDesc.ResourceBindings) {
+      for (const ResourceBindingDesc &RB :
+           BindingsDesc.DescriptorSetDescs[SetIdx].ResourceBindings) {
+        // Heap-indexed resources are reached through the heap bindings added
+        // below instead of through a binding of their own.
+        if (RB.HeapIndex)
+          continue;
         const VulkanBinding VKBinding = RB.VKBinding.value();
 
-        VkDescriptorSetLayoutBinding B = {};
-        B.binding = VKBinding.Binding;
-        B.descriptorType = getDescriptorType(RB.Kind);
-        B.descriptorCount = RB.DescriptorCount;
-        B.stageFlags = StageFlags;
+        VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+            VKBinding.Binding, getDescriptorType(RB.Kind), RB.DescriptorCount,
+            StageFlags);
         Binds.push_back(B);
 
         if (VKBinding.CounterBinding) {
-          VkDescriptorSetLayoutBinding CB = {};
-          CB.binding = *VKBinding.CounterBinding;
-          CB.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-          CB.descriptorCount = RB.DescriptorCount;
-          CB.stageFlags = StageFlags;
+          VkDescriptorSetLayoutBinding CB = createVkDescriptorSetLayoutBinding(
+              *VKBinding.CounterBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              RB.DescriptorCount, StageFlags);
           Binds.push_back(CB);
         }
       }
+
+      // The descriptor heaps always live in set 0. Their entries are sparse,
+      // so the unwritten slots are declared as partially bound.
+      const bool AddHeaps = (SetIdx == 0) && !HeapLayout.empty();
+      llvm::SmallVector<VkDescriptorBindingFlags> BindingFlags;
+      size_t ResourceHeapBindIdx = 0;
+      if (AddHeaps) {
+        // Clear flags for all resources added to Binds so far.
+        BindingFlags.assign(Binds.size(), 0u);
+        if (HeapLayout.hasResourceHeap()) {
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.ResourceHeapBinding,
+              HeapLayout.getResourceHeapDescriptorType(),
+              HeapLayout.ResourceHeapSize, StageFlags);
+          ResourceHeapBindIdx = Binds.size();
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
+        if (HeapLayout.hasSamplerHeap()) {
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.SamplerHeapBinding, VK_DESCRIPTOR_TYPE_SAMPLER,
+              HeapLayout.SamplerHeapSize, StageFlags);
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
+        if (HeapLayout.hasCounterHeap()) {
+          VkDescriptorSetLayoutBinding B = createVkDescriptorSetLayoutBinding(
+              HeapLayout.CounterHeapBinding, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+              HeapLayout.CounterHeapSize, StageFlags);
+          Binds.push_back(B);
+          BindingFlags.push_back(VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+        }
+      }
+
       VkDescriptorSetLayoutCreateInfo SetCI = {};
       SetCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
       SetCI.bindingCount = static_cast<uint32_t>(Binds.size());
       SetCI.pBindings = Binds.data();
+
+      llvm::SmallVector<VkMutableDescriptorTypeListEXT, 8> MutableLists;
+      VkMutableDescriptorTypeCreateInfoEXT MutableCI = {};
+      VkDescriptorSetLayoutBindingFlagsCreateInfo FlagsCI = {};
+      if (AddHeaps) {
+        if (HeapLayout.needsMutableDescriptorType()) {
+          MutableLists.assign(Binds.size(), VkMutableDescriptorTypeListEXT{});
+          MutableLists[ResourceHeapBindIdx].descriptorTypeCount =
+              static_cast<uint32_t>(HeapLayout.ResourceHeapTypes.size());
+          MutableLists[ResourceHeapBindIdx].pDescriptorTypes =
+              HeapLayout.ResourceHeapTypes.data();
+          MutableCI.sType =
+              VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+          MutableCI.mutableDescriptorTypeListCount =
+              static_cast<uint32_t>(MutableLists.size());
+          MutableCI.pMutableDescriptorTypeLists = MutableLists.data();
+          MutableCI.pNext = SetCI.pNext;
+          SetCI.pNext = &MutableCI;
+        }
+        // Add descriptor binding flags.
+        FlagsCI.sType =
+            VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        FlagsCI.bindingCount = static_cast<uint32_t>(BindingFlags.size());
+        FlagsCI.pBindingFlags = BindingFlags.data();
+        FlagsCI.pNext = SetCI.pNext;
+        SetCI.pNext = &FlagsCI;
+      }
+
       VkDescriptorSetLayout SetLayout = VK_NULL_HANDLE;
       if (auto Err = VK::toError(
               vkCreateDescriptorSetLayout(Device, &SetCI, nullptr, &SetLayout),
@@ -2722,7 +3058,7 @@ public:
     ImageInfo.format = getVulkanFormat(Desc.Fmt);
     ImageInfo.extent = {Desc.Width, Desc.Height, 1};
     ImageInfo.mipLevels = Desc.MipLevels;
-    ImageInfo.arrayLayers = 1;
+    ImageInfo.arrayLayers = Desc.ArraySlices;
     ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
                            ? VK_IMAGE_TILING_OPTIMAL
@@ -2773,11 +3109,11 @@ public:
         FullAspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
     }
     const VkImageSubresourceRange FullRange{
-        FullAspectMask,
-        0, /*baseMipLevel*/
-        Desc.MipLevels,
-        0, /*baseArrayLayer*/
-        1, /*layerCount*/
+        /*aspectMask=*/FullAspectMask,
+        /*baseMipLevel=*/0,
+        /*levelCount=*/Desc.MipLevels,
+        /*baseArrayLayer=*/0,
+        /*layerCount=*/Desc.ArraySlices,
     };
 
     VkImageLayout PreferredLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -2894,6 +3230,11 @@ private:
     const bool HasShaderImageAtomicInt64Ext = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME);
 #endif
+    VkPhysicalDeviceShaderAtomicFloatFeaturesEXT FeaturesAtomicFloat{};
+    FeaturesAtomicFloat.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
+    const bool HasShaderAtomicFloatExt = isExtensionSupported(
+        DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
     Features.pNext = &Features11;
     if (HasVulkan12)
@@ -2925,6 +3266,11 @@ private:
         Features11.pNext = &FeaturesImageAtomicInt64;
     }
 #endif
+    // pNext order is irrelevant, so splice in at the head.
+    if (HasShaderAtomicFloatExt) {
+      FeaturesAtomicFloat.pNext = Features.pNext;
+      Features.pNext = &FeaturesAtomicFloat;
+    }
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
@@ -2963,6 +3309,10 @@ private:
       #Name, makeCapability<bool>(#Name, HasShaderImageAtomicInt64Ext &&       \
                                              FeaturesImageAtomicInt64.Name)));
 #endif
+#define VULKAN_EXT_SHADER_ATOMIC_FLOAT_FEATURE_BOOL(Name)                      \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
+                                             FeaturesAtomicFloat.Name)));
 #include "VKFeatures.def"
   }
 
@@ -3308,7 +3658,9 @@ public:
     ImageCreateInfo.imageType = getVKImageType(R.Kind);
     ImageCreateInfo.format = getVKFormat(B.Format, B.Channels);
     ImageCreateInfo.mipLevels = B.OutputProps.MipLevels;
-    ImageCreateInfo.arrayLayers = 1;
+    ImageCreateInfo.arrayLayers = R.getTextureArraySlices();
+    if (R.isTextureCube())
+      ImageCreateInfo.flags |= VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     ImageCreateInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     ImageCreateInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     ImageCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -3579,6 +3931,9 @@ public:
     uint32_t ASDescriptorCount = 0;
     for (const auto &S : P.Sets) {
       for (const auto &R : S.Resources) {
+        // Heap-indexed resources are accounted for by the heap sizes below.
+        if (R.HeapIndex)
+          continue;
         if (R.isAccelerationStructure()) {
           ASDescriptorCount += R.getArraySize();
           continue;
@@ -3589,6 +3944,15 @@ public:
               R.getArraySize();
       }
     }
+    const DescriptorHeapLayout &HL = IS.HeapLayout;
+    if (HL.hasResourceHeap() && !HL.needsMutableDescriptorType())
+      DescriptorCounts[HL.getResourceHeapDescriptorType()] +=
+          HL.ResourceHeapSize;
+    if (HL.hasSamplerHeap())
+      DescriptorCounts[VK_DESCRIPTOR_TYPE_SAMPLER] += HL.SamplerHeapSize;
+    if (HL.hasCounterHeap())
+      DescriptorCounts[VK_DESCRIPTOR_TYPE_STORAGE_BUFFER] += HL.CounterHeapSize;
+
     llvm::SmallVector<VkDescriptorPoolSize> PoolSizes;
     for (const VkDescriptorType Type : DescriptorTypes) {
       if (DescriptorCounts[Type] > 0) {
@@ -3607,12 +3971,32 @@ public:
           {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, ASDescriptorCount});
     }
 
+    llvm::SmallVector<VkMutableDescriptorTypeListEXT, 8> MutableLists;
+    VkMutableDescriptorTypeCreateInfoEXT MutableCI = {};
+    if (HL.needsMutableDescriptorType()) {
+      llvm::outs() << "Descriptors: { type = MUTABLE_EXT"
+                   << ", count = " << HL.ResourceHeapSize << " }\n";
+      PoolSizes.push_back(
+          {VK_DESCRIPTOR_TYPE_MUTABLE_EXT, HL.ResourceHeapSize});
+      MutableLists.assign(PoolSizes.size(), VkMutableDescriptorTypeListEXT{});
+      MutableLists.back().descriptorTypeCount =
+          static_cast<uint32_t>(HL.ResourceHeapTypes.size());
+      MutableLists.back().pDescriptorTypes = HL.ResourceHeapTypes.data();
+      MutableCI.sType =
+          VK_STRUCTURE_TYPE_MUTABLE_DESCRIPTOR_TYPE_CREATE_INFO_EXT;
+      MutableCI.mutableDescriptorTypeListCount =
+          static_cast<uint32_t>(MutableLists.size());
+      MutableCI.pMutableDescriptorTypeLists = MutableLists.data();
+    }
+
     if (P.Sets.size() > 0) {
       VkDescriptorPoolCreateInfo PoolCreateInfo = {};
       PoolCreateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
       PoolCreateInfo.poolSizeCount = PoolSizes.size();
       PoolCreateInfo.pPoolSizes = PoolSizes.data();
       PoolCreateInfo.maxSets = P.Sets.size();
+      if (HL.needsMutableDescriptorType())
+        PoolCreateInfo.pNext = &MutableCI;
       if (auto Err = VK::toError(vkCreateDescriptorPool(Device, &PoolCreateInfo,
                                                         nullptr, &IS.Pool),
                                  "Failed to create descriptor pool."))
@@ -3698,6 +4082,7 @@ public:
            ++RIdx, ++OverallResIdx) {
         const Resource &R = P.Sets[SetIdx].Resources[RIdx];
         if (R.isAccelerationStructure()) {
+          assert(!R.HeapIndex && "AS heap indexing is rejected earlier");
           const auto &Refs = IS.Resources[OverallResIdx].ResourceRefs;
           assert(Refs.size() == R.getArraySize() &&
                  "AS bundle must hold one ResourceRef per array element");
@@ -3750,7 +4135,8 @@ public:
                   : VK_IMAGE_ASPECT_COLOR_BIT;
           ViewCreateInfo.subresourceRange.baseMipLevel = 0;
           ViewCreateInfo.subresourceRange.baseArrayLayer = 0;
-          ViewCreateInfo.subresourceRange.layerCount = 1;
+          ViewCreateInfo.subresourceRange.layerCount =
+              R.getTextureArraySlices();
           ViewCreateInfo.subresourceRange.levelCount =
               R.BufferPtr->OutputProps.MipLevels;
           IndexOfFirstBufferDataInArray = ImageInfos.size();
@@ -3795,8 +4181,18 @@ public:
 
         VkWriteDescriptorSet WDS = {};
         WDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        WDS.dstSet = IS.DescriptorSets[SetIdx];
-        WDS.dstBinding = R.VKBinding->Binding;
+        if (R.HeapIndex) {
+          // The heaps live in set 0 regardless of which set declared the
+          // resource; the heap index selects the slot within the binding.
+          assert(!IS.DescriptorSets.empty());
+          WDS.dstSet = IS.DescriptorSets[0];
+          WDS.dstBinding = R.isSampler() ? IS.HeapLayout.SamplerHeapBinding
+                                         : IS.HeapLayout.ResourceHeapBinding;
+          WDS.dstArrayElement = *R.HeapIndex;
+        } else {
+          WDS.dstSet = IS.DescriptorSets[SetIdx];
+          WDS.dstBinding = R.VKBinding->Binding;
+        }
         WDS.descriptorCount = R.getArraySize();
         WDS.descriptorType = getDescriptorType(R.Kind);
         if (R.isTexture() || R.isSampler())
@@ -3819,8 +4215,16 @@ public:
 
           VkWriteDescriptorSet CounterWDS = {};
           CounterWDS.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-          CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
-          CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          if (R.HeapIndex) {
+            // A heap-indexed counter sits at its resource's heap index in the
+            // counter heap.
+            CounterWDS.dstSet = IS.DescriptorSets[0];
+            CounterWDS.dstBinding = IS.HeapLayout.CounterHeapBinding;
+            CounterWDS.dstArrayElement = *R.HeapIndex;
+          } else {
+            CounterWDS.dstSet = IS.DescriptorSets[SetIdx];
+            CounterWDS.dstBinding = *R.VKBinding->CounterBinding;
+          }
           CounterWDS.descriptorCount = R.getArraySize();
           CounterWDS.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
           CounterWDS.pBufferInfo = &BufferInfos[IndexOfFirstBufferDataInArray];
@@ -3980,36 +4384,9 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      llvm::SmallVector<VkBufferImageCopy> Regions;
-      uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
-      }
-
-      VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
-      SubRange.baseMipLevel = 0;
-      SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      const llvm::SmallVector<VkBufferImageCopy> Regions =
+          getTextureCopyRegions(B);
+      const VkImageSubresourceRange SubRange = getVKFullSubresourceRange(B);
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -4126,13 +4503,7 @@ public:
       return;
     if (R.isImage()) {
       const offloadtest::CPUBuffer &B = *R.BufferPtr;
-      VkImageSubresourceRange SubRange = {};
-      SubRange.aspectMask = B.Format == DataFormat::Depth32
-                                ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                : VK_IMAGE_ASPECT_COLOR_BIT;
-      SubRange.baseMipLevel = 0;
-      SubRange.levelCount = B.OutputProps.MipLevels;
-      SubRange.layerCount = 1;
+      const VkImageSubresourceRange SubRange = getVKFullSubresourceRange(B);
 
       VkImageMemoryBarrier ImageBarrier = {};
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -4152,28 +4523,8 @@ public:
                              nullptr, 1, &ImageBarrier);
       }
 
-      llvm::SmallVector<VkBufferImageCopy> Regions;
-      uint64_t CurrentOffset = 0;
-      for (int I = 0; I < B.OutputProps.MipLevels; ++I) {
-        VkBufferImageCopy Region = {};
-        Region.imageSubresource.aspectMask = B.Format == DataFormat::Depth32
-                                                 ? VK_IMAGE_ASPECT_DEPTH_BIT
-                                                 : VK_IMAGE_ASPECT_COLOR_BIT;
-        Region.imageSubresource.mipLevel = I;
-        Region.imageSubresource.baseArrayLayer = 0;
-        Region.imageSubresource.layerCount = 1;
-        Region.imageExtent.width =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Width) >> I);
-        Region.imageExtent.height =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Height) >> I);
-        Region.imageExtent.depth =
-            std::max(1u, static_cast<uint32_t>(B.OutputProps.Depth) >> I);
-        Region.bufferOffset = CurrentOffset;
-        Regions.push_back(Region);
-        CurrentOffset += static_cast<uint64_t>(Region.imageExtent.width) *
-                         Region.imageExtent.height * Region.imageExtent.depth *
-                         B.getElementSize();
-      }
+      const llvm::SmallVector<VkBufferImageCopy> Regions =
+          getTextureCopyRegions(B);
 
       for (auto &ResRef : R.ResourceRefs)
         vkCmdCopyImageToBuffer(IS.CB->CmdBuffer, ResRef.Image.Image,
@@ -4491,28 +4842,35 @@ public:
     for (auto &S : P.Sets) {
       DescriptorSetLayoutDesc Layout;
       for (auto &R : S.Resources) {
-        // FIXME: https://github.com/llvm/offload-test-suite/issues/1413
-        assert(!R.HeapIndex && "Direct heap indexing is not yet supported.");
-        if (!R.VKBinding)
-          return llvm::createStringError(std::errc::invalid_argument,
-                                         "No VulkanBinding provided for '%s'",
-                                         R.Name.c_str());
+        if (R.HeapIndex) {
+          if (R.isAccelerationStructure())
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "Direct heap indexing of acceleration structures is not "
+                "supported ('%s')",
+                R.Name.c_str());
+        } else {
+          if (!R.VKBinding)
+            return llvm::createStringError(std::errc::invalid_argument,
+                                           "No VulkanBinding provided for '%s'",
+                                           R.Name.c_str());
+          if (R.HasCounter && !R.VKBinding->CounterBinding)
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "No CounterBinding provided for resource '%s' with a counter",
+                R.Name.c_str());
+          assert(R.DXBinding &&
+                 "DXBinding must not be null when HeapIndex is not set.");
+        }
 
         ResourceBindingDesc ResourceBinding = {};
         ResourceBinding.Kind = R.Kind;
-        assert(R.DXBinding &&
-               "DXBinding must not be null when HeapIndex is not set.");
         ResourceBinding.DXBinding = R.DXBinding;
         ResourceBinding.VKBinding = R.VKBinding;
         ResourceBinding.HeapIndex = R.HeapIndex;
+        ResourceBinding.HasCounter = R.HasCounter;
         ResourceBinding.DescriptorCount = R.getArraySize();
         Layout.ResourceBindings.push_back(ResourceBinding);
-
-        if (R.HasCounter && !R.VKBinding->CounterBinding)
-          return llvm::createStringError(
-              std::errc::invalid_argument,
-              "No CounterBinding provided for resource '%s' with a counter",
-              R.Name.c_str());
       }
       BindingsDesc.DescriptorSetDescs.push_back(Layout);
     }
@@ -4521,6 +4879,22 @@ public:
       Range.OffsetInBytes = 0;
       Range.SizeInBytes = PCB.size();
       BindingsDesc.PushConstantRanges.push_back(Range);
+    }
+
+    State.HeapLayout = computeDescriptorHeapLayout(BindingsDesc);
+    if (!State.HeapLayout.empty()) {
+      if (!HasDescriptorIndexing)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Directly indexed resources require the runtimeDescriptorArray and "
+            "descriptorBindingPartiallyBound features of Vulkan 1.2.");
+      if (State.HeapLayout.needsMutableDescriptorType() &&
+          !HasMutableDescriptorType)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Reading more than one resource type from ResourceDescriptorHeap "
+            "requires the %s extension.",
+            VK_EXT_MUTABLE_DESCRIPTOR_TYPE_EXTENSION_NAME);
     }
 
     if (P.isCompute()) {

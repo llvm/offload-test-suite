@@ -1,0 +1,111 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerState MagLinearMinPoint : register(s0);
+[[vk::binding(1, 1)]] SamplerState MagPointMinLinear : register(s1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Each slice carries its own mip chain. Mip 0 texel centres are at u = 0.25
+  // and u = 0.75, so sampling at u = 0.4 gives Nearest -> texel 0 and
+  // Linear -> lerp(texel0, texel1, 0.3).
+  float2 uv = float2(0.4, 0.5);
+
+  // Slice 0. A negative LOD magnifies and so selects the Mag filter; LOD 1
+  // minifies and selects the Min filter.
+  Out[0] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 0), -1.0); // Linear
+  Out[1] = Tex.SampleLevel(MagPointMinLinear, float3(uv, 0), -1.0); // Nearest
+  Out[2] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 0), 1.0);  // -> Yellow
+  Out[3] = Tex.SampleLevel(MagPointMinLinear, float3(uv, 0), 1.0);  // -> Yellow
+
+  // Slice 1, identical calls: mip selection resolves within a slice, so mip 1
+  // here is slice 1's Magenta rather than slice 0's Yellow.
+  Out[4] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 1), -1.0); // Linear
+  Out[5] = Tex.SampleLevel(MagPointMinLinear, float3(uv, 1), -1.0); // Nearest
+  Out[6] = Tex.SampleLevel(MagLinearMinPoint, float3(uv, 1), 1.0);  // -> Magenta
+  Out[7] = Tex.SampleLevel(MagPointMinLinear, float3(uv, 1), 1.0);  // -> Magenta
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Slice-major, with the complete mip chain of each slice before the next:
+  # slice 0 mip 0 (2 texels) then slice 0 mip 1 (1 texel), then the same for
+  # slice 1.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # slice 0, mip 0, texel 0: Red
+            0.0, 1.0, 0.0, 1.0,   # slice 0, mip 0, texel 1: Green
+            1.0, 1.0, 0.0, 1.0,   # slice 0, mip 1: Yellow
+            0.0, 0.0, 1.0, 1.0,   # slice 1, mip 0, texel 0: Blue
+            1.0, 1.0, 1.0, 1.0,   # slice 1, mip 0, texel 1: White
+            1.0, 0.0, 1.0, 1.0 ]  # slice 1, mip 1: Magenta
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 128 # 8 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0.7, 0.3, 0.0, 1.0,   # [0] slice 0 mip 0, Linear: lerp(Red, Green, 0.3)
+            1.0, 0.0, 0.0, 1.0,   # [1] slice 0 mip 0, Nearest: Red
+            1.0, 1.0, 0.0, 1.0,   # [2] slice 0 mip 1: Yellow
+            1.0, 1.0, 0.0, 1.0,   # [3] slice 0 mip 1: Yellow
+            0.3, 0.3, 1.0, 1.0,   # [4] slice 1 mip 0, Linear: lerp(Blue, White, 0.3)
+            0.0, 0.0, 1.0, 1.0,   # [5] slice 1 mip 0, Nearest: Blue
+            1.0, 0.0, 1.0, 1.0,   # [6] slice 1 mip 1: Magenta
+            1.0, 0.0, 1.0, 1.0 ]  # [7] slice 1 mip 1: Magenta
+
+Samplers:
+  - Name: MagLinearMinPoint
+    MinFilter: Nearest
+    MagFilter: Linear
+    Address: Clamp
+  - Name: MagPointMinLinear
+    MinFilter: Linear
+    MagFilter: Nearest
+    Address: Clamp
+
+Results:
+  - Result: ArrayFilterTest
+    Rule: BufferFloatEpsilon
+    Actual: Out
+    Expected: Expected
+    Epsilon: 0.01
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: MagLinearMinPoint
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: MagPointMinLinear
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

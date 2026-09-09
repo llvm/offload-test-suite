@@ -18,6 +18,12 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerState Samp0 : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(2, 0)]] SamplerState Samp1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
+#ifndef NO_TEXTURECUBE
+[[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
+#define CUBE_OR(Call, Expect) (Call)
+#else
+#define CUBE_OR(Call, Expect) (Expect)
+#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Base UV at texture center (0.5, 0.5).
@@ -35,14 +41,14 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Only check the first thread in the quad where UV is exactly (0.5, 0.5).
   // We expect:
   // Samp0 (Mag=Nearest, Min=Linear):
-  //   Sample(uv_mag) -> Mag(Nearest) -> White
-  //   Sample(uv_min) -> Min(Linear)  -> Grey
+  //   Sample(uv_mag) -> Mag(Nearest) -> White (mip 0)
+  //   Sample(uv_min) -> Min(Linear)  -> Magenta (mip 1)
   float4 r0 = Tex.Sample(Samp0, uv_mag);
   float4 r1 = Tex.Sample(Samp0, uv_min);
 
   // Samp1 (Mag=Linear, Min=Nearest):
-  //   Sample(uv_mag) -> Mag(Linear)  -> Grey
-  //   Sample(uv_min) -> Min(Nearest) -> White
+  //   Sample(uv_mag) -> Mag(Linear)  -> Grey (mip 0)
+  //   Sample(uv_min) -> Min(Nearest) -> Magenta (mip 1)
   float4 r2 = Tex.Sample(Samp1, uv_mag);
   float4 r3 = Tex.Sample(Samp1, uv_min);
 
@@ -54,6 +60,26 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Clamp 0.0f should behave normally (Red)
   float4 r5 = Tex.Sample(Samp0, uv_mag, int2(-1, -1), 0.0f);
 
+  // TextureCube::Sample takes a float3 direction and derives its LOD from
+  // screen-space derivatives just as the 2D case does. Face +X is Red at mip 0
+  // and Yellow at mip 1, face -Z is Blue then Green, so magnification and
+  // minification pick within each face's own mip chain. There is no offset
+  // overload for a cube, but the clamp overload does exist.
+  float3 CubeMag = float3(1, 0, 0) + float3(offset * 0.0001, 0);
+  float3 CubeMin = float3(1, 0, 0) + float3(offset * 2.0, 0);
+  float4 r6 = CUBE_OR(TexCube.Sample(Samp1, CubeMag),
+                       float4(1, 0, 0, 1));
+  float4 r7 = CUBE_OR(TexCube.Sample(Samp1, CubeMin),
+                       float4(1, 1, 0, 1));
+
+  float3 CubeMagZ = float3(0, 0, -1) + float3(offset * 0.0001, 0);
+  float4 r8 = CUBE_OR(TexCube.Sample(Samp1, CubeMagZ),
+                       float4(0, 0, 1, 1));
+
+  // Sample with an LOD clamp; 0.0 leaves it at mip 0.
+  float4 r9 = CUBE_OR(TexCube.Sample(Samp1, CubeMag, 0.0f),
+                       float4(1, 0, 0, 1));
+
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
     Out[1] = r1;
@@ -61,6 +87,10 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[3] = r3;
     Out[4] = r4;
     Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
   }
   return float4(0,0,0,0);
 }
@@ -82,22 +112,56 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # Green (1,0)
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
             1.0, 1.0, 1.0, 1.0,  # White (1,1)
-            0.5, 0.5, 0.5, 1.0 ] # Mip 1 (Average)
+            1.0, 0.0, 1.0, 1.0 ] # Mip 1 (Magenta)
+
+  # Six 2x2 faces with 2 mips, slice-major, in the order +X, -X, +Y, -Y, +Z, -Z.
+  - Name: TexCube
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 6 }
+    Data: [ # --- Face 0 (+X): mip 0 Red, mip 1 Yellow ---
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            # --- Face 1 (-X): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 2 (+Y): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 3 (-Y): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 4 (+Z): uniform ---
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,  0.5, 0.5, 0.5, 1.0,
+            0.5, 0.5, 0.5, 1.0,
+            # --- Face 5 (-Z): mip 0 Blue, mip 1 Green ---
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 1.0, 0.0, 1.0 ]
 
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 96 # 6 * sizeof(float4)
+    FillSize: 160 # 10 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
     Data: [ 1.0, 1.0, 1.0, 1.0,       # Samp0 Mag (Nearest) -> White
-            0.5, 0.5, 0.5, 1.0,       # Samp0 Min (Linear)  -> Grey
-            0.5, 0.5, 0.5, 1.0,       # Samp1 Mag (Linear)  -> Grey
-            0.5, 0.5, 0.5, 1.0,       # Samp1 Min (Nearest) -> Grey
+            1.0, 0.0, 1.0, 1.0,       # Samp0 Min (Linear)  -> mip 1 Magenta
+            0.5, 0.5, 0.5, 1.0,       # Samp1 Mag (Linear)  -> Grey (mip 0)
+            1.0, 0.0, 1.0, 1.0,       # Samp1 Min (Nearest) -> mip 1 Magenta
             1.0, 0.0, 0.0, 1.0,       # Offset (-1,-1) -> Red
-            1.0, 0.0, 0.0, 1.0 ]      # Offset (-1,-1) Clamp 0.0 -> Red
+            1.0, 0.0, 0.0, 1.0,       # Offset (-1,-1) Clamp 0.0 -> Red
+            1.0, 0.0, 0.0, 1.0,       # Cube +X magnified -> mip 0 Red
+            1.0, 1.0, 0.0, 1.0,       # Cube +X minified  -> mip 1 Yellow
+            0.0, 0.0, 1.0, 1.0,       # Cube -Z magnified -> mip 0 Blue
+            1.0, 0.0, 0.0, 1.0 ]      # Cube +X, LOD clamp 0.0 -> mip 0 Red
 
   - Name: RT
     Format: Float32
@@ -149,6 +213,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: SampleTest
@@ -171,5 +239,6 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
+# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

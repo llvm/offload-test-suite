@@ -18,6 +18,12 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerState LinearSamp : register(s0);
 [[vk::binding(2, 0)]] SamplerState PointSamp : register(s1);
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
+#ifndef NO_TEXTURECUBE
+[[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
+#define CUBE_OR(Call, Expect) (Call)
+#else
+#define CUBE_OR(Call, Expect) (Expect)
+#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 2x2 Texture:
@@ -34,9 +40,34 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Expected: (1.0, 0.0, 0.0, 1.0)
   float4 r1 = Tex.SampleLevel(PointSamp, float2(0.25, 0.25), 0);
 
+  // A cube is six layers, one per face, in the order +X, -X, +Y, -Y, +Z, -Z.
+  // Sampling straight down each axis lands in the centre of the matching face,
+  // so each result names the layer that face was loaded from. Every face is a
+  // uniform colour, which isolates the face ordering from any in-face
+  // addressing convention -- and means a Linear filter cannot blend a face
+  // into a different result.
+  float4 r2 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 1,  0,  0), 0),
+                       float4(1, 0, 0, 1)); // +X Red
+  float4 r3 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3(-1,  0,  0), 0),
+                       float4(0, 1, 0, 1)); // -X Green
+  float4 r4 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  1,  0), 0),
+                       float4(0, 0, 1, 1)); // +Y Blue
+  float4 r5 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0, -1,  0), 0),
+                       float4(1, 1, 0, 1)); // -Y Yellow
+  float4 r6 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  0,  1), 0),
+                       float4(1, 0, 1, 1)); // +Z Magenta
+  float4 r7 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  0, -1), 0),
+                       float4(0, 1, 1, 1)); // -Z Cyan
+
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
     Out[1] = r1;
+    Out[2] = r2;
+    Out[3] = r3;
+    Out[4] = r4;
+    Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
   }
   return float4(0,0,0,0);
 }
@@ -59,16 +90,46 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
             1.0, 1.0, 1.0, 1.0 ] # White (1,1)
 
+  # Six 2x2 faces, slice-major, each face a uniform colour.
+  - Name: TexCube
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 6 }
+    Data: [ # --- Face 0 (+X) Red ---
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            # --- Face 1 (-X) Green ---
+            0.0, 1.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,
+            # --- Face 2 (+Y) Blue ---
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            # --- Face 3 (-Y) Yellow ---
+            1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 0.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,  1.0, 1.0, 0.0, 1.0,
+            # --- Face 4 (+Z) Magenta ---
+            1.0, 0.0, 1.0, 1.0,  1.0, 0.0, 1.0, 1.0,
+            1.0, 0.0, 1.0, 1.0,  1.0, 0.0, 1.0, 1.0,
+            # --- Face 5 (-Z) Cyan ---
+            0.0, 1.0, 1.0, 1.0,  0.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 1.0, 1.0,  0.0, 1.0, 1.0, 1.0 ]
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 32 # 2 * sizeof(float4)
+    FillSize: 128 # 8 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
     Data: [ 0.5, 0.5, 0.5, 1.0,  # Linear Result
-            1.0, 0.0, 0.0, 1.0 ] # Point Result
+            1.0, 0.0, 0.0, 1.0,  # Point Result
+            1.0, 0.0, 0.0, 1.0,  # Cube +X Red
+            0.0, 1.0, 0.0, 1.0,  # Cube -X Green
+            0.0, 0.0, 1.0, 1.0,  # Cube +Y Blue
+            1.0, 1.0, 0.0, 1.0,  # Cube -Y Yellow
+            1.0, 0.0, 1.0, 1.0,  # Cube +Z Magenta
+            0.0, 1.0, 1.0, 1.0 ] # Cube -Z Cyan
 
   - Name: RT
     Format: Float32
@@ -120,6 +181,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: TexCube
+      Kind: TextureCube
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: SamplerTest
@@ -142,5 +207,6 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
+# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
