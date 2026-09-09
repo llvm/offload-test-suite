@@ -13,28 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # windows-nvidia runs on the frequent builder instead; see
-  # Exec-Tests-Windows-NVIDIA below and docs/frequent-builder.md.
-  Exec-Tests-Windows:
-    permissions:
-      contents: read
-      checks: write
-    if: ${{ !contains(github.event.pull_request.labels.*.name, 'disable-default-tests') }}
-    strategy:
-      fail-fast: false
-      matrix:
-        SKU: [windows-intel]
-        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
-
-    uses: ./.github/workflows/build-and-test-callable.yaml
-    with:
-      OS: windows
-      SKU: ${{ matrix.SKU }}
-      TestTarget: ${{ matrix.TestTarget }}
-      OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
-      SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
-
   # Resolved once per PR so every frequent-builder cell tests the same
   # toolchain. See docs/frequent-builder.md.
   Resolve-Frequent-Builds:
@@ -46,7 +24,7 @@ jobs:
 
   # Consumes prebuilt LLVM/DXC rather than compiling them per cell, so these
   # cells take no generic build-pool capacity.
-  Exec-Tests-Windows-NVIDIA:
+  Exec-Tests-Windows:
     permissions:
       contents: read
       checks: write
@@ -56,13 +34,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        TestTarget: [check-hlsl-d3d12, check-hlsl-clang-d3d12]
+        SKU: [windows-intel, windows-nvidia]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
+        exclude:
+          - { SKU: windows-nvidia, TestTarget: check-hlsl-vk }
+          - { SKU: windows-nvidia, TestTarget: check-hlsl-clang-vk }
 
     uses: ./.github/workflows/test-callable.yaml
     with:
       OS: windows
       Arch: x64
-      SKU: windows-nvidia
+      SKU: ${{ matrix.SKU }}
       TestTarget: ${{ matrix.TestTarget }}
       OffloadTest-branch: ${{ github.event.pull_request.head.sha }}
       LlvmRunId: ${{ needs.Resolve-Frequent-Builds.outputs.LlvmRunId }}

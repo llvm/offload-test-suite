@@ -310,9 +310,6 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/393
 # XFAIL: Metal
 
-# Bug https://github.com/llvm/offload-test-suite/issues/433
-# UNSUPPORTED: WARP
-
 REQUIRES: Double
 
 # RUN: split-file %s %t
