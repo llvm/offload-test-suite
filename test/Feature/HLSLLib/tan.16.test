@@ -42,7 +42,7 @@ Buffers:
             0x0000, 0xBEEC, 0x3EEC, 0xc05f ]
     # -sqrt(3), -1, -1/sqrt(3), sqrt(3)-2
     # 2-sqrt(3), 1/sqrt(3), 1, sqrt(3)
-    # 0, tan(pi) == 0, tan(355.0) == 0, tan(2.0) ~= -2.185
+    # 0, tan(pi) == 0, tan(355.0) ~= 0.000, tan(2.0) ~= -2.185
     # 0, -sqrt(3), sqrt(3), tan(2.0) ~= -2.185
 Results:
   - Result: Test1
