@@ -9,7 +9,8 @@ void main() {
   Out[0] = tan(In[0]);
   Out[1] = half4(tan(In[1].xyz), tan(In[1].w));
   Out[2] = half4(tan(In[2].xy), tan(In[2].zw));
-  Out[3] = tan(half4(0., -1.04719755, 1.04719755, 2.)); // 0, -pi/3, pi/3, 2.0
+  // 0.0, -pi/3, pi/3, 2.0
+  Out[3] = tan(half4(0.0h, -1.04719755h, 1.04719755h, 2.0h));
 }
 
 //--- pipeline.yaml
