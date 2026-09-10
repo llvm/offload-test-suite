@@ -1450,6 +1450,11 @@ public:
       Desc = MTL::TextureDescriptor::textureBufferDescriptor(
           Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
       break;
+    case ResourceKind::Texture1D:
+      Desc =
+          MTL::TextureDescriptor::texture2DDescriptor(Format, Width, 1, false);
+      Desc->setTextureType(MTL::TextureType1D);
+      break;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
       Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width, Height,

@@ -145,13 +145,15 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
 
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
+  case ResourceDimension::Dim1D:
+    // 1D texture arrays are not set up yet.
+    return D3D12_SRV_DIMENSION_TEXTURE1D;
   case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
   case ResourceDimension::Cube:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
                         : D3D12_SRV_DIMENSION_TEXTURECUBE;
-  case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
     llvm_unreachable("Texture dimension has no SRV mapping yet");
   }
@@ -2199,6 +2201,11 @@ public:
       SRVDesc.Format = getDXGIFormatSRV(Desc.Fmt);
       SRVDesc.ViewDimension = getDXSRVDimension(Desc);
       switch (SRVDesc.ViewDimension) {
+      case D3D12_SRV_DIMENSION_TEXTURE1D:
+        SRVDesc.Texture1D.MostDetailedMip = 0;
+        SRVDesc.Texture1D.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture1D.ResourceMinLODClamp = 0.0f;
+        break;
       case D3D12_SRV_DIMENSION_TEXTURE2D:
         SRVDesc.Texture2D.MostDetailedMip = 0;
         SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
