@@ -58,8 +58,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/KhronosGroup/SPIRV-Cross/issues/2525
-# XFAIL: Vulkan && MoltenVK
+# Bug https://github.com/llvm/llvm-project/issues/156069
+# XFAIL: MoltenVK && Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/701
 # XFAIL: Metal && !AppleM1 && !AppleM2 && Clang

@@ -23,8 +23,8 @@ RWStructuredBuffer<float> NanIn : register(u3);
 groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
 groupshared float MatchMinusFive;              // contended, compare matches
 groupshared float NoMatchSeventySeven;         // contended, never matches
-groupshared float ZeroPositive;                // +0.0, compared against -0.0
-groupshared float NanQuiet;                    // NaN, compared against NaN
+groupshared float PositiveZero;                // +0.0, compared against -0.0
+groupshared float QuietNaN;                    // NaN, compared against NaN
 groupshared float ClaimZero;                   // 0.0, claimed by the winner
 
 [numthreads(256, 1, 1)]
@@ -33,8 +33,8 @@ void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     MatchMinusFive = -5.0f;
     NoMatchSeventySeven = 77.0f;
-    ZeroPositive = 0.0f;
-    NanQuiet = NanIn[0];
+    PositiveZero = 0.0f;
+    QuietNaN = NanIn[0];
     ClaimZero = 0.0f;
   }
   GroupMemoryBarrierWithGroupSync();
@@ -69,8 +69,8 @@ void main(uint3 GTID : SV_GroupThreadID) {
   // Check 3. The final value shows whether each compare matched. A compare
   // of NaN against NaN gives false, thus the reported value cannot show it.
   float OrigZero, OrigNan;
-  InterlockedCompareExchangeFloatBitwise(ZeroPositive, -0.0f, 99.0f, OrigZero);
-  InterlockedCompareExchangeFloatBitwise(NanQuiet, NanIn[0], 7.0f, OrigNan);
+  InterlockedCompareExchangeFloatBitwise(PositiveZero, -0.0f, 99.0f, OrigZero);
+  InterlockedCompareExchangeFloatBitwise(QuietNaN, NanIn[0], 7.0f, OrigNan);
 
   OutOrig[GTID.x] = ((OrigMatch == -5.0f || OrigMatch == 42.0f) &&
                      OrigNoMatch == 77.0f && OrigZero == 0.0f &&
@@ -81,8 +81,8 @@ void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     OutFinal[0] = MatchMinusFive;      // 42.0
     OutFinal[1] = NoMatchSeventySeven; // 77.0
-    OutFinal[2] = ZeroPositive;        // +0.0, -0.0 must not have matched
-    OutFinal[3] = NanQuiet;            // 7.0, the NaN must have matched
+    OutFinal[2] = PositiveZero;        // +0.0, -0.0 must not have matched
+    OutFinal[3] = QuietNaN;            // 7.0, the NaN must have matched
     OutFinal[4] = ClaimZero;           // 1.0, exactly one thread claimed
   }
 }
