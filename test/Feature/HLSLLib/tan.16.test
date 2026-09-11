@@ -46,8 +46,9 @@ Buffers:
     # 0, -sqrt(3), sqrt(3), tan(2.0) ~= -2.185
 Results:
   - Result: Test1
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.003
+    Rule: BufferFloatULP
+    ULPT: 2
+    ZeroTolerance: 0.001
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
