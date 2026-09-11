@@ -60,8 +60,7 @@ Buffers:
             12.5, 6.0, 34.75, 4096.0 ]
 Results:
   - Result: Test
-    Rule: BufferFloatULP
-    ULPT: 0
+    Rule: BufferExact
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
