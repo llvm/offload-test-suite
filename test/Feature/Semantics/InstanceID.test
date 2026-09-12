@@ -1,0 +1,109 @@
+# The pipeline draws 3 vertices as 4 instances. Each instance is offset
+# horizontally so it covers exactly one pixel of a 4x1 render target.
+# The expected result is [0, 1, 2, 3].
+
+#--- vertex.hlsl
+struct VSOutput {
+    float4 position : SV_POSITION;
+    float instanceID : INSTANCE_ID;
+};
+
+VSOutput main(float4 pos : POSITION, uint iid : SV_InstanceID) {
+    VSOutput o;
+    // Shift each instance right by 0.5 NDC units so it covers a unique pixel.
+    // Instance 0 -> pixel 0 (-0.75)
+    // Instance 1 -> pixel 1 (-0.25)
+    // Instance 2 -> pixel 2 (+0.25)
+    // Instance 3 -> pixel 3 (+0.75)
+    o.position = float4(pos.x + float(iid) * 0.5 - 0.75, pos.y, pos.z, pos.w);
+    o.instanceID = float(iid);
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+    float instanceID : INSTANCE_ID;
+};
+
+RWStructuredBuffer<uint> Output : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    uint pixelX = (uint)input.position.x;
+    Output[pixelX] = (uint)input.instanceID;
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+DispatchParameters:
+  VertexCount: 3
+  InstanceCount: 4
+Buffers:
+  # Geometry: one small triangle covering NDC x in [-0.125, +0.125].
+  # With InstanceCount: 4 and the per-instance X shift in the VS, each
+  # instance lands on a distinct pixel of the 4x1 render target.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [ -0.125, -1.0, 0.0, 1.0,
+             0.125, -1.0, 0.0, 1.0,
+             0.0,    1.0, 0.0, 1.0 ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 64   # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+  - Name: Output
+    Format: Hex32
+    Stride: 4
+    FillSize: 16   # 4 x uint32
+    FillValue: 0xFF
+  - Name: Output_Expected
+    Format: Hex32
+    Stride: 4
+    Data: [ 0, 1, 2, 3 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: InstanceIDs
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# SV_InstanceID not yet landed
+# XFAIL: Clang
+
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
+# UNSUPPORTED: Lavapipe
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o

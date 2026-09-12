@@ -631,6 +631,9 @@ void MappingTraits<offloadtest::DispatchParametersSet>::mapping(
     IO &I, offloadtest::DispatchParametersSet &Set) {
   I.mapOptional("DispatchGroupCount", Set.DispatchGroupCount);
   I.mapOptional("VertexCount", Set.VertexCount);
+  I.mapOptional("InstanceCount", Set.InstanceCount, 1u);
+  I.mapOptional("FirstVertex", Set.FirstVertex, 0u);
+  I.mapOptional("FirstInstance", Set.FirstInstance, 0u);
 }
 
 void MappingTraits<offloadtest::OutputProperties>::mapping(
@@ -962,6 +965,14 @@ llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
       return llvm::createStringError(
           "DispatchParameters.VertexCount set on a Compute or Mesh Shader "
           "pipeline. Only allowed on a TraditionalRaster pipeline.");
+    if (DispatchParameters.InstanceCount != 1 ||
+        DispatchParameters.FirstVertex != 0 ||
+        DispatchParameters.FirstInstance != 0)
+      return llvm::createStringError(
+          "DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on a "
+          "Compute or Mesh Shader pipeline. Only allowed on a "
+          "TraditionalRaster "
+          "pipeline.");
     break;
   case ShaderPipelineKind::TraditionalRaster:
     if (DispatchParameters.DispatchGroupCount !=
