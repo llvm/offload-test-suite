@@ -1,0 +1,89 @@
+#--- source.hlsl
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<uint4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  uint3x2 U32 = abs(uint3x2(In[0].xyz, In[1].xyz));
+  uint2x4 U24 = abs(uint2x4(In[2], In[3]));
+  uint3x1 U31 = abs(uint3x1(In[4].xyz));
+  uint4x4 U44 = abs(uint4x4(In[5], In[6], In[7], In[8]));
+  uint2x2 U22Const = abs(uint2x2(12, 6, 34, 4096));
+
+  Out[0] = uint4(U32[0], U32[1]);
+  Out[1] = uint4(U32[2], 0, 0);
+  Out[2] = U24[0];
+  Out[3] = U24[1];
+  Out[4] = uint4(U31[0], U31[1], U31[2], 0);
+  Out[5] = U44[0];
+  Out[6] = U44[1];
+  Out[7] = U44[2];
+  Out[8] = U44[3];
+  Out[9] = uint4(U22Const[0], U22Const[1]);
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 16
+    Data: [ 2, 0, 3, 0,
+            4, 5, 6, 0,
+            7, 8, 16, 2048,
+            1024, 1, 42, 7,
+            60000, 21, 999, 0,
+            12, 6, 34, 4096,
+            11, 2, 3, 4,
+            100, 200, 300, 400,
+            8192, 16384, 32768, 25 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 16
+    Data: [ 2, 0, 3, 4,
+            5, 6, 0, 0,
+            7, 8, 16, 2048,
+            1024, 1, 42, 7,
+            60000, 21, 999, 0,
+            12, 6, 34, 4096,
+            11, 2, 3, 4,
+            100, 200, 300, 400,
+            8192, 16384, 32768, 25,
+            12, 6, 34, 4096 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184491
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
