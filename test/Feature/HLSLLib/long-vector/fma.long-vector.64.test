@@ -82,8 +82,6 @@ DescriptorSets:
 # XFAIL: Vulkan && DXC
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1506
-# Note We fail for DXC because today Clang scalairzed and does
-# Not hit  IRErrorCodeUnsupportedInstruction on vector @dx.op.*
 # XFAIL: Metal && DXC
 
 # REQUIRES: Double
