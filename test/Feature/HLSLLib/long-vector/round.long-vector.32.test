@@ -29,8 +29,8 @@ Buffers:
     Data: [-3, -2, 0, 0, 0, 2, 3, -3]
 Results:
   - Result: Test
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.008
+    Rule: BufferFloatULP
+    ULPT: 2
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:

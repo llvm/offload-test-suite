@@ -40,13 +40,13 @@ Buffers:
     Data: [-2, -1, -0.0, 0, 0, 1, 2, -2, -1, -0.0, 0, 0, 1, 2, -2, -1]
 Results:
   - Result: ReturnValue
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.008
+    Rule: BufferFloatULP
+    ULPT: 2
     Actual: Out
     Expected: ExpectedOut
   - Result: OutParameter
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.008
+    Rule: BufferFloatULP
+    ULPT: 2
     Actual: ExtraOut
     Expected: ExpectedExtraOut
 DescriptorSets:
