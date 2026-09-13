@@ -1,0 +1,53 @@
+#--- source.hlsl
+
+RWStructuredBuffer<uint> Out : register(u0);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  Barrier(0, GROUP_SYNC);
+
+  if (GTID.x == 0)
+    Out[0] = 1u;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1 ]
+Results:
+  - Result: BarrierExecutionOnly
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# FIXME(DXC-SPIRV-BARRIER): Replace with the DXC issue URL.
+# DXC SPIR-V validation failure: https://godbolt.org/z/qKn9rKcnY
+# XFAIL: DXC && Vulkan
+# Clang does not implement Barrier: https://github.com/llvm/llvm-project/issues/99234
+# XFAIL: Clang
+# REQUIRES: SM_6_8
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_8 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

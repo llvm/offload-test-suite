@@ -1,0 +1,77 @@
+#--- source.hlsl
+
+RWStructuredBuffer<uint> Data : register(u0);
+RWStructuredBuffer<uint> Out : register(u1);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 255)
+    Data[0] = 1u;
+
+  Barrier(UAV_MEMORY, GROUP_SCOPE | GROUP_SYNC);
+
+  if (GTID.x == 0)
+    Out[0] = Data[0];
+
+  Barrier(UAV_MEMORY, GROUP_SCOPE | GROUP_SYNC);
+
+  for (uint I = 0; I < 256; ++I) {
+    if (GTID.x == I)
+      Data[0] = Data[0] + 1u;
+
+    Barrier(UAV_MEMORY, GROUP_SCOPE | GROUP_SYNC);
+  }
+
+  if (GTID.x == 128)
+    Out[1] = Data[0];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Data
+    Format: UInt32
+    Stride: 4
+    Data: [ 0 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 257 ]
+Results:
+  - Result: BarrierUAVGroupSync
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Data
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Clang does not implement Barrier: https://github.com/llvm/llvm-project/issues/99234
+# XFAIL: Clang
+# REQUIRES: SM_6_8
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_8 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
