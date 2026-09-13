@@ -18,12 +18,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerState Samp0 : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(2, 0)]] SamplerState Samp1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Base UV at texture center (0.5, 0.5).
@@ -67,18 +62,14 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // overload for a cube, but the clamp overload does exist.
   float3 CubeMag = float3(1, 0, 0) + float3(offset * 0.0001, 0);
   float3 CubeMin = float3(1, 0, 0) + float3(offset * 2.0, 0);
-  float4 r6 = CUBE_OR(TexCube.Sample(Samp1, CubeMag),
-                       float4(1, 0, 0, 1));
-  float4 r7 = CUBE_OR(TexCube.Sample(Samp1, CubeMin),
-                       float4(1, 1, 0, 1));
+  float4 r6 = TexCube.Sample(Samp1, CubeMag);
+  float4 r7 = TexCube.Sample(Samp1, CubeMin);
 
   float3 CubeMagZ = float3(0, 0, -1) + float3(offset * 0.0001, 0);
-  float4 r8 = CUBE_OR(TexCube.Sample(Samp1, CubeMagZ),
-                       float4(0, 0, 1, 1));
+  float4 r8 = TexCube.Sample(Samp1, CubeMagZ);
 
   // Sample with an LOD clamp; 0.0 leaves it at mip 0.
-  float4 r9 = CUBE_OR(TexCube.Sample(Samp1, CubeMag, 0.0f),
-                       float4(1, 0, 0, 1));
+  float4 r9 = TexCube.Sample(Samp1, CubeMag, 0.0f);
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -239,6 +230,5 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

@@ -3,12 +3,7 @@
 [[vk::binding(1, 0)]] SamplerState Samp0 : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(2, 0)]] SamplerState Samp1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -48,15 +43,11 @@ void main() {
 
   // Face +X is Red at mip 0 and Yellow at mip 1; face -Z is Blue then Green.
   // Each face carries its own mip chain, so minification on one face must not
-  // reach into another's.
-  Out[5] = CUBE_OR(TexCube.SampleGrad(Samp0, float3(1, 0, 0), CubeDDXMag, CubeDDYMag),
-                   float4(1, 0, 0, 1)); // mip 0 Red
-  Out[6] = CUBE_OR(TexCube.SampleGrad(Samp0, float3(1, 0, 0), CubeDDXMin, CubeDDYMin),
-                   float4(1, 1, 0, 1)); // mip 1 Yellow
-  Out[7] = CUBE_OR(TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMag, CubeDDYMag),
-                   float4(0, 0, 1, 1)); // mip 0 Blue
-  Out[8] = CUBE_OR(TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMin, CubeDDYMin),
-                   float4(0, 1, 0, 1)); // mip 1 Green
+  // reach into another's. The Mag gradients select mip 0, the Min ones mip 1.
+  Out[5] = TexCube.SampleGrad(Samp0, float3(1, 0, 0), CubeDDXMag, CubeDDYMag);
+  Out[6] = TexCube.SampleGrad(Samp0, float3(1, 0, 0), CubeDDXMin, CubeDDYMin);
+  Out[7] = TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMag, CubeDDYMag);
+  Out[8] = TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMin, CubeDDYMin);
 }
 
 //--- pipeline.yaml
@@ -171,6 +162,5 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

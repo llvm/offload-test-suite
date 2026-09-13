@@ -18,12 +18,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerComparisonState Samp : register(s0); // Less
 [[vk::binding(3, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // TODO: Add extra testing when we add multiple mip levels.
@@ -89,18 +84,14 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 0.2/0.8 values as the 2D texture above, so Less against 0.5 blends
   // (0+1+0+1)/4 = 0.5 exactly as the 2D case does. Face -Z is a uniform 0.9,
   // where every texel passes -> 1.0, so the face really is being selected.
-  float r13 = CUBE_OR(TexCube.SampleCmp(Samp, float3(1, 0, 0), 0.5),
-                       0.5);
-  float r14 = CUBE_OR(TexCube.SampleCmp(Samp, float3(0, 0, -1), 0.5),
-                       1.0);
+  float r13 = TexCube.SampleCmp(Samp, float3(1, 0, 0), 0.5);
+  float r14 = TexCube.SampleCmp(Samp, float3(0, 0, -1), 0.5);
 
   // Greater against the uniform 0.9 face fails everywhere -> 0.0.
-  float r15 = CUBE_OR(TexCube.SampleCmp(SampGreater, float3(0, 0, -1), 0.5),
-                       0.0);
+  float r15 = TexCube.SampleCmp(SampGreater, float3(0, 0, -1), 0.5);
 
   // SampleCmpLevelZero forces mip 0 rather than deriving an LOD.
-  float r16 = CUBE_OR(TexCube.SampleCmpLevelZero(Samp, float3(1, 0, 0), 0.5),
-                       0.5);
+  float r16 = TexCube.SampleCmpLevelZero(Samp, float3(1, 0, 0), 0.5);
 
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
@@ -251,6 +242,5 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

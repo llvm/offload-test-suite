@@ -3,12 +3,6 @@
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex : register(u1);
 
-#ifndef NO_RWTEXTURE_LOAD
-#define RW_LOAD_OR(Call, Expect) (Call)
-#else
-#define RW_LOAD_OR(Call, Expect) (Expect)
-#endif
-
 [numthreads(1, 1, 1)]
 void main() {
   // Texture2DArray::Load takes int4(x, y, arraySlice, mip).
@@ -23,9 +17,9 @@ void main() {
 
   // RWTexture2DArray::Load takes int3(x, y, arraySlice), not the int4 the SRV
   // form takes: a UAV has a single mip, so the slice occupies the last component.
-  Out[5] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 0)), float4(1, 0, 0, 1));     // Red
-  Out[6] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 1)), float4(0, 1, 1, 1));     // Cyan
-  Out[7] = RW_LOAD_OR(RWTex.Load(int3(1, 0, 2)), float4(0.5, 0.5, 0, 1)); // Olive
+  Out[5] = RWTex.Load(int3(0, 0, 0)); // Red
+  Out[6] = RWTex.Load(int3(0, 0, 1)); // Cyan
+  Out[7] = RWTex.Load(int3(1, 0, 2)); // Olive
 }
 
 //--- pipeline.yaml
@@ -115,7 +109,5 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# Clang does not implement Load() on RW texture types yet, so those checks
-# compile out there: https://github.com/llvm/llvm-project/issues/218535
-# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_RWTEXTURE_LOAD %} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
