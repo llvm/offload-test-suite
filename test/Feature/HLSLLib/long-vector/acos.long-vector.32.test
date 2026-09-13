@@ -29,8 +29,8 @@ Buffers:
     Data: [3.14159265, 2.0943951, 1.57079633, 1.04719755, 0]
 Results:
   - Result: Test
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.008
+    Rule: BufferFloatULP
+    ULPT: 2
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
