@@ -19,14 +19,6 @@ float4 main(PSInput input) : SV_TARGET {
   for (uint I = 0; I < 5; ++I)
     Input5[I] = input.position.x - 2.0;
   clip(Input5);
-  vector<float, 8> Input8;
-  for (uint I = 0; I < 8; ++I)
-    Input8[I] = input.position.x - 2.0;
-  clip(Input8);
-  vector<float, 16> Input16;
-  for (uint I = 0; I < 16; ++I)
-    Input16[I] = input.position.x - 2.0;
-  clip(Input16);
   return float4(1.0, 0.0, 0.0, 1.0);
 }
 
