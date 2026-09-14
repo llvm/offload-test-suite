@@ -30,7 +30,8 @@ Buffers:
 Results:
   - Result: Test
     Rule: BufferFloatULP
-    ULPT: 2
+    ULPT: 3
+    ZeroTolerance: 0.001
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:

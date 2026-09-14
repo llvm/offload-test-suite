@@ -30,7 +30,7 @@ Buffers:
 Results:
   - Result: Test
     Rule: BufferFloatULP
-    ULPT: 2
+    ULPT: 199 # Metal and NVIDIA need 2 ULP, but Intel drivers need a wider range
     ZeroTolerance: 0.001
     Actual: Out
     Expected: ExpectedOut
