@@ -1,16 +1,15 @@
 #--- source.hlsl
 
 StructuredBuffer<uint> In : register(t0);
-RWStructuredBuffer<uint16_t> Out : register(u1);
+RWStructuredBuffer<uint16_t4> Out : register(u1);
 
 [numthreads(1, 1, 1)]
 void main() {
-  uint8_t4_packed packedVals = In[0];
-  uint16_t4 unpackedVals = unpack_u8u16(packedVals);
-  Out[0] = unpackedVals.x;
-  Out[1] = unpackedVals.y;
-  Out[2] = unpackedVals.z;
-  Out[3] = unpackedVals.w;
+  uint8_t4_packed PackedVals = In[0];
+  uint16_t4 UnpackedVals = unpack_u8u16(PackedVals);
+  Out[0] = UnpackedVals;
+  Out[1] = unpack_u8u16(In[1]);
+  Out[2] = unpack_u8u16(int8_t4_packed(185009411));
 }
 
 //--- pipeline.yaml
@@ -23,15 +22,15 @@ Buffers:
   - Name: In
     Format: UInt32
     Stride: 4
-    Data: [ 16842496 ]
+    Data: [ 16842496, 705691904 ]
   - Name: Out
     Format: UInt16
     Stride: 2
-    FillSize: 8
+    FillSize: 24
   - Name: ExpectedOut
     Format: UInt16
     Stride: 2
-    Data: [ 0, 255, 0, 1 ]
+    Data: [ 0, 255, 0, 1, 0, 1, 16, 42, 3, 5, 7, 11 ]
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -56,9 +55,10 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99223
+# Unimplemented https://github.com/llvm/llvm-project/issues/99223
 # XFAIL: Clang
 
+# REQUIRES: Int16
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -enable-16bit-types -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
