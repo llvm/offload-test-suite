@@ -1,0 +1,219 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareExchangeFloatBitwise on the resource destination
+// types that HLSL permits:
+//
+//   * RWStructuredBuffer<float>[i]                          (free function)
+//   * RWBuffer<float>[i]                                    (typed UAV)
+//   * RWTexture2D<float>[coord]                             (typed UAV)
+//   * RWByteAddressBuffer::InterlockedCompareExchangeFloatBitwise  (method)
+//
+// For each type, the shader makes one compare that matches and one compare
+// that never matches. It then checks the reported original value and the
+// final contents of the destination. All 256 threads make the same calls,
+// thus the compare that matches is contended. The file
+// InterlockedCompareExchangeFloatBitwise.32.test covers the bit patterns
+// (-0.0 against +0.0, and NaN) and the count of winners.
+RWStructuredBuffer<float> SBufF : register(u0);
+RWBuffer<float>           TBufF : register(u1);
+RWTexture2D<float>        Tex2D : register(u2);
+RWByteAddressBuffer       BABuf : register(u3);
+
+RWStructuredBuffer<uint> OutOrig : register(u4);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufF[0] = -5.0f;                 // compare matches
+    SBufF[1] = 9.0f;                  // compare never matches
+    TBufF[0] = -5.0f;                 // compare matches
+    TBufF[1] = 9.0f;                  // compare never matches
+    Tex2D[uint2(0, 0)] = -5.0f;       // compare matches
+    Tex2D[uint2(1, 0)] = 9.0f;        // compare never matches
+    BABuf.Store<float>(0, -5.0f);     // compare matches
+    BABuf.Store<float>(4, 44.0f);     // compare never matches
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<float> (free function).
+  float OrigSBufFMatch, OrigSBufFNoMatch;
+  InterlockedCompareExchangeFloatBitwise(SBufF[0], -5.0f, 66.0f,
+                                         OrigSBufFMatch);
+  InterlockedCompareExchangeFloatBitwise(SBufF[1], 10.0f, 0.0f,
+                                         OrigSBufFNoMatch);
+
+  // RWBuffer<float> (typed buffer UAV).
+  float OrigTBufFMatch, OrigTBufFNoMatch;
+  InterlockedCompareExchangeFloatBitwise(TBufF[0], -5.0f, 77.0f,
+                                         OrigTBufFMatch);
+  InterlockedCompareExchangeFloatBitwise(TBufF[1], 10.0f, 0.0f,
+                                         OrigTBufFNoMatch);
+
+  // RWTexture2D<float> (typed texture UAV).
+  float OrigTexMatch, OrigTexNoMatch;
+  InterlockedCompareExchangeFloatBitwise(Tex2D[uint2(0, 0)], -5.0f, 88.0f,
+                                         OrigTexMatch);
+  InterlockedCompareExchangeFloatBitwise(Tex2D[uint2(1, 0)], 10.0f, 0.0f,
+                                         OrigTexNoMatch);
+
+  // RWByteAddressBuffer method form.
+  float OrigBABufMatch, OrigBABufNoMatch;
+  BABuf.InterlockedCompareExchangeFloatBitwise(0, -5.0f, 123.0f,
+                                               OrigBABufMatch);
+  BABuf.InterlockedCompareExchangeFloatBitwise(4, 45.0f, -1.0f,
+                                               OrigBABufNoMatch);
+
+  OutOrig[GTID.x] = ((OrigSBufFMatch == -5.0f || OrigSBufFMatch == 66.0f) &&
+                     OrigSBufFNoMatch == 9.0f &&
+                     (OrigTBufFMatch == -5.0f || OrigTBufFMatch == 77.0f) &&
+                     OrigTBufFNoMatch == 9.0f &&
+                     (OrigTexMatch == -5.0f || OrigTexMatch == 88.0f) &&
+                     OrigTexNoMatch == 9.0f &&
+                     (OrigBABufMatch == -5.0f || OrigBABufMatch == 123.0f) &&
+                     OrigBABufNoMatch == 44.0f) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufF
+    Format: Float32
+    Stride: 4
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufF
+    Format: Float32
+    Stride: 4
+    Data: [ 66.0, 9.0 ]
+  - Name: TBufF
+    Format: Float32
+    Channels: 1
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedTBufF
+    Format: Float32
+    Channels: 1
+    Data: [ 77.0, 9.0 ]
+  - Name: Tex2D
+    Format: Float32
+    Channels: 1
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+  - Name: ExpectedTex2D
+    Format: Float32
+    Channels: 1
+    Data: [ 88.0, 9.0 ]
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+  - Name: BABuf
+    Format: Float32
+    Stride: 4
+    FillSize: 8
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedBABuf
+    Format: Float32
+    Stride: 4
+    Data: [ 123.0, 44.0 ]
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufF
+    Rule: BufferExact
+    Actual: SBufF
+    Expected: ExpectedSBufF
+  - Result: TestTBufF
+    Rule: BufferExact
+    Actual: TBufF
+    Expected: ExpectedTBufF
+  - Result: TestTex2D
+    Rule: BufferExact
+    Actual: Tex2D
+    Expected: ExpectedTex2D
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedOnes
+DescriptorSets:
+  - Resources:
+    - Name: SBufF
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: TBufF
+      Kind: RWBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Tex2D
+      Kind: RWTexture2D
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99203
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/7782
+# XFAIL: Vulkan && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

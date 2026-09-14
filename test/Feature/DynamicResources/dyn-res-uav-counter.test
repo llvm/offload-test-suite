@@ -1,0 +1,102 @@
+#--- source.hlsl
+
+// This test verifies a dynamically indexed RWStructuredBuffer
+// with an associated UAV counter.
+
+cbuffer DynResIndices : register(b0) {
+  uint Index;
+}
+
+RWStructuredBuffer<float> BufOut : register(u1); 
+
+[numthreads(4, 1, 1)]
+void main(uint3 ID : SV_GroupThreadID) {
+  RWStructuredBuffer<float> UavCounterBuffer = ResourceDescriptorHeap[Index];
+  
+  float a = UavCounterBuffer[ID.x];
+
+  uint counter = 9;
+  if (ID.x == 0) {
+    counter = UavCounterBuffer.IncrementCounter();
+    counter = UavCounterBuffer.IncrementCounter();
+    // counter should be 1
+  }
+
+  BufOut[ID.x] = a + (float)counter;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: DynResIndices
+    Format: Hex32
+    Data:
+      [ 0x4 ]
+
+  - Name: UavCounterBuf
+    Format: Float32
+    Stride: 4
+    Data:
+     [ 0.1, 0.2, 0.3, 0.4 ]
+
+  - Name: BufOut
+    Format: Float32
+    Stride: 4
+    FillSize: 16
+
+  - Name: ExpectedBufOut
+    Format: Float32
+    Stride: 4
+    Data:
+      [ 1.1, 9.2, 9.3, 9.4 ]
+
+Results:
+  - Result: ExpectedResult
+    Rule: BufferFloatEpsilon
+    Actual: BufOut
+    Expected: ExpectedBufOut
+    Epsilon: 0.001
+
+DescriptorSets:
+  - Resources:
+    - Name: DynResIndices
+      Kind: ConstantBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+
+    - Name: BufOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+
+    - Name: UavCounterBuf
+      Kind: RWStructuredBuffer
+      HasCounter: true
+      HeapIndex: 4
+
+...
+#--- end
+
+# REQUIRES: SM_6_6
+# REQUIRES: !DirectX || ResourceBindingTier3
+# REQUIRES: !Vulkan || (VulkanRuntimeDescriptorArray && VulkanDescriptorBindingPartiallyBound)
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/133831
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

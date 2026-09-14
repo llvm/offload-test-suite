@@ -1,0 +1,237 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareExchange on groupshared destinations, int and
+// uint, with 256 concurrent threads. Four checks:
+//
+//   1. Per-thread private slots: a mismatching compare must not store, a
+//      following matching compare must, and both must report the original
+//      value.
+//   2. Contended locations: every thread proposes the same new value, so
+//      only one store can take effect and exactly one thread may observe
+//      the original compare value. A never-matching compare must leave the
+//      destination alone and always report it unchanged.
+//   3. Counter: thread `i` only advances `Counter` from `i` to `i+1`, so
+//      over 256 barrier-separated attempts each thread succeeds exactly
+//      once and the counter must end at 256. Monotonicity: the counter
+//      only moves up, so each fresh re-read must not be below the previous.
+
+RWStructuredBuffer<uint> OutMono : register(u0);
+RWStructuredBuffer<uint> OutSlots : register(u1);
+RWStructuredBuffer<uint> OutOrig : register(u2);
+RWStructuredBuffer<uint> OutWins : register(u3);
+RWStructuredBuffer<int> OutFinal : register(u4);
+
+groupshared uint Counter;        // stepped from 0 to 256, one thread per step
+groupshared int  SlotsInt[256];  // per-thread slots, signed
+groupshared uint SlotsUInt[256]; // per-thread slots, unsigned
+groupshared int  MatchInt;       // contended, compare matches
+groupshared int  NoMatchInt;     // contended, compare never matches
+groupshared uint MatchUInt;      // contended, compare matches
+groupshared uint NoMatchUInt;    // contended, compare never matches
+groupshared uint WinCount;       // threads that observed the compare value
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsInt[GTID.x] = (int)GTID.x - 128;
+  SlotsUInt[GTID.x] = GTID.x + 7u;
+  if (GTID.x == 0) {
+    Counter = 0u;
+    MatchInt = -5;
+    NoMatchInt = 77;
+    MatchUInt = 0xFFFFFFFFu;
+    NoMatchUInt = 5u;
+    WinCount = 0u;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // Per-thread private slots, signed. Both calls report the initial value.
+  int OrigIntNoStore, OrigIntStore;
+  InterlockedCompareExchange(SlotsInt[GTID.x], (int)GTID.x - 127, 0,
+                             OrigIntNoStore);
+  InterlockedCompareExchange(SlotsInt[GTID.x], (int)GTID.x - 128,
+                             (int)GTID.x + 1000, OrigIntStore);
+
+  // Per-thread private slots, unsigned.
+  uint OrigUIntNoStore, OrigUIntStore;
+  InterlockedCompareExchange(SlotsUInt[GTID.x], GTID.x + 8u, 0u,
+                             OrigUIntNoStore);
+  InterlockedCompareExchange(SlotsUInt[GTID.x], GTID.x + 7u, GTID.x + 2000u,
+                             OrigUIntStore);
+
+  OutSlots[GTID.x] = (OrigIntNoStore == (int)GTID.x - 128 &&
+                      OrigIntStore == (int)GTID.x - 128 &&
+                      SlotsInt[GTID.x] == (int)GTID.x + 1000 &&
+                      OrigUIntNoStore == GTID.x + 7u &&
+                      OrigUIntStore == GTID.x + 7u &&
+                      SlotsUInt[GTID.x] == GTID.x + 2000u) ? 1u : 0u;
+
+  // Contended locations. A matching compare reports either the value the
+  // winner replaced or the value it stored; a never-matching compare always
+  // reports the untouched destination.
+  int OrigMatchInt, OrigNoMatchInt;
+  uint OrigMatchUInt, OrigNoMatchUInt;
+  InterlockedCompareExchange(MatchInt, -5, 42, OrigMatchInt);
+  InterlockedCompareExchange(NoMatchInt, 78, -1, OrigNoMatchInt);
+  InterlockedCompareExchange(MatchUInt, 0xFFFFFFFFu, 1234u, OrigMatchUInt);
+  InterlockedCompareExchange(NoMatchUInt, 6u, 999u, OrigNoMatchUInt);
+
+  // Exactly one thread may observe the pre-existing value of MatchInt.
+  if (OrigMatchInt == -5)
+    InterlockedAdd(WinCount, 1u);
+
+  OutOrig[GTID.x] = ((OrigMatchInt == -5 || OrigMatchInt == 42) &&
+                     OrigNoMatchInt == 77 &&
+                     (OrigMatchUInt == 0xFFFFFFFFu ||
+                      OrigMatchUInt == 1234u) &&
+                     OrigNoMatchUInt == 5u) ? 1u : 0u;
+
+  // Counter, checked for exactly one success per thread and for monotonic
+  // non-decrease.
+  uint CompareValue = GTID.x;
+  uint NewValue = GTID.x + 1u;
+  uint Prev = 0u;
+  uint Mono = 1u;
+  uint Wins = 0u;
+  for (uint I = 0; I < 256; ++I) {
+    uint Orig;
+    InterlockedCompareExchange(Counter, CompareValue, NewValue, Orig);
+    if (Orig == CompareValue)
+      ++Wins;
+    GroupMemoryBarrierWithGroupSync();
+    uint Cur = Counter;
+    if (Cur < Prev)
+      Mono = 0u;
+    Prev = Cur;
+  }
+  OutMono[GTID.x] = Mono;
+  OutWins[GTID.x] = Wins;
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = (int)Counter;     // 256
+    OutFinal[1] = MatchInt;         // 42
+    OutFinal[2] = NoMatchInt;       // 77
+    OutFinal[3] = (int)MatchUInt;   // 1234
+    OutFinal[4] = (int)NoMatchUInt; // 5
+    OutFinal[5] = (int)WinCount;    // 1
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlots
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutWins
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: Int32
+    Stride: 4
+    FillSize: 24
+  - Name: ExpectedFinal
+    Format: Int32
+    Stride: 4
+    Data: [ 256, 42, 77, 1234, 5, 1 ]
+Results:
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+  - Result: TestSlots
+    Rule: BufferExact
+    Actual: OutSlots
+    Expected: ExpectedOnes
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedOnes
+  - Result: TestWins
+    Rule: BufferExact
+    Actual: OutWins
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutSlots
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutWins
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99130
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

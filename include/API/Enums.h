@@ -15,15 +15,26 @@ enum class ResourceKind {
   Buffer,
   StructuredBuffer,
   ByteAddressBuffer,
-  Texture2D,
   RWBuffer,
   RWStructuredBuffer,
   RWByteAddressBuffer,
-  RWTexture2D,
   ConstantBuffer,
+  Texture2D,
+  RWTexture2D,
+  Texture2DArray,
+  RWTexture2DArray,
+  TextureCube,
+  TextureCubeArray,
   Sampler,
   SampledTexture2D,
   AccelerationStructure,
+};
+
+enum class ResourceDimension {
+  Dim1D,
+  Dim2D,
+  Dim3D,
+  Cube,
 };
 
 enum ShaderContainerType {

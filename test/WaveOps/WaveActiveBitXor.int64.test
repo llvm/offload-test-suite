@@ -195,7 +195,7 @@ DescriptorSets:
 
 # 64 bit wave ops are not supported on metal.
 # https://github.com/llvm/offload-test-suite/issues/355
-# UNSUPPORTED: Metal
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl

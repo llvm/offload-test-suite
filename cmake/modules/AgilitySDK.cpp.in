@@ -1,0 +1,5 @@
+extern "C" {
+__declspec(dllexport) extern const unsigned int D3D12SDKVersion =
+    @AGILITY_SDK_VERSION_NUMBER@;
+__declspec(dllexport) extern const char *D3D12SDKPath = ".\\D3D12\\";
+}

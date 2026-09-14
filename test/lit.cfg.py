@@ -187,6 +187,8 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("DerivativesInCompute")
 
     if device["API"] == "DirectX":
+        if device["Features"].get("ResourceBindingTier", 0) >= 3:
+            config.available_features.add("ResourceBindingTier3")
         if device["Features"].get("Native16BitShaderOpsSupported", False):
             config.available_features.add("Int16")
             config.available_features.add("Half")
@@ -198,6 +200,9 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("AtomicInt64OnTypedResourceSupported", False):
             config.available_features.add("Int64TypedResourceAtomics")
+        # Float32 atomic exchange on groupshared memory is core DXIL from
+        # SM 6.0 on D3D12, with no separate capability bit to query.
+        config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
         setWaveSizeFeaturesDirectX(config, device)
@@ -238,12 +243,22 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("VulkanInt64BufferAtomics")
         if device["Features"].get("shaderImageInt64Atomics", False):
             config.available_features.add("Int64TypedResourceAtomics")
+        if device["Features"].get("shaderSharedFloat32Atomics", False):
+            config.available_features.add("Float32GroupSharedAtomics")
+        if device["Features"].get("shaderBufferFloat32Atomics", False):
+            config.available_features.add("VulkanFloat32BufferAtomics")
+        if device["Features"].get("runtimeDescriptorArray", False):
+            config.available_features.add("VulkanRuntimeDescriptorArray")
+        if device["Features"].get("descriptorBindingPartiallyBound", False):
+            config.available_features.add("VulkanDescriptorBindingPartiallyBound")
 
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
             if Extension["ExtensionName"] == "VK_EXT_mesh_shader":
                 config.available_features.add("MeshShader")
+            if Extension["ExtensionName"] == "VK_EXT_mutable_descriptor_type":
+                config.available_features.add("VulkanMutableDescriptorType")
 
         if "VK_KHR_acceleration_structure" in config.available_features:
             config.available_features.add("acceleration-structure")

@@ -36,6 +36,12 @@ pip3 install pyyaml
 
 On Windows, the [Graphics Tools](https://learn.microsoft.com/en-us/windows/win32/direct3d12/directx-12-programming-environment-set-up#debug-layer) optional feature is additionally required to run the test suite.
 
+Windows builds use the app-local DirectX 12 Agility SDK runtime from the
+`Microsoft.Direct3D.D3D12` NuGet package. The default `AGILITY_SDK_VERSION=LKG`
+selects the repository's known-good version; `System`, `Latest`, or an explicit
+NuGet version may be selected instead. See [Direct3D on
+Windows](docs/Direct3D.md) for details.
+
 # Building
 
 The LLVM project provides a CMake cache file,

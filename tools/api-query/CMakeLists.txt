@@ -1,5 +1,6 @@
 add_offloadtest_tool(api-query
               api-query.cpp)
+target_enable_agility_sdk(api-query)
 
 target_link_libraries(api-query PRIVATE LLVMSupport OffloadTestAPI)
 

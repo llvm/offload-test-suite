@@ -1,0 +1,261 @@
+#--- source.hlsl
+
+// Tests InterlockedCompareExchange on the HLSL-legal 64-bit non-groupshared
+// (resource) destination types. 64-bit UAV atomics require Shader Model
+// 6.6.
+//
+// 64-bit atomics on typed RWBuffer / RWTexture need the optional
+// "AtomicInt64OnTypedResource" capability and are covered separately by
+// InterlockedCompareExchange.resources.typed.int64.test.
+//
+// Every destination covers both a matching and a never-matching compare
+// (one of which differs only in the upper 32 bits) and checks the reported
+// original value, plus the stepped counter, per-thread success count and
+// monotonicity check described in InterlockedCompareExchange.32.test.
+
+RWStructuredBuffer<uint64_t> SBufU : register(u0);
+RWStructuredBuffer<int64_t>  SBufI : register(u1);
+RWByteAddressBuffer          BABuf : register(u2);
+
+RWStructuredBuffer<uint> OutMonoSBufU : register(u3);
+RWStructuredBuffer<uint> OutMonoBABuf : register(u4);
+RWStructuredBuffer<uint> OutOrig : register(u5);
+RWStructuredBuffer<uint> OutWins : register(u6);
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  if (GTID.x == 0) {
+    SBufU[0] = 0;                 // stepped counter
+    SBufU[1] = 0x100000007ull;    // compare matches the low 32 bits only
+    SBufI[0] = 1000;              // compare matches
+    SBufI[1] = 55;                // compare never matches
+    BABuf.Store<uint64_t>(0, 0xFFFFFFFFFFFFFFFFull); // compare matches
+    BABuf.Store<uint64_t>(8, 44);                    // compare never matches
+    BABuf.Store<uint64_t>(16, 0);                    // stepped counter
+  }
+  DeviceMemoryBarrierWithGroupSync();
+
+  // RWStructuredBuffer<uint64_t>: the compare differs only in the upper 32
+  // bits, so it must not store.
+  uint64_t OrigSBufU;
+  InterlockedCompareExchange(SBufU[1], (uint64_t)7, (uint64_t)0, OrigSBufU);
+
+  // RWStructuredBuffer<int64_t> (signed).
+  int64_t OrigSBufIMatch, OrigSBufINoMatch;
+  InterlockedCompareExchange(SBufI[0], (int64_t)1000, (int64_t)-63,
+                             OrigSBufIMatch);
+  InterlockedCompareExchange(SBufI[1], (int64_t)56, (int64_t)-1,
+                             OrigSBufINoMatch);
+
+  // RWByteAddressBuffer 64-bit method form.
+  uint64_t OrigBABMatch, OrigBABNoMatch;
+  BABuf.InterlockedCompareExchange64(0, 0xFFFFFFFFFFFFFFFFull, (uint64_t)123,
+                                     OrigBABMatch);
+  BABuf.InterlockedCompareExchange64(8, (uint64_t)45, (uint64_t)0,
+                                     OrigBABNoMatch);
+
+  OutOrig[GTID.x] = (OrigSBufU == 0x100000007ull &&
+                     (OrigSBufIMatch == 1000 || OrigSBufIMatch == -63) &&
+                     OrigSBufINoMatch == 55 &&
+                     (OrigBABMatch == 0xFFFFFFFFFFFFFFFFull ||
+                      OrigBABMatch == 123) &&
+                     OrigBABNoMatch == 44) ? 1u : 0u;
+
+  // Stepped counters on the structured buffer and the byte address buffer,
+  // checked for exactly one success per thread and monotonic non-decrease.
+  uint64_t CompareValue = (uint64_t)GTID.x;
+  uint64_t NewValue = (uint64_t)GTID.x + 1;
+  uint64_t PrevS = 0, PrevB = 0;
+  uint MonoS = 1u, MonoB = 1u;
+  uint WinsS = 0u, WinsB = 0u;
+  for (uint I = 0; I < 256; ++I) {
+    uint64_t OrigS, OrigB;
+    InterlockedCompareExchange(SBufU[0], CompareValue, NewValue, OrigS);
+    BABuf.InterlockedCompareExchange64(16, CompareValue, NewValue, OrigB);
+    if (OrigS == CompareValue)
+      ++WinsS;
+    if (OrigB == CompareValue)
+      ++WinsB;
+    DeviceMemoryBarrierWithGroupSync();
+    uint64_t CurS = SBufU[0];
+    uint64_t CurB = BABuf.Load<uint64_t>(16);
+    if (CurS < PrevS)
+      MonoS = 0u;
+    if (CurB < PrevB)
+      MonoB = 0u;
+    PrevS = CurS;
+    PrevB = CurB;
+  }
+  OutMonoSBufU[GTID.x] = MonoS;
+  OutMonoBABuf[GTID.x] = MonoB;
+  OutWins[GTID.x] = (WinsS == 1u && WinsB == 1u) ? 1u : 0u;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: SBufU
+    Format: UInt64
+    Stride: 8
+    FillSize: 16
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufU
+    Format: UInt64
+    Stride: 8
+    Data: [ 256, 4294967303 ]
+  - Name: SBufI
+    Format: Int64
+    Stride: 8
+    FillSize: 16
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedSBufI
+    Format: Int64
+    Stride: 8
+    Data: [ -63, 55 ]
+  - Name: BABuf
+    Format: UInt64
+    Stride: 8
+    FillSize: 24
+    FillValue: 137  # trash non-zero initialization data
+  - Name: ExpectedBABuf
+    Format: UInt64
+    Stride: 8
+    Data: [ 123, 44, 256 ]
+  - Name: OutMonoSBufU
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedMono
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutMonoBABuf
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutWins
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+Results:
+  - Result: TestSBufU
+    Rule: BufferExact
+    Actual: SBufU
+    Expected: ExpectedSBufU
+  - Result: TestSBufI
+    Rule: BufferExact
+    Actual: SBufI
+    Expected: ExpectedSBufI
+  - Result: TestBABuf
+    Rule: BufferExact
+    Actual: BABuf
+    Expected: ExpectedBABuf
+  - Result: TestMonoSBufU
+    Rule: BufferExact
+    Actual: OutMonoSBufU
+    Expected: ExpectedMono
+  - Result: TestMonoBABuf
+    Rule: BufferExact
+    Actual: OutMonoBABuf
+    Expected: ExpectedMono
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedMono
+  - Result: TestWins
+    Rule: BufferExact
+    Actual: OutWins
+    Expected: ExpectedMono
+DescriptorSets:
+  - Resources:
+    - Name: SBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: SBufI
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BABuf
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutMonoSBufU
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutMonoBABuf
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutWins
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99130
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
+
+# Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8451
+# XFAIL: Vulkan && DXC
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1418
+# UNSUPPORTED: WARP && DXC
+
+# REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -4,6 +4,7 @@
 
 import argparse
 import bisect
+import datetime as dt
 import json
 import pathlib
 import re
@@ -151,22 +152,7 @@ def analyze_current_status(workflows, regressions_only=False):
     omitted.
     """
     if not workflows:
-        for path in pathlib.Path(".github/workflows").glob("*.yaml"):
-            if any(
-                (
-                    path.name.startswith("build-"),
-                    path.name.startswith("pr-"),
-                    path.name.startswith("validate-"),
-                )
-            ):
-                continue
-            workflows.append(path.name)
-        workflows.sort(key=workflow_status_key)
-    if not workflows:
-        raise CIResultsError(
-            f"No workflows found in .github/workflows/. "
-            f"Please run from the top level directory of the repository."
-        )
+        workflows = get_readme_workflows()
 
     printer = ResultPrinter()
 
@@ -235,50 +221,26 @@ def get_project_for_workflow(workflow):
     raise CIResultsError(f"Workflow {workflow} is neither clang nor dxc")
 
 
-def workflow_status_key(workflow):
-    parts = workflow[: -len(".yaml")].split("-")
-    if not parts:
-        return None
-    parts.reverse()
-
-    host = parts.pop()
-    if host == "macos":
-        target = "metal"
-    else:
-        target = parts.pop()
-    compiler = parts.pop()
-    driver = parts.pop()
-
-    # We label warp warp-d3d12 and the variant warp-preview-d3d12.
-    if driver == "warp" and parts[-1] == "d3d12":
-        parts.pop()
-
-    variant = True if parts else False
-
-    # Match the order that we print the results in the offload test suite
-    # README for easier correlation. Unfortunately I don't see an obvious way
-    # to automate this.
-    tier_list = [
-        ("d3d12", "intel"),
-        ("d3d12", "nvidia"),
-        ("warp", "amd"),
-        ("warp", "qc"),
-        ("vk", "intel"),
-        ("mtl", "metal"),
-        ("d3d12", "amd"),
-        ("d3d12", "qc"),
-        ("vk", "amd"),
-        ("vk", "nvidia"),
-        ("vk", "qc"),
-    ]
+def get_readme_workflows():
+    workflows = []
+    # Look for [![Name](https://.../badge.svg)](https://.../workflow.yaml)
+    workflow_re = re.compile(
+        r"\[!\[.*?\].*?\]\(https://.*?/actions/workflows/(.*?.yaml)\)"
+    )
     try:
-        tier = tier_list.index((driver, target))
-    except ValueError:
-        tier = len(tier_list)
-
-    compiler_key = 0 if compiler == "dxc" else 1
-
-    return (variant, tier, driver, target, host, compiler_key)
+        with open("README.md") as fd:
+            for workflow in workflow_re.finditer(fd.read()):
+                workflows.append(workflow.group(1))
+    except FileNotFoundError:
+        raise CIResultsError(
+            f"Could not find README.md - "
+            f"Please run from the top level directory of the repository."
+        )
+    if not workflows:
+        raise CIResultsError(
+            f"No workflows matched in README.md - Has the format changed?"
+        )
+    return workflows
 
 
 def find_failure_range(
@@ -411,6 +373,22 @@ def runid_index(runids, runid):
 
 
 def get_last_run(workflow, status="completed"):
+    last_run = get_last_run_internal(workflow, status)
+    if not last_run:
+        return None
+
+    for _ in range(5):
+        # The gh cli seems to sometimes just return results from a month ago.
+        # Work around it by trying again a few times if the results seem stale.
+        ran_at = parse_github_timestamp(last_run["createdAt"])
+        if dt.datetime.now(ran_at.tzinfo) - ran_at < dt.timedelta(days=1):
+            break
+        last_run = get_last_run_internal(workflow, status)
+
+    return last_run
+
+
+def get_last_run_internal(workflow, status):
     output = subprocess.run(
         [
             "gh",
@@ -436,6 +414,22 @@ def get_last_run(workflow, status="completed"):
 
 
 def get_recent_runs(workflow, *, run_limit):
+    recent_runs = get_recent_runs_internal(workflow, run_limit=run_limit)
+    if not recent_runs:
+        return None
+
+    for _ in range(5):
+        # The gh cli seems to sometimes just return results from a month ago.
+        # Work around it by trying again a few times if the results seem stale.
+        ran_at = parse_github_timestamp(recent_runs[0]["createdAt"])
+        if dt.datetime.now(ran_at.tzinfo) - ran_at < dt.timedelta(days=1):
+            break
+        recent_runs = get_recent_runs_internal(workflow, run_limit=run_limit)
+
+    return recent_runs
+
+
+def get_recent_runs_internal(workflow, *, run_limit):
     output = subprocess.run(
         [
             "gh",
@@ -458,6 +452,10 @@ def get_recent_runs(workflow, *, run_limit):
     if not output:
         return None
     return json.loads(output)
+
+
+def parse_github_timestamp(timestamp):
+    return dt.datetime.strptime(timestamp, "%Y-%m-%dT%H:%M:%S%z")
 
 
 def get_log_proc(databaseId):

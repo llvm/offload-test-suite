@@ -21,6 +21,10 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
     return BufferUsage::ConstantBuffer;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -56,6 +60,10 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
     return BufferShaderAccessType::Raw;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
+  case ResourceKind::Texture2DArray:
+  case ResourceKind::RWTexture2DArray:
+  case ResourceKind::TextureCube:
+  case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
   case ResourceKind::SampledTexture2D:
   case ResourceKind::AccelerationStructure:
@@ -120,22 +128,9 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
       const void *DataPtr = *DataPtrOrErr;
 
       if (R.first->isTexture()) {
-        const TextureCreateDesc &Desc = RSIt->Tex->getDesc();
-        const uint32_t SrcStrideInBytes =
-            Dev.getTextureUploadRowStrideInBytes(Desc);
-        const uint32_t DstStrideInBytes =
-            Desc.Width * getFormatSizeInBytes(Desc.Fmt);
-        assert(DstStrideInBytes <= SrcStrideInBytes &&
-               "Destination should not have padding and thus should be <= "
-               "than SrcStride where we do expect potential padding.");
-        uint8_t *Dst = (uint8_t *)DataIt->get();
-        const uint8_t *Src = (const uint8_t *)DataPtr;
-
-        for (uint32_t Y = 0; Y < Desc.Height; ++Y) {
-          memcpy(Dst, Src, DstStrideInBytes);
-          Dst += DstStrideInBytes;
-          Src += SrcStrideInBytes;
-        }
+        const TextureUploadLayout Layout =
+            Dev.getTextureUploadLayout(RSIt->Tex->getDesc());
+        copyTextureLayoutToPacked(DataIt->get(), DataPtr, Layout);
       } else {
         memcpy(DataIt->get(), DataPtr, R.first->size());
       }
@@ -266,12 +261,15 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       CreateDesc.Backing =
           R.IsReserved ? MemoryBacking::Sparse : MemoryBacking::Automatic;
       CreateDesc.Usage = TextureUsage::Sampled;
-      if (R.Kind == ResourceKind::RWTexture2D)
+      if (R.isReadWrite())
         CreateDesc.Usage |= TextureUsage::Storage;
       CreateDesc.Fmt = *FormatOrErr;
       CreateDesc.Width = R.BufferPtr->OutputProps.Width;
       CreateDesc.Height = R.BufferPtr->OutputProps.Height;
       CreateDesc.MipLevels = R.BufferPtr->OutputProps.MipLevels;
+      CreateDesc.Dim = R.getTextureDimension();
+      CreateDesc.ArraySlices = R.getTextureArraySlices();
+      CreateDesc.IsArray = R.isTextureArray();
 
       for (auto &Data : R.BufferPtr->Data) {
         std::unique_ptr<offloadtest::Buffer> UploadBuffer;

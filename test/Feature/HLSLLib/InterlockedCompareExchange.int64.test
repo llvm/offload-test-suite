@@ -1,0 +1,246 @@
+#--- source.hlsl
+
+// The 64-bit version of InterlockedCompareExchange.32.test; see that file
+// for a description of the checks. Additionally covers compares that differ
+// from the destination only in the upper 32 bits, which must not store.
+
+RWStructuredBuffer<uint> OutMono : register(u0);
+RWStructuredBuffer<uint> OutSlots : register(u1);
+RWStructuredBuffer<uint> OutOrig : register(u2);
+RWStructuredBuffer<uint> OutWins : register(u3);
+RWStructuredBuffer<int64_t> OutFinal : register(u4);
+
+groupshared uint64_t Counter;        // stepped 0 to 256, one thread per step
+groupshared int64_t  SlotsInt[256];  // per-thread slots, signed
+groupshared uint64_t SlotsUInt[256]; // per-thread slots, unsigned
+groupshared int64_t  MatchInt;       // contended, compare matches
+groupshared int64_t  NoMatchInt;     // contended, compare never matches
+groupshared uint64_t MatchUInt;      // contended, compare matches
+groupshared uint64_t NoMatchUInt;    // contended, compare never matches
+groupshared uint64_t LargeCounter;   // value exercising the upper 32 bits
+groupshared uint64_t HighBits;       // compare differing only in high bits
+groupshared uint     WinCount;       // threads that observed the compare value
+
+[numthreads(256, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  SlotsInt[GTID.x] = (int64_t)GTID.x - 128;
+  SlotsUInt[GTID.x] = 0x100000000ull + (uint64_t)GTID.x;
+  if (GTID.x == 0) {
+    Counter = 0;
+    MatchInt = -5;
+    NoMatchInt = 77;
+    MatchUInt = 0xFFFFFFFFFFFFFFFFull;
+    NoMatchUInt = 5;
+    LargeCounter = 0x100000000ull;  // 2^32
+    HighBits = 0x100000007ull;      // 2^32 + 7
+    WinCount = 0u;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  // Per-thread private slots, signed. Both calls report the initial value.
+  int64_t OrigIntNoStore, OrigIntStore;
+  InterlockedCompareExchange(SlotsInt[GTID.x], (int64_t)GTID.x - 127, 0,
+                             OrigIntNoStore);
+  InterlockedCompareExchange(SlotsInt[GTID.x], (int64_t)GTID.x - 128,
+                             (int64_t)GTID.x + 1000, OrigIntStore);
+
+  // Per-thread private slots, unsigned. The slot holds 2^32 + GTID.x, so the
+  // first compare matches the low 32 bits only and must not store.
+  uint64_t OrigUIntNoStore, OrigUIntStore;
+  InterlockedCompareExchange(SlotsUInt[GTID.x], (uint64_t)GTID.x, 0,
+                             OrigUIntNoStore);
+  InterlockedCompareExchange(SlotsUInt[GTID.x],
+                             0x100000000ull + (uint64_t)GTID.x,
+                             (uint64_t)GTID.x + 2000, OrigUIntStore);
+
+  OutSlots[GTID.x] = (OrigIntNoStore == (int64_t)GTID.x - 128 &&
+                      OrigIntStore == (int64_t)GTID.x - 128 &&
+                      SlotsInt[GTID.x] == (int64_t)GTID.x + 1000 &&
+                      OrigUIntNoStore == 0x100000000ull + (uint64_t)GTID.x &&
+                      OrigUIntStore == 0x100000000ull + (uint64_t)GTID.x &&
+                      SlotsUInt[GTID.x] == (uint64_t)GTID.x + 2000) ? 1u : 0u;
+
+  // Contended locations.
+  int64_t OrigMatchInt, OrigNoMatchInt;
+  uint64_t OrigMatchUInt, OrigNoMatchUInt, OrigLarge, OrigHigh;
+  InterlockedCompareExchange(MatchInt, -5, 42, OrigMatchInt);
+  InterlockedCompareExchange(NoMatchInt, 78, -1, OrigNoMatchInt);
+  InterlockedCompareExchange(MatchUInt, 0xFFFFFFFFFFFFFFFFull, 1234,
+                             OrigMatchUInt);
+  InterlockedCompareExchange(NoMatchUInt, 6, 999, OrigNoMatchUInt);
+  // Compare and stored value exercise the upper 32 bits.
+  InterlockedCompareExchange(LargeCounter, 0x100000000ull, 0x1000000000ull,
+                             OrigLarge);
+  // The compare matches the low 32 bits only, so it must not store.
+  InterlockedCompareExchange(HighBits, 7, 0, OrigHigh);
+
+  // Exactly one thread may observe the pre-existing value of MatchInt.
+  if (OrigMatchInt == -5)
+    InterlockedAdd(WinCount, 1u);
+
+  OutOrig[GTID.x] = ((OrigMatchInt == -5 || OrigMatchInt == 42) &&
+                     OrigNoMatchInt == 77 &&
+                     (OrigMatchUInt == 0xFFFFFFFFFFFFFFFFull ||
+                      OrigMatchUInt == 1234) &&
+                     OrigNoMatchUInt == 5 &&
+                     (OrigLarge == 0x100000000ull ||
+                      OrigLarge == 0x1000000000ull) &&
+                     OrigHigh == 0x100000007ull) ? 1u : 0u;
+
+  // Counter, checked for exactly one success per thread and for monotonic
+  // non-decrease.
+  uint64_t CompareValue = (uint64_t)GTID.x;
+  uint64_t NewValue = (uint64_t)GTID.x + 1;
+  uint64_t Prev = 0;
+  uint Mono = 1u;
+  uint Wins = 0u;
+  for (uint I = 0; I < 256; ++I) {
+    uint64_t Orig;
+    InterlockedCompareExchange(Counter, CompareValue, NewValue, Orig);
+    if (Orig == CompareValue)
+      ++Wins;
+    GroupMemoryBarrierWithGroupSync();
+    uint64_t Cur = Counter;
+    if (Cur < Prev)
+      Mono = 0u;
+    Prev = Cur;
+  }
+  OutMono[GTID.x] = Mono;
+  OutWins[GTID.x] = Wins;
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GTID.x == 0) {
+    OutFinal[0] = (int64_t)Counter;      // 256
+    OutFinal[1] = MatchInt;              // 42
+    OutFinal[2] = NoMatchInt;            // 77
+    OutFinal[3] = (int64_t)MatchUInt;    // 1234
+    OutFinal[4] = (int64_t)NoMatchUInt;  // 5
+    OutFinal[5] = (int64_t)LargeCounter; // 2^36 = 68719476736
+    OutFinal[6] = (int64_t)HighBits;     // 2^32 + 7 = 4294967303
+    OutFinal[7] = (int64_t)WinCount;     // 1
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: OutMono
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: ExpectedOnes
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]
+  - Name: OutSlots
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutOrig
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutWins
+    Format: UInt32
+    Stride: 4
+    FillSize: 1024
+  - Name: OutFinal
+    Format: Int64
+    Stride: 8
+    FillSize: 64
+  - Name: ExpectedFinal
+    Format: Int64
+    Stride: 8
+    Data: [ 256, 42, 77, 1234, 5, 68719476736, 4294967303, 1 ]
+Results:
+  - Result: TestMono
+    Rule: BufferExact
+    Actual: OutMono
+    Expected: ExpectedOnes
+  - Result: TestSlots
+    Rule: BufferExact
+    Actual: OutSlots
+    Expected: ExpectedOnes
+  - Result: TestOrig
+    Rule: BufferExact
+    Actual: OutOrig
+    Expected: ExpectedOnes
+  - Result: TestWins
+    Rule: BufferExact
+    Actual: OutWins
+    Expected: ExpectedOnes
+  - Result: TestFinal
+    Rule: BufferExact
+    Actual: OutFinal
+    Expected: ExpectedFinal
+DescriptorSets:
+  - Resources:
+    - Name: OutMono
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutSlots
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutOrig
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: OutWins
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: OutFinal
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...
+#--- end
+
+# REQUIRES: Int64 && Int64GroupSharedAtomics && SM_6_6
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99130
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: DXC && Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

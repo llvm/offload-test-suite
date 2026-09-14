@@ -15,6 +15,20 @@ if (OFFLOADTEST_BUILT_STANDALONE)
 
   include(AddLLVM)
 
+  if (NOT LLVM_MAIN_SRC_DIR OR NOT EXISTS "${LLVM_MAIN_SRC_DIR}")
+    message(FATAL_ERROR "LLVM_MAIN_SRC_DIR is not set or invalid. Please set it to the root of the LLVM source tree.")
+  endif()
+
+  # HandleLLVMOptions caches LLVM_THIRD_PARTY_DIR against the top-level source
+  # directory, which is this project when standalone, so point it at LLVM's
+  # copy first.
+  set(LLVM_THIRD_PARTY_DIR "${LLVM_MAIN_SRC_DIR}/../third-party" CACHE STRING
+      "Directory containing third party software used by LLVM (e.g. googletest)")
+
+  # Apply the same compile settings that in-tree builds get,
+  # including deprecation opt-outs and assertions.
+  include(HandleLLVMOptions)
+
   find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION} REQUIRED
     COMPONENTS Interpreter)
 
@@ -36,10 +50,6 @@ if (OFFLOADTEST_BUILT_STANDALONE)
   include_directories(${LLVM_INCLUDE_DIRS})
   link_directories("${LLVM_LIBRARY_DIR}")
 
-  if (NOT LLVM_MAIN_SRC_DIR OR NOT EXISTS "${LLVM_MAIN_SRC_DIR}")
-    message(FATAL_ERROR "LLVM_MAIN_SRC_DIR is not set or invalid. Please set it to the root of the LLVM source tree.")
-  endif()
-
   # Seek installed Lit.
   find_program(LLVM_LIT
                 NAMES llvm-lit lit.py lit
@@ -53,9 +63,6 @@ if (OFFLOADTEST_BUILT_STANDALONE)
   endif()
   endif()
 
-  if (NOT LLVM_THIRD_PARTY_DIR)
-    set(LLVM_THIRD_PARTY_DIR "${LLVM_MAIN_SRC_DIR}/../third-party")
-  endif()
   if (NOT TARGET llvm_gtest)
       add_subdirectory(${LLVM_THIRD_PARTY_DIR}/unittest ${CMAKE_CURRENT_BINARY_DIR}/third-party/unittest)
   endif()
@@ -167,6 +174,7 @@ endif ()
 add_subdirectory(third-party/libpng)
 set_property(GLOBAL APPEND PROPERTY LLVM_EXPORTS_BUILDTREE_ONLY png_static)
 
+include(AgilitySDK)
 include(Warp)
 
 # This must be after the third-party targets are generated so that we only apply
@@ -195,6 +203,7 @@ if (OFFLOADTEST_USE_CLANG_TIDY)
   endif()
   # Only lint headers that live inside this project's source tree.
   set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS}
+    --config-file=${CMAKE_CURRENT_SOURCE_DIR}/.clang-tidy
     --header-filter=^${CMAKE_CURRENT_SOURCE_DIR}/.*)
   if (OFFLOADTEST_CLANG_TIDY_APPLY_FIX)
     set(CLANG_TIDY_ARGS ${CLANG_TIDY_ARGS} --fix)

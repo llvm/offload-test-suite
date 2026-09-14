@@ -1,0 +1,104 @@
+#--- source.hlsl
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(0, 1)]] SamplerState Samp : register(s0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture2DArray::SampleGrad takes a float3 location but only float2
+  // gradients: the array slice has no derivative, so the LOD is computed from
+  // the in-slice coordinates alone and the slice is selected exactly.
+  float3 uv0 = float3(0.5, 0.5, 0);
+  float3 uv1 = float3(0.5, 0.5, 1);
+
+  // Tiny gradients -> magnification -> mip 0.
+  float2 DDXMag = float2(0.0001, 0.0);
+  float2 DDYMag = float2(0.0, 0.0001);
+  // Large gradients -> minification -> the coarsest mip.
+  float2 DDXMin = float2(2.0, 0.0);
+  float2 DDYMin = float2(0.0, 2.0);
+
+  // Slice 0 mip 0 is all Red, its mip 1 is Yellow.
+  Out[0] = Tex.SampleGrad(Samp, uv0, DDXMag, DDYMag); // Red
+  Out[1] = Tex.SampleGrad(Samp, uv0, DDXMin, DDYMin); // Yellow
+
+  // Slice 1 mip 0 is all Blue, its mip 1 is Green. Each slice carries its own
+  // mip chain, so minification must not reach across into slice 0's mips.
+  Out[2] = Tex.SampleGrad(Samp, uv1, DDXMag, DDYMag); // Blue
+  Out[3] = Tex.SampleGrad(Samp, uv1, DDXMin, DDYMin); // Green
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # 2x2 with 2 mips across 2 slices, slice-major.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+    Data: [ # --- Slice 0, Mip 0 (2x2, all Red) ---
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            # --- Slice 0, Mip 1 (1x1, Yellow) ---
+            1.0, 1.0, 0.0, 1.0,
+
+            # --- Slice 1, Mip 0 (2x2, all Blue) ---
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            # --- Slice 1, Mip 1 (1x1, Green) ---
+            0.0, 1.0, 0.0, 1.0 ]
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4 * sizeof(float4)
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # [0] slice 0, mip 0 Red
+            1.0, 1.0, 0.0, 1.0,   # [1] slice 0, mip 1 Yellow
+            0.0, 0.0, 1.0, 1.0,   # [2] slice 1, mip 0 Blue
+            0.0, 1.0, 0.0, 1.0 ]  # [3] slice 1, mip 1 Green
+
+Samplers:
+  - Name: Samp
+    MinFilter: Linear
+    MagFilter: Linear
+    Address: Clamp
+
+Results:
+  - Result: ArraySampleGradTest
+    Rule: BufferFloatEpsilon
+    Actual: Out
+    Expected: Expected
+    Epsilon: 0.001
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2DArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Out
+      Kind: RWBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+  - Resources:
+    - Name: Samp
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
