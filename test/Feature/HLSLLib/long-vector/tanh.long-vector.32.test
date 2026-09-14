@@ -30,7 +30,8 @@ Buffers:
 Results:
   - Result: Test
     Rule: BufferFloatULP
-    ULPT: 2
+    ULPT: 114 # Metal has an ULP range of 2, NV drivers need this to be very large
+    ZeroTolerance: 0.001
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
