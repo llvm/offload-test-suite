@@ -1,17 +1,15 @@
 #--- source.hlsl
 
-StructuredBuffer<uint16_t> In : register(t0);
+StructuredBuffer<int16_t4> In : register(t0);
 RWStructuredBuffer<uint> Out : register(u1);
 
 [numthreads(1, 1, 1)]
 void main() {
-  int16_t4 unpackedVals;
-  unpackedVals.x = In[0];
-  unpackedVals.y = In[1];
-  unpackedVals.z = In[2];
-  unpackedVals.w = In[3];
-  uint8_t4_packed packedVals = pack_clamp_u8(unpackedVals);
-  Out[0] = packedVals;
+  int16_t4 UnpackedVals = In[0];
+  uint8_t4_packed PackedVals = pack_clamp_u8(UnpackedVals);
+  Out[0] = PackedVals;
+  Out[1] = pack_clamp_u8(In[1]);
+  Out[2] = pack_clamp_u8(int16_t4(3, 5, 7, 11));
 }
 
 //--- pipeline.yaml
@@ -24,15 +22,15 @@ Buffers:
   - Name: In
     Format: Int16
     Stride: 2
-    Data: [ -1, 0, 255, 256 ]
+    Data: [ -1, 0, 255, 256, 0, 1, 16, 42 ]
   - Name: Out
     Format: UInt32
     Stride: 4
-    FillSize: 4
+    FillSize: 12
   - Name: ExpectedOut
     Format: UInt32
     Stride: 4
-    Data: [ 4294901760 ] # Values clamped to 0 0 255 255
+    Data: [ 4294901760, 705691904, 185009411 ] # First values clamped to 0 0 255 255, others untouched
 Results:
   - Result: Test1
     Rule: BufferExact
@@ -57,9 +55,10 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99230
+# Unimplementedhttps://github.com/llvm/llvm-project/issues/99230
 # XFAIL: Clang
 
+# REQUIRES: Int16
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -enable-16bit-types -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
