@@ -7,7 +7,7 @@ void main() {
   float3x2 R32 = log10(float3x2(In[0].xy, In[0].zw, In[1].xy));
   float2x4 R24 = log10(float2x4(In[1], In[2]));
   float3x1 R31 = log10(float3x1(In[4].xyz));
-  float4x4 R44 = log10(float4x4(In[5], In[6], In[7], In[8]));
+  float4x4 R44 = log10(float4x4(In[0], In[1], In[2], In[3]));
   float2x2 R22 = log10(float2x2(1.0, 10.0, 100.0, 0.1));
 
   Out[0] = float4(R32[0], R32[1]);
@@ -36,11 +36,7 @@ Buffers:
             10.0, 100.0, 1000.0, 3.16228,
             31.6228, 1.0, 10.0, 0.1,
             0.01, 3.16228, 1.0, 0.1,
-            1.0, 10.0, 100.0, 0.1,
-            0.001, 0.01, 0.1, 1.0,
-            10.0, 100.0, 1000.0, 3.16228,
-            31.6228, 1.0, 10.0, 0.1,
-            0.01, 3.16228, 1.0, 0.1 ]
+            1.0, 10.0, 100.0, 0.0 ]
   - Name: Out
     Format: Float32
     Stride: 16

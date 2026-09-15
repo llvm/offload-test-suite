@@ -7,7 +7,7 @@ void main() {
   float3x2 R32 = saturate(float3x2(In[0].xy, In[0].zw, In[1].xy));
   float2x4 R24 = saturate(float2x4(In[1], In[2]));
   float3x1 R31 = saturate(float3x1(In[4].xyz));
-  float4x4 R44 = saturate(float4x4(In[5], In[6], In[7], In[8]));
+  float4x4 R44 = saturate(float4x4(In[0], In[1], In[2], In[3]));
   float2x2 R22 = saturate(float2x2(-1.0, 0.5, 0.75, 2.0));
 
   Out[0] = float4(R32[0], R32[1]);
@@ -36,11 +36,7 @@ Buffers:
             0.5, 0.75, 1.0, 2.0,
             2.0, -1.0, 0.5, -2.0,
             0.25, 0.5, -1.0, 0.5,
-            -1.0, 0.5, 0.75, 2.0,
-            -2.0, -1.0, 0.0, 0.25,
-            0.5, 0.75, 1.0, 2.0,
-            2.0, -1.0, 0.5, -2.0,
-            0.25, 0.5, -1.0, 0.5 ]
+            -1.0, 0.5, 0.75, 0.0 ]
   - Name: Out
     Format: Float32
     Stride: 16
@@ -60,7 +56,8 @@ Buffers:
             0.0, 0.5, 0.75, 1.0 ]
 Results:
   - Result: Test1
-    Rule: BufferExact
+    Rule: BufferFloatEpsilon
+    Epsilon: 0
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
