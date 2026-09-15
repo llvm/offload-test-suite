@@ -10,6 +10,7 @@
 #define OFFLOADTEST_API_ENCODER_H
 
 #include "API/API.h"
+#include "API/Viewport.h"
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/PointerUnion.h"
@@ -129,23 +130,15 @@ public:
                                    uint32_t Depth) = 0;
 };
 
-struct Viewport {
-  float X = 0.0f, Y = 0.0f;
-  float Width = 0.0f, Height = 0.0f;
-  float MinDepth = 0.0f, MaxDepth = 1.0f;
-};
-
-struct ScissorRect {
-  int32_t X = 0, Y = 0;
-  uint32_t Width = 0, Height = 0;
-};
-
 class RenderEncoder : public CommandEncoder {
 public:
   using CommandEncoder::CommandEncoder;
 
-  virtual void setViewport(const Viewport &VP) = 0;
-  virtual void setScissor(const ScissorRect &Rect) = 0;
+  /// Bind viewports to consecutive slots starting at zero.
+  virtual void setViewports(llvm::ArrayRef<Viewport> Viewports) = 0;
+
+  /// Bind one scissor rectangle for each viewport.
+  virtual void setScissors(llvm::ArrayRef<ScissorRect> Scissors) = 0;
 
   virtual void setVertexBuffer(uint32_t Slot, Buffer *VB, size_t Offset,
                                uint32_t Stride) = 0;

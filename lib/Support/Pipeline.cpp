@@ -106,6 +106,28 @@ uint32_t PushConstantBlock::size() const {
   return Size;
 }
 
+llvm::SmallVector<Viewport> IOBindings::getViewports() const {
+  if (!Viewports.empty())
+    return Viewports;
+
+  assert(RTargetBufferPtr && "Raster pipeline has no render target");
+  Viewport VP;
+  VP.Width = static_cast<float>(RTargetBufferPtr->OutputProps.Width);
+  VP.Height = static_cast<float>(RTargetBufferPtr->OutputProps.Height);
+  return {VP};
+}
+
+llvm::SmallVector<ScissorRect> IOBindings::getScissors() const {
+  if (!Scissors.empty())
+    return Scissors;
+
+  assert(RTargetBufferPtr && "Raster pipeline has no render target");
+  ScissorRect Rect;
+  Rect.Width = static_cast<uint32_t>(RTargetBufferPtr->OutputProps.Width);
+  Rect.Height = static_cast<uint32_t>(RTargetBufferPtr->OutputProps.Height);
+  return {Rect};
+}
+
 namespace llvm {
 namespace yaml {
 
@@ -569,6 +591,55 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
   I.mapOptional("PatchControlPoints", B.PatchControlPoints);
+  I.mapOptional("Viewports", B.Viewports);
+  I.mapOptional("Scissors", B.Scissors);
+
+  const size_t MaxVPs = offloadtest::MaxViewports;
+  if (B.Viewports.size() > MaxVPs)
+    I.setError(Twine("Bindings: at most ") + std::to_string(MaxVPs) +
+               " Viewports may be specified, found " +
+               std::to_string(B.Viewports.size()) + ".");
+  if (B.Scissors.size() > MaxVPs)
+    I.setError(Twine("Bindings: at most ") + std::to_string(MaxVPs) +
+               " Scissors may be specified, found " +
+               std::to_string(B.Scissors.size()) + ".");
+  if (B.Viewports.empty() != B.Scissors.empty())
+    I.setError(
+        "Bindings: 'Viewports' and 'Scissors' must be specified together.");
+  else if (B.Viewports.size() != B.Scissors.size())
+    I.setError(Twine("Bindings: 'Scissors' has ") +
+               std::to_string(B.Scissors.size()) + " entries but there are " +
+               std::to_string(B.Viewports.size()) +
+               " viewports; they must match.");
+}
+
+void MappingTraits<offloadtest::Viewport>::mapping(IO &I,
+                                                   offloadtest::Viewport &V) {
+  I.mapOptional("X", V.X, 0.0f);
+  I.mapOptional("Y", V.Y, 0.0f);
+  I.mapRequired("Width", V.Width);
+  I.mapRequired("Height", V.Height);
+  I.mapOptional("MinDepth", V.MinDepth, 0.0f);
+  I.mapOptional("MaxDepth", V.MaxDepth, 1.0f);
+
+  if (V.Width <= 0 || V.Height <= 0)
+    I.setError("Viewport width and height must be positive.");
+  if (V.MinDepth < 0 || V.MaxDepth > 1 || V.MinDepth > V.MaxDepth)
+    I.setError(
+        "Viewport depth range must satisfy 0 <= MinDepth <= MaxDepth <= 1.");
+}
+
+void MappingTraits<offloadtest::ScissorRect>::mapping(
+    IO &I, offloadtest::ScissorRect &S) {
+  I.mapOptional("X", S.X, 0);
+  I.mapOptional("Y", S.Y, 0);
+  I.mapRequired("Width", S.Width);
+  I.mapRequired("Height", S.Height);
+
+  if (S.X < 0 || S.Y < 0)
+    I.setError("Scissor X and Y must be non-negative.");
+  if (S.Width == 0 || S.Height == 0)
+    I.setError("Scissor width and height must be positive.");
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(

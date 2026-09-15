@@ -1455,28 +1455,32 @@ public:
     CB.insertDebugSignpost(Label);
   }
 
-  void setViewport(const offloadtest::Viewport &VP) override {
-    // Negative viewport height (with Y origin at the bottom) flips clip->
-    // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
-    // triangle is front-facing on every backend.
-    VkViewport VKVP = {};
-    VKVP.x = VP.X;
-    VKVP.y = VP.Y + VP.Height;
-    VKVP.width = VP.Width;
-    VKVP.height = -VP.Height;
-    VKVP.minDepth = VP.MinDepth;
-    VKVP.maxDepth = VP.MaxDepth;
-    vkCmdSetViewport(CB.CmdBuffer, 0, 1, &VKVP);
+  void setViewports(llvm::ArrayRef<offloadtest::Viewport> VPs) override {
+    assert(!VPs.empty() && "At least one viewport is required.");
+    assert(VPs.size() <= offloadtest::MaxViewports &&
+           "Viewport count exceeds the guaranteed Vulkan maxViewports.");
+    llvm::SmallVector<VkViewport, offloadtest::MaxViewports> VKVPs;
+    VKVPs.reserve(VPs.size());
+    for (const offloadtest::Viewport &VP : VPs) {
+      // Flip framebuffer Y to match D3D12 and Metal clip-space winding.
+      VKVPs.push_back({VP.X, VP.Y + VP.Height, VP.Width, -VP.Height,
+                       VP.MinDepth, VP.MaxDepth});
+    }
+    vkCmdSetViewport(CB.CmdBuffer, 0, static_cast<uint32_t>(VKVPs.size()),
+                     VKVPs.data());
     ViewportSet = true;
   }
 
-  void setScissor(const offloadtest::ScissorRect &Rect) override {
-    VkRect2D VKRect = {};
-    VKRect.offset.x = Rect.X;
-    VKRect.offset.y = Rect.Y;
-    VKRect.extent.width = Rect.Width;
-    VKRect.extent.height = Rect.Height;
-    vkCmdSetScissor(CB.CmdBuffer, 0, 1, &VKRect);
+  void setScissors(llvm::ArrayRef<offloadtest::ScissorRect> Rects) override {
+    assert(!Rects.empty() && "At least one scissor rectangle is required.");
+    assert(Rects.size() <= offloadtest::MaxViewports &&
+           "Scissor count exceeds the guaranteed Vulkan maxViewports.");
+    llvm::SmallVector<VkRect2D, offloadtest::MaxViewports> VKRects;
+    VKRects.reserve(Rects.size());
+    for (const offloadtest::ScissorRect &Rect : Rects)
+      VKRects.push_back({{Rect.X, Rect.Y}, {Rect.Width, Rect.Height}});
+    vkCmdSetScissor(CB.CmdBuffer, 0, static_cast<uint32_t>(VKRects.size()),
+                    VKRects.data());
     ScissorSet = true;
   }
 
@@ -2400,6 +2404,9 @@ public:
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) override {
+    assert(Desc.ViewportCount > 0 &&
+           Desc.ViewportCount <= offloadtest::MaxViewports);
+
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = Desc.PS;
     const std::optional<ShaderContainer> &HS = Desc.HS;
@@ -2627,8 +2634,8 @@ public:
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    ViewportCI.viewportCount = 1;
-    ViewportCI.scissorCount = 1;
+    ViewportCI.viewportCount = Desc.ViewportCount;
+    ViewportCI.scissorCount = Desc.ViewportCount;
 
     const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
                                         VK_DYNAMIC_STATE_SCISSOR};
@@ -2705,6 +2712,8 @@ public:
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
+    assert(Desc.ViewportCount > 0 &&
+           Desc.ViewportCount <= offloadtest::MaxViewports);
 
     VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
     llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> ShaderStages;
@@ -2821,8 +2830,8 @@ public:
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    ViewportCI.viewportCount = 1;
-    ViewportCI.scissorCount = 1;
+    ViewportCI.viewportCount = Desc.ViewportCount;
+    ViewportCI.scissorCount = Desc.ViewportCount;
 
     const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
                                         VK_DYNAMIC_STATE_SCISSOR};
@@ -4662,17 +4671,8 @@ public:
         return EncOrErr.takeError();
       auto &Encoder = *EncOrErr.get();
 
-      Viewport VP;
-      VP.Width =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
-      VP.Height =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Encoder.setViewport(VP);
-
-      ScissorRect Scissor;
-      Scissor.Width = static_cast<uint32_t>(VP.Width);
-      Scissor.Height = static_cast<uint32_t>(VP.Height);
-      Encoder.setScissor(Scissor);
+      Encoder.setViewports(P.Bindings.getViewports());
+      Encoder.setScissors(P.Bindings.getScissors());
 
       if (P.isTraditionalRaster()) {
         if (IS.VB)
@@ -4954,6 +4954,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -4991,6 +4992,7 @@ public:
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;

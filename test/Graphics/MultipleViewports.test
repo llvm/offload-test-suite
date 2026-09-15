@@ -1,0 +1,134 @@
+# Two full-screen quads select side-by-side viewports. The pixel shader records
+# the viewport index and transformed SV_POSITION for every covered pixel.
+
+#--- vertex.hlsl
+struct VSOutput {
+    float4 position : SV_POSITION;
+    uint viewport : SV_ViewportArrayIndex;
+    nointerpolation uint vpIndex : VPINDEX;
+};
+
+VSOutput main(uint vid : SV_VertexID) {
+    const float2 Corners[6] = {
+        float2(-1.0, -1.0), float2(-1.0,  1.0), float2( 1.0,  1.0),
+        float2( 1.0,  1.0), float2( 1.0, -1.0), float2(-1.0, -1.0),
+    };
+
+    const uint quad = vid / 6;
+
+    VSOutput o;
+    o.position = float4(Corners[vid % 6], 0.0, 1.0);
+    o.viewport = quad;
+    o.vpIndex = quad;
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+    nointerpolation uint vpIndex : VPINDEX;
+};
+
+struct Record {
+    float ViewportIndex;
+    float PosX;
+    float PosY;
+};
+
+RWStructuredBuffer<Record> Output : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    uint pixelX = (uint)input.position.x;
+
+    Record r;
+    r.ViewportIndex = input.vpIndex;
+    r.PosX = input.position.x;
+    r.PosY = input.position.y;
+    Output[pixelX] = r;
+
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 128 # 8x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 8
+      Depth: 1
+  - Name: ResultBuffer
+    Format: Float32
+    Stride: 12 # sizeof(Record): 3 floats
+    FillSize: 96 # 8 records * 12 bytes
+    FillValue: 0
+  - Name: ResultBuffer_Expected
+    Format: Float32
+    Stride: 12
+    # Records are ViewportIndex, PosX, PosY.
+    Data: [
+      0.0, 0.5, 0.5,
+      0.0, 1.5, 0.5,
+      0.0, 2.5, 0.5,
+      0.0, 3.5, 0.5,
+      1.0, 4.5, 0.5,
+      1.0, 5.5, 0.5,
+      1.0, 6.5, 0.5,
+      1.0, 7.5, 0.5,
+    ]
+Bindings:
+  RenderTarget: RenderTarget
+  Viewports:
+    - X: 0
+      Y: 0
+      Width: 4
+      Height: 1
+    - X: 4
+      Y: 0
+      Width: 4
+      Height: 1
+  Scissors:
+    - X: 0
+      Y: 0
+      Width: 4
+      Height: 1
+    - X: 4
+      Y: 0
+      Width: 4
+      Height: 1
+DescriptorSets:
+  - Resources:
+    - Name: ResultBuffer
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+DispatchParameters:
+  VertexCount: 12
+Results:
+  - Result: Viewports
+    Rule: BufferExact
+    Actual: ResultBuffer
+    Expected: ResultBuffer_Expected
+...
+#--- end
+
+# REQUIRES: multi-viewport
+
+# Not implemented: https://github.com/llvm/llvm-project/issues/136974
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
