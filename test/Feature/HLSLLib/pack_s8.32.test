@@ -19,7 +19,7 @@ Shaders:
 Buffers:
   - Name: In
     Format: Int32
-    Stride: 4
+    Stride: 16
     Data: [ -256, -127, 127, 128, -1, 0, 1, 42 ]
   - Name: Out
     Format: UInt32
