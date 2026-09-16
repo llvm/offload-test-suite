@@ -1,23 +1,19 @@
 #--- source.hlsl
 
-RWStructuredBuffer<half> HalfIn : register(u0);
-RWStructuredBuffer<bool> BoolOut : register(u1);
+RWStructuredBuffer<half> HalfLHSIn : register(u0);
+RWStructuredBuffer<half> HalfRHSIn : register(u1);
+RWStructuredBuffer<bool> BoolOut : register(u2);
 
 [numthreads(1, 1, 1)]
 void main() {
-  half4x3 HalfEQLHS = HalfIn[0], HalfEQRHS = HalfIn[1];
+  half4x3 HalfEQLHS = half4x3(HalfLHSIn[0], HalfLHSIn[1], HalfLHSIn[2], HalfLHSIn[3], HalfLHSIn[4], HalfLHSIn[5], HalfLHSIn[6], HalfLHSIn[7], HalfLHSIn[8], HalfLHSIn[9], HalfLHSIn[10], HalfLHSIn[11]);
+  half4x3 HalfEQRHS = half4x3(HalfRHSIn[0], HalfRHSIn[1], HalfRHSIn[2], HalfRHSIn[3], HalfRHSIn[4], HalfRHSIn[5], HalfRHSIn[6], HalfRHSIn[7], HalfRHSIn[8], HalfRHSIn[9], HalfRHSIn[10], HalfRHSIn[11]);
   bool4x3 HalfEQ = HalfEQLHS == HalfEQRHS;
 
+  uint Offset = 0;
   for (uint Row = 0; Row < 4; ++Row)
     for (uint Col = 0; Col < 3; ++Col)
-      BoolOut[Row * 3 + Col] = HalfEQ[Row][Col];
-
-  HalfEQRHS = HalfIn[2];
-  HalfEQ = HalfEQLHS == HalfEQRHS;
-
-  for (uint Row = 0; Row < 4; ++Row)
-    for (uint Col = 0; Col < 3; ++Col)
-      BoolOut[12 + Row * 3 + Col] = HalfEQ[Row][Col];
+      BoolOut[Offset++] = HalfEQ[Row][Col];
 }
 
 #--- pipeline.yaml
@@ -27,17 +23,24 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  - Name: HalfIn
+  - Name: HalfLHSIn
     Format: Float16
-    Data: [ 0x4000, 0x4000, 0x4200 ]
-    #       2.0,    2.0,    3.0
+    Data: [ 0x3c00, 0x4000, 0x4200, 0x4400, 0x4500, 0x4600,
+            0x4700, 0x4800, 0x4880, 0x4900, 0x4980, 0x4a00 ]
+    #       1.0,    2.0,    3.0,    4.0,    5.0,    6.0,
+    #       7.0,    8.0,    9.0,    10.0,   11.0,   12.0
+  - Name: HalfRHSIn
+    Format: Float16
+    Data: [ 0x3c00, 0x4200, 0x4000, 0x4400, 0x4600, 0x4500,
+            0x4700, 0x4880, 0x4800, 0x4900, 0x4a00, 0x4980 ]
+    #       1.0,    3.0,    2.0,    4.0,    6.0,    5.0,
+    #       7.0,    9.0,    8.0,    10.0,   12.0,   11.0
   - Name: BoolOut
     Format: Int32
-    FillSize: 96
+    FillSize: 48
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
+    Data: [ 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact
@@ -45,20 +48,27 @@ Results:
     Expected: BoolExpected
 DescriptorSets:
   - Resources:
-    - Name: HalfIn
+    - Name: HalfLHSIn
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: BoolOut
+    - Name: HalfRHSIn
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
 ...
 #--- end
 

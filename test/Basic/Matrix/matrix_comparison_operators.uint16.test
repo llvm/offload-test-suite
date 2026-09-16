@@ -1,22 +1,18 @@
 #--- source.hlsl
 
-RWStructuredBuffer<uint16_t> Uint16In : register(u0);
-RWStructuredBuffer<bool> BoolOut : register(u1);
+RWStructuredBuffer<uint16_t> Uint16LHSIn : register(u0);
+RWStructuredBuffer<uint16_t> Uint16RHSIn : register(u1);
+RWStructuredBuffer<bool> BoolOut : register(u2);
 
 [numthreads(1, 1, 1)]
 void main() {
-  uint16_t4x2 Uint16GTLHS = Uint16In[0], Uint16GTRHS = Uint16In[1];
+  uint16_t4x2 Uint16GTLHS = uint16_t4x2(Uint16LHSIn[0], Uint16LHSIn[1], Uint16LHSIn[2], Uint16LHSIn[3], Uint16LHSIn[4], Uint16LHSIn[5], Uint16LHSIn[6], Uint16LHSIn[7]);
+  uint16_t4x2 Uint16GTRHS = uint16_t4x2(Uint16RHSIn[0], Uint16RHSIn[1], Uint16RHSIn[2], Uint16RHSIn[3], Uint16RHSIn[4], Uint16RHSIn[5], Uint16RHSIn[6], Uint16RHSIn[7]);
   bool4x2 Uint16GT = Uint16GTLHS > Uint16GTRHS;
 
   for (uint Row = 0; Row < 4; ++Row)
     for (uint Col = 0; Col < 2; ++Col)
       BoolOut[Row * 2 + Col] = Uint16GT[Row][Col];
-
-  Uint16GT = Uint16GTLHS > Uint16GTLHS;
-
-  for (uint Row = 0; Row < 4; ++Row)
-    for (uint Col = 0; Col < 2; ++Col)
-      BoolOut[8 + Row * 2 + Col] = Uint16GT[Row][Col];
 }
 
 #--- pipeline.yaml
@@ -26,16 +22,18 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  - Name: Uint16In
+  - Name: Uint16LHSIn
     Format: UInt16
-    Data: [ 5, 2 ]
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8 ]
+  - Name: Uint16RHSIn
+    Format: UInt16
+    Data: [ 2, 1, 4, 3, 6, 5, 8, 7 ]
   - Name: BoolOut
     Format: Int32
-    FillSize: 64
+    FillSize: 32
   - Name: BoolExpected
     Format: Int32
-    Data: [ 1, 1, 1, 1, 1, 1, 1, 1,
-            0, 0, 0, 0, 0, 0, 0, 0 ]
+    Data: [ 0, 1, 0, 1, 0, 1, 0, 1 ]
 Results:
   - Result: BoolOut
     Rule: BufferExact
@@ -43,20 +41,27 @@ Results:
     Expected: BoolExpected
 DescriptorSets:
   - Resources:
-    - Name: Uint16In
+    - Name: Uint16LHSIn
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: BoolOut
+    - Name: Uint16RHSIn
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
 ...
 #--- end
 
