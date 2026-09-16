@@ -5,9 +5,7 @@ RWStructuredBuffer<int32_t4> Out : register(u1);
 
 [numthreads(1, 1, 1)]
 void main() {
-  int8_t4_packed PackedVals = In[0];
-  int32_t4 UnpackedVals = unpack_s8s32(PackedVals);
-  Out[0] = UnpackedVals;
+  Out[0] = unpack_s8s32(In[0]);
   Out[1] = unpack_s8s32(In[1]);
   Out[2] = unpack_s8s32(int8_t4_packed(185009411));
 }
