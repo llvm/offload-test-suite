@@ -54,7 +54,8 @@ Shaders:
 Buffers:
   - Name: UintIn
     Format: UInt32
-    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
+    Data: [ 1, 2, 3, 4, 5, 6, 7, 8,
+            9, 10, 11, 12, 13, 2147483648, 2147483649, 4294967295 ]
   - Name: BoolOut
     Format: Int32
     FillSize: 252
