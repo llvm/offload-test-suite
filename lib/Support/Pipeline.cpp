@@ -988,6 +988,12 @@ llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
       return llvm::createStringError(
           "DispatchParameters.VertexCount set on a RayTracing pipeline. Only "
           "allowed on a TraditionalRaster pipeline.");
+    if (DispatchParameters.InstanceCount != 1 ||
+        DispatchParameters.FirstVertex != 0 ||
+        DispatchParameters.FirstInstance != 0)
+      return llvm::createStringError(
+          "DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on a "
+          "RayTracing pipeline. Only allowed on a TraditionalRaster pipeline.");
     break;
   }
 

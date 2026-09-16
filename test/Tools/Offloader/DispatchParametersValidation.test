@@ -1,0 +1,62 @@
+# This test verifies that InstanceCount, FirstVertex, and FirstInstance are
+# rejected with clear errors on pipeline kinds that do not support them.
+#
+# Covered cases:
+#   - RayTracing + InstanceCount != 1
+#   - RayTracing + FirstVertex   != 0
+#   - RayTracing + FirstInstance != 0
+
+#--- source.hlsl
+
+[numthreads(1, 1, 1)]
+void main() {}
+
+#--- rt-instance-count.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: main
+DescriptorSets: []
+Results: []
+DispatchParameters:
+  InstanceCount: 2
+...
+
+#--- rt-first-vertex.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: main
+DescriptorSets: []
+Results: []
+DispatchParameters:
+  FirstVertex: 1
+...
+
+#--- rt-first-instance.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: main
+DescriptorSets: []
+Results: []
+DispatchParameters:
+  FirstInstance: 1
+...
+
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+
+# RUN: not %offloader %t/rt-instance-count.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=RT-INSTANCE-COUNT
+# RT-INSTANCE-COUNT: error: DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on a RayTracing pipeline. Only allowed on a TraditionalRaster pipeline.
+
+# RUN: not %offloader %t/rt-first-vertex.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=RT-FIRST-VERTEX
+# RT-FIRST-VERTEX: error: DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on a RayTracing pipeline. Only allowed on a TraditionalRaster pipeline.
+
+# RUN: not %offloader %t/rt-first-instance.yaml %t.o 2>&1 \
+# RUN:   | FileCheck %s --check-prefix=RT-FIRST-INSTANCE
+# RT-FIRST-INSTANCE: error: DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on a RayTracing pipeline. Only allowed on a TraditionalRaster pipeline.
