@@ -1,6 +1,11 @@
-# The pipeline draws 3 vertices as 4 instances. Each instance is offset
-# horizontally so it covers exactly one pixel of a 4x1 render target.
-# The expected result is [0, 1, 2, 3].
+# Two pipeline variants are tested:
+#
+# 1. Base: 3 vertices, 4 instances, FirstVertex=0, FirstInstance=0.
+#    Expected output: [0, 1, 2, 3].
+#
+# 2. Offset: 4-vertex buffer with FirstVertex=1 and FirstInstance=3.
+#    SV_InstanceID must remain zero-based regardless of FirstInstance.
+#    Expected output: [0, 1, 2, 3].
 
 #--- vertex.hlsl
 struct VSOutput {
@@ -94,9 +99,73 @@ Results:
     Actual: Output
     Expected: Output_Expected
 ...
+#--- pipeline-offset.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+DispatchParameters:
+  VertexCount: 3
+  InstanceCount: 4
+  FirstVertex: 1
+  FirstInstance: 3
+Buffers:
+  # Geometry: vertex 0 is padding (skipped via FirstVertex=1).
+  # Vertices 1-3 form the same triangle as the base pipeline.
+  # SV_InstanceID must be 0-based despite FirstInstance=3.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [  0.0,   0.0, 0.0, 1.0,   # vertex 0: padding, skipped
+            -0.125, -1.0, 0.0, 1.0,   # vertex 1: bottom-left
+             0.125, -1.0, 0.0, 1.0,   # vertex 2: bottom-right
+             0.0,    1.0, 0.0, 1.0 ]  # vertex 3: top
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 64   # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+  - Name: Output
+    Format: Hex32
+    Stride: 4
+    FillSize: 16   # 4 x uint32
+    FillValue: 0xFF
+  - Name: Output_Expected
+    Format: Hex32
+    Stride: 4
+    Data: [ 0, 1, 2, 3 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: InstanceIDsOffset
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
 #--- end
 
-# SV_InstanceID not yet landed
+# SV_StartVertexLocation and SV_StartInstanceLocation not yet
+# implemented in the Clang-DXC SPIRV or DXIL backend.
 # XFAIL: Clang
 
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
@@ -106,4 +175,10 @@ Results:
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+
+# Base pipeline: FirstVertex=0, FirstInstance=0.
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
+
+# Offset pipeline: FirstVertex=1, FirstInstance=3.
+# SV_InstanceID must remain zero-based.
+# RUN: %offloader %t/pipeline-offset.yaml %t-vertex.o %t-pixel.o
