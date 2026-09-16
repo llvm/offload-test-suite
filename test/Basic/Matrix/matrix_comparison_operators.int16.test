@@ -1,0 +1,75 @@
+#--- source.hlsl
+
+RWStructuredBuffer<int16_t> Int16LHSIn : register(u0);
+RWStructuredBuffer<int16_t> Int16RHSIn : register(u1);
+RWStructuredBuffer<bool> BoolOut : register(u2);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int16_t2x3 Int16LTLHS = int16_t2x3(Int16LHSIn[0], Int16LHSIn[1], Int16LHSIn[2], Int16LHSIn[3], Int16LHSIn[4], Int16LHSIn[5]);
+  int16_t2x3 Int16LTRHS = int16_t2x3(Int16RHSIn[0], Int16RHSIn[1], Int16RHSIn[2], Int16RHSIn[3], Int16RHSIn[4], Int16RHSIn[5]);
+  bool2x3 Int16LT = Int16LTLHS < Int16LTRHS;
+
+  for (uint Row = 0; Row < 2; ++Row)
+    for (uint Col = 0; Col < 3; ++Col)
+      BoolOut[Row * 3 + Col] = Int16LT[Row][Col];
+}
+
+#--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Int16LHSIn
+    Format: Int16
+    Data: [ -2, -1, 0, 1, 2, 3 ]
+  - Name: Int16RHSIn
+    Format: Int16
+    Data: [ -1, -2, 1, 0, 3, 2 ]
+  - Name: BoolOut
+    Format: Int32
+    FillSize: 24
+  - Name: BoolExpected
+    Format: Int32
+    Data: [ 1, 0, 1, 0, 1, 0 ]
+Results:
+  - Result: BoolOut
+    Rule: BufferExact
+    Actual: BoolOut
+    Expected: BoolExpected
+DescriptorSets:
+  - Resources:
+    - Name: Int16LHSIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Int16RHSIn
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: BoolOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
+#--- end
+
+# Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Int16
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_2 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
