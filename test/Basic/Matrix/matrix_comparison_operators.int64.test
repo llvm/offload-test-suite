@@ -24,10 +24,10 @@ Shaders:
 Buffers:
   - Name: Int64LHSIn
     Format: Int64
-    Data: [ 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
+    Data: [ -4, -3, -2, -1, 0, 1, 2, 3, 4 ]
   - Name: Int64RHSIn
     Format: Int64
-    Data: [ 2, 1, 3, 5, 4, 6, 8, 7, 9 ]
+    Data: [ -3, -4, -2, 0, -1, 1, 3, 2, 4 ]
   - Name: BoolOut
     Format: Int32
     FillSize: 36
