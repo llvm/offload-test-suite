@@ -7,7 +7,7 @@ RWStructuredBuffer<uint16_t4> Out : register(u1);
 void main() {
   Out[0] = unpack_u8u16(In[0]);
   Out[1] = unpack_u8u16(In[1]);
-  Out[2] = unpack_u8u16(int8_t4_packed(185009411));
+  Out[2] = unpack_u8u16(int8_t4_packed(185009411)); // value is packed form of 3 5 7 11
 }
 
 //--- pipeline.yaml
@@ -20,7 +20,7 @@ Buffers:
   - Name: In
     Format: UInt32
     Stride: 4
-    Data: [ 16842496, 705691904 ]
+    Data: [ 16842496, 705691904 ] # 0 255 0 1, 0 1 16 42
   - Name: Out
     Format: UInt16
     Stride: 2
