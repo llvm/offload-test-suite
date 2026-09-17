@@ -1,0 +1,76 @@
+#--- source.hlsl
+
+StructuredBuffer<half4> In : register(t0);
+
+RWStructuredBuffer<half4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = tan(In[0]);
+  Out[1] = half4(tan(In[1].xyz), tan(In[1].w));
+  Out[2] = half4(tan(In[2].xy), tan(In[2].zw));
+  // 0.0, -pi/3, pi/3, 2.0
+  Out[3] = tan(half4(0.0h, -1.04719755h, 1.04719755h, 2.0h));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0xBC30, 0xBA48, 0xB830, 0xB430,
+            0x3430, 0x3830, 0x3A48, 0x3C30,
+            0x0000, 0x4248, 0x5D8C, 0x4000 ]
+    # -pi/3, -pi/4, -pi/6, -pi/12
+    # pi/12, pi/6, pi/4, pi/3
+    # 0, pi (rounded 3.140625), 113pi (rounded 355.0), 2.0
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 32
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    Data: [ 0xBEEC, 0xBBFF, 0xB89E, 0xB449,
+            0x3449, 0x389E, 0x3BFF, 0x3EEC,
+            0x0000, 0x0000, 0x0000, 0xc05f,
+            0x0000, 0xBEEC, 0x3EEC, 0xc05f ]
+    # -sqrt(3), -1, -1/sqrt(3), sqrt(3)-2
+    # 2-sqrt(3), 1/sqrt(3), 1, sqrt(3)
+    # 0, tan(pi) == 0, tan(355.0) ~= 0.000, tan(2.0) ~= -2.185
+    # 0, -sqrt(3), sqrt(3), tan(2.0) ~= -2.185
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 2
+    ZeroTolerance: 0.001
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,94 @@
+#--- source.hlsl
+
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<int4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  int3x2 U32 = sign(uint3x2(In[0].xyz, In[1].xyz));
+  int2x4 U24 = sign(uint2x4(In[2], In[3]));
+  int3x1 U31 = sign(uint3x1(In[4].xyz));
+  int4x4 U44 = sign(uint4x4(In[5], In[6], In[7], In[8]));
+  int2x2 U22Const = sign(uint2x2(0, 26, 3, 27374));
+
+  Out[0] = int4(U32[0], U32[1]);
+  Out[1] = int4(U32[2], 0, 0);
+  Out[2] = U24[0];
+  Out[3] = U24[1];
+  Out[4] = int4(U31[0], U31[1], U31[2], 0);
+  Out[5] = U44[0];
+  Out[6] = U44[1];
+  Out[7] = U44[2];
+  Out[8] = U44[3];
+  Out[9] = int4(U22Const[0], U22Const[1]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 3, 40, 0,
+            8, 5, 7, 0,
+            63, 419, 100, 5,
+            50, 0, 2, 0,
+            0, 4294967295, 14910, 0,
+            494, 70, 44, 6,
+            13, 9, 78, 0,
+            0, 5, 7, 621,
+            64, 22, 9, 0 ]
+  - Name: Out
+    Format: Int32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 16
+    Data: [ 0, 1, 1, 1,
+            1, 1, 0, 0,
+            1, 1, 1, 1,
+            1, 0, 1, 0,
+            0, 1, 1, 0,
+            1, 1, 1, 1,
+            1, 1, 1, 0,
+            0, 1, 1, 1,
+            1, 1, 1, 0,
+            0, 1, 1, 1 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184488
+# XFAIL: Clang
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8860
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

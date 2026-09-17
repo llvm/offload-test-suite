@@ -1,0 +1,91 @@
+#--- source.hlsl
+
+ByteAddressBuffer In0 : register(t0);
+ByteAddressBuffer In1 : register(t1);
+RWByteAddressBuffer Out0 : register(u2);
+RWByteAddressBuffer Out1 : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out0.Store<uint16_t>(0, In0.Load<uint16_t>(0));
+  Out1.Store<uint16_t>(8, In1.Load<uint16_t>(8));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In0
+    Format: UInt16
+    Stride: 2
+    Data: [0x1234]
+  - Name: In1
+    Format: UInt16
+    Stride: 2
+    Data: [0, 0, 0, 0, 0x1234]
+  - Name: Out0
+    Format: UInt16
+    Stride: 2
+    FillSize: 2
+  - Name: Out1
+    Format: UInt16
+    Stride: 2
+    FillSize: 10
+  - Name: ExpectedOut0
+    Format: UInt16
+    Stride: 2
+    Data: [0x1234]
+  - Name: ExpectedOut1
+    Format: UInt16
+    Stride: 2
+    Data: [0, 0, 0, 0, 0x1234]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out0
+    Expected: ExpectedOut0
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out1
+    Expected: ExpectedOut1
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Out0
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Int16
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
