@@ -18,12 +18,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerState LinearSamp : register(s0);
 [[vk::binding(2, 0)]] SamplerState PointSamp : register(s1);
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 2x2 Texture:
@@ -46,18 +41,12 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // uniform colour, which isolates the face ordering from any in-face
   // addressing convention -- and means a Linear filter cannot blend a face
   // into a different result.
-  float4 r2 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 1,  0,  0), 0),
-                       float4(1, 0, 0, 1)); // +X Red
-  float4 r3 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3(-1,  0,  0), 0),
-                       float4(0, 1, 0, 1)); // -X Green
-  float4 r4 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  1,  0), 0),
-                       float4(0, 0, 1, 1)); // +Y Blue
-  float4 r5 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0, -1,  0), 0),
-                       float4(1, 1, 0, 1)); // -Y Yellow
-  float4 r6 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  0,  1), 0),
-                       float4(1, 0, 1, 1)); // +Z Magenta
-  float4 r7 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  0, -1), 0),
-                       float4(0, 1, 1, 1)); // -Z Cyan
+  float4 r2 = TexCube.SampleLevel(LinearSamp, float3( 1,  0,  0), 0); // +X Red
+  float4 r3 = TexCube.SampleLevel(LinearSamp, float3(-1,  0,  0), 0); // -X Green
+  float4 r4 = TexCube.SampleLevel(LinearSamp, float3( 0,  1,  0), 0); // +Y Blue
+  float4 r5 = TexCube.SampleLevel(LinearSamp, float3( 0, -1,  0), 0); // -Y Yellow
+  float4 r6 = TexCube.SampleLevel(LinearSamp, float3( 0,  0,  1), 0); // +Z Magenta
+  float4 r7 = TexCube.SampleLevel(LinearSamp, float3( 0,  0, -1), 0); // -Z Cyan
 
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
@@ -207,6 +196,5 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o

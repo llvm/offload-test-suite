@@ -18,12 +18,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(3, 0)]] SamplerState Samp2 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Setup UVs to have a derivative of exactly 0.5.
@@ -61,25 +56,21 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float3 CubeDir = float3(1, 0, 0) + float3(float2(GTid.xy) * 0.5, 0);
 
   // Large positive bias drives the LOD to the coarsest mip -> Yellow.
-  float4 r6 = CUBE_OR(TexCube.SampleBias(Samp, CubeDir, 4.0),
-                       float4(1, 1, 0, 1));
+  float4 r6 = TexCube.SampleBias(Samp, CubeDir, 4.0);
 
   // Negative bias keeps it at mip 0 -> Red.
-  float4 r7 = CUBE_OR(TexCube.SampleBias(Samp, CubeDir, -4.0),
-                       float4(1, 0, 0, 1));
+  float4 r7 = TexCube.SampleBias(Samp, CubeDir, -4.0);
 
   // The Clamp argument is a *minimum* LOD, as the 2D case above shows: a
   // negative bias that would select mip 0 is raised back to mip 1 by a clamp
   // of 1.0 -> Yellow. Contrast with r7, which is the same bias unclamped.
-  float4 r8 = CUBE_OR(TexCube.SampleBias(Samp, CubeDir, -4.0, 1.0),
-                       float4(1, 1, 0, 1));
+  float4 r8 = TexCube.SampleBias(Samp, CubeDir, -4.0, 1.0);
 
   // A second face, to show each face has its own mip chain: -Z is Blue at mip
   // 0 and Green at mip 1, so a coarse LOD here must give Green rather than
   // +X's Yellow.
   float3 CubeDirNegZ = float3(float2(GTid.xy) * 0.5, -1);
-  float4 r9 = CUBE_OR(TexCube.SampleBias(Samp, CubeDirNegZ, 4.0),
-                       float4(0, 1, 0, 1));
+  float4 r9 = TexCube.SampleBias(Samp, CubeDirNegZ, 4.0);
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -241,6 +232,5 @@ Results:
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T ps_6_0 -E mainPS %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
