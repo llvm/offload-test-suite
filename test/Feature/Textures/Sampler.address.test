@@ -14,12 +14,13 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState ClampSamp : register(s0);
 [[vk::binding(2, 0)]] SamplerState RepeatSamp : register(s1);
 [[vk::binding(3, 0)]] SamplerState BorderSamp : register(s2);
 [[vk::binding(4, 0)]] SamplerState MirrorSamp : register(s3);
 [[vk::binding(5, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(6, 0)]] Texture1D<float4> Tex1D : register(t1);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Texture 2x1: [Red, Green]
@@ -30,26 +31,36 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float2 uv = float2(1.25, 0.5);
 
   // 1. Clamp: Snaps 1.25 -> 1.0 (Edge). Result: Green.
-  float4 r0 = Tex.SampleLevel(ClampSamp, uv, 0);
+  float4 r0 = Tex2D.SampleLevel(ClampSamp, uv, 0);
 
   // 2. Repeat: Wraps 1.25 -> 0.25 (Start). Result: Red.
-  float4 r1 = Tex.SampleLevel(RepeatSamp, uv, 0);
+  float4 r1 = Tex2D.SampleLevel(RepeatSamp, uv, 0);
 
   // 3. Border: 1.25 is outside. Result: Border Color (0,0,0,0).
-  float4 r2 = Tex.SampleLevel(BorderSamp, uv, 0);
+  float4 r2 = Tex2D.SampleLevel(BorderSamp, uv, 0);
 
   // 4. Mirror: Test at 1.75
   // Range [1.0, 2.0] is mirrored [1.0, 0.0].
   // 1.75 maps to 1.0 - (0.75) = 0.25 (Center of Red).
   // Result: Red.
   // Note: Repeat/Clamp would map 1.75 to Green (0.75 or 1.0).
-  float4 r3 = Tex.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
+  float4 r3 = Tex2D.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
+
+  float u = 1.25;
+  float4 r4 = Tex1D.SampleLevel(ClampSamp, u, 0);
+  float4 r5 = Tex1D.SampleLevel(RepeatSamp, u, 0);
+  float4 r6 = Tex1D.SampleLevel(BorderSamp, u, 0);
+  float4 r7 = Tex1D.SampleLevel(MirrorSamp, 1.75, 0);
 
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
     Out[1] = r1;
     Out[2] = r2;
     Out[3] = r3;
+    Out[4] = r4;
+    Out[5] = r5;
+    Out[6] = r6;
+    Out[7] = r7;
   }
   return float4(0,0,0,0);
 }
@@ -63,7 +74,14 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0 ] # Green
+
+  - Name: Tex1D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 1, Depth: 1 }
@@ -73,7 +91,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64 # 4 * sizeof(float4)
+    FillSize: 128 # 8 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -81,7 +99,11 @@ Buffers:
     Data: [ 0.0, 1.0, 0.0, 1.0,  # Clamp -> Green
             1.0, 0.0, 0.0, 1.0,  # Repeat -> Red
             0.0, 0.0, 0.0, 0.0,  # Border -> Transparent Black
-            1.0, 0.0, 0.0, 1.0 ] # Mirror -> Red
+            1.0, 0.0, 0.0, 1.0,  # Mirror -> Red
+            0.0, 1.0, 0.0, 1.0,  # 1D Clamp -> Green
+            1.0, 0.0, 0.0, 1.0,  # 1D Repeat -> Red
+            0.0, 0.0, 0.0, 0.0,  # 1D Border -> Transparent Black
+            1.0, 0.0, 0.0, 1.0 ] # 1D Mirror -> Red
 
   - Name: RT
     Format: Float32
@@ -125,7 +147,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -149,6 +171,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 5 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 6 }
 
 Results:
   - Result: AddressTest
