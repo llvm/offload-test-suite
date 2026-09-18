@@ -4681,7 +4681,9 @@ public:
 
         if (auto Err =
                 Encoder.drawInstanced(*IS.Pipeline.get(), P.getVertexCount(),
-                                      /*InstanceCount=*/1))
+                                      P.DispatchParameters.InstanceCount,
+                                      P.DispatchParameters.FirstVertex,
+                                      P.DispatchParameters.FirstInstance))
           return Err;
       } else if (P.isMeshShaderRaster()) {
         if (auto Err = Encoder.dispatchMesh(
