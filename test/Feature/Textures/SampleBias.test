@@ -14,11 +14,12 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(3, 0)]] SamplerState Samp2 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
+[[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Setup UVs to have a derivative of exactly 0.5.
@@ -29,25 +30,25 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float2 sample_uv = 0.5 + float2(GTid.xy) * 0.5;
 
   // 1. Bias = -0.1 -> LOD = -0.1 -> Mag(Nearest) -> White
-  float4 r0 = Tex.SampleBias(Samp, sample_uv, -0.1);
+  float4 r0 = Tex2D.SampleBias(Samp, sample_uv, -0.1);
 
   // 2. Bias = 1.0 -> LOD = 1.0 -> Min -> mip 1 -> Magenta.
   // Mip selection is nearest, so a smaller positive bias such as 0.1 would
   // round back to mip 0.
-  float4 r1 = Tex.SampleBias(Samp, sample_uv, 1.0);
+  float4 r1 = Tex2D.SampleBias(Samp, sample_uv, 1.0);
 
   // 3. Bias = -0.1, Offset = (-1, -1) -> UV = (0.5, 0.5) -> Texel (1, 1). Offset (-1, -1) -> Texel (0, 0) -> Red
-  float4 r2 = Tex.SampleBias(Samp, sample_uv, -0.1, int2(-1, -1));
+  float4 r2 = Tex2D.SampleBias(Samp, sample_uv, -0.1, int2(-1, -1));
 
   // 4. Bias = -0.1, Clamp = 1.0. The clamp is a *minimum* LOD, so it raises
   // the magnifying -0.1 up to 1.0 -> mip 1 -> Magenta.
-  float4 r3 = Tex.SampleBias(Samp, sample_uv, -0.1, int2(0, 0), 1.0);
+  float4 r3 = Tex2D.SampleBias(Samp, sample_uv, -0.1, int2(0, 0), 1.0);
 
   // 5. Bias = -0.1 -> LOD = -0.1 -> Mag(Linear) -> Grey (mip 0)
-  float4 r4 = Tex.SampleBias(Samp2, sample_uv, -0.1);
+  float4 r4 = Tex2D.SampleBias(Samp2, sample_uv, -0.1);
 
   // 6. Sample at (0.25, 0.25) -> Red.
-  float4 r5 = Tex.SampleBias(Samp, float2(0.25, 0.25), -0.1);
+  float4 r5 = Tex2D.SampleBias(Samp, float2(0.25, 0.25), -0.1);
 
   // TextureCube::SampleBias takes a float3 direction. The bias shifts the
   // derivative-computed LOD exactly as for 2D, but within the sampled face's
@@ -72,6 +73,15 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float3 CubeDirNegZ = float3(float2(GTid.xy) * 0.5, -1);
   float4 r9 = TexCube.SampleBias(Samp, CubeDirNegZ, 4.0);
 
+  // Use 0.375 to avoid the nearest-filter tie at 0.5.
+  float sample_u = 0.375 + float(GTid.x) * 0.5;
+  float4 r10 = Tex1D.SampleBias(Samp, sample_u, -0.1);
+  float4 r11 = Tex1D.SampleBias(Samp, sample_u, 1.0);
+  float4 r12 = Tex1D.SampleBias(Samp, sample_u, -0.1, 1);
+  float4 r13 = Tex1D.SampleBias(Samp, sample_u, -0.1, 0, 1.0);
+  float4 r14 = Tex1D.SampleBias(Samp2, sample_u, -0.1);
+  float4 r15 = Tex1D.SampleBias(Samp, 0.75, -0.1);
+
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
     Out[1] = r1;
@@ -83,6 +93,12 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[7] = r7;
     Out[8] = r8;
     Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
+    Out[12] = r12;
+    Out[13] = r13;
+    Out[14] = r14;
+    Out[15] = r15;
   }
   return float4(0,0,0,0);
 }
@@ -96,7 +112,7 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
@@ -137,24 +153,38 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
             0.0, 1.0, 0.0, 1.0 ]
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1)
+            1.0, 0.0, 1.0, 1.0 ] # Mip 1 (Magenta)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 160 # 10 * sizeof(float4)
+    FillSize: 256 # 16 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 1.0, 1.0, 1.0,  # Bias -0.1 -> Mag(Nearest) -> White
-            1.0, 0.0, 1.0, 1.0,  # Bias 1.0 -> mip 1 -> Magenta
-            1.0, 0.0, 0.0, 1.0,  # Offset (-1, -1) -> Red
-            1.0, 0.0, 1.0, 1.0,  # Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
-            0.5, 0.5, 0.5, 1.0,  # Bias -0.1 -> Mag(Linear) -> Grey (mip 0)
-            1.0, 0.0, 0.0, 1.0,  # Sample at (0.25, 0.25) -> Red
-            1.0, 1.0, 0.0, 1.0,  # Cube +X, bias +4 -> mip 1 Yellow
-            1.0, 0.0, 0.0, 1.0,  # Cube +X, bias -4 -> mip 0 Red
-            1.0, 1.0, 0.0, 1.0,  # Cube +X, bias -4 min-LOD-clamped to 1 -> Yellow
-            0.0, 1.0, 0.0, 1.0 ] # Cube -Z, bias +4 -> that face's mip 1 Green
+    Data: [ 1.0, 1.0, 1.0, 1.0,   # Bias -0.1 -> Mag(Nearest) -> White
+            1.0, 0.0, 1.0, 1.0,   # Bias 1.0 -> mip 1 -> Magenta
+            1.0, 0.0, 0.0, 1.0,   # Offset (-1, -1) -> Red
+            1.0, 0.0, 1.0, 1.0,   # Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
+            0.5, 0.5, 0.5, 1.0,   # Bias -0.1 -> Mag(Linear) -> Grey (mip 0)
+            1.0, 0.0, 0.0, 1.0,   # Sample at (0.25, 0.25) -> Red
+            1.0, 1.0, 0.0, 1.0,   # Cube +X, bias +4 -> mip 1 Yellow
+            1.0, 0.0, 0.0, 1.0,   # Cube +X, bias -4 -> mip 0 Red
+            1.0, 1.0, 0.0, 1.0,   # Cube +X, bias -4 min-LOD-clamped to 1 -> Yellow
+            0.0, 1.0, 0.0, 1.0,   # Cube -Z, bias +4 -> that face's mip 1 Green
+            1.0, 0.0, 0.0, 1.0,   # 1D Bias -0.1 -> Mag(Nearest) -> Red
+            1.0, 0.0, 1.0, 1.0,   # 1D Bias 1.0 -> mip 1 -> Magenta
+            0.0, 1.0, 0.0, 1.0,   # 1D Offset (1) -> Green
+            1.0, 0.0, 1.0, 1.0,   # 1D Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
+            0.75, 0.25, 0.0, 1.0, # 1D Bias -0.1 -> Mag(Linear) -> Red/Green blend (mip 0)
+            0.0, 1.0, 0.0, 1.0 ]  # 1D Sample at (0.75) -> Green
 
   - Name: RT
     Format: Float32
@@ -190,7 +220,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -210,6 +240,10 @@ DescriptorSets:
       Kind: TextureCube
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: SampleBiasTest

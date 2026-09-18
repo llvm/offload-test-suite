@@ -1,31 +1,42 @@
 #--- source.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(2, 0)]] RWTexture2D<float4> RWTex : register(u1);
+
+[[vk::binding(3, 0)]] Texture1D<float4> Tex1D : register(t1);
 
 [numthreads(1, 1, 1)]
 void main() {
   // Explicit Load(int3)
   // Location: (x, y, mip)
-  Out[0] = Tex.Load(int3(0, 0, 0)); // Red
-  Out[1] = Tex.Load(int3(1, 0, 0)); // Green
-  Out[2] = Tex.Load(int3(0, 1, 0)); // Blue
-  Out[3] = Tex.Load(int3(1, 1, 0)); // White
+  Out[0] = Tex2D.Load(int3(0, 0, 0)); // Red
+  Out[1] = Tex2D.Load(int3(1, 0, 0)); // Green
+  Out[2] = Tex2D.Load(int3(0, 1, 0)); // Blue
+  Out[3] = Tex2D.Load(int3(1, 1, 0)); // White
 
   // Load(int3, int2) - With Offset
   // (0,0) + (1,0) = (1,0) -> Green
-  Out[4] = Tex.Load(int3(0, 0, 0), int2(1, 0)); 
+  Out[4] = Tex2D.Load(int3(0, 0, 0), int2(1, 0));
   
   // (1,1) + (-1,-1) = (0,0) -> Red
-  Out[5] = Tex.Load(int3(1, 1, 0), int2(-1, -1));
+  Out[5] = Tex2D.Load(int3(1, 1, 0), int2(-1, -1));
 
   // (0,0) + (1,1) = (1,1) -> White
-  Out[6] = Tex.Load(int3(0, 0, 0), int2(1, 1));
+  Out[6] = Tex2D.Load(int3(0, 0, 0), int2(1, 1));
 
   // RWTexture2D::Load takes an int2, not the int3 the SRV form takes: a UAV
   // has a single mip level, so there is no mip component to supply.
   Out[7] = RWTex.Load(int2(0, 0)); // Cyan
   Out[8] = RWTex.Load(int2(1, 1)); // Grey
+
+  Out[9] = Tex1D.Load(int2(0, 0));  // Red
+  Out[10] = Tex1D.Load(int2(1, 0)); // Green
+
+  // (0) + (1) = (1) -> Green
+  Out[11] = Tex1D.Load(int2(0, 0), 1);
+
+  // (1) + (-1) = (0) -> Red
+  Out[12] = Tex1D.Load(int2(1, 0), -1);
 }
 
 //--- pipeline.yaml
@@ -35,7 +46,7 @@ Shaders:
     Entry: main
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
@@ -53,10 +64,17 @@ Buffers:
             1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1)
             0.5, 0.5, 0.5, 1.0 ] # Grey    (1,1)
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
+            0.0, 1.0, 0.0, 1.0 ] # Green (1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 144 # 9 * sizeof(float4)
+    FillSize: 208 # 13 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -69,11 +87,15 @@ Buffers:
             1.0, 0.0, 0.0, 1.0,  # Offset (-1,-1) -> Red
             1.0, 1.0, 1.0, 1.0,  # Offset (1,1) -> White
             0.0, 1.0, 1.0, 1.0,  # [7] UAV Load (0,0) -> Cyan
-            0.5, 0.5, 0.5, 1.0 ] # [8] UAV Load (1,1) -> Grey
+            0.5, 0.5, 0.5, 1.0,  # [8] UAV Load (1,1) -> Grey
+            1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,  # 1D Offset (1) -> Green
+            1.0, 0.0, 0.0, 1.0 ] # 1D Offset (-1) -> Red
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -85,6 +107,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 1 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
 
 Results:
   - Result: LoadTest

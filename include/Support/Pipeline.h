@@ -121,6 +121,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::Buffer:
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
+  case ResourceKind::Texture1D:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::TextureCube:
@@ -276,6 +277,7 @@ struct Resource {
     switch (Kind) {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
+    case ResourceKind::Texture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -307,6 +309,7 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -331,6 +334,7 @@ struct Resource {
     case ResourceKind::ConstantBuffer:
       return true;
     case ResourceKind::Sampler:
+    case ResourceKind::Texture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -346,6 +350,7 @@ struct Resource {
 
   bool isTexture() const {
     switch (Kind) {
+    case ResourceKind::Texture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -381,6 +386,7 @@ struct Resource {
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
+    case ResourceKind::Texture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::TextureCube:
@@ -405,6 +411,8 @@ struct Resource {
   ResourceDimension getTextureDimension() const {
     assert(isTexture() && "Only textures have a dimension");
     switch (Kind) {
+    case ResourceKind::Texture1D:
+      return ResourceDimension::Dim1D;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -486,6 +494,7 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
+    case ResourceKind::Texture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::TextureCube:
@@ -1047,6 +1056,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(Buffer);
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
+    ENUM_CASE(Texture1D);
     ENUM_CASE(Texture2D);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
