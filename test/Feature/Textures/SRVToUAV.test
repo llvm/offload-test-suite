@@ -1,13 +1,20 @@
 #--- source.hlsl
 
-Texture2D<float4> In : register(t0);
-RWTexture2D<float4> Out : register(u1);
+Texture2D<float4> In2D : register(t0);
+RWTexture2D<float4> Out2D : register(u1);
+Texture1D<float4> In1D : register(t2);
+RWTexture1D<float4> Out1D : register(u3);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
   uint2 GID = {GI / 2, GI % 2};
-  float4 Color = In[GID.xy];
-  Out[GID.xy] = Color.bgra;
+  float4 Color2D = In2D[GID.xy];
+  Out2D[GID.xy] = Color2D.bgra;
+
+  if (GID.y == 0) {
+    float4 Color1D = In1D[GID.x];
+    Out1D[GID.x] = Color1D.bgra;
+  }
 }
 //--- pipeline.yaml
 ---
@@ -15,7 +22,7 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  - Name: In
+  - Name: In2D
     Format: Float32
     Channels: 4
     Data: [1.0, 0.0, 0.0, 1.0,
@@ -26,7 +33,7 @@ Buffers:
       Height: 2
       Width: 2
       Depth: 1
-  - Name: Out
+  - Name: Out2D
     Format: Float32
     Channels: 4
     # A UAV only ever addresses mip 0, so mip 1 must come back exactly as it was.
@@ -40,7 +47,7 @@ Buffers:
       Width: 2
       Depth: 1
       MipLevels: 2
-  - Name: ExpectedOut
+  - Name: ExpectedOut2D
     Format: Float32
     Channels: 4
     Data: [0.0, 0.0, 1.0, 1.0,
@@ -53,27 +60,77 @@ Buffers:
       Width: 2
       Depth: 1
       MipLevels: 2
+  - Name: In1D
+    Format: Float32
+    Channels: 4
+    Data: [1.0, 0.0, 0.0, 1.0,
+           0.0, 1.0, 0.0, 1.0]
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+  - Name: Out1D
+    Format: Float32
+    Channels: 4
+    # A UAV only ever addresses mip 0, so mip 1 must come back exactly as it was.
+    Data: [0.25, 0.25, 0.25, 1.0,
+           0.25, 0.25, 0.25, 1.0,
+           1.0, 0.0, 1.0, 1.0]
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+      MipLevels: 2
+  - Name: ExpectedOut1D
+    Format: Float32
+    Channels: 4
+    Data: [0.0, 0.0, 1.0, 1.0,
+           0.0, 1.0, 0.0, 1.0,
+           1.0, 0.0, 1.0, 1.0]
+    OutputProps:
+      Height: 1
+      Width: 2
+      Depth: 1
+      MipLevels: 2
 Results:
   - Result: Test1
     Rule: BufferExact
-    Actual: Out
-    Expected: ExpectedOut
+    Actual: Out2D
+    Expected: ExpectedOut2D
+  - Result: Test1D
+    Rule: BufferExact
+    Actual: Out1D
+    Expected: ExpectedOut1D
 DescriptorSets:
   - Resources:
-    - Name: In
+    - Name: In2D
       Kind: Texture2D
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
+    - Name: Out2D
       Kind: RWTexture2D
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: In1D
+      Kind: Texture1D
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1D
+      Kind: RWTexture1D
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 
