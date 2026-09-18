@@ -35,7 +35,7 @@ A count of `0` is always invalid. Further restrictions are backend-specific:
   `2`, `4`, `8`, `16`, `32`, and `64`. The requested value must also be present
   in both the format's image properties and the applicable framebuffer sample
   count limits.
-* **Metal** currently rejects counts other than `1`.
+* **Metal** queries `supportsTextureSampleCount` for the requested count.
 
 Support depends on the device and format; a value accepted by the YAML parser
 may still be rejected by the backend.
@@ -49,6 +49,8 @@ color target into it before readback:
 
 * DirectX uses `ResolveSubresource`.
 * Vulkan uses `vkCmdResolveImage`.
+* Metal resolves through `MTLStoreActionStoreAndMultisampleResolve` when the
+  render pass ends.
 
 The output buffer therefore retains the dimensions and format declared in
 YAML; `SampleCount` does not multiply its size.
@@ -56,8 +58,8 @@ YAML; `SampleCount` does not multiply its size.
 ## Current Scope
 
 `Bindings.SampleCount` creates multisampled raster attachments. Multisampled
-textures have one mip level as required by DirectX and Vulkan. The suite also
-limits render targets to one array slice because layered rendering is not
+textures have one mip level as required by DirectX, Vulkan, and Metal. The suite
+also limits render targets to one array slice because layered rendering is not
 implemented.
 
 `SampleCount` does not create shader-visible `Texture2DMS` or `RWTexture2DMS`

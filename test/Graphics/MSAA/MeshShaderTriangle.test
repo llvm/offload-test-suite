@@ -70,8 +70,6 @@ DescriptorSets: []
 
 REQUIRES: MeshShader, goldenimage
 
-# UNSUPPORTED: Metal
-
 # Unimplemented https://github.com/llvm/llvm-project/issues/136966
 # XFAIL: Clang
 

@@ -67,8 +67,6 @@ DescriptorSets: []
 ...
 #--- end
 
-# UNSUPPORTED: Metal
-
 # XFAIL: Clang && !Vulkan
 # REQUIRES: goldenimage
 
