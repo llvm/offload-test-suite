@@ -1,0 +1,131 @@
+#--- source.hlsl
+
+// Tests the uint flag and UAV object overloads of Barrier.
+
+RWStructuredBuffer<uint> UavData : register(u0);
+RWStructuredBuffer<uint> AllData : register(u1);
+RWStructuredBuffer<uint> ObjectData : register(u2);
+RWStructuredBuffer<uint> Out : register(u3);
+
+groupshared uint GroupData[64];
+groupshared uint AllGroupData[64];
+
+[numthreads(64, 1, 1)]
+void main(uint3 GTID : SV_GroupThreadID) {
+  uint Index = GTID.x;
+  GroupData[Index] = Index + 1;
+  Barrier(GROUP_SHARED_MEMORY, GROUP_SCOPE | GROUP_SYNC);
+
+  uint Passed = 1;
+  if (Index == 0) {
+    for (uint I = 0; I < 64; ++I)
+      Passed &= GroupData[I] == I + 1;
+  }
+
+  UavData[Index] = Index + 65;
+  Barrier(UAV_MEMORY, GROUP_SCOPE | GROUP_SYNC);
+  if (Index == 0) {
+    for (uint I = 0; I < 64; ++I)
+      Passed &= UavData[I] == I + 65;
+  }
+
+  AllGroupData[Index] = Index + 129;
+  AllData[Index] = Index + 193;
+  Barrier(ALL_MEMORY, GROUP_SCOPE | GROUP_SYNC);
+  if (Index == 0) {
+    for (uint I = 0; I < 64; ++I) {
+      Passed &= AllGroupData[I] == I + 129;
+      Passed &= AllData[I] == I + 193;
+    }
+  }
+
+  ObjectData[Index] = Index + 257;
+  Barrier(ObjectData, GROUP_SCOPE | GROUP_SYNC);
+  if (Index == 0) {
+    for (uint I = 0; I < 64; ++I)
+      Passed &= ObjectData[I] == I + 257;
+  }
+
+  // Zero flags request no synchronization but are valid.
+  Barrier(0, 0);
+  
+  Barrier(UAV_MEMORY, DEVICE_SCOPE);
+  if (Index == 0)
+    Out[0] = Passed;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: UavData
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: AllData
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: ObjectData
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1 ]
+Results:
+  - Result: TestBarrier
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: UavData
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: AllData
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: ObjectData
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: SM_6_8
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99234
+# XFAIL: Clang
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_8 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
