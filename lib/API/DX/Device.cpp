@@ -139,8 +139,81 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
   TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
   TexDesc.Format = getDXGIFormat(Desc.Fmt);
-  TexDesc.SampleDesc.Count = 1;
+  TexDesc.SampleDesc.Count = Desc.SampleCount;
   return TexDesc;
+}
+
+static llvm::Error validateDXFormatSampleCount(ID3D12DeviceX *Device,
+                                               Format Fmt, uint32_t SampleCount,
+                                               bool IsDepthStencil) {
+  if (SampleCount == 1)
+    return llvm::Error::success();
+
+  const DXGI_FORMAT DXFmt = getDXGIFormat(Fmt);
+  D3D12_FEATURE_DATA_MULTISAMPLE_QUALITY_LEVELS MSLevels = {};
+  MSLevels.Format = DXFmt;
+  MSLevels.SampleCount = SampleCount;
+  MSLevels.Flags = D3D12_MULTISAMPLE_QUALITY_LEVELS_FLAG_NONE;
+  if (auto Err = HR::toError(
+          Device->CheckFeatureSupport(D3D12_FEATURE_MULTISAMPLE_QUALITY_LEVELS,
+                                      &MSLevels, sizeof(MSLevels)),
+          "Failed to query multisample quality levels."))
+    return Err;
+  if (MSLevels.NumQualityLevels == 0)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "SampleCount %u is not supported for format '%s' on this device.",
+        SampleCount, getFormatName(Fmt).data());
+
+  D3D12_FEATURE_DATA_FORMAT_SUPPORT FmtSupport = {};
+  FmtSupport.Format = DXFmt;
+  if (auto Err = HR::toError(
+          Device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &FmtSupport,
+                                      sizeof(FmtSupport)),
+          "Failed to query format support."))
+    return Err;
+
+  if (IsDepthStencil) {
+    if ((FmtSupport.Support1 & D3D12_FORMAT_SUPPORT1_DEPTH_STENCIL) == 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Format '%s' cannot be used as a depth-stencil attachment on this "
+          "device.",
+          getFormatName(Fmt).data());
+  } else {
+    if ((FmtSupport.Support1 &
+         D3D12_FORMAT_SUPPORT1_MULTISAMPLE_RENDERTARGET) == 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Format '%s' cannot be used as a multisampled render target on this "
+          "device.",
+          getFormatName(Fmt).data());
+    if ((FmtSupport.Support1 & D3D12_FORMAT_SUPPORT1_MULTISAMPLE_RESOLVE) == 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Render-target format '%s' does not support multisample resolve on "
+          "this device.",
+          getFormatName(Fmt).data());
+  }
+
+  return llvm::Error::success();
+}
+
+static llvm::Error validateDXRasterSampleCount(ID3D12DeviceX *Device,
+                                               uint32_t SampleCount,
+                                               llvm::ArrayRef<Format> RTFormats,
+                                               std::optional<Format> DSFormat) {
+  if (auto Err = validateSampleCount(SampleCount, "Pipeline SampleCount"))
+    return Err;
+  for (const Format F : RTFormats)
+    if (auto Err = validateDXFormatSampleCount(Device, F, SampleCount,
+                                               /*IsDepthStencil=*/false))
+      return Err;
+  if (DSFormat)
+    if (auto Err = validateDXFormatSampleCount(Device, *DSFormat, SampleCount,
+                                               /*IsDepthStencil=*/true))
+      return Err;
+  return llvm::Error::success();
 }
 
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
@@ -149,6 +222,9 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
     // 1D texture arrays are not set up yet.
     return D3D12_SRV_DIMENSION_TEXTURE1D;
   case ResourceDimension::Dim2D:
+    if (Desc.SampleCount > 1)
+      return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY
+                          : D3D12_SRV_DIMENSION_TEXTURE2DMS;
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
   case ResourceDimension::Cube:
@@ -1065,6 +1141,39 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error resolveTexture(Texture &Src, Texture &Dst) override {
+    if (auto Err = validateResolve(Src, Dst))
+      return Err;
+
+    auto &DXSrc = llvm::cast<DXTexture>(Src);
+    auto &DXDst = llvm::cast<DXTexture>(Dst);
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
+      CB.addResourceTransition(DXSrc.Resource.Get(), DXSrc.PreferredState,
+                               D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_RESOLVE_DEST)
+      CB.addResourceTransition(DXDst.Resource.Get(), DXDst.PreferredState,
+                               D3D12_RESOURCE_STATE_RESOLVE_DEST);
+
+    CB.flushBarrier();
+
+    CB.CmdList->ResolveSubresource(DXDst.Resource.Get(), 0,
+                                   DXSrc.Resource.Get(), 0,
+                                   getDXGIFormat(DXSrc.Desc.Fmt));
+
+    if (DXSrc.PreferredState != D3D12_RESOURCE_STATE_RESOLVE_SOURCE)
+      CB.addResourceTransition(DXSrc.Resource.Get(),
+                               D3D12_RESOURCE_STATE_RESOLVE_SOURCE,
+                               DXSrc.PreferredState);
+    if (DXDst.PreferredState != D3D12_RESOURCE_STATE_RESOLVE_DEST)
+      CB.addResourceTransition(DXDst.Resource.Get(),
+                               D3D12_RESOURCE_STATE_RESOLVE_DEST,
+                               DXDst.PreferredState);
+
+    CB.flushBarrier();
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs DXDevice's full type for access to the
   // ID3D12Device5 entry point and helper allocators.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -1559,6 +1668,10 @@ public:
       const TraditionalRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
 
+    if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
+                                               Desc.RTFormats, Desc.DSFormat))
+      return Err;
+
     ComPtr<ID3D12RootSignature> RootSig;
     llvm::SmallVector<RootSignatureLayout> Layout;
     if (auto Err = createRootSignature(Name, BndDesc, Desc.VS,
@@ -1617,7 +1730,7 @@ public:
       PSODesc.DSVFormat = getDXGIFormat(*Desc.DSFormat);
     for (size_t I = 0; I < Desc.RTFormats.size(); ++I)
       PSODesc.RTVFormats[I] = getDXGIFormat(Desc.RTFormats[I]);
-    PSODesc.SampleDesc.Count = 1;
+    PSODesc.SampleDesc.Count = Desc.SampleCount;
 
     ComPtr<ID3D12PipelineState> PSO;
     if (auto Err = HR::toError(
@@ -1634,6 +1747,10 @@ public:
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
+
+    if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
+                                               Desc.RTFormats, Desc.DSFormat))
+      return Err;
 
     ComPtr<ID3D12RootSignature> RootSig;
     llvm::SmallVector<RootSignatureLayout> Layout;
@@ -1678,7 +1795,7 @@ public:
     DepthStencil.StencilEnable = false;
 
     DXGI_SAMPLE_DESC SampleDesc = {};
-    SampleDesc.Count = 1;
+    SampleDesc.Count = Desc.SampleCount;
 
     CD3DX12_PIPELINE_MESH_STATE_STREAM Stream;
     Stream.pRootSignature = RootSig.Get();
@@ -2130,6 +2247,10 @@ public:
           std::errc::invalid_argument,
           "D3D12 supports at most %u mip levels; got %u.", D3D12_REQ_MIP_LEVELS,
           Desc.MipLevels);
+    if (auto Err = validateDXFormatSampleCount(
+            Device.Get(), Desc.Fmt, Desc.SampleCount,
+            (Desc.Usage & TextureUsage::DepthStencil) != 0))
+      return Err;
 
     const D3D12_HEAP_PROPERTIES HeapProps =
         CD3DX12_HEAP_PROPERTIES(getDXHeapType(Desc.Location));
@@ -2211,6 +2332,12 @@ public:
         SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
         SRVDesc.Texture2D.PlaneSlice = 0;
         SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURE2DMS:
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY:
+        SRVDesc.Texture2DMSArray.FirstArraySlice = 0;
+        SRVDesc.Texture2DMSArray.ArraySize = Desc.ArraySlices;
         break;
       case D3D12_SRV_DIMENSION_TEXTURE2DARRAY:
         SRVDesc.Texture2DArray.MostDetailedMip = 0;
@@ -2543,6 +2670,17 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
   createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    llvm::SmallVector<Format> RTFormats;
+    RTFormats.reserve(Desc.ColorAttachments.size());
+    for (const auto &CA : Desc.ColorAttachments)
+      RTFormats.push_back(CA.Fmt);
+    std::optional<Format> DSFormat;
+    if (Desc.DepthStencil)
+      DSFormat = Desc.DepthStencil->Fmt;
+    if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
+                                               RTFormats, DSFormat))
+      return Err;
+
     return std::make_unique<DXRenderPass>(Desc);
   }
 
@@ -3042,8 +3180,13 @@ public:
       return EncoderOrErr.takeError();
     auto ReadbackEncoder = std::move(*EncoderOrErr);
 
-    if (auto Err = ReadbackEncoder->copyTextureToBuffer(*IS.RenderTarget,
-                                                        *IS.RTReadback))
+    if (IS.ResolveTarget)
+      if (auto Err = ReadbackEncoder->resolveTexture(*IS.RenderTarget,
+                                                     *IS.ResolveTarget))
+        return Err;
+
+    if (auto Err = ReadbackEncoder->copyTextureToBuffer(
+            IS.readbackSourceTexture(), *IS.RTReadback))
       return Err;
 
     for (auto &Table : IS.DescTables)
@@ -3147,6 +3290,7 @@ public:
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
+      PassDesc.SampleCount = P.Bindings.SampleCount;
       PassDesc.ColorAttachments.push_back(ColorAttachment);
       PassDesc.DepthStencil = DSAttachment;
 
@@ -3173,6 +3317,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -3210,6 +3355,7 @@ public:
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -3304,17 +3450,7 @@ DXCommandBuffer::createRenderEncoder(
   auto &DXPass = llvm::cast<DXRenderPass>(*Desc.Pass);
   const offloadtest::RenderPassDesc &PassDesc = DXPass.Desc;
 
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, nullptr, nullptr))
+  if (auto Err = validateRenderPassBeginDesc(PassDesc, Desc))
     return Err;
 
   // Validate attachments and gather the RTV / DSV CPU handles. RT and DSV
@@ -3325,10 +3461,6 @@ DXCommandBuffer::createRenderEncoder(
   RTTextures.reserve(Desc.ColorAttachments.size());
   RTVHandles.reserve(Desc.ColorAttachments.size());
   for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
-    if (!Tex)
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
     auto &DXTex = llvm::cast<DXTexture>(*Tex);
     if (DXTex.RTVHandle.ptr == 0)
       return llvm::createStringError(

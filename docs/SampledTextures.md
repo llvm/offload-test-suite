@@ -68,6 +68,10 @@ Sampled texture resources are modeled as explicit kinds, including:
 
 All sampled texture kinds follow the same binding model, where the Sampler and Textures are bound together using the same `Name`.
 
+`Bindings.SampleCount` currently applies only to raster attachments; it does
+not create a shader-visible `SampledTexture2DMS`. See
+[MSAA.md](MSAA.md).
+
 ## Sampler Comparison
 
 Comparison behavior is controlled by sampler state, not by resource kind:

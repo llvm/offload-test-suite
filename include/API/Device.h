@@ -107,6 +107,7 @@ struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<InputLayoutDesc> InputLayout;
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
+  uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind.
@@ -154,6 +155,7 @@ struct TraditionalRasterPipelineCreateDesc {
 struct MeshShaderRasterPipelineCreateDesc {
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
+  uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
 
   ShaderContainer MS;
@@ -421,11 +423,13 @@ initializeDevices(const DeviceConfig Config);
 // CPUBuffer. Does not upload the buffer's data — only uses its description to
 // configure the texture.
 llvm::Expected<std::unique_ptr<Texture>>
-createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf);
+createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf,
+                                uint32_t SampleCount = 1);
 
 // Creates a depth/stencil texture matching the dimensions of a render target.
 llvm::Expected<std::unique_ptr<Texture>>
-createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height);
+createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height,
+                                uint32_t SampleCount = 1);
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 createBufferWithData(Device &Dev, std::string Name,

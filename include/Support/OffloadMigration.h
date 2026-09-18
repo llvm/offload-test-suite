@@ -97,9 +97,14 @@ struct SharedInvocationState {
   // Resources for graphics pipelines.
   std::unique_ptr<offloadtest::RenderPass> RenderPass;
   std::unique_ptr<offloadtest::Texture> RenderTarget;
+  std::unique_ptr<offloadtest::Texture> ResolveTarget;
   std::unique_ptr<offloadtest::Buffer> RTReadback;
   std::unique_ptr<offloadtest::Texture> DepthStencil;
   std::unique_ptr<offloadtest::Buffer> VB;
+
+  offloadtest::Texture &readbackSourceTexture() {
+    return ResolveTarget ? *ResolveTarget : *RenderTarget;
+  }
 
   llvm::SmallVector<std::unique_ptr<Buffer>> KeepAliveBuffers;
 
