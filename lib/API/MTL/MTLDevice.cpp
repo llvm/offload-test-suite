@@ -1474,6 +1474,11 @@ public:
       Desc = MTL::TextureDescriptor::textureBufferDescriptor(
           Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
       break;
+    case ResourceKind::Texture1D:
+      // Metal Shader Converter maps Texture1D to a 2D texture with height 1.
+      Desc =
+          MTL::TextureDescriptor::texture2DDescriptor(Format, Width, 1, false);
+      break;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
       Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width, Height,

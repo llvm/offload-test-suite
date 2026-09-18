@@ -1,5 +1,5 @@
 #--- source.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp0 : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(2, 0)]] SamplerState Samp1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
@@ -9,6 +9,7 @@
 #else
 #define CUBE_OR(Call, Expect) (Expect)
 #endif
+[[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -22,21 +23,21 @@ void main() {
 
   // 1. Samp0 at (0.5, 0.5)
   // Mag -> Nearest(0.5) -> White
-  // Min -> Linear(0.5)  -> Grey
-  Out[0] = Tex.SampleGrad(Samp0, uv0, ddx_mag, ddy_mag);
-  Out[1] = Tex.SampleGrad(Samp0, uv0, ddx_min, ddy_min);
+  // Min -> Linear(0.5)  -> Yellow (mip 1)
+  Out[0] = Tex2D.SampleGrad(Samp0, uv0, ddx_mag, ddy_mag);
+  Out[1] = Tex2D.SampleGrad(Samp0, uv0, ddx_min, ddy_min);
 
   // 2. Samp1 at (0.25, 0.25)
   // Mag -> Linear(0.25)  -> Red
-  // Min -> Nearest(0.25) -> Red
-  Out[2] = Tex.SampleGrad(Samp1, uv1, ddx_mag, ddy_mag);
-  Out[3] = Tex.SampleGrad(Samp1, uv1, ddx_min, ddy_min);
+  // Min -> Nearest(0.25) -> Yellow (mip 1)
+  Out[2] = Tex2D.SampleGrad(Samp1, uv1, ddx_mag, ddy_mag);
+  Out[3] = Tex2D.SampleGrad(Samp1, uv1, ddx_min, ddy_min);
 
   // 3. Mip Selection Test
   // LOD = log2(1.0 * 2) = 1.0 -> Mip 1
   float2 ddx_mip1 = float2(1.0, 0.0);
   float2 ddy_mip1 = float2(0.0, 1.0);
-  Out[4] = Tex.SampleGrad(Samp0, uv0, ddx_mip1, ddy_mip1); // Yellow
+  Out[4] = Tex2D.SampleGrad(Samp0, uv0, ddx_mip1, ddy_mip1); // Yellow
 
   // TextureCube::SampleGrad takes a float3 direction and, unlike the 2D array
   // case, float3 gradients: the derivative of a direction vector is itself a
@@ -57,6 +58,20 @@ void main() {
                    float4(0, 0, 1, 1)); // mip 0 Blue
   Out[8] = CUBE_OR(TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMin, CubeDDYMin),
                    float4(0, 1, 0, 1)); // mip 1 Green
+
+  // Use 0.25 for nearest filtering to avoid the tie at 0.5.
+  float u0 = 0.25;
+  float u1 = 0.5;
+  float grad_mag = 0.0001;
+  float grad_min = 2.0;
+
+  Out[9] = Tex1D.SampleGrad(Samp0, u0, grad_mag, grad_mag);
+  Out[10] = Tex1D.SampleGrad(Samp0, u0, grad_min, grad_min);
+
+  Out[11] = Tex1D.SampleGrad(Samp1, u1, grad_mag, grad_mag);
+  Out[12] = Tex1D.SampleGrad(Samp1, u1, grad_min, grad_min);
+
+  Out[13] = Tex1D.SampleGrad(Samp0, u0, 1.0, 1.0); // Yellow
 }
 
 //--- pipeline.yaml
@@ -66,7 +81,7 @@ Shaders:
     Entry: main
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
@@ -107,10 +122,18 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
             0.0, 1.0, 0.0, 1.0 ]
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1)
+            1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1 texel) - Yellow
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 144 # 9 * sizeof(float4)
+    FillSize: 224 # 14 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -123,7 +146,12 @@ Buffers:
             1.0, 0.0, 0.0, 1.0,  # Cube +X magnified -> mip 0 Red
             1.0, 1.0, 0.0, 1.0,  # Cube +X minified  -> mip 1 Yellow
             0.0, 0.0, 1.0, 1.0,  # Cube -Z magnified -> mip 0 Blue
-            0.0, 1.0, 0.0, 1.0 ] # Cube -Z minified  -> mip 1 Green
+            0.0, 1.0, 0.0, 1.0,  # Cube -Z minified  -> mip 1 Green
+            1.0, 0.0, 0.0, 1.0,  # 1D Samp0, u0, Mag -> Red
+            1.0, 1.0, 0.0, 1.0,  # 1D Samp0, u0, Min -> Yellow (mip 1)
+            0.5, 0.5, 0.0, 1.0,  # 1D Samp1, u1, Mag -> Red/Green blend
+            1.0, 1.0, 0.0, 1.0,  # 1D Samp1, u1, Min -> Yellow (mip 1)
+            1.0, 1.0, 0.0, 1.0 ] # 1D Mip Selection -> Yellow (mip 1)
 
 Samplers:
   - Name: Samp0
@@ -137,7 +165,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -157,6 +185,10 @@ DescriptorSets:
       Kind: TextureCube
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: SampleGradTest

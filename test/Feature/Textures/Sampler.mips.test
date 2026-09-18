@@ -1,8 +1,9 @@
 #--- source.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState MagLinearMinPoint : register(s0);
 [[vk::binding(2, 0)]] SamplerState MagPointMinLinear : register(s1);
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(4, 0)]] Texture1D<float4> Tex1D : register(t1);
 
 [numthreads(1,1,1)]
 void main() {
@@ -15,16 +16,23 @@ void main() {
   float2 uv = float2(0.4, 0.5);
 
   // 0: Mag Test (LOD -1) with Mag=Linear -> Linear Result
-  Out[0] = Tex.SampleLevel(MagLinearMinPoint, uv, -1.0);
+  Out[0] = Tex2D.SampleLevel(MagLinearMinPoint, uv, -1.0);
 
   // 1: Mag Test (LOD -1) with Mag=Point -> Nearest Result
-  Out[1] = Tex.SampleLevel(MagPointMinLinear, uv, -1.0);
+  Out[1] = Tex2D.SampleLevel(MagPointMinLinear, uv, -1.0);
 
+  // Mip 1 has one texel, so both filters return the same color.
   // 2: Min Test (LOD 1) with Min=Point -> Nearest Result
-  Out[2] = Tex.SampleLevel(MagLinearMinPoint, uv, 1.0);
+  Out[2] = Tex2D.SampleLevel(MagLinearMinPoint, uv, 1.0);
 
   // 3: Min Test (LOD 1) with Min=Linear -> Linear Result
-  Out[3] = Tex.SampleLevel(MagPointMinLinear, uv, 1.0);
+  Out[3] = Tex2D.SampleLevel(MagPointMinLinear, uv, 1.0);
+
+  float u = 0.4;
+  Out[4] = Tex1D.SampleLevel(MagLinearMinPoint, u, -1.0);
+  Out[5] = Tex1D.SampleLevel(MagPointMinLinear, u, -1.0);
+  Out[6] = Tex1D.SampleLevel(MagLinearMinPoint, u, 1.0);
+  Out[7] = Tex1D.SampleLevel(MagPointMinLinear, u, 1.0);
 }
 
 //--- pipeline.yaml
@@ -34,7 +42,15 @@ Shaders:
     Entry: main
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0,  # Green
+            0.5, 0.5, 0.0, 1.0 ] # Mip 1
+
+  - Name: Tex1D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
@@ -45,7 +61,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64 # 4 * sizeof(float4)
+    FillSize: 128 # 8 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -53,7 +69,11 @@ Buffers:
     Data: [ 0.7, 0.3, 0.0, 1.0,  # Linear
             1.0, 0.0, 0.0, 1.0,  # Nearest
             0.5, 0.5, 0.0, 1.0,  # Nearest (LOD 1)
-            0.5, 0.5, 0.0, 1.0 ] # Linear (LOD 1)
+            0.5, 0.5, 0.0, 1.0,  # Linear (LOD 1)
+            0.7, 0.3, 0.0, 1.0,  # 1D Linear
+            1.0, 0.0, 0.0, 1.0,  # 1D Nearest
+            0.5, 0.5, 0.0, 1.0,  # 1D Nearest (LOD 1)
+            0.5, 0.5, 0.0, 1.0 ] # 1D Linear (LOD 1)
 
 Samplers:
   - Name: MagLinearMinPoint
@@ -67,7 +87,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -83,6 +103,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: FilterTest

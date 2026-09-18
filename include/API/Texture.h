@@ -77,8 +77,8 @@ inline llvm::Error validateSampleCount(uint32_t SampleCount,
                                  FieldName.str().c_str());
 }
 
-// TODO: only 2D textures (2D texture arrays, and texture cubes) are supported.
-// 1D and 3D textures need their ResourceDimension cases filled in, plus
+// TODO: only 1D and 2D textures (2D texture arrays, and texture cubes) are
+// supported. 3D textures need their ResourceDimension case filled in, plus
 // validation between usage and shape (e.g. 3D textures cannot be used as
 // DepthStencil).
 struct TextureCreateDesc {
@@ -119,12 +119,11 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "Format '%s' is not compatible with texture creation.",
         getFormatName(Desc.Fmt).data());
 
-  // 1D and 3D textures are not implemented yet.
-  if (Desc.Dim == ResourceDimension::Dim1D ||
-      Desc.Dim == ResourceDimension::Dim3D)
+  // 3D textures are not implemented yet.
+  if (Desc.Dim == ResourceDimension::Dim3D)
     return llvm::createStringError(
         std::errc::not_supported,
-        "Only 2D textures and texture cubes are supported.");
+        "Only 1D and 2D textures and texture cubes are supported.");
 
   if (Desc.Width == 0 || Desc.Height == 0)
     return llvm::createStringError(

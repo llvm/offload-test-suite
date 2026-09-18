@@ -14,7 +14,7 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0);
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);
 #ifndef NO_TEXTURECUBE
@@ -23,6 +23,7 @@ VSOutput mainVS(VSInput input) {
 #else
 #define CUBE_OR(Call, Expect) (Expect)
 #endif
+[[vk::binding(4, 0)]] Texture1D<float4> Tex1D : register(t2);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Use SV_Position (pixel coordinates) to simulate the grid logic.
@@ -41,10 +42,10 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // the clamped LOD will be 2.0.
   float2 uv1 = 0.25 + float2(GTid.xy) * 2.0;
 
-  float lod0 = Tex.CalculateLevelOfDetail(Samp, uv0);
-  float lod1 = Tex.CalculateLevelOfDetail(Samp, uv1);
-  float lod2 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv0);
-  float lod3 = Tex.CalculateLevelOfDetailUnclamped(Samp, uv1);
+  float lod0 = Tex2D.CalculateLevelOfDetail(Samp, uv0);
+  float lod1 = Tex2D.CalculateLevelOfDetail(Samp, uv1);
+  float lod2 = Tex2D.CalculateLevelOfDetailUnclamped(Samp, uv0);
+  float lod3 = Tex2D.CalculateLevelOfDetailUnclamped(Samp, uv1);
 
   // TextureCube::CalculateLevelOfDetail takes a float3 direction. The direction
   // is projected onto the cube face that the major axis selects, and only then
@@ -69,6 +70,13 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float lod5 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeSteep),
                         1.0);
 
+  float u0 = 0.25 + float(GTid.x) * 0.5;
+  float u1 = 0.25 + float(GTid.x) * 2.0;
+  float lod6 = Tex1D.CalculateLevelOfDetail(Samp, u0);
+  float lod7 = Tex1D.CalculateLevelOfDetail(Samp, u1);
+  float lod8 = Tex1D.CalculateLevelOfDetailUnclamped(Samp, u0);
+  float lod9 = Tex1D.CalculateLevelOfDetailUnclamped(Samp, u1);
+
   if (all(GTid.xy == 0)) {
     Out[0] = lod0;
     Out[1] = lod1;
@@ -76,6 +84,10 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[3] = lod3;
     Out[4] = lod4;
     Out[5] = lod5;
+    Out[6] = lod6;
+    Out[7] = lod7;
+    Out[8] = lod8;
+    Out[9] = lod9;
   }
   return float4(0, 0, 0, 0);
 }
@@ -89,7 +101,7 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3 }
@@ -102,17 +114,24 @@ Buffers:
     OutputProps: { Width: 4, Height: 4, Depth: 1, MipLevels: 3, ArraySlices: 6 }
     FillSize: 2016 # 21 * 6 * 16
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 1, Depth: 1, MipLevels: 3 }
+    FillSize: 112 # (4 + 2 + 1) * 16
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 24 # 6 * sizeof(float)
+    FillSize: 40 # 10 * sizeof(float)
 
   - Name: Expected
     Format: Float32
     Channels: 1
     Data: [ 1.0, 2.0, 1.0, 3.0,   # Texture2D: clamped, clamped, unclamped x2
             0.0,                  # TextureCube: no minification -> LOD 0
-            1.0 ]                 # TextureCube: half a 4-texel face -> LOD 1
+            1.0,                  # TextureCube: half a 4-texel face -> LOD 1
+            1.0, 2.0, 1.0, 3.0 ]  # Texture1D: clamped, clamped, unclamped x2
 
   - Name: RT
     Format: Float32
@@ -144,7 +163,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -160,6 +179,10 @@ DescriptorSets:
       Kind: TextureCube
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 
 Results:
   - Result: LODTest
