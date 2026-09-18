@@ -17,6 +17,7 @@
 #include "API/Enums.h"
 #include "API/Resources.h"
 #include "API/Sampler.h"
+#include "API/Viewport.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
@@ -572,6 +573,17 @@ struct IOBindings {
   // VkPipelineTessellationStateCreateInfo::patchControlPoints).
   std::optional<uint32_t> PatchControlPoints;
 
+  // Leave both empty to use one full-target viewport and scissor.
+  llvm::SmallVector<Viewport> Viewports;
+  llvm::SmallVector<ScissorRect> Scissors;
+
+  uint32_t getViewportCount() const {
+    return Viewports.empty() ? 1 : static_cast<uint32_t>(Viewports.size());
+  }
+
+  llvm::SmallVector<Viewport> getViewports() const;
+  llvm::SmallVector<ScissorRect> getScissors() const;
+
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
     for (auto VA : VertexAttributes)
@@ -815,6 +827,8 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Viewport)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::ScissorRect)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantBlock)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
@@ -864,6 +878,14 @@ template <> struct MappingTraits<offloadtest::VulkanBinding> {
 
 template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::Viewport> {
+  static void mapping(IO &I, offloadtest::Viewport &V);
+};
+
+template <> struct MappingTraits<offloadtest::ScissorRect> {
+  static void mapping(IO &I, offloadtest::ScissorRect &S);
 };
 
 template <> struct MappingTraits<offloadtest::PushConstantValue> {

@@ -52,6 +52,8 @@ D3D_FEATURE_BOOL(AtomicInt64OnGroupSharedSupported)
 D3D_FEATURE_BOOL(AtomicInt64OnTypedResourceSupported)
 D3D_FEATURE_BOOL(DoublePrecisionFloatShaderOps)
 D3D_FEATURE_BOOL(WaveOps)
+D3D_FEATURE_BOOL(
+    VPAndRTArrayIndexFromAnyShaderFeedingRasterizerSupportedWithoutGSEmulation)
 #undef D3D_FEATURE_BOOL
 #endif
 
