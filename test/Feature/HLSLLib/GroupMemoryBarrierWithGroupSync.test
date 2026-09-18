@@ -1,7 +1,6 @@
 #--- source.hlsl
 
-// Note: Placing GroupMemoryBarrierWithGroupSync in divergent control branches
-// is undefined, and hence, untested
+// Calls in divergent control branches are undefined and are not tested.
 
 RWStructuredBuffer<uint> Out : register(u0);
 
