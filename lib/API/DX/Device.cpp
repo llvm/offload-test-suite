@@ -2091,6 +2091,13 @@ public:
       BufferSizeInBytes = CounterOffsetInBytes + sizeof(uint32_t);
     }
 
+    if (Desc.AccessType == BufferShaderAccessType::Raw) {
+      // If we have a raw buffer we need the allocation to be a multiple of 4
+      // bytes. Overallocate if we need to.
+      if (UINT64 Rem = BufferSizeInBytes % 4)
+        BufferSizeInBytes += Rem;
+    }
+
     const D3D12_HEAP_PROPERTIES HeapProps = CD3DX12_HEAP_PROPERTIES(HeapType);
     const D3D12_RESOURCE_DESC BufferDesc =
         CD3DX12_RESOURCE_DESC::Buffer(BufferSizeInBytes, Flags);
@@ -2139,7 +2146,8 @@ public:
       switch (Desc.AccessType) {
       case BufferShaderAccessType::Raw:
         SRVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
-        SRVDesc.Buffer.NumElements = static_cast<uint32_t>(SizeInBytes / 4);
+        SRVDesc.Buffer.NumElements =
+            static_cast<uint32_t>(BufferSizeInBytes / 4);
         SRVDesc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
         break;
       case BufferShaderAccessType::Typed:
@@ -2173,7 +2181,8 @@ public:
       switch (Desc.AccessType) {
       case BufferShaderAccessType::Raw:
         UAVDesc.Format = DXGI_FORMAT_R32_TYPELESS;
-        UAVDesc.Buffer.NumElements = static_cast<uint32_t>(SizeInBytes / 4);
+        UAVDesc.Buffer.NumElements =
+            static_cast<uint32_t>(BufferSizeInBytes / 4);
         UAVDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
         break;
       case BufferShaderAccessType::Typed:
