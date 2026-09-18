@@ -1,0 +1,63 @@
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In0
+    Format: Float64
+    Stride: 8
+    Data: [-2, -1, -0.5, 0, 0.5, 1, 2, -2]
+  - Name: In1
+    Format: Float64
+    Stride: 8
+    Data: [0.5, -1, 2, 0.5, -1, 2, 0.5, -1]
+  - Name: In2
+    Format: Float64
+    Stride: 8
+    Data: [1, -0.5, 1, -0.5, 1, -0.5, 1, -0.5]
+  - Name: Out
+    Format: Float64
+    Stride: 8
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Float64
+    Stride: 8
+    Data: [0, 0.5, 0, -0.5, 0.5, 1.5, 2, 1.5]
+Results:
+  - Result: Test
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: In1
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: In2
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
