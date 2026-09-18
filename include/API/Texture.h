@@ -68,7 +68,7 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
-// TODO: only 1D and 2D textures (2D texture arrays, and texture cubes) are
+// TODO: only 1D and 2D textures (texture arrays, and texture cubes) are
 // supported. 3D textures need their ResourceDimension case filled in, plus
 // validation between usage and shape (e.g. 3D textures cannot be used as
 // DepthStencil).

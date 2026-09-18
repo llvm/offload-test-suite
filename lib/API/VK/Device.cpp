@@ -83,6 +83,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture1D:
+  case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::TextureCube:
@@ -90,6 +91,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
   case ResourceKind::RWTexture1D:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -270,6 +272,8 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture1D:
   case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
@@ -290,6 +294,9 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::Texture1D:
   case ResourceKind::RWTexture1D:
     return VK_IMAGE_VIEW_TYPE_1D;
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
+    return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
@@ -333,6 +340,8 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
   case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
     return getVKImageType(ResourceDimension::Dim1D);
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
