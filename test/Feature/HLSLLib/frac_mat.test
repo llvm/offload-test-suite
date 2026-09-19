@@ -4,13 +4,11 @@ RWStructuredBuffer<float4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  // All inputs are exact powers-of-two fractions to ensure exact fp32 results.
-  // frac(x) = x - floor(x); frac(-0.25) = 0.75, frac(-2.5) = 0.5, etc.
-  float3x2 R32 = frac(float3x2(In[0].xy, In[0].zw, In[1].xy));
-  float2x4 R24 = frac(float2x4(In[1], In[2]));
+  float3x2 R32 = frac(float3x2(In[0].xyz, In[1].xyz));
+  float2x4 R24 = frac(float2x4(In[2], In[3]));
   float3x1 R31 = frac(float3x1(In[4].xyz));
   float4x4 R44 = frac(float4x4(In[0], In[1], In[2], In[3]));
-  float2x2 R22 = frac(float2x2(-1.5, -0.5, 0.5, 1.5));
+  float2x2 R22Const = frac(float2x2(-1.75, -0.25, 0.75, 1.25));
 
   Out[0] = float4(R32[0], R32[1]);
   Out[1] = float4(R32[2], 0.0, 0.0);
@@ -21,7 +19,7 @@ void main() {
   Out[6] = R44[1];
   Out[7] = R44[2];
   Out[8] = R44[3];
-  Out[9] = float4(R22[0], R22[1]);
+  Out[9] = float4(R22Const[0], R22Const[1]);
 }
 
 //--- pipeline.yaml
@@ -46,16 +44,16 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
-    Data: [ 0.5, 0.5, 0.0, 0.5,
-            0.75, 0.0, 0.0, 0.0,
+    Data: [ 0.5, 0.5, 0.0, 0.75,
+            0.0, 0.25, 0.0, 0.0,
             0.75, 0.0, 0.25, 0.5,
-            0.75, 0.0, 0.25, 0.5,
+            0.75, 0.0, 0.5, 0.0,
             0.5, 0.5, 0.5, 0.0,
             0.5, 0.5, 0.0, 0.5,
             0.75, 0.0, 0.25, 0.5,
             0.75, 0.0, 0.25, 0.5,
             0.75, 0.0, 0.5, 0.0,
-            0.5, 0.5, 0.5, 0.5 ]
+            0.25, 0.75, 0.75, 0.25 ]
 Results:
   - Result: Test1
     Rule: BufferFloatEpsilon

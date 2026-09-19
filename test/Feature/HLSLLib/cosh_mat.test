@@ -4,11 +4,11 @@ RWStructuredBuffer<float4> Out : register(u1);
 
 [numthreads(1,1,1)]
 void main() {
-  float3x2 R32 = cosh(float3x2(In[0].xy, In[0].zw, In[1].xy));
-  float2x4 R24 = cosh(float2x4(In[1], In[2]));
+  float3x2 R32 = cosh(float3x2(In[0].xyz, In[1].xyz));
+  float2x4 R24 = cosh(float2x4(In[2], In[3]));
   float3x1 R31 = cosh(float3x1(In[4].xyz));
   float4x4 R44 = cosh(float4x4(In[0], In[1], In[2], In[3]));
-  float2x2 R22 = cosh(float2x2(-1.0, 0.0, 1.0, 2.0));
+  float2x2 R22Const = cosh(float2x2(-1.0, 0.0, 1.0, 2.0));
 
   Out[0] = float4(R32[0], R32[1]);
   Out[1] = float4(R32[2], 0.0, 0.0);
@@ -19,7 +19,7 @@ void main() {
   Out[6] = R44[1];
   Out[7] = R44[2];
   Out[8] = R44[3];
-  Out[9] = float4(R22[0], R22[1]);
+  Out[9] = float4(R22Const[0], R22Const[1]);
 }
 
 //--- pipeline.yaml
@@ -44,20 +44,20 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
-    Data: [ 10.067662, 3.7621956, 1.5430807, 1.127626,
-            1.0314131, 1.0, 0.0, 0.0,
-            1.0314131, 1.0, 1.0314131, 1.127626,
+    Data: [ 10.067662, 3.7621956, 1.5430807, 1.0314131,
+            1.0, 1.0314131, 0.0, 0.0,
             1.5430807, 3.7621956, 10.067662, 1.0314131,
-            1.54308, 1.0, 1.54308, 0.0,
+            3.7621956, 1.127626, 3.7621956, 1.5430807,
+            1.5430807, 1.0, 1.5430807, 0.0,
             10.067662, 3.7621956, 1.5430807, 1.127626,
             1.0314131, 1.0, 1.0314131, 1.127626,
             1.5430807, 3.7621956, 10.067662, 1.0314131,
             3.7621956, 1.127626, 3.7621956, 1.5430807,
-            1.54308, 1.0, 1.54308, 3.7622 ]
+            1.5430807, 1.0, 1.5430807, 3.7621956 ]
 Results:
   - Result: Test1
-    Rule: BufferFloatEpsilon
-    Epsilon: 0.0008
+    Rule: BufferFloatULP
+    ULPT: 4
     Actual: Out
     Expected: ExpectedOut
 DescriptorSets:
