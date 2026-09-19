@@ -4519,7 +4519,7 @@ public:
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
       ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask = 0;
+      ImageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       ImageBarrier.oldLayout = R.ImageLayout;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
