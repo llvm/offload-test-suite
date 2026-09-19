@@ -105,7 +105,7 @@ Buffers:
       Width: 2
       Depth: 1
 Results:
-  - Result: Test1
+  - Result: Test2D
     Rule: BufferExact
     Actual: Out2D
     Expected: ExpectedOut2D
