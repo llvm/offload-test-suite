@@ -1,8 +1,9 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
-[[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex : register(u1);
+[[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex2D : register(u1);
 [[vk::binding(3, 0)]] Texture1DArray<float4> Tex1D : register(t1);
+[[vk::binding(4, 0)]] RWTexture1DArray<float4> RWTex1D : register(u2);
 
 #ifndef NO_RWTEXTURE_LOAD
 #define RW_LOAD_OR(Call, Expect) (Call)
@@ -24,9 +25,9 @@ void main() {
 
   // RWTexture2DArray::Load takes int3(x, y, arraySlice), not the int4 the SRV
   // form takes: a UAV has a single mip, so the slice occupies the last component.
-  Out[5] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 0)), float4(1, 0, 0, 1));     // Red
-  Out[6] = RW_LOAD_OR(RWTex.Load(int3(0, 0, 1)), float4(0, 1, 1, 1));     // Cyan
-  Out[7] = RW_LOAD_OR(RWTex.Load(int3(1, 0, 2)), float4(0.5, 0.5, 0, 1)); // Olive
+  Out[5] = RW_LOAD_OR(RWTex2D.Load(int3(0, 0, 0)), float4(1, 0, 0, 1));     // Red
+  Out[6] = RW_LOAD_OR(RWTex2D.Load(int3(0, 0, 1)), float4(0, 1, 1, 1));     // Cyan
+  Out[7] = RW_LOAD_OR(RWTex2D.Load(int3(1, 0, 2)), float4(0.5, 0.5, 0, 1)); // Olive
 
   // Texture1DArray::Load takes int3(x, arraySlice, mip).
   Out[8] = Tex1D.Load(int3(0, 0, 0));  // Slice 0 (0) Red
@@ -37,6 +38,11 @@ void main() {
   // With an offset, which applies to the x coordinate only.
   // Slice 1: (0) + (1) = (1) -> Magenta
   Out[12] = Tex1D.Load(int3(0, 1, 0), 1);
+
+  // RWTexture1DArray::Load takes int2(x, arraySlice).
+  Out[13] = RW_LOAD_OR(RWTex1D.Load(int2(0, 0)), float4(1, 0, 0, 1));     // Red
+  Out[14] = RW_LOAD_OR(RWTex1D.Load(int2(0, 1)), float4(0, 1, 1, 1));     // Cyan
+  Out[15] = RW_LOAD_OR(RWTex1D.Load(int2(1, 2)), float4(0.5, 0.5, 0, 1)); // Olive
 }
 
 //--- pipeline.yaml
@@ -71,7 +77,7 @@ Buffers:
             0.0, 0.5, 0.5, 1.0 ] # (1,1) Teal
 
   # The same contents as Tex2D, reached through a UAV instead of an SRV.
-  - Name: RWTex
+  - Name: RWTex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 3 }
@@ -98,10 +104,19 @@ Buffers:
             0.5, 0.0, 0.0, 1.0,  # (0) Maroon
             0.5, 0.5, 0.0, 1.0 ] # (1) Olive
 
+  # The same contents as Tex1D, reached through a UAV instead of an SRV.
+  - Name: RWTex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 3 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  0.0, 1.0, 0.0, 1.0,   # slice 0
+            0.0, 1.0, 1.0, 1.0,  1.0, 0.0, 1.0, 1.0,   # slice 1
+            0.5, 0.0, 0.0, 1.0,  0.5, 0.5, 0.0, 1.0 ]  # slice 2
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 208 # 13 * sizeof(float4)
+    FillSize: 256 # 16 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -118,7 +133,10 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # [9] 1D Slice 0 (1) Green
             0.0, 1.0, 1.0, 1.0,  # [10] 1D Slice 1 (0) Cyan
             0.5, 0.5, 0.0, 1.0,  # [11] 1D Slice 2 (1) Olive
-            1.0, 0.0, 1.0, 1.0 ] # [12] 1D Slice 1 offset (1) Magenta
+            1.0, 0.0, 1.0, 1.0,  # [12] 1D Slice 1 offset (1) Magenta
+            1.0, 0.0, 0.0, 1.0,  # [13] 1D UAV slice 0 (0) Red
+            0.0, 1.0, 1.0, 1.0,  # [14] 1D UAV slice 1 (0) Cyan
+            0.5, 0.5, 0.0, 1.0 ] # [15] 1D UAV slice 2 (1) Olive
 
 DescriptorSets:
   - Resources:
@@ -126,7 +144,7 @@ DescriptorSets:
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: RWTex
+    - Name: RWTex2D
       Kind: RWTexture2DArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
@@ -134,6 +152,10 @@ DescriptorSets:
       Kind: Texture1DArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: RWTex1D
+      Kind: RWTexture1DArray
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }

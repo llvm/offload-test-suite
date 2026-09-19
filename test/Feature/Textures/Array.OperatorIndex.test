@@ -1,8 +1,9 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
-[[vk::binding(2, 0)]] RWTexture2DArray<float> RWTex : register(u1);
+[[vk::binding(2, 0)]] RWTexture2DArray<float> RWTex2D : register(u1);
 [[vk::binding(3, 0)]] Texture1DArray<float4> Tex1D : register(t1);
+[[vk::binding(4, 0)]] RWTexture1DArray<float> RWTex1D : register(u2);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -15,14 +16,22 @@ void main() {
   // operator[] takes uint3(x, y, arraySlice); the third component is the slice,
   // not a mip. The UAV is single-channel: a typed UAV load is only guaranteed
   // for the single-component 32-bit formats.
-  Out[4] = float4(RWTex[uint3(0, 0, 0)], RWTex[uint3(1, 1, 1)],
-                  RWTex[uint3(0, 1, 2)], RWTex[uint3(1, 0, 2)]);
+  Out[4] = float4(RWTex2D[uint3(0, 0, 0)], RWTex2D[uint3(1, 1, 1)],
+                  RWTex2D[uint3(0, 1, 2)], RWTex2D[uint3(1, 0, 2)]);
 
   // Texture1DArray::operator[] (uint2) - (x, arraySlice)
   Out[5] = Tex1D[uint2(0, 0)]; // Slice 0 (0) Red
   Out[6] = Tex1D[uint2(1, 0)]; // Slice 0 (1) Green
   Out[7] = Tex1D[uint2(1, 1)]; // Slice 1 (1) Magenta
   Out[8] = Tex1D[uint2(0, 2)]; // Slice 2 (0) Maroon
+
+  // RWTexture1DArray::operator[] (uint2) - (x, arraySlice)
+  float2 values = float2(RWTex1D[uint2(0, 0)], RWTex1D[uint2(0, 1)]);
+
+  // Swap texels in different slices to test writing through operator[].
+  RWTex1D[uint2(0, 0)] = values.y;
+  RWTex1D[uint2(0, 1)] = values.x;
+  Out[9] = float4(values, RWTex1D[uint2(0, 0)], RWTex1D[uint2(0, 1)]);
 }
 
 //--- pipeline.yaml
@@ -55,7 +64,7 @@ Buffers:
             0.0, 0.5, 0.5, 1.0 ] # (1,1) Teal
 
   # Slice-major, one distinct value per texel so a wrong slice is visible.
-  - Name: RWTex
+  - Name: RWTex2D
     Format: Float32
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 3 }
@@ -79,23 +88,31 @@ Buffers:
             0.5, 0.0, 0.0, 1.0,  # (0) Maroon
             0.5, 0.5, 0.0, 1.0 ] # (1) Olive
 
+  - Name: RWTex1D
+    Format: Float32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+    Data: [ 0.1, 0.2,   # slice 0: (0) (1)
+            0.5, 0.6 ]  # slice 1
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 144 # 9 * sizeof(float4)
+    FillSize: 160 # 10 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 0.0, 0.0, 1.0,   # [0] Slice 0 (0,0) Red
-            1.0, 1.0, 1.0, 1.0,   # [1] Slice 0 (1,1) White
-            0.5, 0.5, 0.5, 1.0,   # [2] Slice 1 (1,1) Grey
-            0.0, 0.0, 0.5, 1.0,   # [3] Slice 2 (0,1) Navy
-            0.1, 0.8, 0.35, 0.95, # [4] UAV: s0(0,0) s1(1,1) s2(0,1) s2(1,0)
-            1.0, 0.0, 0.0, 1.0,   # [5] 1D Slice 0 (0) Red
-            0.0, 1.0, 0.0, 1.0,   # [6] 1D Slice 0 (1) Green
-            1.0, 0.0, 1.0, 1.0,   # [7] 1D Slice 1 (1) Magenta
-            0.5, 0.0, 0.0, 1.0 ]  # [8] 1D Slice 2 (0) Maroon
+    Data: [ 1.0, 0.0, 0.0, 1.0,    # [0] Slice 0 (0,0) Red
+            1.0, 1.0, 1.0, 1.0,    # [1] Slice 0 (1,1) White
+            0.5, 0.5, 0.5, 1.0,    # [2] Slice 1 (1,1) Grey
+            0.0, 0.0, 0.5, 1.0,    # [3] Slice 2 (0,1) Navy
+            0.1, 0.8, 0.35, 0.95,  # [4] UAV: s0(0,0) s1(1,1) s2(0,1) s2(1,0)
+            1.0, 0.0, 0.0, 1.0,    # [5] 1D Slice 0 (0) Red
+            0.0, 1.0, 0.0, 1.0,    # [6] 1D Slice 0 (1) Green
+            1.0, 0.0, 1.0, 1.0,    # [7] 1D Slice 1 (1) Magenta
+            0.5, 0.0, 0.0, 1.0,    # [8] 1D Slice 2 (0) Maroon
+            0.1, 0.5, 0.5, 0.1 ]   # [9] Before and after swapping s0(0) and s1(0) of the 1D UAV
 
 DescriptorSets:
   - Resources:
@@ -103,7 +120,7 @@ DescriptorSets:
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: RWTex
+    - Name: RWTex2D
       Kind: RWTexture2DArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
@@ -111,6 +128,10 @@ DescriptorSets:
       Kind: Texture1DArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: RWTex1D
+      Kind: RWTexture1DArray
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
