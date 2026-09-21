@@ -125,18 +125,17 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   TexDesc.Dimension = getDXResourceDimension(Desc.Dim);
   TexDesc.Width = Desc.Width;
   TexDesc.Height = Desc.Height;
-  // DepthOrArraySize is the layer count for 1D/2D resources but the depth
-  // extent for 3D ones, so it cannot take the slice count once 3D textures
-  // exist; they need their own extent on TextureCreateDesc.
-  assert(Desc.Dim != ResourceDimension::Dim3D &&
-         "3D resources need a depth extent, not a slice count");
-  // Both fields are UINT16. Callers must reject out-of-range values before
+  const uint32_t DepthOrArraySize =
+      Desc.Dim == ResourceDimension::Dim3D ? Desc.Depth : Desc.ArraySlices;
+  // These fields are UINT16. Callers must reject out-of-range values before
   // getting here, otherwise these casts wrap silently.
   assert(Desc.ArraySlices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION &&
          "Slice count must be range-checked before narrowing to UINT16");
+  assert(Desc.Depth <= D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION &&
+         "Depth must be range-checked before narrowing to UINT16");
   assert(Desc.MipLevels <= D3D12_REQ_MIP_LEVELS &&
          "Mip level count must be range-checked before narrowing to UINT16");
-  TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
+  TexDesc.DepthOrArraySize = static_cast<UINT16>(DepthOrArraySize);
   TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
   TexDesc.Format = getDXGIFormat(Desc.Fmt);
   TexDesc.SampleDesc.Count = Desc.SampleCount;
@@ -227,11 +226,12 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
                           : D3D12_SRV_DIMENSION_TEXTURE2DMS;
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Dim3D:
+    // 3D textures cannot be arrays.
+    return D3D12_SRV_DIMENSION_TEXTURE3D;
   case ResourceDimension::Cube:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
                         : D3D12_SRV_DIMENSION_TEXTURECUBE;
-  case ResourceDimension::Dim3D:
-    llvm_unreachable("Texture dimension has no SRV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
 }
@@ -2244,6 +2244,11 @@ public:
           std::errc::invalid_argument,
           "D3D12 supports at most %u texture array slices; got %u.",
           D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, Desc.ArraySlices);
+    if (Desc.Depth > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports a depth of at most %u texels; got %u.",
+          D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION, Desc.Depth);
     if (Desc.MipLevels > D3D12_REQ_MIP_LEVELS)
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -2355,6 +2360,11 @@ public:
         SRVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
         SRVDesc.Texture2DArray.PlaneSlice = 0;
         SRVDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
+        break;
+      case D3D12_SRV_DIMENSION_TEXTURE3D:
+        SRVDesc.Texture3D.MostDetailedMip = 0;
+        SRVDesc.Texture3D.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture3D.ResourceMinLODClamp = 0.0f;
         break;
       case D3D12_SRV_DIMENSION_TEXTURECUBE:
         SRVDesc.TextureCube.MostDetailedMip = 0;
@@ -2499,7 +2509,7 @@ public:
       Sub.Offset = Footprints[I].Offset;
       Sub.RowPitchInBytes = Footprints[I].Footprint.RowPitch;
       Sub.RowSizeInBytes = static_cast<uint32_t>(RowSizes[I]);
-      Sub.NumRows = NumRows[I];
+      Sub.NumRows = NumRows[I] * Footprints[I].Footprint.Depth;
       Layout.Subresources.push_back(Sub);
     }
     return Layout;

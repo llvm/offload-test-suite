@@ -86,6 +86,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
@@ -278,6 +279,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -304,6 +306,8 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
     return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  case ResourceKind::Texture3D:
+    return VK_IMAGE_VIEW_TYPE_3D;
   case ResourceKind::TextureCube:
     return VK_IMAGE_VIEW_TYPE_CUBE;
   case ResourceKind::TextureCubeArray:
@@ -350,6 +354,8 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::RWTexture2DArray:
     // Texture arrays are 2D images with more than one layer.
     return getVKImageType(ResourceDimension::Dim2D);
+  case ResourceKind::Texture3D:
+    return getVKImageType(ResourceDimension::Dim3D);
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
     return getVKImageType(ResourceDimension::Cube);
@@ -3800,7 +3806,8 @@ public:
     // Set initial layout of the image to undefined
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
-                              static_cast<uint32_t>(B.OutputProps.Height), 1};
+                              static_cast<uint32_t>(B.OutputProps.Height),
+                              static_cast<uint32_t>(B.OutputProps.Depth)};
     if (UsageOverride == 0) {
       ImageCreateInfo.usage =
           VK_IMAGE_USAGE_TRANSFER_DST_BIT |

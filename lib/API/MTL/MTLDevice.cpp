@@ -1483,6 +1483,12 @@ public:
       Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width, Height,
                                                          false);
       break;
+    case ResourceKind::Texture3D:
+      Desc = MTL::TextureDescriptor::texture2DDescriptor(Format, Width, Height,
+                                                         false);
+      Desc->setTextureType(MTL::TextureType3D);
+      Desc->setDepth(B.OutputProps.Depth);
+      break;
     case ResourceKind::Sampler:
       llvm_unreachable("Not implemented yet.");
     case ResourceKind::Texture1DArray:
@@ -1506,9 +1512,14 @@ public:
     }
 
     MTL::Texture *NewTex = Device->newTexture(Desc);
-    NewTex->replaceRegion(MTL::Region(0, 0, Width, Height), 0,
-                          B.Data[ResourceArrayIndex].get(),
-                          Width * R.getElementSize());
+    const bool Is3D =
+        R.isTexture() && R.getTextureDimension() == ResourceDimension::Dim3D;
+    const uint64_t Depth = Is3D ? B.OutputProps.Depth : 1;
+    const size_t RowBytes = Width * R.getElementSize();
+    const size_t ImageBytes = Is3D ? RowBytes * Height : 0;
+    NewTex->replaceRegion(MTL::Region(0, 0, 0, Width, Height, Depth), 0, 0,
+                          B.Data[ResourceArrayIndex].get(), RowBytes,
+                          ImageBytes);
     return NewTex;
   }
 

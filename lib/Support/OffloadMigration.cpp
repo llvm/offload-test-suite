@@ -27,6 +27,7 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -70,6 +71,7 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -274,6 +276,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       CreateDesc.Fmt = *FormatOrErr;
       CreateDesc.Width = R.BufferPtr->OutputProps.Width;
       CreateDesc.Height = R.BufferPtr->OutputProps.Height;
+      CreateDesc.Depth = R.BufferPtr->OutputProps.Depth;
       CreateDesc.MipLevels = R.BufferPtr->OutputProps.MipLevels;
       CreateDesc.Dim = R.getTextureDimension();
       CreateDesc.ArraySlices = R.getTextureArraySlices();
