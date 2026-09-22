@@ -1917,8 +1917,13 @@ public:
                                         MTL::ResourceUsageWrite);
     }
 
-    Encoder.setViewports(P.Bindings.getViewports());
-    Encoder.setScissors(P.Bindings.getScissors());
+    const llvm::SmallVector<Viewport> Viewports = P.Bindings.getViewports();
+    const llvm::SmallVector<ScissorRect> Scissors = P.Bindings.getScissors();
+    const uint32_t ViewportCount = P.Bindings.getViewportCount();
+    assert(Viewports.size() == ViewportCount);
+    assert(Scissors.size() == ViewportCount);
+    Encoder.setViewports(Viewports);
+    Encoder.setScissors(Scissors);
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)
