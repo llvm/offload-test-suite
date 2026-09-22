@@ -605,10 +605,7 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
     I.setError(Twine("Bindings: at most ") + std::to_string(MaxVPs) +
                " Scissors may be specified, found " +
                std::to_string(B.Scissors.size()) + ".");
-  if (B.Viewports.empty() != B.Scissors.empty())
-    I.setError(
-        "Bindings: 'Viewports' and 'Scissors' must be specified together.");
-  else if (B.Viewports.size() != B.Scissors.size())
+  if (B.Viewports.size() != B.Scissors.size())
     I.setError(Twine("Bindings: 'Scissors' has ") +
                std::to_string(B.Scissors.size()) + " entries but there are " +
                std::to_string(B.Viewports.size()) +
