@@ -26,8 +26,8 @@ void main(uint3 GTID : SV_GroupThreadID) {
 
   for (uint I = 0; I < 512; ++I) {
     if (GTID.x == I) {
-      GroupCounter = GroupCounter + 1;
-      UavCounter[0] = UavCounter[0] + 1;
+      GroupCounter++;
+      UavCounter[0]++;
     }
 
     AllMemoryBarrierWithGroupSync();

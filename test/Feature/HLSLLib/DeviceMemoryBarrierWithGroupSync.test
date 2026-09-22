@@ -20,7 +20,7 @@ void main(uint3 GTID : SV_GroupThreadID) {
 
   for (uint I = 0; I < 512; ++I) {
     if (GTID.x == I)
-      Counter[0] = Counter[0] + 1;
+      Counter[0]++;
 
     DeviceMemoryBarrierWithGroupSync();
   }
