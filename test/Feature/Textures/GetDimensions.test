@@ -8,6 +8,7 @@
 [[vk::binding(6, 0)]] Texture1D<float4> Tex1D : register(t4); // 4 texels, 3 mips
 [[vk::binding(7, 0)]] RWTexture1D<float4> RWTex1D : register(u2); // 8 texels
 [[vk::binding(8, 0)]] Texture3D<float4> Tex3D : register(t5); // 4x2x8, 4 mips
+[[vk::binding(9, 0)]] RWTexture3D<float4> RWTex3D : register(u3); // 8x2x4
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -135,6 +136,17 @@ void main() {
   Out[55] = width;
   Out[56] = height;
   Out[57] = depth;
+
+  // RWTexture3D (8x2x4).
+  RWTex3D.GetDimensions(uwidth, uheight, udepth);
+  Out[58] = (float)uwidth;
+  Out[59] = (float)uheight;
+  Out[60] = (float)udepth;
+
+  RWTex3D.GetDimensions(width, height, depth);
+  Out[61] = width;
+  Out[62] = height;
+  Out[63] = depth;
 }
 
 //--- pipeline.yaml
@@ -193,10 +205,16 @@ Buffers:
     OutputProps: { Width: 4, Height: 2, Depth: 8, MipLevels: 4 }
     FillSize: 1200 # (64 + 8 + 2 + 1) * sizeof(float4)
 
+  - Name: RWTex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 8, Height: 2, Depth: 4 }
+    FillSize: 1024 # 8 * 2 * 4 * sizeof(float4)
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 232 # 58 * sizeof(float)
+    FillSize: 256 # 64 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -220,7 +238,9 @@ Buffers:
             1.0, 1.0, 2.0, 4.0,          # Tex3D Mip 2
             1.0, 1.0, 1.0, 4.0,          # Tex3D Mip 3
             4.0, 2.0, 8.0,               # Tex3D width, height, depth (uint)
-            4.0, 2.0, 8.0 ]              # Tex3D width, height, depth (float)
+            4.0, 2.0, 8.0,               # Tex3D width, height, depth (float)
+            8.0, 2.0, 4.0,               # RWTex3D width, height, depth (uint)
+            8.0, 2.0, 4.0 ]              # RWTex3D width, height, depth (float)
 
 DescriptorSets:
   - Resources:
@@ -260,6 +280,10 @@ DescriptorSets:
       Kind: Texture3D
       DirectXBinding: { Register: 5, Space: 0 }
       VulkanBinding: { Binding: 8 }
+    - Name: RWTex3D
+      Kind: RWTexture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 9 }
 
 Results:
   - Result: GetDimensionsTest
