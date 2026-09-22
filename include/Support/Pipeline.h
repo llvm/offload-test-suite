@@ -138,6 +138,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::RWTexture3D:
     return DescriptorKind::UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -290,6 +291,7 @@ struct Resource {
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::Sampler:
@@ -326,6 +328,7 @@ struct Resource {
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -355,6 +358,7 @@ struct Resource {
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -375,6 +379,7 @@ struct Resource {
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -413,6 +418,7 @@ struct Resource {
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -447,6 +453,7 @@ struct Resource {
     case ResourceKind::SampledTexture2D:
       return ResourceDimension::Dim2D;
     case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
       return ResourceDimension::Dim3D;
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
@@ -542,6 +549,7 @@ struct Resource {
     case ResourceKind::RWTexture1DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::RWTexture3D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -1107,6 +1115,7 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(Texture2DArray);
     ENUM_CASE(RWTexture2DArray);
     ENUM_CASE(Texture3D);
+    ENUM_CASE(RWTexture3D);
     ENUM_CASE(TextureCube);
     ENUM_CASE(TextureCubeArray);
 #undef ENUM_CASE

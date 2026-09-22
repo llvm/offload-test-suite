@@ -28,6 +28,7 @@ enum class ResourceKind {
   Texture2DArray,
   RWTexture2DArray,
   Texture3D,
+  RWTexture3D,
   TextureCube,
   TextureCubeArray,
   Sampler,

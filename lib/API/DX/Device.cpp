@@ -244,10 +244,11 @@ static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Dim3D:
+    // 3D textures cannot be arrays.
+    return D3D12_UAV_DIMENSION_TEXTURE3D;
   case ResourceDimension::Cube:
     llvm_unreachable("Texture cubes cannot be used as a UAV");
-  case ResourceDimension::Dim3D:
-    llvm_unreachable("Texture dimension has no UAV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
 }
@@ -2413,6 +2414,11 @@ public:
         UAVDesc.Texture2DArray.FirstArraySlice = 0;
         UAVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
         UAVDesc.Texture2DArray.PlaneSlice = 0;
+        break;
+      case D3D12_UAV_DIMENSION_TEXTURE3D:
+        UAVDesc.Texture3D.MipSlice = 0;
+        UAVDesc.Texture3D.FirstWSlice = 0;
+        UAVDesc.Texture3D.WSize = Desc.Depth;
         break;
       default:
         llvm_unreachable("Unhandled texture UAV dimension");

@@ -95,6 +95,7 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
   case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::RWTexture3D:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
   case ResourceKind::ByteAddressBuffer:
@@ -280,6 +281,7 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
   case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -307,6 +309,7 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::RWTexture2DArray:
     return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
     return VK_IMAGE_VIEW_TYPE_3D;
   case ResourceKind::TextureCube:
     return VK_IMAGE_VIEW_TYPE_CUBE;
@@ -355,6 +358,7 @@ static VkImageType getVKImageType(const ResourceKind RK) {
     // Texture arrays are 2D images with more than one layer.
     return getVKImageType(ResourceDimension::Dim2D);
   case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
     return getVKImageType(ResourceDimension::Dim3D);
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:

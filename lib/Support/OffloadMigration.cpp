@@ -28,6 +28,7 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
   case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -72,6 +73,7 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
   case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
