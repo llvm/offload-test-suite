@@ -55,12 +55,12 @@ Viewport fields:
 
 | Field | Required | Default | Constraint |
 |---|---|---|---|
-| `X` | No | `0` | — |
-| `Y` | No | `0` | — |
-| `Width` | Yes | — | Greater than zero |
-| `Height` | Yes | — | Greater than zero |
-| `MinDepth` | No | `0` | Between 0 and 1 |
-| `MaxDepth` | No | `1` | Between `MinDepth` and 1 |
+| `X` | No | `0` | Finite |
+| `Y` | No | `0` | Finite |
+| `Width` | Yes | — | Finite and greater than zero |
+| `Height` | Yes | — | Finite and greater than zero |
+| `MinDepth` | No | `0` | Finite and between 0 and 1 |
+| `MaxDepth` | No | `1` | Finite and between `MinDepth` and 1 |
 
 Scissor fields:
 

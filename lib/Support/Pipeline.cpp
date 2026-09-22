@@ -13,6 +13,8 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 
+#include <cmath>
+
 using namespace offloadtest;
 
 static bool isFloatingPointFormat(DataFormat Format) {
@@ -622,6 +624,12 @@ void MappingTraits<offloadtest::Viewport>::mapping(IO &I,
   I.mapOptional("MinDepth", V.MinDepth, 0.0f);
   I.mapOptional("MaxDepth", V.MaxDepth, 1.0f);
 
+  if (!std::isfinite(V.X) || !std::isfinite(V.Y) || !std::isfinite(V.Width) ||
+      !std::isfinite(V.Height) || !std::isfinite(V.MinDepth) ||
+      !std::isfinite(V.MaxDepth)) {
+    I.setError("Viewport values must be finite.");
+    return;
+  }
   if (V.Width <= 0 || V.Height <= 0)
     I.setError("Viewport width and height must be positive.");
   if (V.MinDepth < 0 || V.MaxDepth > 1 || V.MinDepth > V.MaxDepth)
