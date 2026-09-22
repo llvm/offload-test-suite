@@ -64,6 +64,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan && DXC
+
 # Bug https://github.com/llvm/offload-test-suite/issues/1506
 # XFAIL: Metal && DXC
 
