@@ -19,10 +19,23 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // int case
   int64_t4 v = In[index];
-  int64_t scalar = QuadReadAcrossX(v.x);
-  int64_t2 vec2 = QuadReadAcrossX(v.xy);
-  int64_t3 vec3 = QuadReadAcrossX(v.xyz);
-  int64_t4 vec4 = QuadReadAcrossX(v);
+#ifdef __spirv__
+  // SPIR-V requires the lane index to be a compile-time constant (or
+  // dynamically uniform in SPIR-V 1.5+), so we pass a literal.
+  int64_t scalar = QuadReadLaneAt(v.x, 2);
+  int64_t2 vec2 = QuadReadLaneAt(v.xy, 2);
+  int64_t3 vec3 = QuadReadLaneAt(v.xyz, 2);
+  int64_t4 vec4 = QuadReadLaneAt(v, 2);
+#else
+  // DXIL permits a non-uniform (per-lane) lane index. Demonstrate this with
+  // an identity shuffle where each lane passes its own `index`, then
+  // broadcast lane 2's values so the result matches the SPIR-V path.
+  int64_t4 id = QuadReadLaneAt(v, index);
+  int64_t scalar = QuadReadLaneAt(id.x, 2);
+  int64_t2 vec2 = QuadReadLaneAt(id.xy, 2);
+  int64_t3 vec3 = QuadReadLaneAt(id.xyz, 2);
+  int64_t4 vec4 = QuadReadLaneAt(id, 2);
+#endif
 
   Out1[index].x = scalar;
   Out2[index].xy = vec2;
@@ -31,10 +44,18 @@ void main(uint3 dtid : SV_DispatchThreadID) {
 
   // uint case
   uint64_t4 uv = UIn[index];
-  uint64_t uscalar = QuadReadAcrossX(uv.x);
-  uint64_t2 uvec2 = QuadReadAcrossX(uv.xy);
-  uint64_t3 uvec3 = QuadReadAcrossX(uv.xyz);
-  uint64_t4 uvec4 = QuadReadAcrossX(uv);
+#ifdef __spirv__
+  uint64_t uscalar = QuadReadLaneAt(uv.x, 2);
+  uint64_t2 uvec2 = QuadReadLaneAt(uv.xy, 2);
+  uint64_t3 uvec3 = QuadReadLaneAt(uv.xyz, 2);
+  uint64_t4 uvec4 = QuadReadLaneAt(uv, 2);
+#else
+  uint64_t4 uid = QuadReadLaneAt(uv, index);
+  uint64_t uscalar = QuadReadLaneAt(uid.x, 2);
+  uint64_t2 uvec2 = QuadReadLaneAt(uid.xy, 2);
+  uint64_t3 uvec3 = QuadReadLaneAt(uid.xyz, 2);
+  uint64_t4 uvec4 = QuadReadLaneAt(uid, 2);
+#endif
 
   UOut1[index].x = uscalar;
   UOut2[index].xy = uvec2;
@@ -72,19 +93,19 @@ Buffers:
   - Name: ExpectedOut1
     Format: Int64
     Stride: 32
-    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+    Data: [ 9, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0 ]
   - Name: ExpectedOut2
     Format: Int64
     Stride: 32
-    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+    Data: [ 9, 10, 0, 0, 9, 10, 0, 0, 9, 10, 0, 0, 9, 10, 0, 0 ]
   - Name: ExpectedOut3
     Format: Int64
     Stride: 32
-    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+    Data: [ 9, 10, 11, 0, 9, 10, 11, 0, 9, 10, 11, 0, 9, 10, 11, 0 ]
   - Name: ExpectedOut4
     Format: Int64
     Stride: 32
-    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+    Data: [ 9, 10, 11, 12, 9, 10, 11, 12, 9, 10, 11, 12, 9, 10, 11, 12 ]
   - Name: UIn
     Format: UInt64
     Stride: 32
@@ -108,19 +129,19 @@ Buffers:
   - Name: UExpectedOut1
     Format: UInt64
     Stride: 32
-    Data: [ 5, 0, 0, 0, 1, 0, 0, 0, 13, 0, 0, 0, 9, 0, 0, 0 ]
+    Data: [ 9, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0, 9, 0, 0, 0 ]
   - Name: UExpectedOut2
     Format: UInt64
     Stride: 32
-    Data: [ 5, 6, 0, 0, 1, 2, 0, 0, 13, 14, 0, 0, 9, 10, 0, 0 ]
+    Data: [ 9, 10, 0, 0, 9, 10, 0, 0, 9, 10, 0, 0, 9, 10, 0, 0 ]
   - Name: UExpectedOut3
     Format: UInt64
     Stride: 32
-    Data: [ 5, 6, 7, 0, 1, 2, 3, 0, 13, 14, 15, 0, 9, 10, 11, 0 ]
+    Data: [ 9, 10, 11, 0, 9, 10, 11, 0, 9, 10, 11, 0, 9, 10, 11, 0 ]
   - Name: UExpectedOut4
     Format: UInt64
     Stride: 32
-    Data: [ 5, 6, 7, 8, 1, 2, 3, 4, 13, 14, 15, 16, 9, 10, 11, 12 ]
+    Data: [ 9, 10, 11, 12, 9, 10, 11, 12, 9, 10, 11, 12, 9, 10, 11, 12 ]
 Results:
   - Result: ExpectedOut1
     Rule: BufferExact
@@ -231,6 +252,9 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int64
+
+# Currently not supported in Clang, ongoing PR
+# XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/959
 # XFAIL: Metal
