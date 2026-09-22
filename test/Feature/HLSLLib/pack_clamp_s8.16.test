@@ -28,7 +28,7 @@ Buffers:
   - Name: ExpectedOut
     Format: UInt32
     Stride: 4
-    Data: [ 2139062400, 704708863, 185009411 ] # -128 -128 127 127, -1 0 1 42, 3 5 7 11
+    Data: [ 2139062400, 704708863, 185009411 ] # [-128, -128, 127, 127], [-1, 0, 1, 42], [3, 5, 7, 11]
 Results:
   - Result: Test1
     Rule: BufferExact
