@@ -4,6 +4,7 @@
 [[vk::binding(2, 0)]] RWTexture2D<float> RWTex2D : register(u1);
 [[vk::binding(3, 0)]] Texture1D<float4> Tex1D : register(t1);
 [[vk::binding(4, 0)]] RWTexture1D<float> RWTex1D : register(u2);
+[[vk::binding(5, 0)]] Texture3D<float4> Tex3D : register(t2);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -29,6 +30,16 @@ void main() {
   RWTex1D[uint(0)] = values.y;
   RWTex1D[uint(1)] = values.x;
   Out[7] = float4(values, RWTex1D[uint(0)], RWTex1D[uint(1)]);
+
+  // Texture3D::operator[] (int3)
+  Out[8] = Tex3D[int3(0, 0, 0)];  // Red
+  Out[9] = Tex3D[int3(1, 0, 0)];  // Green
+  Out[10] = Tex3D[int3(0, 1, 0)]; // Blue
+  Out[11] = Tex3D[int3(1, 1, 0)]; // White
+  Out[12] = Tex3D[int3(0, 0, 1)]; // Cyan
+  Out[13] = Tex3D[int3(1, 0, 1)]; // Magenta
+  Out[14] = Tex3D[int3(0, 1, 1)]; // Yellow
+  Out[15] = Tex3D[int3(1, 1, 1)]; // Black
 }
 
 //--- pipeline.yaml
@@ -72,22 +83,44 @@ Buffers:
     Data: [ 0.25,   # (0)
             0.5 ]   # (1)
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Mip 0 (2x2x2)
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 1.0, 1.0,
+            1.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.5, 0.5, 0.5, 1.0 ] # Mip 1 (1x1x1) - Grey
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 128 # 8 * sizeof(float4)
+    FillSize: 256 # 16 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 0.0, 0.0, 1.0,    # [0]
-            0.0, 1.0, 0.0, 1.0,    # [1]
-            0.0, 0.0, 1.0, 1.0,    # [2]
-            1.0, 1.0, 1.0, 1.0,    # [3]
-            0.25, 0.5, 0.75, 1.0,  # [4] the UAV's four texels
-            1.0, 0.0, 0.0, 1.0,    # [5]
-            0.0, 1.0, 0.0, 1.0,    # [6]
-            0.25, 0.5, 0.5, 0.25 ] # [7] before and after reversing the 1D UAV
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # [0]
+            0.0, 1.0, 0.0, 1.0,   # [1]
+            0.0, 0.0, 1.0, 1.0,   # [2]
+            1.0, 1.0, 1.0, 1.0,   # [3]
+            0.25, 0.5, 0.75, 1.0, # [4] the UAV's four texels
+            1.0, 0.0, 0.0, 1.0,   # [5]
+            0.0, 1.0, 0.0, 1.0,   # [6]
+            0.25, 0.5, 0.5, 0.25, # [7] before and after reversing the 1D UAV
+            1.0, 0.0, 0.0, 1.0,   # [8]
+            0.0, 1.0, 0.0, 1.0,   # [9]
+            0.0, 0.0, 1.0, 1.0,   # [10]
+            1.0, 1.0, 1.0, 1.0,   # [11]
+            0.0, 1.0, 1.0, 1.0,   # [12]
+            1.0, 0.0, 1.0, 1.0,   # [13]
+            1.0, 1.0, 0.0, 1.0,   # [14]
+            0.0, 0.0, 0.0, 1.0 ]  # [15]
 
 DescriptorSets:
   - Resources:
@@ -107,6 +140,10 @@ DescriptorSets:
       Kind: RWTexture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
