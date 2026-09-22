@@ -27,7 +27,7 @@ Buffers:
     FillSize: 48
   - Name: ExpectedOut
     Format: UInt32
-    Stride: 4
+    Stride: 16
     Data: [ 0, 255, 0, 1, 0, 1, 16, 42, 3, 5, 7, 11 ]
 Results:
   - Result: Test1

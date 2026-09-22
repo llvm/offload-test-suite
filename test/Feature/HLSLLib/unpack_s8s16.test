@@ -27,7 +27,7 @@ Buffers:
     FillSize: 24
   - Name: ExpectedOut
     Format: Int16
-    Stride: 2
+    Stride: 8
     Data: [ 0, -127, 127, -128, -1, 0, 1, 42, 3, 5, 7, 11 ]
 Results:
   - Result: Test1
