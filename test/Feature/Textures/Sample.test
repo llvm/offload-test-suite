@@ -14,7 +14,7 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp0 : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(2, 0)]] SamplerState Samp1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
@@ -24,6 +24,7 @@ VSOutput mainVS(VSInput input) {
 #else
 #define CUBE_OR(Call, Expect) (Expect)
 #endif
+[[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Base UV at texture center (0.5, 0.5).
@@ -43,22 +44,22 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Samp0 (Mag=Nearest, Min=Linear):
   //   Sample(uv_mag) -> Mag(Nearest) -> White (mip 0)
   //   Sample(uv_min) -> Min(Linear)  -> Magenta (mip 1)
-  float4 r0 = Tex.Sample(Samp0, uv_mag);
-  float4 r1 = Tex.Sample(Samp0, uv_min);
+  float4 r0 = Tex2D.Sample(Samp0, uv_mag);
+  float4 r1 = Tex2D.Sample(Samp0, uv_min);
 
   // Samp1 (Mag=Linear, Min=Nearest):
   //   Sample(uv_mag) -> Mag(Linear)  -> Grey (mip 0)
   //   Sample(uv_min) -> Min(Nearest) -> Magenta (mip 1)
-  float4 r2 = Tex.Sample(Samp1, uv_mag);
-  float4 r3 = Tex.Sample(Samp1, uv_min);
+  float4 r2 = Tex2D.Sample(Samp1, uv_mag);
+  float4 r3 = Tex2D.Sample(Samp1, uv_min);
 
   // Overloads with Offset
   // Offset (-1, -1) applied to (0.5001, 0.5001) effectively samples near (0,0) -> Red
-  float4 r4 = Tex.Sample(Samp0, uv_mag, int2(-1, -1));
+  float4 r4 = Tex2D.Sample(Samp0, uv_mag, int2(-1, -1));
 
   // Overloads with Offset and Clamp
   // Clamp 0.0f should behave normally (Red)
-  float4 r5 = Tex.Sample(Samp0, uv_mag, int2(-1, -1), 0.0f);
+  float4 r5 = Tex2D.Sample(Samp0, uv_mag, int2(-1, -1), 0.0f);
 
   // TextureCube::Sample takes a float3 direction and derives its LOD from
   // screen-space derivatives just as the 2D case does. Face +X is Red at mip 0
@@ -80,6 +81,20 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float4 r9 = CUBE_OR(TexCube.Sample(Samp1, CubeMag, 0.0f),
                        float4(1, 0, 0, 1));
 
+  // Use 0.375 to avoid the nearest-filter tie at 0.5.
+  float u_mag = 0.375 + float(GTid.x) * 0.0001;
+  float u_min = 0.5 + float(GTid.x) * 2.0;
+
+  float4 r10 = Tex1D.Sample(Samp0, u_mag);
+  float4 r11 = Tex1D.Sample(Samp0, u_min);
+
+  float4 r12 = Tex1D.Sample(Samp1, u_mag);
+  float4 r13 = Tex1D.Sample(Samp1, u_min);
+
+  float4 r14 = Tex1D.Sample(Samp0, u_mag, 1);
+
+  float4 r15 = Tex1D.Sample(Samp0, u_mag, 1, 0.0);
+
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
     Out[1] = r1;
@@ -91,6 +106,12 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[7] = r7;
     Out[8] = r8;
     Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
+    Out[12] = r12;
+    Out[13] = r13;
+    Out[14] = r14;
+    Out[15] = r15;
   }
   return float4(0,0,0,0);
 }
@@ -104,7 +125,7 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
@@ -144,10 +165,18 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
             0.0, 1.0, 0.0, 1.0 ]
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
+            0.0, 1.0, 0.0, 1.0,  # Green (1)
+            1.0, 0.0, 1.0, 1.0 ] # Mip 1 (Magenta)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 160 # 10 * sizeof(float4)
+    FillSize: 256 # 16 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -161,7 +190,13 @@ Buffers:
             1.0, 0.0, 0.0, 1.0,       # Cube +X magnified -> mip 0 Red
             1.0, 1.0, 0.0, 1.0,       # Cube +X minified  -> mip 1 Yellow
             0.0, 0.0, 1.0, 1.0,       # Cube -Z magnified -> mip 0 Blue
-            1.0, 0.0, 0.0, 1.0 ]      # Cube +X, LOD clamp 0.0 -> mip 0 Red
+            1.0, 0.0, 0.0, 1.0,       # Cube +X, LOD clamp 0.0 -> mip 0 Red
+            1.0, 0.0, 0.0, 1.0,       # 1D Samp0 Mag (Nearest) -> Red
+            1.0, 0.0, 1.0, 1.0,       # 1D Samp0 Min (Linear)  -> mip 1 Magenta
+            0.75, 0.25, 0.0, 1.0,     # 1D Samp1 Mag (Linear)  -> Red/Green blend (mip 0)
+            1.0, 0.0, 1.0, 1.0,       # 1D Samp1 Min (Nearest) -> mip 1 Magenta
+            0.0, 1.0, 0.0, 1.0,       # 1D Offset (1) -> Green
+            0.0, 1.0, 0.0, 1.0 ]      # 1D Offset (1) Clamp 0.0 -> Green
 
   - Name: RT
     Format: Float32
@@ -197,7 +232,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -217,6 +252,10 @@ DescriptorSets:
       Kind: TextureCube
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: SampleTest
