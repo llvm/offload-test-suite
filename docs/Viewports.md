@@ -53,23 +53,23 @@ number of entries. Up to 16 entries are supported.
 
 Viewport fields:
 
-| Field | Required | Default | Constraint |
-|---|---|---|---|
-| `X` | No | `0` | Finite |
-| `Y` | No | `0` | Finite |
-| `Width` | Yes | — | Finite and greater than zero |
-| `Height` | Yes | — | Finite and greater than zero |
-| `MinDepth` | No | `0` | Finite and between 0 and 1 |
-| `MaxDepth` | No | `1` | Finite and between `MinDepth` and 1 |
+| Field      | Required | Default | Constraint                          |
+|------------|----------|---------|-------------------------------------|
+| `X`        | No       | `0`     | Finite                              |
+| `Y`        | No       | `0`     | Finite                              |
+| `Width`    | Yes      | —       | Finite and greater than zero        |
+| `Height`   | Yes      | —       | Finite and greater than zero        |
+| `MinDepth` | No       | `0`     | Finite and between 0 and 1          |
+| `MaxDepth` | No       | `1`     | Finite and between `MinDepth` and 1 |
 
 Scissor fields:
 
-| Field | Required | Default | Constraint |
-|---|---|---|---|
-| `X` | No | `0` | Non-negative |
-| `Y` | No | `0` | Non-negative |
-| `Width` | Yes | — | Greater than zero |
-| `Height` | Yes | — | Greater than zero |
+| Field    | Required | Default | Constraint        |
+|----------|----------|---------|-------------------|
+| `X`      | No       | `0`     | Non-negative      |
+| `Y`      | No       | `0`     | Non-negative      |
+| `Width`  | Yes      | —       | Greater than zero |
+| `Height` | Yes      | —       | Greater than zero |
 
 ## Selecting a viewport from HLSL
 
