@@ -94,9 +94,12 @@ VSOutput main(float3 Position : POSITION, uint InstanceID : SV_InstanceID) {
 ```
 
 The rasterizer applies the selected viewport transform and its corresponding
-scissor rectangle to the primitive. The index is primitive-level state, so all
-vertices of a primitive must write the same value. A disagreement is invalid
-usage and does not produce a portable viewport selection.
+scissor rectangle to the primitive. A pixel shader can read the selected index
+directly as an `SV_ViewportArrayIndex` input.
+
+The index is primitive-level state, so all vertices of a primitive must write
+the same value. A disagreement is invalid usage and does not produce a portable
+viewport selection.
 
 ## Test requirements
 
