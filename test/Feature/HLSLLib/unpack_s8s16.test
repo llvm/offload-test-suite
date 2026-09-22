@@ -23,7 +23,7 @@ Buffers:
     Data: [ 2155839744, 704708863 ] # [0, -127, 127, -128], [-1, 0, 1, 42]
   - Name: Out
     Format: Int16
-    Stride: 2
+    Stride: 8
     FillSize: 24
   - Name: ExpectedOut
     Format: Int16

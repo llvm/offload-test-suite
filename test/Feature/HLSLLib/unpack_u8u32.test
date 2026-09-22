@@ -23,7 +23,7 @@ Buffers:
     Data: [ 16842496, 705691904 ] # [0, 255, 0, 1], [0, 1, 16, 42]
   - Name: Out
     Format: UInt32
-    Stride: 4
+    Stride: 16
     FillSize: 48
   - Name: ExpectedOut
     Format: UInt32
