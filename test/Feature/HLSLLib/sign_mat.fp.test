@@ -1,0 +1,91 @@
+#--- source.hlsl
+
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<int4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  int3x2 F32 = sign(float3x2(In[0].xyz, In[1].xyz));
+  int2x4 F24 = sign(float2x4(In[2], In[3]));
+  int3x1 F31 = sign(float3x1(In[4].xyz));
+  int4x4 F44 = sign(float4x4(In[5], In[6], In[7], In[8]));
+  int2x2 F22Const = sign(float2x2(-96.83, -8.7, 8.72, 44.0));
+
+  Out[0] = int4(F32[0], F32[1]);
+  Out[1] = int4(F32[2], 0, 0);
+  Out[2] = F24[0];
+  Out[3] = F24[1];
+  Out[4] = int4(F31[0], F31[1], F31[2], 0);
+  Out[5] = F44[0];
+  Out[6] = F44[1];
+  Out[7] = F44[2];
+  Out[8] = F44[3];
+  Out[9] = int4(F22Const[0], F22Const[1]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, -0.0, -4.2, 0.0,
+            -1.0, 1.0, 58.0, 0.0,
+            -4.2, 58.0, 75.59, 41.9,
+            91.09, -3.76, 19.98, -5.47,
+            -53.1, 590.32, 70794.0, 0.0,
+            -60.6, 98.0, 1.2, -8.5,
+            0.0, 4.46, -4.9, -8.0,
+            7.42, 7.2, -764.09, -30.6,
+            -9.1, 81.6, -94.0, 7.0 ]
+  - Name: Out
+    Format: Int32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Int32
+    Stride: 16
+    Data: [ 0, 0, -1, -1,
+            1, 1, 0, 0,
+            -1, 1, 1, 1,
+            1, -1, 1, -1,
+            -1, 1, 1, 0,
+            -1, 1, 1, -1,
+            0, 1, -1, -1,
+            1, 1, -1, -1,
+            -1, 1, -1, 1,
+            -1, -1, 1, 1 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184488
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 202x -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
