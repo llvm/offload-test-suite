@@ -969,10 +969,9 @@ llvm::Error offloadtest::Pipeline::validateDispatchParameters() {
         DispatchParameters.FirstVertex != 0 ||
         DispatchParameters.FirstInstance != 0)
       return llvm::createStringError(
-          "DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on a "
-          "Compute or Mesh Shader pipeline. Only allowed on a "
-          "TraditionalRaster "
-          "pipeline.");
+          "DispatchParameters.InstanceCount/FirstVertex/FirstInstance set on "
+          "a Compute or Mesh Shader pipeline. Only allowed on a "
+          "TraditionalRaster pipeline.");
     break;
   case ShaderPipelineKind::TraditionalRaster:
     if (DispatchParameters.DispatchGroupCount !=
