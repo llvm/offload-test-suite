@@ -5,8 +5,7 @@ verifying that the compiler correctly generates code for
 `CalculateLevelOfDetail`, `SampleGrad` (explicit gradients), and direct access
 via `mips[level][coords]`.
 
-Multisampled render targets have one mip level; see
-[MSAA.md](MSAA.md).
+Multisampled render targets have one mip level; see [MSAA.md](MSAA.md).
 
 ## Defining Mip Levels
 
