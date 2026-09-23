@@ -3242,6 +3242,15 @@ private:
     const bool HasShaderAtomicFloatExt = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+        FeaturesFragmentShadingRate{};
+    FeaturesFragmentShadingRate.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+    const bool HasFragmentShadingRateExt = isExtensionSupported(
+        DeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+#endif
+
     Features.pNext = &Features11;
     if (HasVulkan12)
       Features11.pNext = &Features12;
@@ -3277,6 +3286,12 @@ private:
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
     }
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    if (HasFragmentShadingRateExt) {
+      FeaturesFragmentShadingRate.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShadingRate;
+    }
+#endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
@@ -3319,6 +3334,13 @@ private:
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
                                              FeaturesAtomicFloat.Name)));
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+#define VULKAN_KHR_FRAGMENT_SHADING_RATE_FEATURE_BOOL(Name)                    \
+  Caps.insert(std::make_pair(                                                  \
+      #Name,                                                                   \
+      makeCapability<bool>(#Name, HasFragmentShadingRateExt &&                 \
+                                      FeaturesFragmentShadingRate.Name)));
+#endif
 #include "VKFeatures.def"
   }
 
