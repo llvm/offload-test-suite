@@ -83,12 +83,15 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture1D:
+  case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -268,6 +271,9 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
@@ -286,7 +292,11 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
 static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
     return VK_IMAGE_VIEW_TYPE_1D;
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
+    return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
@@ -329,6 +339,9 @@ static VkImageType getVKImageType(ResourceDimension Dim) {
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
     return getVKImageType(ResourceDimension::Dim1D);
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
@@ -4679,7 +4692,7 @@ public:
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
       ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask = 0;
+      ImageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       ImageBarrier.oldLayout = R.ImageLayout;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;

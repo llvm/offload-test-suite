@@ -219,8 +219,8 @@ static llvm::Error validateDXRasterSampleCount(ID3D12DeviceX *Device,
 static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
   case ResourceDimension::Dim1D:
-    // 1D texture arrays are not set up yet.
-    return D3D12_SRV_DIMENSION_TEXTURE1D;
+    return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE1DARRAY
+                        : D3D12_SRV_DIMENSION_TEXTURE1D;
   case ResourceDimension::Dim2D:
     if (Desc.SampleCount > 1)
       return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DMSARRAY
@@ -238,12 +238,14 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
 
 static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   switch (Desc.Dim) {
+  case ResourceDimension::Dim1D:
+    return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE1DARRAY
+                        : D3D12_UAV_DIMENSION_TEXTURE1D;
   case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
   case ResourceDimension::Cube:
     llvm_unreachable("Texture cubes cannot be used as a UAV");
-  case ResourceDimension::Dim1D:
   case ResourceDimension::Dim3D:
     llvm_unreachable("Texture dimension has no UAV mapping yet");
   }
@@ -2327,6 +2329,13 @@ public:
         SRVDesc.Texture1D.MipLevels = Desc.MipLevels;
         SRVDesc.Texture1D.ResourceMinLODClamp = 0.0f;
         break;
+      case D3D12_SRV_DIMENSION_TEXTURE1DARRAY:
+        SRVDesc.Texture1DArray.MostDetailedMip = 0;
+        SRVDesc.Texture1DArray.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture1DArray.FirstArraySlice = 0;
+        SRVDesc.Texture1DArray.ArraySize = Desc.ArraySlices;
+        SRVDesc.Texture1DArray.ResourceMinLODClamp = 0.0f;
+        break;
       case D3D12_SRV_DIMENSION_TEXTURE2D:
         SRVDesc.Texture2D.MostDetailedMip = 0;
         SRVDesc.Texture2D.MipLevels = Desc.MipLevels;
@@ -2377,6 +2386,14 @@ public:
       D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
       UAVDesc.ViewDimension = getDXUAVDimension(Desc);
       switch (UAVDesc.ViewDimension) {
+      case D3D12_UAV_DIMENSION_TEXTURE1D:
+        UAVDesc.Texture1D.MipSlice = 0;
+        break;
+      case D3D12_UAV_DIMENSION_TEXTURE1DARRAY:
+        UAVDesc.Texture1DArray.MipSlice = 0;
+        UAVDesc.Texture1DArray.FirstArraySlice = 0;
+        UAVDesc.Texture1DArray.ArraySize = Desc.ArraySlices;
+        break;
       case D3D12_UAV_DIMENSION_TEXTURE2D:
         UAVDesc.Texture2D.MipSlice = 0;
         UAVDesc.Texture2D.PlaneSlice = 0;

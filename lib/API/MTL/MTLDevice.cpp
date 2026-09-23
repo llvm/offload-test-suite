@@ -1473,6 +1473,7 @@ public:
           Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
       break;
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
       // Metal Shader Converter maps Texture1D to a 2D texture with height 1.
       Desc =
           MTL::TextureDescriptor::texture2DDescriptor(Format, Width, 1, false);
@@ -1484,6 +1485,8 @@ public:
       break;
     case ResourceKind::Sampler:
       llvm_unreachable("Not implemented yet.");
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
       llvm_unreachable("Texture arrays aren't supported in Metal.");

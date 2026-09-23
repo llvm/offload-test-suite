@@ -20,6 +20,9 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   case ResourceKind::ConstantBuffer:
     return BufferUsage::ConstantBuffer;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
@@ -60,6 +63,9 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
   case ResourceKind::ConstantBuffer:
     return BufferShaderAccessType::Raw;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:

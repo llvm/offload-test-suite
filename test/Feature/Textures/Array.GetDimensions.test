@@ -1,8 +1,10 @@
 #--- source.hlsl
-[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float> Out : register(u0);
-[[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex : register(u1); // 8x2, 4 slices
+[[vk::binding(2, 0)]] RWTexture2DArray<float4> RWTex2D : register(u1); // 8x2, 4 slices
 [[vk::binding(3, 0)]] TextureCubeArray<float4> TexCubeArr : register(t1);
+[[vk::binding(4, 0)]] Texture1DArray<float4> Tex1D : register(t2);
+[[vk::binding(5, 0)]] RWTexture1DArray<float4> RWTex1D : register(u2); // 8 texels, 4 slices
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -11,20 +13,20 @@ void main() {
   // Texture2DArray::GetDimensions reports the slice count as `Elements`, so
   // this reads back through the shader what the harness created from
   // `ArraySlices`.
-  Tex.GetDimensions(Width, Height, Elements);
+  Tex2D.GetDimensions(Width, Height, Elements);
   Out[0] = (float)Width;    // 4
   Out[1] = (float)Height;   // 2
   Out[2] = (float)Elements; // 3
 
   // With an explicit mip level the extents halve, but the slice count must
   // not: layers are not a texel dimension.
-  Tex.GetDimensions(0, Width, Height, Elements, Levels);
+  Tex2D.GetDimensions(0, Width, Height, Elements, Levels);
   Out[3] = (float)Width;    // 4
   Out[4] = (float)Height;   // 2
   Out[5] = (float)Elements; // 3
   Out[6] = (float)Levels;   // 2
 
-  Tex.GetDimensions(1, Width, Height, Elements, Levels);
+  Tex2D.GetDimensions(1, Width, Height, Elements, Levels);
   Out[7] = (float)Width;     // 2
   Out[8] = (float)Height;    // 1
   Out[9] = (float)Elements;  // 3 -- unchanged by the mip level
@@ -32,7 +34,7 @@ void main() {
 
   // RWTexture2DArray (8x2, 4 slices). A UAV has a single mip, so this overload
   // reports only the extents and the slice count.
-  RWTex.GetDimensions(Width, Height, Elements);
+  RWTex2D.GetDimensions(Width, Height, Elements);
   Out[11] = (float)Width;    // 8
   Out[12] = (float)Height;   // 2
   Out[13] = (float)Elements; // 4
@@ -48,6 +50,26 @@ void main() {
   Out[18] = (float)Height;   // 4
   Out[19] = (float)Elements; // 2
   Out[20] = (float)Levels;   // 1
+
+  // Texture1DArray (4 texels, 2 mips, 3 slices).
+  Tex1D.GetDimensions(Width, Elements);
+  Out[21] = (float)Width;    // 4
+  Out[22] = (float)Elements; // 3
+
+  Tex1D.GetDimensions(0, Width, Elements, Levels);
+  Out[23] = (float)Width;    // 4
+  Out[24] = (float)Elements; // 3
+  Out[25] = (float)Levels;   // 2
+
+  Tex1D.GetDimensions(1, Width, Elements, Levels);
+  Out[26] = (float)Width;    // 2
+  Out[27] = (float)Elements; // 3 -- unchanged by the mip level
+  Out[28] = (float)Levels;   // 2
+
+  // RWTexture1DArray (8 texels, 4 slices).
+  RWTex1D.GetDimensions(Width, Elements);
+  Out[29] = (float)Width;    // 8
+  Out[30] = (float)Elements; // 4
 }
 
 //--- pipeline.yaml
@@ -58,13 +80,13 @@ Shaders:
 
 Buffers:
   # 4x2 with 2 mips across 3 slices: (8 + 2) * 3 * sizeof(float4) = 480 bytes.
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     FillSize: 480
     OutputProps: { Width: 4, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 3 }
 
-  - Name: RWTex
+  - Name: RWTex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 8, Height: 2, Depth: 1, ArraySlices: 4 }
@@ -77,10 +99,23 @@ Buffers:
     FillSize: 3072 # 16 texels * 12 layers * sizeof(float4)
     OutputProps: { Width: 4, Height: 4, Depth: 1, ArraySlices: 12 }
 
+  # 4 texels with 2 mips across 3 slices: (4 + 2) * 3 * sizeof(float4) = 288 bytes.
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    FillSize: 288
+    OutputProps: { Width: 4, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 3 }
+
+  - Name: RWTex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 8, Height: 1, Depth: 1, ArraySlices: 4 }
+    FillSize: 512 # 8 * 4 slices * 4 channels * 4 bytes
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 84 # 21 * sizeof(float)
+    FillSize: 124 # 31 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -90,7 +125,11 @@ Buffers:
             2.0, 1.0, 3.0, 2.0,       # mip 1: extents halve, elements do not
             8.0, 2.0, 4.0,            # RWTexture2DArray: w, h, elements
             4.0, 4.0, 2.0,            # cube array: w, h, cubes
-            4.0, 4.0, 2.0, 1.0 ]      # cube array: w, h, cubes, levels
+            4.0, 4.0, 2.0, 1.0,       # cube array: w, h, cubes, levels
+            4.0, 3.0,                 # 1D: w, elements
+            4.0, 3.0, 2.0,            # 1D mip 0: w, elements, levels
+            2.0, 3.0, 2.0,            # 1D mip 1: width halves, elements do not
+            8.0, 4.0 ]                # RWTexture1DArray: w, elements
 
 Results:
   - Result: ArrayGetDimensionsTest
@@ -100,11 +139,11 @@ Results:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: RWTex
+    - Name: RWTex2D
       Kind: RWTexture2DArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
@@ -112,6 +151,14 @@ DescriptorSets:
       Kind: TextureCubeArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: Tex1D
+      Kind: Texture1DArray
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: RWTex1D
+      Kind: RWTexture1DArray
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
