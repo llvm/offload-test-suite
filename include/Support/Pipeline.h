@@ -590,6 +590,8 @@ struct IOBindings {
   CPUBuffer *RTargetBufferPtr = nullptr;
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
+  uint32_t SampleCount = 1;
+
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind. Valid range is 1..32 (matches both
   // D3D12's per-CP-patchlist topologies and Vulkan's

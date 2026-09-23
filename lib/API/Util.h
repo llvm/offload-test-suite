@@ -16,6 +16,8 @@
 
 #include "API/API.h"
 #include "API/CommandBuffer.h"
+#include "API/RenderPass.h"
+#include "API/Texture.h"
 
 #include <cstdint>
 
@@ -24,6 +26,13 @@ namespace offloadtest {
 llvm::Error findAndValidateRenderPassTextureSize(const RenderPassBeginDesc &,
                                                  uint32_t *OutWidth,
                                                  uint32_t *OutHeight);
+
+llvm::Error validateRenderPassBeginDesc(const RenderPassDesc &PassDesc,
+                                        const RenderPassBeginDesc &Desc,
+                                        uint32_t *OutWidth = nullptr,
+                                        uint32_t *OutHeight = nullptr);
+
+llvm::Error validateResolve(const Texture &Src, const Texture &Dst);
 
 enum class IntelGpuEra { UnknownOrLegacy, Gen7_to_10, Gen11_to_14_and_Xe };
 
