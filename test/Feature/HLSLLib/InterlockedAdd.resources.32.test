@@ -263,9 +263,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented texture atomics: https://github.com/llvm/llvm-project/issues/186154
-# XFAIL: Clang && (DirectX || Metal)
-
 # Bug: https://github.com/llvm/llvm-project/issues/221370
 # XFAIL: Clang && Vulkan
 

@@ -14,7 +14,7 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2D<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState LinearSamp : register(s0);
 [[vk::binding(2, 0)]] SamplerState PointSamp : register(s1);
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
@@ -24,6 +24,7 @@ VSOutput mainVS(VSInput input) {
 #else
 #define CUBE_OR(Call, Expect) (Expect)
 #endif
+[[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 2x2 Texture:
@@ -33,12 +34,12 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Linear sample at center (0.5, 0.5)
   // Should average all 4 pixels: (1+0+0+1)/4 = 0.5 for R, etc.
   // Expected: (0.5, 0.5, 0.5, 1.0)
-  float4 r0 = Tex.SampleLevel(LinearSamp, float2(0.5, 0.5), 0);
+  float4 r0 = Tex2D.SampleLevel(LinearSamp, float2(0.5, 0.5), 0);
 
   // Point sample at top-left center (0.25, 0.25)
   // Should pick (0,0) -> Red
   // Expected: (1.0, 0.0, 0.0, 1.0)
-  float4 r1 = Tex.SampleLevel(PointSamp, float2(0.25, 0.25), 0);
+  float4 r1 = Tex2D.SampleLevel(PointSamp, float2(0.25, 0.25), 0);
 
   // A cube is six layers, one per face, in the order +X, -X, +Y, -Y, +Z, -Z.
   // Sampling straight down each axis lands in the centre of the matching face,
@@ -59,6 +60,9 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float4 r7 = CUBE_OR(TexCube.SampleLevel(LinearSamp, float3( 0,  0, -1), 0),
                        float4(0, 1, 1, 1)); // -Z Cyan
 
+  float4 r8 = Tex1D.SampleLevel(LinearSamp, 0.5, 0);
+  float4 r9 = Tex1D.SampleLevel(PointSamp, 0.25, 0);
+
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
     Out[1] = r1;
@@ -68,6 +72,8 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[5] = r5;
     Out[6] = r6;
     Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
   }
   return float4(0,0,0,0);
 }
@@ -81,7 +87,7 @@ Shaders:
     Entry: mainPS
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
@@ -114,10 +120,17 @@ Buffers:
             0.0, 1.0, 1.0, 1.0,  0.0, 1.0, 1.0, 1.0,
             0.0, 1.0, 1.0, 1.0,  0.0, 1.0, 1.0, 1.0 ]
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
+            0.0, 1.0, 0.0, 1.0 ] # Green (1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 128 # 8 * sizeof(float4)
+    FillSize: 160 # 10 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -129,7 +142,9 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  # Cube +Y Blue
             1.0, 1.0, 0.0, 1.0,  # Cube -Y Yellow
             1.0, 0.0, 1.0, 1.0,  # Cube +Z Magenta
-            0.0, 1.0, 1.0, 1.0 ] # Cube -Z Cyan
+            0.0, 1.0, 1.0, 1.0,  # Cube -Z Cyan
+            0.5, 0.5, 0.0, 1.0,  # 1D Linear Result
+            1.0, 0.0, 0.0, 1.0 ] # 1D Point Result
 
   - Name: RT
     Format: Float32
@@ -165,7 +180,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -185,6 +200,10 @@ DescriptorSets:
       Kind: TextureCube
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: SamplerTest
