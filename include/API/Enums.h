@@ -21,6 +21,8 @@ enum class ResourceKind {
   ConstantBuffer,
   Texture1D,
   RWTexture1D,
+  Texture1DArray,
+  RWTexture1DArray,
   Texture2D,
   RWTexture2D,
   Texture2DArray,

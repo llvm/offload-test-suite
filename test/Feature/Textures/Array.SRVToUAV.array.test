@@ -1,14 +1,21 @@
 #--- source.hlsl
 
-[[vk::binding(0, 0)]] Texture2DArray<float4> In[2] : register(t0);
-[[vk::binding(1, 0)]] RWTexture2DArray<float4> Out[2] : register(u1);
+[[vk::binding(0, 0)]] Texture2DArray<float4> In2D[2] : register(t0);
+[[vk::binding(1, 0)]] RWTexture2DArray<float4> Out2D[2] : register(u1);
+[[vk::binding(2, 0)]] Texture1DArray<float4> In1D[2] : register(t2);
+[[vk::binding(3, 0)]] RWTexture1DArray<float4> Out1D[2] : register(u3);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
   uint2 GID = {GI / 2, GI % 2};
   for (uint I = 0; I < 2; ++I)
     for (uint Slice = 0; Slice < 2; ++Slice)
-      Out[I][uint3(GID.xy, Slice)] = In[I][uint3(GID.xy, Slice)].bgra;
+      Out2D[I][uint3(GID.xy, Slice)] = In2D[I][uint3(GID.xy, Slice)].bgra;
+
+  if (GID.y == 0)
+    for (uint I = 0; I < 2; ++I)
+      for (uint Slice = 0; Slice < 2; ++Slice)
+        Out1D[I][uint2(GID.x, Slice)] = In1D[I][uint2(GID.x, Slice)].bgra;
 }
 //--- pipeline.yaml
 ---
@@ -18,38 +25,38 @@ Shaders:
 Buffers:
   # Two Data blobs, one per descriptor-array element. Within each blob the
   # layout is slice-major: the whole of slice 0, then slice 1.
-  - Name: In
+  - Name: In2D
     Format: Float32
     Channels: 4
     ArraySize: 2
     Data:
-      - [1.0, 0.0, 0.0, 1.0,   # In[0] slice 0 (0,0) Red
-         0.0, 1.0, 0.0, 1.0,   #             (1,0) Green
-         0.0, 0.0, 1.0, 1.0,   #             (0,1) Blue
-         1.0, 1.0, 1.0, 1.0,   #             (1,1) White
-         0.0, 1.0, 1.0, 1.0,   # In[0] slice 1 (0,0) Cyan
-         1.0, 0.0, 1.0, 1.0,   #             (1,0) Magenta
-         1.0, 1.0, 0.0, 1.0,   #             (0,1) Yellow
-         0.5, 0.5, 0.5, 1.0]   #             (1,1) Grey
-      - [0.5, 0.0, 0.0, 1.0,   # In[1] slice 0 (0,0) Maroon
-         0.5, 0.5, 0.0, 1.0,   #             (1,0) Olive
-         0.0, 0.0, 0.5, 1.0,   #             (0,1) Navy
-         0.0, 0.5, 0.5, 1.0,   #             (1,1) Teal
-         0.25, 0.0, 0.0, 1.0,  # In[1] slice 1 (0,0)
-         0.0, 0.25, 0.0, 1.0,  #             (1,0)
-         0.0, 0.0, 0.25, 1.0,  #             (0,1)
-         0.75, 0.75, 0.75, 1.0] #            (1,1)
+      - [1.0, 0.0, 0.0, 1.0,   # In2D[0] slice 0 (0,0) Red
+         0.0, 1.0, 0.0, 1.0,   #                 (1,0) Green
+         0.0, 0.0, 1.0, 1.0,   #                 (0,1) Blue
+         1.0, 1.0, 1.0, 1.0,   #                 (1,1) White
+         0.0, 1.0, 1.0, 1.0,   # In2D[0] slice 1 (0,0) Cyan
+         1.0, 0.0, 1.0, 1.0,   #                 (1,0) Magenta
+         1.0, 1.0, 0.0, 1.0,   #                 (0,1) Yellow
+         0.5, 0.5, 0.5, 1.0]   #                 (1,1) Grey
+      - [0.5, 0.0, 0.0, 1.0,   # In2D[1] slice 0 (0,0) Maroon
+         0.5, 0.5, 0.0, 1.0,   #                 (1,0) Olive
+         0.0, 0.0, 0.5, 1.0,   #                 (0,1) Navy
+         0.0, 0.5, 0.5, 1.0,   #                 (1,1) Teal
+         0.25, 0.0, 0.0, 1.0,  # In2D[1] slice 1 (0,0)
+         0.0, 0.25, 0.0, 1.0,  #                 (1,0)
+         0.0, 0.0, 0.25, 1.0,  #                 (0,1)
+         0.75, 0.75, 0.75, 1.0] #                (1,1)
     OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
 
-  - Name: Out
+  - Name: Out2D
     Format: Float32
     Channels: 4
     ArraySize: 2
     FillSize: 128 # 2 slices * 2x2 texels * sizeof(float4)
     OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
 
-  # Each texel of In, swizzled .bgra.
-  - Name: ExpectedOut
+  # Each texel of In2D, swizzled .bgra.
+  - Name: ExpectedOut2D
     Format: Float32
     Channels: 4
     ArraySize: 2
@@ -72,28 +79,84 @@ Buffers:
          0.75, 0.75, 0.75, 1.0]
     OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
 
+  - Name: In1D
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    Data:
+      - [1.0, 0.0, 0.0, 1.0,   # In1D[0] slice 0 (0) Red
+         0.0, 1.0, 0.0, 1.0,   #                 (1) Green
+         0.0, 1.0, 1.0, 1.0,   # In1D[0] slice 1 (0) Cyan
+         1.0, 0.0, 1.0, 1.0]   #                 (1) Magenta
+      - [0.5, 0.0, 0.0, 1.0,   # In1D[1] slice 0 (0) Maroon
+         0.5, 0.5, 0.0, 1.0,   #                 (1) Olive
+         0.25, 0.0, 0.0, 1.0,  # In1D[1] slice 1 (0)
+         0.0, 0.25, 0.0, 1.0]  #                 (1)
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+
+  - Name: Out1D
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    FillSize: 64 # 2 slices * 2 texels * sizeof(float4)
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+
+  # Each texel of In1D, swizzled .bgra.
+  - Name: ExpectedOut1D
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    Data:
+      - [0.0, 0.0, 1.0, 1.0,   # Red     -> Blue
+         0.0, 1.0, 0.0, 1.0,   # Green   -> Green
+         1.0, 1.0, 0.0, 1.0,   # Cyan    -> Yellow
+         1.0, 0.0, 1.0, 1.0]   # Magenta -> Magenta
+      - [0.0, 0.0, 0.5, 1.0,   # Maroon  -> Navy
+         0.0, 0.5, 0.5, 1.0,   # Olive   -> Teal
+         0.0, 0.0, 0.25, 1.0,
+         0.0, 0.25, 0.0, 1.0]
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+
 Results:
-  - Result: ArrayTextureDescriptorArrayTest
+  - Result: 2DArrayTextureDescriptorArrayTest
     Rule: BufferExact
-    Actual: Out
-    Expected: ExpectedOut
+    Actual: Out2D
+    Expected: ExpectedOut2D
+  - Result: 1DArrayTextureDescriptorArrayTest
+    Rule: BufferExact
+    Actual: Out1D
+    Expected: ExpectedOut1D
 
 DescriptorSets:
   - Resources:
-    - Name: In
+    - Name: In2D
       Kind: Texture2DArray
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
+    - Name: Out2D
       Kind: RWTexture2DArray
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: In1D
+      Kind: Texture1DArray
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1D
+      Kind: RWTexture1DArray
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 
