@@ -66,6 +66,7 @@ template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 template <> char CapabilityValueEnum<directx::RaytracingTier>::ID = 0;
+template <> char CapabilityValueEnum<directx::VariableShadingRateTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;

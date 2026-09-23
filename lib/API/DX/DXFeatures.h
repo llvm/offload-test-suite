@@ -37,6 +37,11 @@ enum RaytracingTier {
 #include "DXFeatures.def"
 };
 
+#define VARIABLE_SHADING_RATE_TIER_ENUM(NewCase, Str, Value) NewCase = Value,
+enum VariableShadingRateTier {
+#include "DXFeatures.def"
+};
+
 } // namespace directx
 
 template <> struct CapabilityPrinter<directx::ShaderModel> {
@@ -53,6 +58,10 @@ template <> struct CapabilityPrinter<directx::MeshShaderTier> {
 
 template <> struct CapabilityPrinter<directx::RaytracingTier> {
   static std::string toString(const directx::RaytracingTier &V);
+};
+
+template <> struct CapabilityPrinter<directx::VariableShadingRateTier> {
+  static std::string toString(const directx::VariableShadingRateTier &V);
 };
 
 } // namespace offloadtest
