@@ -56,15 +56,13 @@ static llvm::Error toError(NS::Error *Err) {
 }
 
 static llvm::Error validateMetalSampleCount(MTL::Device *Device,
-                                            uint32_t SampleCount,
-                                            llvm::StringRef FieldName) {
-  if (auto Err = validateSampleCount(SampleCount, FieldName))
+                                            uint32_t SampleCount) {
+  if (auto Err = validateSampleCount(SampleCount, "SampleCount"))
     return Err;
   if (!Device->supportsTextureSampleCount(SampleCount))
     return llvm::createStringError(
         std::errc::not_supported,
-        "%s %u is not supported on this Metal device.", FieldName.str().c_str(),
-        SampleCount);
+        "SampleCount %u is not supported on this Metal device.", SampleCount);
   return llvm::Error::success();
 }
 
@@ -2351,8 +2349,7 @@ public:
   createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
-    if (auto Err =
-            validateMetalSampleCount(Device, Desc.SampleCount, "SampleCount"))
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
       return Err;
 
     MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
@@ -2419,8 +2416,7 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
   createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
-    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount,
-                                            "RenderPassDesc.SampleCount"))
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
       return Err;
     return std::make_unique<MTLRenderPass>(Desc);
   }
@@ -2480,8 +2476,7 @@ public:
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) override {
-    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount,
-                                            "Pipeline SampleCount"))
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
       return Err;
     if (Desc.GS)
       return llvm::createStringError(
@@ -2672,8 +2667,7 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
-    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount,
-                                            "Pipeline SampleCount"))
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
       return Err;
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
