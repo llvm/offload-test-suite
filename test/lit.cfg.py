@@ -205,7 +205,7 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
-        if device["Features"].get("VariableShadingRateTier", "NotSupported" != "NotSupported":
+        if device["Features"].get("VariableShadingRateTier", "NotSupported") != "NotSupported":
             config.available_features.add("FragmentShadingRate")
         setWaveSizeFeaturesDirectX(config, device)
         if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
