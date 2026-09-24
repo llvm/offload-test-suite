@@ -108,6 +108,7 @@ struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
   PrimitiveTopology Topology;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind.
   std::optional<uint32_t> PatchControlPoints;
@@ -155,6 +156,7 @@ struct MeshShaderRasterPipelineCreateDesc {
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
   PrimitiveTopology Topology;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
 
   ShaderContainer MS;
   std::optional<ShaderContainer> AS;

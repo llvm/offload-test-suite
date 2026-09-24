@@ -2425,6 +2425,10 @@ public:
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) override {
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Fragment shading rates are not supported on the Metal backend.");
     if (Desc.GS)
       return llvm::createStringError(
           std::errc::not_supported,
@@ -2613,6 +2617,10 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Fragment shading rates are not supported on the Metal backend.");
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
@@ -2948,6 +2956,7 @@ public:
       if (P.isTraditionalRaster()) {
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
@@ -2977,6 +2986,7 @@ public:
       } else if (P.isMeshShaderRaster()) {
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {

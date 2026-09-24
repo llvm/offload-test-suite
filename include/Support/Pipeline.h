@@ -724,6 +724,7 @@ struct Pipeline {
   ShaderPipelineKind Kind;
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
 
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
@@ -1146,6 +1147,18 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
     ENUM_CASE(PatchList);
     ENUM_CASE(LineList);
 #undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::FragmentShadingRate> {
+  static void enumeration(IO &I, offloadtest::FragmentShadingRate &V) {
+    I.enumCase(V, "1x1", offloadtest::FragmentShadingRate::Rate1x1);
+    I.enumCase(V, "1x2", offloadtest::FragmentShadingRate::Rate1x2);
+    I.enumCase(V, "2x1", offloadtest::FragmentShadingRate::Rate2x1);
+    I.enumCase(V, "2x2", offloadtest::FragmentShadingRate::Rate2x2);
+    I.enumCase(V, "2x4", offloadtest::FragmentShadingRate::Rate2x4);
+    I.enumCase(V, "4x2", offloadtest::FragmentShadingRate::Rate4x2);
+    I.enumCase(V, "4x4", offloadtest::FragmentShadingRate::Rate4x4);
   }
 };
 
