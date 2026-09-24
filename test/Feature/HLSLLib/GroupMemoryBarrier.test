@@ -1,19 +1,27 @@
 #--- source.hlsl
 
-// Tests GroupMemoryBarrier with group-shared memory.
+// Runs 8,192 cross-wave store-buffering trials on group-shared memory.
+// A trial fails only if both threads read the initial value.
 
 RWStructuredBuffer<uint> Out : register(u0);
 
-groupshared uint GroupData[4];
+groupshared uint Data[256];
+groupshared uint Read[256];
 
-[numthreads(4, 1, 1)]
-void main(uint3 GTID : SV_GroupThreadID) {
-  uint Index = GTID.x;
-  GroupData[Index] = Index + 1;
+[numthreads(256, 1, 1)]
+void main(uint GI : SV_GroupIndex, uint3 Gid : SV_GroupID) {
+  uint Other = GI ^ 128;
 
+  Data[GI] = 0;
+  GroupMemoryBarrierWithGroupSync();
+  Data[GI] = 1;
   GroupMemoryBarrier();
+  Read[GI] = Data[Other];
 
-  Out[Index] = GroupData[Index] == Index + 1;
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GI < 128)
+    Out[Gid.x * 128 + GI] = Read[GI] | Read[Other];
 }
 
 //--- pipeline.yaml
@@ -22,15 +30,18 @@ void main(uint3 GTID : SV_GroupThreadID) {
 Shaders:
   - Stage: Compute
     Entry: main
+DispatchParameters:
+  DispatchGroupCount: [64, 1, 1]
 Buffers:
   - Name: Out
     Format: UInt32
     Stride: 4
-    FillSize: 16
+    FillSize: 32768
   - Name: ExpectedOut
     Format: UInt32
     Stride: 4
-    Data: [ 1, 1, 1, 1 ]
+    FillSize: 32768
+    FillValue: 1
 Results:
   - Result: TestGroupMemoryBarrier
     Rule: BufferExact
