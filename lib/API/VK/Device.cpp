@@ -3364,6 +3364,14 @@ private:
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
     const bool HasShaderAtomicFloatExt = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+        FeaturesFragmentShaderBarycentric{};
+    FeaturesFragmentShaderBarycentric.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+    const bool HasFragmentShaderBarycentricExt = isExtensionSupported(
+        DeviceExtensions, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+#endif
 
     Features.pNext = &Features11;
     if (HasVulkan12)
@@ -3400,6 +3408,12 @@ private:
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
     }
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    if (HasFragmentShaderBarycentricExt) {
+      FeaturesFragmentShaderBarycentric.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShaderBarycentric;
+    }
+#endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
@@ -3442,6 +3456,13 @@ private:
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
                                              FeaturesAtomicFloat.Name)));
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+#define VULKAN_KHR_FRAGMENT_SHADER_BARYCENTRIC_FEATURE_BOOL(Name)              \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(                                             \
+                 #Name, HasFragmentShaderBarycentricExt &&                     \
+                            FeaturesFragmentShaderBarycentric.Name)));
+#endif
 #include "VKFeatures.def"
   }
 

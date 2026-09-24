@@ -1,0 +1,92 @@
+#--- vertex.hlsl
+struct VSInput {
+    float4 position : POSITION;
+};
+
+float4 main(VSInput input) : SV_POSITION {
+    return input.position;
+}
+
+#--- pixel.hlsl
+RWStructuredBuffer<float3> Output : register(u0);
+
+float4 main(float3 barycentrics : SV_Barycentrics) : SV_TARGET {
+    Output[0] = barycentrics;
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Oversized triangle covering the 1x1 render target. At the pixel center
+  # (NDC 0,0), the weights for vertices A, B, and C are 0.5, 0.25, and 0.25.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+      -1.0, -1.0, 0.0, 1.0, # A
+       3.0, -1.0, 0.0, 1.0, # B
+      -1.0,  3.0, 0.0, 1.0, # C
+    ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: Output
+    Format: Float32
+    Stride: 12
+    FillSize: 12
+    FillValue: 0
+  - Name: Output_Expected
+    Format: Float32
+    Stride: 12
+    Data: [ 0.5, 0.25, 0.25 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: Barycentrics
+    Rule: BufferFloatULP
+    ULPT: 2
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# SV_Barycentrics is a Shader Model 6.1 pixel-shader input containing the
+# perspective-correct weights for the primitive's vertices in API order.
+# REQUIRES: SM_6_1
+# REQUIRES: Barycentrics
+# UNSUPPORTED: Metal
+# UNSUPPORTED: Lavapipe
+
+# TODO: Remove when Clang supports graphics-stage DXIL input/output lowering.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
