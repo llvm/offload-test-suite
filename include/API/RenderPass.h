@@ -23,6 +23,7 @@
 
 #include "llvm/ADT/SmallVector.h"
 
+#include <cstdint>
 #include <optional>
 
 namespace offloadtest {
@@ -44,6 +45,7 @@ struct DepthStencilAttachmentFormatDesc {
 struct RenderPassDesc {
   llvm::SmallVector<ColorAttachmentFormatDesc, 8> ColorAttachments;
   std::optional<DepthStencilAttachmentFormatDesc> DepthStencil;
+  uint32_t SampleCount = 1;
 };
 
 class RenderPass {

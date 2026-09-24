@@ -83,12 +83,15 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture1D:
+  case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -268,6 +271,9 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
@@ -286,7 +292,11 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
 static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
     return VK_IMAGE_VIEW_TYPE_1D;
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
+    return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
@@ -329,6 +339,9 @@ static VkImageType getVKImageType(ResourceDimension Dim) {
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
     return getVKImageType(ResourceDimension::Dim1D);
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
@@ -1407,6 +1420,61 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error resolveTexture(offloadtest::Texture &Src,
+                             offloadtest::Texture &Dst) override {
+    if (auto Err = validateResolve(Src, Dst))
+      return Err;
+    if (isDepthFormat(Src.getDesc().Fmt))
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "vkCmdResolveImage only supports color images.");
+
+    auto &VKSrc = llvm::cast<VulkanTexture>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT,        /*DstAccessMask*/
+                          VKSrc.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
+                          VKSrc);
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst);
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    VkImageResolve Region = {};
+    Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.srcSubresource.layerCount = 1;
+    Region.dstSubresource = Region.srcSubresource;
+    Region.extent = {VKSrc.Desc.Width, VKSrc.Desc.Height, 1};
+
+    insertDebugSignpost(
+        llvm::formatv("resolveTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdResolveImage(CB.CmdBuffer, VKSrc.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,              /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
+                          VKSrc.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKSrc);
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst);
+
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs VulkanDevice's full type for access to
   // the device-loaded ray-tracing entry points and helpers.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -1709,6 +1777,7 @@ private:
 
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
+    std::unique_ptr<offloadtest::Texture> ResolveTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
@@ -2517,6 +2586,10 @@ public:
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) override {
+    if (auto Err =
+            validateVulkanSampleCount(Desc.SampleCount, "Pipeline SampleCount"))
+      return Err;
+
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = Desc.PS;
     const std::optional<ShaderContainer> &HS = Desc.HS;
@@ -2659,6 +2732,7 @@ public:
 
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
+    PassDesc.SampleCount = Desc.SampleCount;
     PassDesc.ColorAttachments.reserve(RTFormats.size());
     for (const Format F : RTFormats) {
       ColorAttachmentFormatDesc CA = {};
@@ -2764,7 +2838,7 @@ public:
     VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
     MultisampleCI.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MultisampleCI.rasterizationSamples = getVulkanSampleCount(Desc.SampleCount);
 
     VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
     DepthStencilCI.sType =
@@ -2843,6 +2917,10 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    if (auto Err =
+            validateVulkanSampleCount(Desc.SampleCount, "Pipeline SampleCount"))
+      return Err;
+
     assert(Desc.RTFormats.size() <= 8);
 
     VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
@@ -2928,6 +3006,7 @@ public:
 
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
+    PassDesc.SampleCount = Desc.SampleCount;
     PassDesc.ColorAttachments.reserve(Desc.RTFormats.size());
     for (const Format F : Desc.RTFormats) {
       ColorAttachmentFormatDesc CA = {};
@@ -2980,7 +3059,7 @@ public:
     VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
     MultisampleCI.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MultisampleCI.rasterizationSamples = getVulkanSampleCount(Desc.SampleCount);
 
     VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
     DepthStencilCI.sType =
@@ -3214,10 +3293,51 @@ public:
                                           SizeInBytes);
   }
 
+  // Framebuffer limits are format-independent; intersect them with the
+  // per-format image properties.
+  llvm::Error validateSampleCountSupport(const TextureCreateDesc &Desc,
+                                         const VkImageCreateInfo &ImageInfo) {
+    if (Desc.SampleCount == 1)
+      return llvm::Error::success();
+
+    VkImageFormatProperties FmtProps = {};
+    if (auto Err = VK::toError(
+            vkGetPhysicalDeviceImageFormatProperties(
+                PhysicalDevice, ImageInfo.format, ImageInfo.imageType,
+                ImageInfo.tiling, ImageInfo.usage, ImageInfo.flags, &FmtProps),
+            "Format is not supported for the requested image usage."))
+      return Err;
+
+    VkSampleCountFlags Supported = FmtProps.sampleCounts;
+    if (isDepthFormat(Desc.Fmt)) {
+      Supported &= Props.limits.framebufferDepthSampleCounts;
+      if (isStencilFormat(Desc.Fmt))
+        Supported &= Props.limits.framebufferStencilSampleCounts;
+    } else {
+      Supported &= Props.limits.framebufferColorSampleCounts;
+    }
+    const VkSampleCountFlagBits Wanted = getVulkanSampleCount(Desc.SampleCount);
+    if ((Supported & Wanted) == 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "SampleCount %u is not supported for format '%s' on this device "
+          "(supported mask 0x%x).",
+          Desc.SampleCount, getFormatName(Desc.Fmt).data(),
+          static_cast<unsigned>(Supported));
+
+    return llvm::Error::success();
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
+    if (auto Err = validateVulkanSampleCount(Desc.SampleCount, "SampleCount"))
+      return Err;
+    if (Desc.Backing == MemoryBacking::Sparse)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Vulkan backend does not yet support sparse texture backing.");
 
     VkImageCreateInfo ImageInfo = {};
     ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -3226,13 +3346,16 @@ public:
     ImageInfo.extent = {Desc.Width, Desc.Height, 1};
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = Desc.ArraySlices;
-    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.samples = getVulkanSampleCount(Desc.SampleCount);
     ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
                            ? VK_IMAGE_TILING_OPTIMAL
                            : VK_IMAGE_TILING_LINEAR;
     ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
     ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (auto Err = validateSampleCountSupport(Desc, ImageInfo))
+      return Err;
 
     VkImage Image;
     if (auto Err =
@@ -3519,13 +3642,17 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
   createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    if (auto Err = validateVulkanSampleCount(Desc.SampleCount,
+                                             "RenderPassDesc.SampleCount"))
+      return Err;
+
     llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
     llvm::SmallVector<VkAttachmentReference, 8> ColorRefs;
 
     for (const ColorAttachmentFormatDesc &Color : Desc.ColorAttachments) {
       VkAttachmentDescription AD = {};
       AD.format = getVulkanFormat(Color.Fmt);
-      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.samples = getVulkanSampleCount(Desc.SampleCount);
       AD.loadOp = getVkLoadOp(Color.Load);
       AD.storeOp = getVkStoreOp(Color.Store);
       AD.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -3554,7 +3681,7 @@ public:
       const auto &DS = *Desc.DepthStencil;
       VkAttachmentDescription AD = {};
       AD.format = getVulkanFormat(DS.Fmt);
-      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.samples = getVulkanSampleCount(Desc.SampleCount);
       AD.loadOp = getVkLoadOp(DS.DepthLoad);
       AD.storeOp = getVkStoreOp(DS.DepthStore);
       AD.stencilLoadOp = getVkLoadOp(DS.StencilLoad);
@@ -4016,11 +4143,20 @@ public:
           "No render target bound for graphics pipeline.");
     const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
 
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(
+        *this, RTBuf, P.Bindings.SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
 
     IS.RenderTarget = std::move(*TexOrErr);
+
+    if (P.Bindings.SampleCount > 1) {
+      auto ResolveOrErr =
+          offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+      if (!ResolveOrErr)
+        return ResolveOrErr.takeError();
+      IS.ResolveTarget = std::move(*ResolveOrErr);
+    }
 
     // Create a host-visible staging buffer for readback.
     BufferCreateDesc BufDesc = {};
@@ -4037,7 +4173,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height,
+        P.Bindings.SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -4628,6 +4765,46 @@ public:
     }
   }
 
+  // The legacy executeProgram path records raw barriers rather than using
+  // ComputeEncoder's barrier tracking.
+  void resolveMultisampledTexture(VkCommandBuffer CmdBuffer,
+                                  const VulkanTexture &Src,
+                                  const VulkanTexture &Dst,
+                                  VkImageLayout SrcOldLayout,
+                                  VkAccessFlags SrcAccessMask,
+                                  VkPipelineStageFlags SrcStageMask) {
+    VkImageMemoryBarrier Barriers[2] = {};
+    Barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    Barriers[0].subresourceRange = Src.FullRange;
+    Barriers[0].srcAccessMask = SrcAccessMask;
+    Barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    Barriers[0].oldLayout = SrcOldLayout;
+    Barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    Barriers[0].image = Src.Image;
+
+    // The new resolve target has no contents to preserve.
+    Barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    Barriers[1].subresourceRange = Dst.FullRange;
+    Barriers[1].srcAccessMask = 0;
+    Barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    Barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    Barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    Barriers[1].image = Dst.Image;
+
+    vkCmdPipelineBarrier(CmdBuffer, SrcStageMask,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 2, Barriers);
+
+    VkImageResolve Region = {};
+    Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.srcSubresource.layerCount = 1;
+    Region.dstSubresource = Region.srcSubresource;
+    Region.extent = {Src.Desc.Width, Src.Desc.Height, 1};
+    vkCmdResolveImage(CmdBuffer, Src.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Dst.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+  }
+
   // Record commands to copy a texture into a readback buffer.
   void copyTextureToReadback(VkCommandBuffer CmdBuffer,
                              const VulkanTexture &Tex,
@@ -4698,7 +4875,7 @@ public:
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
       ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask = 0;
+      ImageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       ImageBarrier.oldLayout = R.ImageLayout;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -4875,12 +5052,26 @@ public:
       }
       Encoder.endEncoding();
 
-      copyTextureToReadback(IS.CB->CmdBuffer,
-                            llvm::cast<VulkanTexture>(*IS.RenderTarget),
-                            llvm::cast<VulkanBuffer>(*IS.RTReadback),
-                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+      if (IS.ResolveTarget) {
+        resolveMultisampledTexture(
+            IS.CB->CmdBuffer, llvm::cast<VulkanTexture>(*IS.RenderTarget),
+            llvm::cast<VulkanTexture>(*IS.ResolveTarget),
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+        copyTextureToReadback(
+            IS.CB->CmdBuffer, llvm::cast<VulkanTexture>(*IS.ResolveTarget),
+            llvm::cast<VulkanBuffer>(*IS.RTReadback),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT);
+      } else {
+        copyTextureToReadback(IS.CB->CmdBuffer,
+                              llvm::cast<VulkanTexture>(*IS.RenderTarget),
+                              llvm::cast<VulkanBuffer>(*IS.RTReadback),
+                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+      }
     }
 
     for (auto &R : IS.Resources)
@@ -5123,6 +5314,7 @@ public:
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
+      PassDesc.SampleCount = P.Bindings.SampleCount;
       PassDesc.ColorAttachments.push_back(ColorAttachment);
       PassDesc.DepthStencil = DSAttachment;
 
@@ -5138,6 +5330,7 @@ public:
         PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -5176,6 +5369,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -5289,28 +5483,14 @@ VulkanCommandBuffer::createRenderEncoder(
         "RenderPassBeginDesc is missing its RenderPass.");
   auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
   const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
   uint32_t Width = 0, Height = 0;
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+  if (auto Err = validateRenderPassBeginDesc(PassDesc, Desc, &Width, &Height))
     return Err;
 
   llvm::SmallVector<VkImageView, 9> Views;
   llvm::SmallVector<VkClearValue, 9> ClearValues;
 
   for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    if (!Desc.ColorAttachments[I])
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
     auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
     if (Tex.View == VK_NULL_HANDLE)
       return llvm::createStringError(

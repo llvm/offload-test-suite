@@ -10,6 +10,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Pipeline.h"
+
+#include "API/Texture.h"
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 
@@ -571,6 +574,7 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
   I.mapOptional("PatchControlPoints", B.PatchControlPoints);
+  I.mapOptional("SampleCount", B.SampleCount, 1u);
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -889,6 +893,13 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
   const bool HasMeshStage = HasShaderType[llvm::to_underlying(Stages::Mesh)];
   const bool HasAmplificationStage =
       HasShaderType[llvm::to_underlying(Stages::Amplification)];
+
+  if (auto Err =
+          validateSampleCount(Bindings.SampleCount, "Bindings.SampleCount"))
+    return Err;
+  if (Bindings.SampleCount != 1 && !HasVertexStage && !HasMeshStage)
+    return llvm::createStringError(
+        "Bindings.SampleCount is only valid on a raster pipeline.");
 
   if (HasAnyRayTracingStage) {
     if (ShadingRate != FragmentShadingRate::Rate1x1)
