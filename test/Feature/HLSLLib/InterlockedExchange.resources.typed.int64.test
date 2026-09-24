@@ -106,8 +106,6 @@ Buffers:
   - Name: ExpectedSeen
     Format: UInt32
     Stride: 4
-    # Flags, one per value handed in. Each value must turn up either as
-    # an original or as the value left behind, thus all of them are 1.
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -132,8 +130,6 @@ Buffers:
   - Name: ExpectedOnes
     Format: UInt32
     Stride: 4
-    # Pass flags, one per thread, not test data. A thread writes 1 only
-    # when its check holds, thus a single 0 fails the comparison.
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -227,9 +223,6 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int64TypedResourceAtomics && SM_6_6
-
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99129
-# XFAIL: Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
