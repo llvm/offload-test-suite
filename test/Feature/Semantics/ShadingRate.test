@@ -96,7 +96,7 @@ Results:
 # shading-rate feature, but rejects the graphics PSO with E_INVALIDARG.
 # XFAIL: DirectX && Linux
 
-# Unimplemented: support for SV_ShadingRate.
+# Unimplemented: https://github.com/llvm/llvm-project/issues/212567
 # XFAIL: Clang
 
 # RUN: split-file %s %t
