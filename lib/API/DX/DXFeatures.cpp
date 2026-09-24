@@ -47,7 +47,7 @@ static constexpr auto RaytracingTierNames =
 static constexpr EnumStringDef<directx::VariableShadingRateTier>
     VariableShadingRateTierDefs[]{
 #include "DXFeatures.def"
-};
+    };
 static constexpr auto VariableShadingRateTierNames =
     BUILD_ENUM_STRINGS(VariableShadingRateTierDefs);
 
