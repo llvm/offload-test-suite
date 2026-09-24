@@ -6,7 +6,7 @@ struct VSOutput {
 
 VSOutput main(float4 Pos : POSITION, uint Sr : SV_ShadingRate) {
     VSOutput O;
-    O.position Pos;
+    O.position = Pos;
     O.shadingRate = Sr;
     return O;
 }
