@@ -123,6 +123,10 @@ Results:
 
 # REQUIRES: multi-viewport
 
+# WARP leaves viewport 1's pixels 4 and 5 unwritten.
+# https://github.com/llvm/offload-test-suite/issues/1539
+# XFAIL: WARP
+
 # Not implemented: https://github.com/llvm/llvm-project/issues/136974
 # XFAIL: Clang
 
