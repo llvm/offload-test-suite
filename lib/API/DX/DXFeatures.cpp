@@ -43,6 +43,14 @@ static constexpr EnumStringDef<directx::RaytracingTier> RaytracingTierDefs[]{
 static constexpr auto RaytracingTierNames =
     BUILD_ENUM_STRINGS(RaytracingTierDefs);
 
+#define VARIABLE_SHADING_RATE_TIER_ENUM(NewCase, Str, Value) {{#Str}, NewCase},
+static constexpr EnumStringDef<directx::VariableShadingRateTier>
+    VariableShadingRateTierDefs[]{
+#include "DXFeatures.def"
+    };
+static constexpr auto VariableShadingRateTierNames =
+    BUILD_ENUM_STRINGS(VariableShadingRateTierDefs);
+
 std::string CapabilityPrinter<directx::ShaderModel>::toString(
     const directx::ShaderModel &V) {
   return EnumStrings(ShaderModelNames).toString(V).str();
@@ -61,4 +69,9 @@ std::string CapabilityPrinter<directx::MeshShaderTier>::toString(
 std::string CapabilityPrinter<directx::RaytracingTier>::toString(
     const directx::RaytracingTier &V) {
   return EnumStrings(RaytracingTierNames).toString(V).str();
+}
+
+std::string CapabilityPrinter<directx::VariableShadingRateTier>::toString(
+    const directx::VariableShadingRateTier &V) {
+  return EnumStrings(VariableShadingRateTierNames).toString(V).str();
 }

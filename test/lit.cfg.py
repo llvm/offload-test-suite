@@ -207,6 +207,11 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("MeshShader")
         if device["Features"].get("BarycentricsSupported", False):
             config.available_features.add("Barycentrics")
+        if (
+            device["Features"].get("VariableShadingRateTier", "NotSupported")
+            != "NotSupported"
+        ):
+            config.available_features.add("FragmentShadingRate")
         setWaveSizeFeaturesDirectX(config, device)
         if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
             config.available_features.add("acceleration-structure")
@@ -251,6 +256,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("VulkanFloat32BufferAtomics")
         if device["Features"].get("fragmentShaderBarycentric", False):
             config.available_features.add("Barycentrics")
+        if device["Features"].get("pipelineFragmentShadingRate", False):
+            config.available_features.add("FragmentShadingRate")
         if device["Features"].get("runtimeDescriptorArray", False):
             config.available_features.add("VulkanRuntimeDescriptorArray")
         if device["Features"].get("descriptorBindingPartiallyBound", False):
