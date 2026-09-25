@@ -125,6 +125,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::AccelerationStructure:
@@ -137,6 +138,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::RWTexture3D:
     return DescriptorKind::UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -288,6 +290,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::Sampler:
@@ -323,6 +327,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -351,6 +357,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -370,6 +378,8 @@ struct Resource {
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -407,6 +417,8 @@ struct Resource {
     case ResourceKind::RWTexture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -440,6 +452,9 @@ struct Resource {
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::SampledTexture2D:
       return ResourceDimension::Dim2D;
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
+      return ResourceDimension::Dim3D;
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
       return ResourceDimension::Cube;
@@ -519,6 +534,7 @@ struct Resource {
     case ResourceKind::Texture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::Texture2DArray:
+    case ResourceKind::Texture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::ConstantBuffer:
@@ -533,6 +549,7 @@ struct Resource {
     case ResourceKind::RWTexture1DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::RWTexture3D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -750,6 +767,7 @@ struct Pipeline {
   ShaderPipelineKind Kind;
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
 
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
@@ -1097,6 +1115,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(AccelerationStructure);
     ENUM_CASE(Texture2DArray);
     ENUM_CASE(RWTexture2DArray);
+    ENUM_CASE(Texture3D);
+    ENUM_CASE(RWTexture3D);
     ENUM_CASE(TextureCube);
     ENUM_CASE(TextureCubeArray);
 #undef ENUM_CASE
@@ -1175,6 +1195,18 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
     ENUM_CASE(PatchList);
     ENUM_CASE(LineList);
 #undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::FragmentShadingRate> {
+  static void enumeration(IO &I, offloadtest::FragmentShadingRate &V) {
+    I.enumCase(V, "1x1", offloadtest::FragmentShadingRate::Rate1x1);
+    I.enumCase(V, "1x2", offloadtest::FragmentShadingRate::Rate1x2);
+    I.enumCase(V, "2x1", offloadtest::FragmentShadingRate::Rate2x1);
+    I.enumCase(V, "2x2", offloadtest::FragmentShadingRate::Rate2x2);
+    I.enumCase(V, "2x4", offloadtest::FragmentShadingRate::Rate2x4);
+    I.enumCase(V, "4x2", offloadtest::FragmentShadingRate::Rate4x2);
+    I.enumCase(V, "4x4", offloadtest::FragmentShadingRate::Rate4x4);
   }
 };
 

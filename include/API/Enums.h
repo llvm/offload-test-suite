@@ -27,6 +27,8 @@ enum class ResourceKind {
   RWTexture2D,
   Texture2DArray,
   RWTexture2DArray,
+  Texture3D,
+  RWTexture3D,
   TextureCube,
   TextureCubeArray,
   Sampler,
@@ -61,6 +63,16 @@ enum class StoreAction {
 };
 
 enum class PrimitiveTopology { TriangleList, PointList, PatchList, LineList };
+
+enum class FragmentShadingRate {
+  Rate1x1,
+  Rate1x2,
+  Rate2x1,
+  Rate2x2,
+  Rate2x4,
+  Rate4x2,
+  Rate4x4,
+};
 
 } // namespace offloadtest
 
