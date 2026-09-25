@@ -7,11 +7,13 @@
 [[vk::binding(5, 0)]] TextureCube<float4> TexCube : register(t3); // 4x4, 3 mips
 [[vk::binding(6, 0)]] Texture1D<float4> Tex1D : register(t4); // 4 texels, 3 mips
 [[vk::binding(7, 0)]] RWTexture1D<float4> RWTex1D : register(u2); // 8 texels
+[[vk::binding(8, 0)]] Texture3D<float4> Tex3D : register(t5); // 4x2x8, 4 mips
+[[vk::binding(9, 0)]] RWTexture3D<float4> RWTex3D : register(u3); // 8x2x4
 
 [numthreads(1, 1, 1)]
 void main() {
-  float width, height, levels;
-  uint uwidth, uheight, ulevels;
+  float width, height, depth, levels;
+  uint uwidth, uheight, udepth, ulevels;
   
   // Tex1 (4x8, 1 mip)
   Tex1.GetDimensions(0, width, height, levels);
@@ -99,6 +101,52 @@ void main() {
 
   RWTex1D.GetDimensions(width);
   Out[35] = width;
+
+  // Texture3D (4x2x8, 4 mips).
+  Tex3D.GetDimensions(0, width, height, depth, levels);
+  Out[36] = width;
+  Out[37] = height;
+  Out[38] = depth;
+  Out[39] = levels;
+
+  Tex3D.GetDimensions(1, uwidth, uheight, udepth, ulevels);
+  Out[40] = (float)uwidth;
+  Out[41] = (float)uheight;
+  Out[42] = (float)udepth;
+  Out[43] = (float)ulevels;
+
+  Tex3D.GetDimensions(2, width, height, depth, levels);
+  Out[44] = width;
+  Out[45] = height;
+  Out[46] = depth;
+  Out[47] = levels;
+
+  Tex3D.GetDimensions(3, uwidth, uheight, udepth, ulevels);
+  Out[48] = (float)uwidth;
+  Out[49] = (float)uheight;
+  Out[50] = (float)udepth;
+  Out[51] = (float)ulevels;
+
+  Tex3D.GetDimensions(uwidth, uheight, udepth);
+  Out[52] = (float)uwidth;
+  Out[53] = (float)uheight;
+  Out[54] = (float)udepth;
+
+  Tex3D.GetDimensions(width, height, depth);
+  Out[55] = width;
+  Out[56] = height;
+  Out[57] = depth;
+
+  // RWTexture3D (8x2x4).
+  RWTex3D.GetDimensions(uwidth, uheight, udepth);
+  Out[58] = (float)uwidth;
+  Out[59] = (float)uheight;
+  Out[60] = (float)udepth;
+
+  RWTex3D.GetDimensions(width, height, depth);
+  Out[61] = width;
+  Out[62] = height;
+  Out[63] = depth;
 }
 
 //--- pipeline.yaml
@@ -151,10 +199,22 @@ Buffers:
     OutputProps: { Width: 8, Height: 1, Depth: 1 }
     FillSize: 128 # 8 * sizeof(float4)
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 4, Height: 2, Depth: 8, MipLevels: 4 }
+    FillSize: 1200 # (64 + 8 + 2 + 1) * sizeof(float4)
+
+  - Name: RWTex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 8, Height: 2, Depth: 4 }
+    FillSize: 1024 # 8 * 2 * 4 * sizeof(float4)
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 144 # 36 * sizeof(float)
+    FillSize: 256 # 64 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -172,7 +232,15 @@ Buffers:
             2.0, 3.0,                    # Tex1D Mip 1
             1.0, 3.0,                    # Tex1D Mip 2
             4.0, 4.0,                    # Tex1D width (uint, float)
-            8.0, 8.0 ]                   # RWTex1D width (uint, float)
+            8.0, 8.0,                    # RWTex1D width (uint, float)
+            4.0, 2.0, 8.0, 4.0,          # Tex3D Mip 0 (w, h, d, levels)
+            2.0, 1.0, 4.0, 4.0,          # Tex3D Mip 1
+            1.0, 1.0, 2.0, 4.0,          # Tex3D Mip 2
+            1.0, 1.0, 1.0, 4.0,          # Tex3D Mip 3
+            4.0, 2.0, 8.0,               # Tex3D width, height, depth (uint)
+            4.0, 2.0, 8.0,               # Tex3D width, height, depth (float)
+            8.0, 2.0, 4.0,               # RWTex3D width, height, depth (uint)
+            8.0, 2.0, 4.0 ]              # RWTex3D width, height, depth (float)
 
 DescriptorSets:
   - Resources:
@@ -208,6 +276,14 @@ DescriptorSets:
       Kind: RWTexture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 7 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 5, Space: 0 }
+      VulkanBinding: { Binding: 8 }
+    - Name: RWTex3D
+      Kind: RWTexture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 9 }
 
 Results:
   - Result: GetDimensionsTest

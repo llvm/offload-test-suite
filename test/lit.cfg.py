@@ -205,6 +205,11 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
+        if (
+            device["Features"].get("VariableShadingRateTier", "NotSupported")
+            != "NotSupported"
+        ):
+            config.available_features.add("FragmentShadingRate")
         setWaveSizeFeaturesDirectX(config, device)
         VPAndRTArrayIndexCap = (
             "VPAndRTArrayIndexFromAnyShaderFeedingRasterizer"
@@ -254,6 +259,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("shaderBufferFloat32Atomics", False):
             config.available_features.add("VulkanFloat32BufferAtomics")
+        if device["Features"].get("pipelineFragmentShadingRate", False):
+            config.available_features.add("FragmentShadingRate")
         if device["Features"].get("runtimeDescriptorArray", False):
             config.available_features.add("VulkanRuntimeDescriptorArray")
         if device["Features"].get("descriptorBindingPartiallyBound", False):

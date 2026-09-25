@@ -142,6 +142,8 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
 
   // Runtime-specific settings.
   I.mapOptional("RuntimeSettings", P.Settings);
+  I.mapOptional("ShadingRate", P.ShadingRate,
+                offloadtest::FragmentShadingRate::Rate1x1);
 
   I.mapRequired("Buffers", P.Buffers);
   I.mapOptional("Samplers", P.Samplers);
@@ -976,6 +978,9 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
         "Bindings.SampleCount is only valid on a raster pipeline.");
 
   if (HasAnyRayTracingStage) {
+    if (ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          "ShadingRate is only valid on a raster pipeline.");
     if (HasComputeStage || HasVertexStage || HasMeshStage ||
         HasAmplificationStage)
       return llvm::createStringError(
@@ -994,6 +999,9 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
         "valid on a RayTracing pipeline.");
 
   if (HasComputeStage) {
+    if (ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          "ShadingRate is only valid on a raster pipeline.");
     if (Shaders.size() > 1)
       return llvm::createStringError(
           "Compute Pipeline is only allowed to have Compute Shader.");

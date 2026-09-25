@@ -66,6 +66,7 @@ template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 template <> char CapabilityValueEnum<directx::RaytracingTier>::ID = 0;
+template <> char CapabilityValueEnum<directx::VariableShadingRateTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
@@ -125,18 +126,17 @@ static D3D12_RESOURCE_DESC getDXResourceDesc(const TextureCreateDesc &Desc) {
   TexDesc.Dimension = getDXResourceDimension(Desc.Dim);
   TexDesc.Width = Desc.Width;
   TexDesc.Height = Desc.Height;
-  // DepthOrArraySize is the layer count for 1D/2D resources but the depth
-  // extent for 3D ones, so it cannot take the slice count once 3D textures
-  // exist; they need their own extent on TextureCreateDesc.
-  assert(Desc.Dim != ResourceDimension::Dim3D &&
-         "3D resources need a depth extent, not a slice count");
-  // Both fields are UINT16. Callers must reject out-of-range values before
+  const uint32_t DepthOrArraySize =
+      Desc.Dim == ResourceDimension::Dim3D ? Desc.Depth : Desc.ArraySlices;
+  // These fields are UINT16. Callers must reject out-of-range values before
   // getting here, otherwise these casts wrap silently.
   assert(Desc.ArraySlices <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION &&
          "Slice count must be range-checked before narrowing to UINT16");
+  assert(Desc.Depth <= D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION &&
+         "Depth must be range-checked before narrowing to UINT16");
   assert(Desc.MipLevels <= D3D12_REQ_MIP_LEVELS &&
          "Mip level count must be range-checked before narrowing to UINT16");
-  TexDesc.DepthOrArraySize = static_cast<UINT16>(Desc.ArraySlices);
+  TexDesc.DepthOrArraySize = static_cast<UINT16>(DepthOrArraySize);
   TexDesc.MipLevels = static_cast<UINT16>(Desc.MipLevels);
   TexDesc.Format = getDXGIFormat(Desc.Fmt);
   TexDesc.SampleDesc.Count = Desc.SampleCount;
@@ -227,11 +227,12 @@ static D3D12_SRV_DIMENSION getDXSRVDimension(const TextureCreateDesc &Desc) {
                           : D3D12_SRV_DIMENSION_TEXTURE2DMS;
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_SRV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Dim3D:
+    // 3D textures cannot be arrays.
+    return D3D12_SRV_DIMENSION_TEXTURE3D;
   case ResourceDimension::Cube:
     return Desc.IsArray ? D3D12_SRV_DIMENSION_TEXTURECUBEARRAY
                         : D3D12_SRV_DIMENSION_TEXTURECUBE;
-  case ResourceDimension::Dim3D:
-    llvm_unreachable("Texture dimension has no SRV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
 }
@@ -244,10 +245,11 @@ static D3D12_UAV_DIMENSION getDXUAVDimension(const TextureCreateDesc &Desc) {
   case ResourceDimension::Dim2D:
     return Desc.IsArray ? D3D12_UAV_DIMENSION_TEXTURE2DARRAY
                         : D3D12_UAV_DIMENSION_TEXTURE2D;
+  case ResourceDimension::Dim3D:
+    // 3D textures cannot be arrays.
+    return D3D12_UAV_DIMENSION_TEXTURE3D;
   case ResourceDimension::Cube:
     llvm_unreachable("Texture cubes cannot be used as a UAV");
-  case ResourceDimension::Dim3D:
-    llvm_unreachable("Texture dimension has no UAV mapping yet");
   }
   llvm_unreachable("All texture dimensions handled");
 }
@@ -286,6 +288,52 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
     return D3D_PRIMITIVE_TOPOLOGY_LINELIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
+}
+
+static llvm::Expected<D3D12_SHADING_RATE>
+getDXShadingRate(ID3D12Device *Device, FragmentShadingRate Rate) {
+  D3D12_SHADING_RATE DXRate;
+  switch (Rate) {
+  case FragmentShadingRate::Rate1x1:
+    return D3D12_SHADING_RATE_1X1;
+  case FragmentShadingRate::Rate1x2:
+    DXRate = D3D12_SHADING_RATE_1X2;
+    break;
+  case FragmentShadingRate::Rate2x1:
+    DXRate = D3D12_SHADING_RATE_2X1;
+    break;
+  case FragmentShadingRate::Rate2x2:
+    DXRate = D3D12_SHADING_RATE_2X2;
+    break;
+  case FragmentShadingRate::Rate2x4:
+    DXRate = D3D12_SHADING_RATE_2X4;
+    break;
+  case FragmentShadingRate::Rate4x2:
+    DXRate = D3D12_SHADING_RATE_4X2;
+    break;
+  case FragmentShadingRate::Rate4x4:
+    DXRate = D3D12_SHADING_RATE_4X4;
+    break;
+  }
+
+  D3D12_FEATURE_DATA_D3D12_OPTIONS6 Options6{};
+  if (FAILED(Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6,
+                                         &Options6, sizeof(Options6))) ||
+      Options6.VariableShadingRateTier ==
+          D3D12_VARIABLE_SHADING_RATE_TIER_NOT_SUPPORTED)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "The DirectX device does not support variable-rate shading.");
+
+  if (!Options6.AdditionalShadingRatesSupported &&
+      (Rate == FragmentShadingRate::Rate2x4 ||
+       Rate == FragmentShadingRate::Rate4x2 ||
+       Rate == FragmentShadingRate::Rate4x4))
+    return llvm::createStringError(
+        std::errc::not_supported, "The requested DirectX shading rate requires "
+                                  "AdditionalShadingRatesSupported.");
+
+  return DXRate;
 }
 
 static D3D12_FILTER getDXFilterMode(FilterMode MinFilter, FilterMode MagFilter,
@@ -494,6 +542,7 @@ public:
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
+  D3D12_SHADING_RATE ShadingRate = D3D12_SHADING_RATE_1X1;
   // True for pipelines created via createPipelineRT — used by SBT / dispatch
   // code to safely downcast to DXRayTracingPipelineState (parallel to
   // VulkanPipelineState::IsRayTracing).
@@ -503,10 +552,11 @@ public:
                   llvm::SmallVector<RootSignatureLayout> Layout,
                   ComPtr<ID3D12PipelineState> PSO,
                   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology,
-                  bool IsRT = false)
+                  bool IsRT = false,
+                  D3D12_SHADING_RATE ShadingRate = D3D12_SHADING_RATE_1X1)
       : offloadtest::PipelineState(GPUAPI::DirectX), Name(Name),
         RootSig(RootSig), Layout(std::move(Layout)), PSO(PSO),
-        Topology(Topology), IsRayTracing(IsRT) {}
+        Topology(Topology), IsRayTracing(IsRT), ShadingRate(ShadingRate) {}
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::DirectX;
@@ -1209,6 +1259,7 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
   bool ScissorSet = false;
+  bool NonDefaultShadingRateSet = false;
 
   llvm::Error bindCommonDrawState(const offloadtest::PipelineState &PSO) {
     if (!ViewportSet)
@@ -1225,6 +1276,13 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
     // topology; only bind one when the pipeline actually has one.
     if (DXPSO.Topology)
       CB.CmdList->IASetPrimitiveTopology(*DXPSO.Topology);
+    if (DXPSO.ShadingRate != D3D12_SHADING_RATE_1X1) {
+      CB.CmdList->RSSetShadingRate(DXPSO.ShadingRate, nullptr);
+      NonDefaultShadingRateSet = true;
+    } else if (NonDefaultShadingRateSet) {
+      CB.CmdList->RSSetShadingRate(D3D12_SHADING_RATE_1X1, nullptr);
+      NonDefaultShadingRateSet = false;
+    }
     return llvm::Error::success();
   }
 
@@ -1313,6 +1371,9 @@ public:
 
 protected:
   void endEncodingImpl() override {
+    if (NonDefaultShadingRateSet)
+      CB.CmdList->RSSetShadingRate(D3D12_SHADING_RATE_1X1, nullptr);
+
     // State transitions
     for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
       auto &DXTex = llvm::cast<DXTexture>(*Tex);
@@ -1676,6 +1737,9 @@ public:
       const TraditionalRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
 
+    auto ShadingRateOrErr = getDXShadingRate(Device.Get(), Desc.ShadingRate);
+    if (!ShadingRateOrErr)
+      return ShadingRateOrErr.takeError();
     if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
                                                Desc.RTFormats, Desc.DSFormat))
       return Err;
@@ -1748,7 +1812,8 @@ public:
 
     return std::make_unique<DXPipelineState>(
         Name, RootSig, std::move(Layout), PSO,
-        getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints));
+        getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints),
+        /*IsRT=*/false, *ShadingRateOrErr);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
@@ -1756,6 +1821,9 @@ public:
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
 
+    auto ShadingRateOrErr = getDXShadingRate(Device.Get(), Desc.ShadingRate);
+    if (!ShadingRateOrErr)
+      return ShadingRateOrErr.takeError();
     if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
                                                Desc.RTFormats, Desc.DSFormat))
       return Err;
@@ -1830,7 +1898,8 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(Name, RootSig, std::move(Layout),
-                                             PSO, std::nullopt);
+                                             PSO, std::nullopt,
+                                             /*IsRT=*/false, *ShadingRateOrErr);
   }
 
   static std::wstring widen(llvm::StringRef S) {
@@ -2250,6 +2319,11 @@ public:
           std::errc::invalid_argument,
           "D3D12 supports at most %u texture array slices; got %u.",
           D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, Desc.ArraySlices);
+    if (Desc.Depth > D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "D3D12 supports a depth of at most %u texels; got %u.",
+          D3D12_REQ_TEXTURE3D_U_V_OR_W_DIMENSION, Desc.Depth);
     if (Desc.MipLevels > D3D12_REQ_MIP_LEVELS)
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -2362,6 +2436,11 @@ public:
         SRVDesc.Texture2DArray.PlaneSlice = 0;
         SRVDesc.Texture2DArray.ResourceMinLODClamp = 0.0f;
         break;
+      case D3D12_SRV_DIMENSION_TEXTURE3D:
+        SRVDesc.Texture3D.MostDetailedMip = 0;
+        SRVDesc.Texture3D.MipLevels = Desc.MipLevels;
+        SRVDesc.Texture3D.ResourceMinLODClamp = 0.0f;
+        break;
       case D3D12_SRV_DIMENSION_TEXTURECUBE:
         SRVDesc.TextureCube.MostDetailedMip = 0;
         SRVDesc.TextureCube.MipLevels = Desc.MipLevels;
@@ -2409,6 +2488,11 @@ public:
         UAVDesc.Texture2DArray.FirstArraySlice = 0;
         UAVDesc.Texture2DArray.ArraySize = Desc.ArraySlices;
         UAVDesc.Texture2DArray.PlaneSlice = 0;
+        break;
+      case D3D12_UAV_DIMENSION_TEXTURE3D:
+        UAVDesc.Texture3D.MipSlice = 0;
+        UAVDesc.Texture3D.FirstWSlice = 0;
+        UAVDesc.Texture3D.WSize = Desc.Depth;
         break;
       default:
         llvm_unreachable("Unhandled texture UAV dimension");
@@ -2505,7 +2589,7 @@ public:
       Sub.Offset = Footprints[I].Offset;
       Sub.RowPitchInBytes = Footprints[I].Footprint.RowPitch;
       Sub.RowSizeInBytes = static_cast<uint32_t>(RowSizes[I]);
-      Sub.NumRows = NumRows[I];
+      Sub.NumRows = NumRows[I] * Footprints[I].Footprint.Depth;
       Layout.Subresources.push_back(Sub);
     }
     return Layout;
@@ -3334,6 +3418,7 @@ public:
 
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
@@ -3374,6 +3459,7 @@ public:
       } else if (P.isMeshShaderRaster()) {
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
