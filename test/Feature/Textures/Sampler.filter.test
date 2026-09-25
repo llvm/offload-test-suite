@@ -20,6 +20,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
 [[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
+[[vk::binding(6, 0)]] Texture3D<float4> Tex3D : register(t3);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // 2x2 Texture:
@@ -49,8 +50,13 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float4 r6 = TexCube.SampleLevel(LinearSamp, float3( 0,  0,  1), 0); // +Z Magenta
   float4 r7 = TexCube.SampleLevel(LinearSamp, float3( 0,  0, -1), 0); // -Z Cyan
 
+  // Texture1D::SampleLevel
   float4 r8 = Tex1D.SampleLevel(LinearSamp, 0.5, 0);
   float4 r9 = Tex1D.SampleLevel(PointSamp, 0.25, 0);
+
+  // Texture3D::SampleLevel
+  float4 r10 = Tex3D.SampleLevel(LinearSamp, float3(0.25, 0.25, 0.5), 0);
+  float4 r11 = Tex3D.SampleLevel(PointSamp, float3(0.25, 0.25, 0.75), 0);
 
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
@@ -63,6 +69,8 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[7] = r7;
     Out[8] = r8;
     Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
   }
   return float4(0,0,0,0);
 }
@@ -116,10 +124,23 @@ Buffers:
     Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
             0.0, 1.0, 0.0, 1.0 ] # Green (1)
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red     (0,0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green   (1,0,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue    (0,1,0)
+            1.0, 1.0, 1.0, 1.0,  # White   (1,1,0)
+            0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0,1)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0,1)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1,1)
+            0.0, 0.0, 0.0, 1.0 ] # Black   (1,1,1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 160 # 10 * sizeof(float4)
+    FillSize: 192 # 12 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -133,7 +154,9 @@ Buffers:
             1.0, 0.0, 1.0, 1.0,  # Cube +Z Magenta
             0.0, 1.0, 1.0, 1.0,  # Cube -Z Cyan
             0.5, 0.5, 0.0, 1.0,  # 1D Linear Result
-            1.0, 0.0, 0.0, 1.0 ] # 1D Point Result
+            1.0, 0.0, 0.0, 1.0,  # 1D Point Result
+            0.5, 0.5, 0.5, 1.0,  # 3D Linear Result
+            0.0, 1.0, 1.0, 1.0 ] # 3D Point Result
 
   - Name: RT
     Format: Float32
@@ -193,6 +216,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 5 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 6 }
 
 Results:
   - Result: SamplerTest

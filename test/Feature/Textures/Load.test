@@ -1,9 +1,12 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
-[[vk::binding(2, 0)]] RWTexture2D<float4> RWTex : register(u1);
+[[vk::binding(2, 0)]] RWTexture2D<float4> RWTex2D : register(u1);
 
 [[vk::binding(3, 0)]] Texture1D<float4> Tex1D : register(t1);
+[[vk::binding(4, 0)]] RWTexture1D<float4> RWTex1D : register(u2);
+[[vk::binding(5, 0)]] Texture3D<float4> Tex3D : register(t2);
+[[vk::binding(6, 0)]] RWTexture3D<float4> RWTex3D : register(u3);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -26,17 +29,49 @@ void main() {
 
   // RWTexture2D::Load takes an int2, not the int3 the SRV form takes: a UAV
   // has a single mip level, so there is no mip component to supply.
-  Out[7] = RWTex.Load(int2(0, 0)); // Cyan
-  Out[8] = RWTex.Load(int2(1, 1)); // Grey
+  Out[7] = RWTex2D.Load(int2(0, 0)); // Cyan
+  Out[8] = RWTex2D.Load(int2(1, 1)); // Grey
 
+  // Texture1D::Load(int2)
+  // Location: (x, mip)
   Out[9] = Tex1D.Load(int2(0, 0));  // Red
   Out[10] = Tex1D.Load(int2(1, 0)); // Green
 
+  // Load(int2, int) - With Offset
   // (0) + (1) = (1) -> Green
   Out[11] = Tex1D.Load(int2(0, 0), 1);
 
   // (1) + (-1) = (0) -> Red
   Out[12] = Tex1D.Load(int2(1, 0), -1);
+
+  // RWTexture1D::Load(int)
+  Out[13] = RWTex1D.Load(int(0)); // Cyan
+  Out[14] = RWTex1D.Load(int(1)); // Grey
+
+  // Texture3D::Load(int4)
+  // Location: (x, y, z, mip)
+  Out[15] = Tex3D.Load(int4(0, 0, 0, 0)); // Red
+  Out[16] = Tex3D.Load(int4(1, 0, 0, 0)); // Green
+  Out[17] = Tex3D.Load(int4(0, 1, 0, 0)); // Blue
+  Out[18] = Tex3D.Load(int4(1, 1, 0, 0)); // White
+  Out[19] = Tex3D.Load(int4(0, 0, 1, 0)); // Cyan
+  Out[20] = Tex3D.Load(int4(1, 0, 1, 0)); // Magenta
+  Out[21] = Tex3D.Load(int4(0, 1, 1, 0)); // Yellow
+  Out[22] = Tex3D.Load(int4(1, 1, 1, 0)); // Black
+
+  // Load(int4, int3) - With Offset
+  // (0,0,0) + (0,0,1) = (0,0,1) -> Cyan
+  Out[23] = Tex3D.Load(int4(0, 0, 0, 0), int3(0, 0, 1));
+
+  // (1,1,1) + (-1,-1,-1) = (0,0,0) -> Red
+  Out[24] = Tex3D.Load(int4(1, 1, 1, 0), int3(-1, -1, -1));
+
+  // (0,0,0) + (1,1,1) = (1,1,1) -> Black
+  Out[25] = Tex3D.Load(int4(0, 0, 0, 0), int3(1, 1, 1));
+
+  // RWTexture3D::Load(int3)
+  Out[26] = RWTex3D.Load(int3(0, 0, 0)); // Cyan
+  Out[27] = RWTex3D.Load(int3(1, 1, 1)); // Grey
 }
 
 //--- pipeline.yaml
@@ -55,7 +90,7 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,  # Blue  (0,1)
             1.0, 1.0, 1.0, 1.0 ] # White (1,1)
 
-  - Name: RWTex
+  - Name: RWTex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
@@ -71,10 +106,43 @@ Buffers:
     Data: [ 1.0, 0.0, 0.0, 1.0,  # Red   (0)
             0.0, 1.0, 0.0, 1.0 ] # Green (1)
 
+  - Name: RWTex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0.0, 1.0, 1.0, 1.0,  # Cyan (0)
+            0.5, 0.5, 0.5, 1.0 ] # Grey (1)
+
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red     (0,0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green   (1,0,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue    (0,1,0)
+            1.0, 1.0, 1.0, 1.0,  # White   (1,1,0)
+            0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0,1)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0,1)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1,1)
+            0.0, 0.0, 0.0, 1.0 ] # Black   (1,1,1)
+
+  - Name: RWTex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0,0)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0,0)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1,0)
+            1.0, 1.0, 1.0, 1.0,  # White   (1,1,0)
+            1.0, 0.0, 0.0, 1.0,  # Red     (0,0,1)
+            0.0, 1.0, 0.0, 1.0,  # Green   (1,0,1)
+            0.0, 0.0, 1.0, 1.0,  # Blue    (0,1,1)
+            0.5, 0.5, 0.5, 1.0 ] # Grey    (1,1,1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 208 # 13 * sizeof(float4)
+    FillSize: 448 # 28 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -91,7 +159,22 @@ Buffers:
             1.0, 0.0, 0.0, 1.0,
             0.0, 1.0, 0.0, 1.0,
             0.0, 1.0, 0.0, 1.0,  # 1D Offset (1) -> Green
-            1.0, 0.0, 0.0, 1.0 ] # 1D Offset (-1) -> Red
+            1.0, 0.0, 0.0, 1.0,  # 1D Offset (-1) -> Red
+            0.0, 1.0, 1.0, 1.0,  # 1D UAV Load (0) -> Cyan
+            0.5, 0.5, 0.5, 1.0,  # 1D UAV Load (1) -> Grey
+            1.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 1.0, 1.0,
+            1.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.0, 1.0, 1.0, 1.0,  # 3D Offset (0,0,1) -> Cyan
+            1.0, 0.0, 0.0, 1.0,  # 3D Offset (-1,-1,-1) -> Red
+            0.0, 0.0, 0.0, 1.0,  # 3D Offset (1,1,1) -> Black
+            0.0, 1.0, 1.0, 1.0,  # 3D UAV Load (0,0,0) -> Cyan
+            0.5, 0.5, 0.5, 1.0 ] # 3D UAV Load (1,1,1) -> Grey
 
 DescriptorSets:
   - Resources:
@@ -99,7 +182,7 @@ DescriptorSets:
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: RWTex
+    - Name: RWTex2D
       Kind: RWTexture2D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
@@ -111,6 +194,18 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: RWTex1D
+      Kind: RWTexture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+    - Name: RWTex3D
+      Kind: RWTexture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 6 }
 
 Results:
   - Result: LoadTest

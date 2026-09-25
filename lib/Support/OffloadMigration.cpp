@@ -20,10 +20,15 @@ static BufferUsage bufferUsageFromResourceKind(ResourceKind Kind) {
   case ResourceKind::ConstantBuffer:
     return BufferUsage::ConstantBuffer;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -60,10 +65,15 @@ static BufferShaderAccessType bufferShaderAccessTypeFromResourceKind(
   case ResourceKind::ConstantBuffer:
     return BufferShaderAccessType::Raw;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -171,8 +181,8 @@ llvm::Error readBack(Device &Dev, Pipeline &P, SharedInvocationState &IS) {
     return DataPtrOrErr.takeError();
   const void *Mapped = *DataPtrOrErr;
 
-  const uint32_t SrcStrideInBytes =
-      Dev.getTextureUploadRowStrideInBytes(IS.RenderTarget->getDesc());
+  const uint32_t SrcStrideInBytes = Dev.getTextureUploadRowStrideInBytes(
+      IS.readbackSourceTexture().getDesc());
 
   P.Bindings.RTargetBufferPtr->copyFromTexture(Mapped, SrcStrideInBytes);
   IS.RTReadback->unmap();
@@ -268,6 +278,7 @@ llvm::Error createResources(Device &Dev, Pipeline &P,
       CreateDesc.Fmt = *FormatOrErr;
       CreateDesc.Width = R.BufferPtr->OutputProps.Width;
       CreateDesc.Height = R.BufferPtr->OutputProps.Height;
+      CreateDesc.Depth = R.BufferPtr->OutputProps.Depth;
       CreateDesc.MipLevels = R.BufferPtr->OutputProps.MipLevels;
       CreateDesc.Dim = R.getTextureDimension();
       CreateDesc.ArraySlices = R.getTextureArraySlices();
@@ -416,11 +427,20 @@ llvm::Error createRenderTarget(Device &Dev, Pipeline &P,
         "No render target bound for graphics pipeline.");
   const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
 
-  auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(Dev, OutBuf);
+  auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(
+      Dev, OutBuf, P.Bindings.SampleCount);
   if (!TexOrErr)
     return TexOrErr.takeError();
 
   IS.RenderTarget = std::move(*TexOrErr);
+
+  if (P.Bindings.SampleCount > 1) {
+    auto ResolveOrErr =
+        offloadtest::createRenderTargetFromCPUBuffer(Dev, OutBuf);
+    if (!ResolveOrErr)
+      return ResolveOrErr.takeError();
+    IS.ResolveTarget = std::move(*ResolveOrErr);
+  }
 
   // Create readback buffer sized for the pixel data with row pitch padded
   // up to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, which is what D3D12 requires
@@ -430,7 +450,8 @@ llvm::Error createRenderTarget(Device &Dev, Pipeline &P,
   BufDesc.Location = MemoryLocation::GpuToCpu;
   BufDesc.Usage = BufferUsage::Storage;
   auto BufOrErr = Dev.createBuffer(
-      "RTReadback", BufDesc, IS.RenderTarget->calculateLinearSizeInBytes(Dev));
+      "RTReadback", BufDesc,
+      IS.readbackSourceTexture().calculateLinearSizeInBytes(Dev));
   if (!BufOrErr)
     return BufOrErr.takeError();
   IS.RTReadback = std::move(*BufOrErr);
@@ -442,7 +463,7 @@ llvm::Error createDepthStencil(Device &Dev, Pipeline &P,
                                SharedInvocationState &IS) {
   auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
       Dev, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-      P.Bindings.RTargetBufferPtr->OutputProps.Height);
+      P.Bindings.RTargetBufferPtr->OutputProps.Height, P.Bindings.SampleCount);
   if (!TexOrErr)
     return TexOrErr.takeError();
   IS.DepthStencil = std::move(*TexOrErr);

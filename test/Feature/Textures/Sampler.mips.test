@@ -4,6 +4,7 @@
 [[vk::binding(2, 0)]] SamplerState MagPointMinLinear : register(s1);
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(4, 0)]] Texture1D<float4> Tex1D : register(t1);
+[[vk::binding(5, 0)]] Texture3D<float4> Tex3D : register(t2);
 
 [numthreads(1,1,1)]
 void main() {
@@ -28,11 +29,19 @@ void main() {
   // 3: Min Test (LOD 1) with Min=Linear -> Linear Result
   Out[3] = Tex2D.SampleLevel(MagPointMinLinear, uv, 1.0);
 
+  // Texture1D::SampleLevel
   float u = 0.4;
   Out[4] = Tex1D.SampleLevel(MagLinearMinPoint, u, -1.0);
   Out[5] = Tex1D.SampleLevel(MagPointMinLinear, u, -1.0);
   Out[6] = Tex1D.SampleLevel(MagLinearMinPoint, u, 1.0);
   Out[7] = Tex1D.SampleLevel(MagPointMinLinear, u, 1.0);
+
+  // Texture3D::SampleLevel
+  float3 uvw = float3(0.4, 0.25, 0.25);
+  Out[8] = Tex3D.SampleLevel(MagLinearMinPoint, uvw, -1.0);
+  Out[9] = Tex3D.SampleLevel(MagPointMinLinear, uvw, -1.0);
+  Out[10] = Tex3D.SampleLevel(MagLinearMinPoint, uvw, 1.0);
+  Out[11] = Tex3D.SampleLevel(MagPointMinLinear, uvw, 1.0);
 }
 
 //--- pipeline.yaml
@@ -58,10 +67,24 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # Green
             0.5, 0.5, 0.0, 1.0 ] # Mip 1
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0,  # Green
+            0.0, 0.0, 1.0, 1.0,  # Blue
+            1.0, 1.0, 1.0, 1.0,  # White
+            0.0, 1.0, 1.0, 1.0,  # Cyan
+            1.0, 0.0, 1.0, 1.0,  # Magenta
+            1.0, 1.0, 0.0, 1.0,  # Yellow
+            0.0, 0.0, 0.0, 1.0,  # Black
+            0.5, 0.5, 0.0, 1.0 ] # Mip 1
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 128 # 8 * sizeof(float4)
+    FillSize: 192 # 12 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -73,7 +96,11 @@ Buffers:
             0.7, 0.3, 0.0, 1.0,  # 1D Linear
             1.0, 0.0, 0.0, 1.0,  # 1D Nearest
             0.5, 0.5, 0.0, 1.0,  # 1D Nearest (LOD 1)
-            0.5, 0.5, 0.0, 1.0 ] # 1D Linear (LOD 1)
+            0.5, 0.5, 0.0, 1.0,  # 1D Linear (LOD 1)
+            0.7, 0.3, 0.0, 1.0,  # 3D Linear
+            1.0, 0.0, 0.0, 1.0,  # 3D Nearest
+            0.5, 0.5, 0.0, 1.0,  # 3D Nearest (LOD 1)
+            0.5, 0.5, 0.0, 1.0 ] # 3D Linear (LOD 1)
 
 Samplers:
   - Name: MagLinearMinPoint
@@ -107,6 +134,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: FilterTest

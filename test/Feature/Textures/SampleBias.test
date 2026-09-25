@@ -20,6 +20,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
 [[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
+[[vk::binding(6, 0)]] Texture3D<float4> Tex3D : register(t3);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Setup UVs to have a derivative of exactly 0.5.
@@ -73,6 +74,7 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float3 CubeDirNegZ = float3(float2(GTid.xy) * 0.5, -1);
   float4 r9 = TexCube.SampleBias(Samp, CubeDirNegZ, 4.0);
 
+  // Texture1D::SampleBias
   // Use 0.375 to avoid the nearest-filter tie at 0.5.
   float sample_u = 0.375 + float(GTid.x) * 0.5;
   float4 r10 = Tex1D.SampleBias(Samp, sample_u, -0.1);
@@ -81,6 +83,16 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float4 r13 = Tex1D.SampleBias(Samp, sample_u, -0.1, 0, 1.0);
   float4 r14 = Tex1D.SampleBias(Samp2, sample_u, -0.1);
   float4 r15 = Tex1D.SampleBias(Samp, 0.75, -0.1);
+
+  // Texture3D::SampleBias. Vary only z so the depth gradient drives the LOD.
+  // Use 0.375 to avoid the nearest-filter tie at 0.5.
+  float3 sample_uvw = float3(0.25, 0.25, 0.375 + float(GTid.x) * 0.5);
+  float4 r16 = Tex3D.SampleBias(Samp, sample_uvw, -0.1);
+  float4 r17 = Tex3D.SampleBias(Samp, sample_uvw, 1.0);
+  float4 r18 = Tex3D.SampleBias(Samp, sample_uvw, -0.1, int3(1, 1, 1));
+  float4 r19 = Tex3D.SampleBias(Samp, sample_uvw, -0.1, int3(0, 0, 0), 1.0);
+  float4 r20 = Tex3D.SampleBias(Samp2, sample_uvw, -0.1);
+  float4 r21 = Tex3D.SampleBias(Samp, float3(0.25, 0.25, 0.75), -0.1);
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -99,6 +111,12 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[13] = r13;
     Out[14] = r14;
     Out[15] = r15;
+    Out[16] = r16;
+    Out[17] = r17;
+    Out[18] = r18;
+    Out[19] = r19;
+    Out[20] = r20;
+    Out[21] = r21;
   }
   return float4(0,0,0,0);
 }
@@ -161,30 +179,50 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # Green (1)
             1.0, 0.0, 1.0, 1.0 ] # Mip 1 (Magenta)
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red     (0,0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green   (1,0,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue    (0,1,0)
+            1.0, 1.0, 1.0, 1.0,  # White   (1,1,0)
+            0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0,1)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0,1)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1,1)
+            0.0, 0.0, 0.0, 1.0,  # Black   (1,1,1)
+            1.0, 0.0, 1.0, 1.0 ] # Mip 1   (Magenta)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 256 # 16 * sizeof(float4)
+    FillSize: 352 # 22 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 1.0, 1.0, 1.0,   # Bias -0.1 -> Mag(Nearest) -> White
-            1.0, 0.0, 1.0, 1.0,   # Bias 1.0 -> mip 1 -> Magenta
-            1.0, 0.0, 0.0, 1.0,   # Offset (-1, -1) -> Red
-            1.0, 0.0, 1.0, 1.0,   # Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
-            0.5, 0.5, 0.5, 1.0,   # Bias -0.1 -> Mag(Linear) -> Grey (mip 0)
-            1.0, 0.0, 0.0, 1.0,   # Sample at (0.25, 0.25) -> Red
-            1.0, 1.0, 0.0, 1.0,   # Cube +X, bias +4 -> mip 1 Yellow
-            1.0, 0.0, 0.0, 1.0,   # Cube +X, bias -4 -> mip 0 Red
-            1.0, 1.0, 0.0, 1.0,   # Cube +X, bias -4 min-LOD-clamped to 1 -> Yellow
-            0.0, 1.0, 0.0, 1.0,   # Cube -Z, bias +4 -> that face's mip 1 Green
-            1.0, 0.0, 0.0, 1.0,   # 1D Bias -0.1 -> Mag(Nearest) -> Red
-            1.0, 0.0, 1.0, 1.0,   # 1D Bias 1.0 -> mip 1 -> Magenta
-            0.0, 1.0, 0.0, 1.0,   # 1D Offset (1) -> Green
-            1.0, 0.0, 1.0, 1.0,   # 1D Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
-            0.75, 0.25, 0.0, 1.0, # 1D Bias -0.1 -> Mag(Linear) -> Red/Green blend (mip 0)
-            0.0, 1.0, 0.0, 1.0 ]  # 1D Sample at (0.75) -> Green
+    Data: [ 1.0, 1.0, 1.0, 1.0,    # Bias -0.1 -> Mag(Nearest) -> White
+            1.0, 0.0, 1.0, 1.0,    # Bias 1.0 -> mip 1 -> Magenta
+            1.0, 0.0, 0.0, 1.0,    # Offset (-1, -1) -> Red
+            1.0, 0.0, 1.0, 1.0,    # Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
+            0.5, 0.5, 0.5, 1.0,    # Bias -0.1 -> Mag(Linear) -> Grey (mip 0)
+            1.0, 0.0, 0.0, 1.0,    # Sample at (0.25, 0.25) -> Red
+            1.0, 1.0, 0.0, 1.0,    # Cube +X, bias +4 -> mip 1 Yellow
+            1.0, 0.0, 0.0, 1.0,    # Cube +X, bias -4 -> mip 0 Red
+            1.0, 1.0, 0.0, 1.0,    # Cube +X, bias -4 min-LOD-clamped to 1 -> Yellow
+            0.0, 1.0, 0.0, 1.0,    # Cube -Z, bias +4 -> that face's mip 1 Green
+            1.0, 0.0, 0.0, 1.0,    # 1D Bias -0.1 -> Mag(Nearest) -> Red
+            1.0, 0.0, 1.0, 1.0,    # 1D Bias 1.0 -> mip 1 -> Magenta
+            0.0, 1.0, 0.0, 1.0,    # 1D Offset (1) -> Green
+            1.0, 0.0, 1.0, 1.0,    # 1D Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
+            0.75, 0.25, 0.0, 1.0,  # 1D Bias -0.1 -> Mag(Linear) -> Red/Green blend (mip 0)
+            0.0, 1.0, 0.0, 1.0,    # 1D Sample at (0.75) -> Green
+            1.0, 0.0, 0.0, 1.0,    # 3D Bias -0.1 -> Mag(Nearest) -> Red
+            1.0, 0.0, 1.0, 1.0,    # 3D Bias 1.0 -> mip 1 -> Magenta
+            0.0, 0.0, 0.0, 1.0,    # 3D Offset (1, 1, 1) -> Black
+            1.0, 0.0, 1.0, 1.0,    # 3D Clamp 1.0 (a minimum LOD) -> mip 1 -> Magenta
+            0.75, 0.25, 0.25, 1.0, # 3D Bias -0.1 -> Mag(Linear) -> Red/Cyan blend (mip 0)
+            0.0, 1.0, 1.0, 1.0 ]   # 3D Sample at (0.25, 0.25, 0.75) -> Cyan
 
   - Name: RT
     Format: Float32
@@ -244,6 +282,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 5 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 6 }
 
 Results:
   - Result: SampleBiasTest

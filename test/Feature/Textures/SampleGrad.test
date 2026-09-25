@@ -5,6 +5,7 @@
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
 [[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
+[[vk::binding(6, 0)]] Texture3D<float4> Tex3D : register(t3);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -50,6 +51,7 @@ void main() {
   Out[7] = TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMag, CubeDDYMag);
   Out[8] = TexCube.SampleGrad(Samp0, float3(0, 0, -1), CubeDDXMin, CubeDDYMin);
 
+  // Texture1D::SampleGrad
   // Use 0.25 for nearest filtering to avoid the tie at 0.5.
   float u0 = 0.25;
   float u1 = 0.5;
@@ -63,6 +65,23 @@ void main() {
   Out[12] = Tex1D.SampleGrad(Samp1, u1, grad_min, grad_min);
 
   Out[13] = Tex1D.SampleGrad(Samp0, u0, 1.0, 1.0); // Yellow
+
+  // Texture3D::SampleGrad. Vary only z so the depth gradient drives the LOD.
+  // Use 0.375 for nearest filtering to avoid the tie at 0.5.
+  float3 uvw0 = float3(0.25, 0.25, 0.375);
+  float3 uvw1 = float3(0.25, 0.25, 0.5);
+  float3 ddx_mag_3d = float3(0, 0, 0.0001);
+  float3 ddy_mag_3d = float3(0, 0, 0.0001);
+  float3 ddx_min_3d = float3(0, 0, 2.0);
+  float3 ddy_min_3d = float3(0, 0, 2.0);
+
+  Out[14] = Tex3D.SampleGrad(Samp0, uvw0, ddx_mag_3d, ddy_mag_3d);
+  Out[15] = Tex3D.SampleGrad(Samp0, uvw0, ddx_min_3d, ddy_min_3d);
+
+  Out[16] = Tex3D.SampleGrad(Samp1, uvw1, ddx_mag_3d, ddy_mag_3d);
+  Out[17] = Tex3D.SampleGrad(Samp1, uvw1, ddx_min_3d, ddy_min_3d);
+
+  Out[18] = Tex3D.SampleGrad(Samp0, uvw0, float3(0, 0, 1), float3(0, 0, 0)); // Yellow
 }
 
 //--- pipeline.yaml
@@ -121,10 +140,24 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # Green (1)
             1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1 texel) - Yellow
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red     (0,0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green   (1,0,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue    (0,1,0)
+            1.0, 1.0, 1.0, 1.0,  # White   (1,1,0)
+            0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0,1)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0,1)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1,1)
+            0.0, 0.0, 0.0, 1.0,  # Black   (1,1,1)
+            1.0, 1.0, 0.0, 1.0 ] # Mip 1   (1x1x1) - Yellow
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 224 # 14 * sizeof(float4)
+    FillSize: 304 # 19 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -142,7 +175,12 @@ Buffers:
             1.0, 1.0, 0.0, 1.0,  # 1D Samp0, u0, Min -> Yellow (mip 1)
             0.5, 0.5, 0.0, 1.0,  # 1D Samp1, u1, Mag -> Red/Green blend
             1.0, 1.0, 0.0, 1.0,  # 1D Samp1, u1, Min -> Yellow (mip 1)
-            1.0, 1.0, 0.0, 1.0 ] # 1D Mip Selection -> Yellow (mip 1)
+            1.0, 1.0, 0.0, 1.0,  # 1D Mip Selection -> Yellow (mip 1)
+            1.0, 0.0, 0.0, 1.0,  # 3D Samp0, uvw0, Mag -> Red
+            1.0, 1.0, 0.0, 1.0,  # 3D Samp0, uvw0, Min -> Yellow (mip 1)
+            0.5, 0.5, 0.5, 1.0,  # 3D Samp1, uvw1, Mag -> Red/Cyan blend
+            1.0, 1.0, 0.0, 1.0,  # 3D Samp1, uvw1, Min -> Yellow (mip 1)
+            1.0, 1.0, 0.0, 1.0 ] # 3D Mip Selection -> Yellow (mip 1)
 
 Samplers:
   - Name: Samp0
@@ -180,6 +218,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 5 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 6 }
 
 Results:
   - Result: SampleGradTest

@@ -20,6 +20,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(3, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(4, 0)]] TextureCube<float4> TexCube : register(t1);
 [[vk::binding(5, 0)]] Texture1D<float4> Tex1D : register(t2);
+[[vk::binding(6, 0)]] Texture3D<float4> Tex3D : register(t3);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Base UV at texture center (0.5, 0.5).
@@ -72,6 +73,7 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Sample with an LOD clamp; 0.0 leaves it at mip 0.
   float4 r9 = TexCube.Sample(Samp1, CubeMag, 0.0f);
 
+  // Texture1D::Sample
   // Use 0.375 to avoid the nearest-filter tie at 0.5.
   float u_mag = 0.375 + float(GTid.x) * 0.0001;
   float u_min = 0.5 + float(GTid.x) * 2.0;
@@ -85,6 +87,21 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float4 r14 = Tex1D.Sample(Samp0, u_mag, 1);
 
   float4 r15 = Tex1D.Sample(Samp0, u_mag, 1, 0.0);
+
+  // Texture3D::Sample. Vary only z so the depth gradient drives the LOD.
+  // Use 0.375 to avoid the nearest-filter tie at 0.5.
+  float3 uvw_mag = float3(0.25, 0.25, 0.375 + float(GTid.x) * 0.0001);
+  float3 uvw_min = float3(0.25, 0.25, 0.375 + float(GTid.x) * 2.0);
+
+  float4 r16 = Tex3D.Sample(Samp0, uvw_mag);
+  float4 r17 = Tex3D.Sample(Samp0, uvw_min);
+
+  float4 r18 = Tex3D.Sample(Samp1, uvw_mag);
+  float4 r19 = Tex3D.Sample(Samp1, uvw_min);
+
+  float4 r20 = Tex3D.Sample(Samp0, uvw_mag, int3(1, 1, 1));
+
+  float4 r21 = Tex3D.Sample(Samp0, uvw_mag, int3(1, 1, 1), 0.0);
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -103,6 +120,12 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[13] = r13;
     Out[14] = r14;
     Out[15] = r15;
+    Out[16] = r16;
+    Out[17] = r17;
+    Out[18] = r18;
+    Out[19] = r19;
+    Out[20] = r20;
+    Out[21] = r21;
   }
   return float4(0,0,0,0);
 }
@@ -164,10 +187,24 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # Green (1)
             1.0, 0.0, 1.0, 1.0 ] # Mip 1 (Magenta)
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red     (0,0,0)
+            0.0, 1.0, 0.0, 1.0,  # Green   (1,0,0)
+            0.0, 0.0, 1.0, 1.0,  # Blue    (0,1,0)
+            1.0, 1.0, 1.0, 1.0,  # White   (1,1,0)
+            0.0, 1.0, 1.0, 1.0,  # Cyan    (0,0,1)
+            1.0, 0.0, 1.0, 1.0,  # Magenta (1,0,1)
+            1.0, 1.0, 0.0, 1.0,  # Yellow  (0,1,1)
+            0.0, 0.0, 0.0, 1.0,  # Black   (1,1,1)
+            1.0, 0.0, 1.0, 1.0 ] # Mip 1   (Magenta)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 256 # 16 * sizeof(float4)
+    FillSize: 352 # 22 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -187,7 +224,13 @@ Buffers:
             0.75, 0.25, 0.0, 1.0,     # 1D Samp1 Mag (Linear)  -> Red/Green blend (mip 0)
             1.0, 0.0, 1.0, 1.0,       # 1D Samp1 Min (Nearest) -> mip 1 Magenta
             0.0, 1.0, 0.0, 1.0,       # 1D Offset (1) -> Green
-            0.0, 1.0, 0.0, 1.0 ]      # 1D Offset (1) Clamp 0.0 -> Green
+            0.0, 1.0, 0.0, 1.0,       # 1D Offset (1) Clamp 0.0 -> Green
+            1.0, 0.0, 0.0, 1.0,       # 3D Samp0 Mag (Nearest) -> Red
+            1.0, 0.0, 1.0, 1.0,       # 3D Samp0 Min (Linear)  -> mip 1 Magenta
+            0.75, 0.25, 0.25, 1.0,    # 3D Samp1 Mag (Linear)  -> Red/Cyan blend (mip 0)
+            1.0, 0.0, 1.0, 1.0,       # 3D Samp1 Min (Nearest) -> mip 1 Magenta
+            0.0, 0.0, 0.0, 1.0,       # 3D Offset (1,1,1) -> Black
+            0.0, 0.0, 0.0, 1.0 ]      # 3D Offset (1,1,1) Clamp 0.0 -> Black
 
   - Name: RT
     Format: Float32
@@ -247,6 +290,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 5 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 6 }
 
 Results:
   - Result: SampleTest

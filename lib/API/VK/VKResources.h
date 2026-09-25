@@ -96,6 +96,37 @@ inline VkImageUsageFlags getVulkanImageUsage(TextureUsage Usage) {
   return Flags;
 }
 
+inline bool isValidVulkanSampleCount(uint32_t SampleCount) {
+  switch (SampleCount) {
+  case 1:
+  case 2:
+  case 4:
+  case 8:
+  case 16:
+  case 32:
+  case 64:
+    return true;
+  default:
+    return false;
+  }
+}
+
+inline llvm::Error validateVulkanSampleCount(uint32_t SampleCount,
+                                             llvm::StringRef FieldName) {
+  if (isValidVulkanSampleCount(SampleCount))
+    return llvm::Error::success();
+  return llvm::createStringError(
+      std::errc::invalid_argument,
+      "%s must be one of 1, 2, 4, 8, 16, 32, or 64; got %u.",
+      FieldName.str().c_str(), SampleCount);
+}
+
+// VkSampleCountFlagBits uses the numeric sample count as its bit value.
+inline VkSampleCountFlagBits getVulkanSampleCount(uint32_t SampleCount) {
+  assert(isValidVulkanSampleCount(SampleCount) && "Invalid sample count");
+  return static_cast<VkSampleCountFlagBits>(SampleCount);
+}
+
 inline VkIndexType getVulkanIndexType(IndexFormat Fmt) {
   switch (Fmt) {
   case IndexFormat::Uint16:
