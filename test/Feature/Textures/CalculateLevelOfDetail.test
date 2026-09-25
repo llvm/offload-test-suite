@@ -24,6 +24,7 @@ VSOutput mainVS(VSInput input) {
 #define CUBE_OR(Call, Expect) (Expect)
 #endif
 [[vk::binding(4, 0)]] Texture1D<float4> Tex1D : register(t2);
+[[vk::binding(5, 0)]] Texture3D<float4> Tex3D : register(t3);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Use SV_Position (pixel coordinates) to simulate the grid logic.
@@ -70,12 +71,21 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float lod5 = CUBE_OR(TexCube.CalculateLevelOfDetail(Samp, CubeSteep),
                         1.0);
 
+  // Texture1D::CalculateLevelOfDetail
   float u0 = 0.25 + float(GTid.x) * 0.5;
   float u1 = 0.25 + float(GTid.x) * 2.0;
   float lod6 = Tex1D.CalculateLevelOfDetail(Samp, u0);
   float lod7 = Tex1D.CalculateLevelOfDetail(Samp, u1);
   float lod8 = Tex1D.CalculateLevelOfDetailUnclamped(Samp, u0);
   float lod9 = Tex1D.CalculateLevelOfDetailUnclamped(Samp, u1);
+
+  // Texture3D::CalculateLevelOfDetail. Vary only z so the depth gradient drives the LOD.
+  float3 uvw0 = float3(0.25, 0.25, 0.25 + float(GTid.x) * 0.5);
+  float3 uvw1 = float3(0.25, 0.25, 0.25 + float(GTid.y) * 2.0);
+  float lod10 = Tex3D.CalculateLevelOfDetail(Samp, uvw0);
+  float lod11 = Tex3D.CalculateLevelOfDetail(Samp, uvw1);
+  float lod12 = Tex3D.CalculateLevelOfDetailUnclamped(Samp, uvw0);
+  float lod13 = Tex3D.CalculateLevelOfDetailUnclamped(Samp, uvw1);
 
   if (all(GTid.xy == 0)) {
     Out[0] = lod0;
@@ -88,6 +98,10 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[7] = lod7;
     Out[8] = lod8;
     Out[9] = lod9;
+    Out[10] = lod10;
+    Out[11] = lod11;
+    Out[12] = lod12;
+    Out[13] = lod13;
   }
   return float4(0, 0, 0, 0);
 }
@@ -120,10 +134,16 @@ Buffers:
     OutputProps: { Width: 4, Height: 1, Depth: 1, MipLevels: 3 }
     FillSize: 112 # (4 + 2 + 1) * 16
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 4, MipLevels: 3 }
+    FillSize: 304 # (16 + 2 + 1) * 16
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 40 # 10 * sizeof(float)
+    FillSize: 56 # 14 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -131,7 +151,8 @@ Buffers:
     Data: [ 1.0, 2.0, 1.0, 3.0,   # Texture2D: clamped, clamped, unclamped x2
             0.0,                  # TextureCube: no minification -> LOD 0
             1.0,                  # TextureCube: half a 4-texel face -> LOD 1
-            1.0, 2.0, 1.0, 3.0 ]  # Texture1D: clamped, clamped, unclamped x2
+            1.0, 2.0, 1.0, 3.0,   # Texture1D: clamped, clamped, unclamped x2
+            1.0, 2.0, 1.0, 3.0 ]  # Texture3D: clamped, clamped, unclamped x2
 
   - Name: RT
     Format: Float32
@@ -183,6 +204,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 2, Space: 0 }
       VulkanBinding: { Binding: 4 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 5 }
 
 Results:
   - Result: LODTest

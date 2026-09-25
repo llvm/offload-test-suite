@@ -37,11 +37,19 @@ RAYTRACING_TIER_ENUM(RT_1_2, 1.2, 12)
 #undef RAYTRACING_TIER_ENUM
 #endif
 
+#ifdef VARIABLE_SHADING_RATE_TIER_ENUM
+VARIABLE_SHADING_RATE_TIER_ENUM(VRS_NotSupported, NotSupported, 0)
+VARIABLE_SHADING_RATE_TIER_ENUM(VRS_Tier1, Tier1, 1)
+VARIABLE_SHADING_RATE_TIER_ENUM(VRS_Tier2, Tier2, 2)
+#undef VARIABLE_SHADING_RATE_TIER_ENUM
+#endif
+
 #ifdef D3D_FEATURE_ENUM
 D3D_FEATURE_ENUM(directx::ShaderModel, HighestShaderModel)
 D3D_FEATURE_ENUM(directx::RootSignature, HighestRootSignatureVersion)
 D3D_FEATURE_ENUM(directx::MeshShaderTier, MeshShaderTier)
 D3D_FEATURE_ENUM(directx::RaytracingTier, RaytracingTier)
+D3D_FEATURE_ENUM(directx::VariableShadingRateTier, VariableShadingRateTier)
 #undef D3D_FEATURE_ENUM
 #endif
 
