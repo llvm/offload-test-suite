@@ -1,13 +1,13 @@
 #--- vertex.hlsl
 struct VSOutput {
     float4 position : SV_POSITION;
-    uint shadingRate: SV_ShadingRate;
+    uint shadingRate : SV_ShadingRate;
 };
 
-VSOutput main(float4 Pos : POSITION, uint Sr : SV_ShadingRate) {
+VSOutput main(float4 Pos : POSITION) {
     VSOutput O;
     O.position = Pos;
-    O.shadingRate = Sr;
+    O.shadingRate = 5; // 2x2
     return O;
 }
 
@@ -92,14 +92,11 @@ Results:
 # UNSUPPORTED: Metal
 # UNSUPPORTED: Lavapipe
 
-# The WSL D3D12 runtime reports VRS Tier 2 and accepts the DXIL validator's
-# shading-rate feature, but rejects the graphics PSO with E_INVALIDARG.
-# XFAIL: DirectX && Linux
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/212567
 # XFAIL: Clang
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T vs_6_4 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_4 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
