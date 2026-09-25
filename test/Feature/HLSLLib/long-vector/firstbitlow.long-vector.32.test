@@ -1,0 +1,66 @@
+#--- source.hlsl
+
+ByteAddressBuffer In0 : register(t0);
+RWByteAddressBuffer Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  Out.Store<vector<uint, 16> >(0, firstbitlow(In0.Load<vector<uint, 16> >(0)));
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In0
+    Format: UInt32
+    Stride: 4
+    Data: [0, 1, 2, 3, 4294967295, 2147483648, 1431655765, 305419896, 0, 1, 2, 3, 4294967295, 2147483648, 1431655765, 305419896]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [4294967295, 0, 1, 0, 0, 31, 0, 3, 4294967295, 0, 1, 0, 0, 31, 0, 3]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In0
+      Kind: ByteAddressBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWByteAddressBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented https://github.com/llvm/wg-hlsl/issues/467
+# XFAIL: Vulkan
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1506
+# Note We fail for DXC because today Clang scalairzed and does
+# Not hit  IRErrorCodeUnsupportedInstruction on vector @dx.op.*
+# Bug https://github.com/llvm/offload-test-suite/issues/1495
+# XFAIL: Metal && DXC
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+
