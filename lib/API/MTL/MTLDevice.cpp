@@ -938,7 +938,6 @@ public:
     assert(VPs.size() <= offloadtest::MaxViewports &&
            "Viewport count exceeds Metal's per-encoder limit.");
     llvm::SmallVector<MTL::Viewport, offloadtest::MaxViewports> MTLVPs;
-    MTLVPs.reserve(VPs.size());
     for (const offloadtest::Viewport &VP : VPs)
       MTLVPs.push_back(MTL::Viewport{
           static_cast<double>(VP.X), static_cast<double>(VP.Y),
@@ -954,7 +953,6 @@ public:
     assert(Rects.size() <= offloadtest::MaxViewports &&
            "Scissor count exceeds Metal's per-encoder limit.");
     llvm::SmallVector<MTL::ScissorRect, offloadtest::MaxViewports> MTLRects;
-    MTLRects.reserve(Rects.size());
     for (const offloadtest::ScissorRect &Rect : Rects)
       MTLRects.push_back({static_cast<NS::UInteger>(Rect.X),
                           static_cast<NS::UInteger>(Rect.Y), Rect.Width,

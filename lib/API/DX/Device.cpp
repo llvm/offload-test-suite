@@ -1142,7 +1142,6 @@ public:
     assert(VPs.size() <= offloadtest::MaxViewports &&
            "Viewport count exceeds D3D12's per-pipeline limit.");
     llvm::SmallVector<D3D12_VIEWPORT, offloadtest::MaxViewports> DXVPs;
-    DXVPs.reserve(VPs.size());
     for (const offloadtest::Viewport &VP : VPs)
       DXVPs.push_back(
           {VP.X, VP.Y, VP.Width, VP.Height, VP.MinDepth, VP.MaxDepth});
@@ -1155,7 +1154,6 @@ public:
     assert(Rects.size() <= offloadtest::MaxViewports &&
            "Scissor count exceeds D3D12's per-pipeline limit.");
     llvm::SmallVector<D3D12_RECT, offloadtest::MaxViewports> DXRects;
-    DXRects.reserve(Rects.size());
     for (const offloadtest::ScissorRect &Rect : Rects)
       DXRects.push_back(D3D12_RECT{Rect.X, Rect.Y,
                                    static_cast<LONG>(Rect.X + Rect.Width),

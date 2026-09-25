@@ -1460,7 +1460,6 @@ public:
     assert(VPs.size() <= offloadtest::MaxViewports &&
            "Viewport count exceeds the guaranteed Vulkan maxViewports.");
     llvm::SmallVector<VkViewport, offloadtest::MaxViewports> VKVPs;
-    VKVPs.reserve(VPs.size());
     for (const offloadtest::Viewport &VP : VPs) {
       // Flip framebuffer Y to match D3D12 and Metal clip-space winding.
       VKVPs.push_back({VP.X, VP.Y + VP.Height, VP.Width, -VP.Height,
@@ -1476,7 +1475,6 @@ public:
     assert(Rects.size() <= offloadtest::MaxViewports &&
            "Scissor count exceeds the guaranteed Vulkan maxViewports.");
     llvm::SmallVector<VkRect2D, offloadtest::MaxViewports> VKRects;
-    VKRects.reserve(Rects.size());
     for (const offloadtest::ScissorRect &Rect : Rects)
       VKRects.push_back({{Rect.X, Rect.Y}, {Rect.Width, Rect.Height}});
     vkCmdSetScissor(CB.CmdBuffer, 0, static_cast<uint32_t>(VKRects.size()),
