@@ -496,6 +496,26 @@ static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
+static VkExtent2D getVkFragmentShadingRateExtent(FragmentShadingRate Rate) {
+  switch (Rate) {
+  case FragmentShadingRate::Rate1x1:
+    return {1, 1};
+  case FragmentShadingRate::Rate1x2:
+    return {1, 2};
+  case FragmentShadingRate::Rate2x1:
+    return {2, 1};
+  case FragmentShadingRate::Rate2x2:
+    return {2, 2};
+  case FragmentShadingRate::Rate2x4:
+    return {2, 4};
+  case FragmentShadingRate::Rate4x2:
+    return {4, 2};
+  case FragmentShadingRate::Rate4x4:
+    return {4, 4};
+  }
+  llvm_unreachable("All FragmentShadingRate cases handled");
+}
+
 static std::string getMessageSeverityString(
     VkDebugUtilsMessageSeverityFlagBitsEXT MessageSeverity) {
   if (MessageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
@@ -1670,6 +1690,11 @@ private:
   bool HasRTPipelineSupport = false;
   bool HasDescriptorIndexing = false;
   bool HasMutableDescriptorType = false;
+  bool HasFragmentShadingRateSupport = false;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+  PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR
+      GetPhysicalDeviceFragmentShadingRates = nullptr;
+#endif
   struct ASFunctions {
     PFN_vkCreateAccelerationStructureKHR Create = nullptr;
     PFN_vkDestroyAccelerationStructureKHR Destroy = nullptr;
@@ -1901,6 +1926,21 @@ public:
           SupportedAtomicFloat.shaderBufferFloat32Atomics;
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    const bool HasFragmentShadingRateExt = isExtensionSupported(
+        AvailableDeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+        SupportedFragmentShadingRate{};
+    if (HasFragmentShadingRateExt) {
+      SupportedFragmentShadingRate.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+      VkPhysicalDeviceFeatures2 ProbeFeatures{};
+      ProbeFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      ProbeFeatures.pNext = &SupportedFragmentShadingRate;
+      vkGetPhysicalDeviceFeatures2(PhysicalDevice, &ProbeFeatures);
+    }
+#endif
+
     const bool HasMeshShader = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
@@ -2037,6 +2077,22 @@ public:
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR EnabledFragmentShadingRate{};
+    const bool EnableFragmentShadingRate =
+        HasFragmentShadingRateExt &&
+        SupportedFragmentShadingRate.pipelineFragmentShadingRate;
+    if (EnableFragmentShadingRate) {
+      EnabledFragmentShadingRate.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+      EnabledFragmentShadingRate.pipelineFragmentShadingRate = VK_TRUE;
+      EnabledFragmentShadingRate.pNext = Features.pNext;
+      Features.pNext = &EnabledFragmentShadingRate;
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+    }
+#endif
+
     if (HasASExts) {
       if (!ASFeatures.accelerationStructure)
         return llvm::createStringError(
@@ -2123,6 +2179,20 @@ public:
                                  Features12.runtimeDescriptorArray &&
                                  Features12.descriptorBindingPartiallyBound;
     Dev->HasMutableDescriptorType = HasMutableDescriptorTypeExt;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    Dev->HasFragmentShadingRateSupport = EnableFragmentShadingRate;
+    if (EnableFragmentShadingRate) {
+      Dev->GetPhysicalDeviceFragmentShadingRates =
+          reinterpret_cast<PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR>(
+              vkGetInstanceProcAddr(
+                  Instance->Instance,
+                  "vkGetPhysicalDeviceFragmentShadingRatesKHR"));
+      if (!Dev->GetPhysicalDeviceFragmentShadingRates)
+        return llvm::createStringError(
+            std::errc::function_not_supported,
+            "Failed to load vkGetPhysicalDeviceFragmentShadingRatesKHR.");
+    }
+#endif
 
     // Load acceleration-structure and ray-tracing-pipeline function pointers
     // after device creation. These two feature sets are independent; the RT
@@ -2475,6 +2545,53 @@ public:
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
+  llvm::Expected<VkExtent2D>
+  getSupportedFragmentShadingRate(FragmentShadingRate Rate) const {
+    const VkExtent2D Requested = getVkFragmentShadingRateExtent(Rate);
+    if (Rate == FragmentShadingRate::Rate1x1)
+      return Requested;
+
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    if (!HasFragmentShadingRateSupport)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "The Vulkan device does not support pipeline fragment shading "
+          "rates.");
+
+    uint32_t RateCount = 0;
+    if (auto Err =
+            VK::toError(GetPhysicalDeviceFragmentShadingRates(
+                            PhysicalDevice, &RateCount, nullptr),
+                        "Failed to query Vulkan fragment shading rates."))
+      return std::move(Err);
+
+    llvm::SmallVector<VkPhysicalDeviceFragmentShadingRateKHR> Rates(RateCount);
+    for (auto &SupportedRate : Rates)
+      SupportedRate.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR;
+    if (auto Err =
+            VK::toError(GetPhysicalDeviceFragmentShadingRates(
+                            PhysicalDevice, &RateCount, Rates.data()),
+                        "Failed to query Vulkan fragment shading rates."))
+      return std::move(Err);
+
+    for (const auto &SupportedRate : Rates)
+      if (SupportedRate.fragmentSize.width == Requested.width &&
+          SupportedRate.fragmentSize.height == Requested.height &&
+          (SupportedRate.sampleCounts & VK_SAMPLE_COUNT_1_BIT))
+        return Requested;
+
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "The Vulkan device does not support the requested fragment shading "
+        "rate for one sample per pixel.");
+#else
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "The Vulkan headers do not support VK_KHR_fragment_shading_rate.");
+#endif
+  }
+
   llvm::Expected<std::unique_ptr<PipelineState>>
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
@@ -2755,6 +2872,28 @@ public:
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPipelineFragmentShadingRateStateCreateInfoKHR FragmentShadingRateCI{};
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1) {
+      auto FragmentSizeOrErr =
+          getSupportedFragmentShadingRate(Desc.ShadingRate);
+      if (!FragmentSizeOrErr)
+        return FragmentSizeOrErr.takeError();
+      FragmentShadingRateCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR;
+      FragmentShadingRateCI.fragmentSize = *FragmentSizeOrErr;
+      FragmentShadingRateCI.combinerOps[0] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      FragmentShadingRateCI.combinerOps[1] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      PipelineCI.pNext = &FragmentShadingRateCI;
+    }
+#else
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "The Vulkan headers do not support VK_KHR_fragment_shading_rate.");
+#endif
     PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
@@ -2954,6 +3093,28 @@ public:
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPipelineFragmentShadingRateStateCreateInfoKHR FragmentShadingRateCI{};
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1) {
+      auto FragmentSizeOrErr =
+          getSupportedFragmentShadingRate(Desc.ShadingRate);
+      if (!FragmentSizeOrErr)
+        return FragmentSizeOrErr.takeError();
+      FragmentShadingRateCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR;
+      FragmentShadingRateCI.fragmentSize = *FragmentSizeOrErr;
+      FragmentShadingRateCI.combinerOps[0] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      FragmentShadingRateCI.combinerOps[1] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      PipelineCI.pNext = &FragmentShadingRateCI;
+    }
+#else
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "The Vulkan headers do not support VK_KHR_fragment_shading_rate.");
+#endif
     PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pViewportState = &ViewportCI;
@@ -3375,6 +3536,15 @@ private:
     const bool HasShaderAtomicFloatExt = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+        FeaturesFragmentShadingRate{};
+    FeaturesFragmentShadingRate.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+    const bool HasFragmentShadingRateExt = isExtensionSupported(
+        DeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+#endif
+
     Features.pNext = &Features11;
     if (HasVulkan12)
       Features11.pNext = &Features12;
@@ -3410,6 +3580,12 @@ private:
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
     }
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    if (HasFragmentShadingRateExt) {
+      FeaturesFragmentShadingRate.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShadingRate;
+    }
+#endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
@@ -3452,6 +3628,13 @@ private:
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
                                              FeaturesAtomicFloat.Name)));
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+#define VULKAN_KHR_FRAGMENT_SHADING_RATE_FEATURE_BOOL(Name)                    \
+  Caps.insert(std::make_pair(                                                  \
+      #Name,                                                                   \
+      makeCapability<bool>(#Name, HasFragmentShadingRateExt &&                 \
+                                      FeaturesFragmentShadingRate.Name)));
+#endif
 #include "VKFeatures.def"
   }
 
@@ -5155,6 +5338,7 @@ public:
       if (P.isTraditionalRaster()) {
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
@@ -5194,6 +5378,7 @@ public:
       } else if (P.isMeshShaderRaster()) {
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {

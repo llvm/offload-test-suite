@@ -66,6 +66,7 @@ template <> char CapabilityValueEnum<directx::ShaderModel>::ID = 0;
 template <> char CapabilityValueEnum<directx::RootSignature>::ID = 0;
 template <> char CapabilityValueEnum<directx::MeshShaderTier>::ID = 0;
 template <> char CapabilityValueEnum<directx::RaytracingTier>::ID = 0;
+template <> char CapabilityValueEnum<directx::VariableShadingRateTier>::ID = 0;
 
 static std::mutex SignalHandlerMutex;
 static llvm::SmallVector<ID3D12DeviceX *> SignalHandlerDevices;
@@ -289,6 +290,52 @@ getDXPrimitiveTopology(PrimitiveTopology Topology,
   llvm_unreachable("All PrimitiveTopology cases handled");
 }
 
+static llvm::Expected<D3D12_SHADING_RATE>
+getDXShadingRate(ID3D12Device *Device, FragmentShadingRate Rate) {
+  D3D12_SHADING_RATE DXRate;
+  switch (Rate) {
+  case FragmentShadingRate::Rate1x1:
+    return D3D12_SHADING_RATE_1X1;
+  case FragmentShadingRate::Rate1x2:
+    DXRate = D3D12_SHADING_RATE_1X2;
+    break;
+  case FragmentShadingRate::Rate2x1:
+    DXRate = D3D12_SHADING_RATE_2X1;
+    break;
+  case FragmentShadingRate::Rate2x2:
+    DXRate = D3D12_SHADING_RATE_2X2;
+    break;
+  case FragmentShadingRate::Rate2x4:
+    DXRate = D3D12_SHADING_RATE_2X4;
+    break;
+  case FragmentShadingRate::Rate4x2:
+    DXRate = D3D12_SHADING_RATE_4X2;
+    break;
+  case FragmentShadingRate::Rate4x4:
+    DXRate = D3D12_SHADING_RATE_4X4;
+    break;
+  }
+
+  D3D12_FEATURE_DATA_D3D12_OPTIONS6 Options6{};
+  if (FAILED(Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6,
+                                         &Options6, sizeof(Options6))) ||
+      Options6.VariableShadingRateTier ==
+          D3D12_VARIABLE_SHADING_RATE_TIER_NOT_SUPPORTED)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "The DirectX device does not support variable-rate shading.");
+
+  if (!Options6.AdditionalShadingRatesSupported &&
+      (Rate == FragmentShadingRate::Rate2x4 ||
+       Rate == FragmentShadingRate::Rate4x2 ||
+       Rate == FragmentShadingRate::Rate4x4))
+    return llvm::createStringError(
+        std::errc::not_supported, "The requested DirectX shading rate requires "
+                                  "AdditionalShadingRatesSupported.");
+
+  return DXRate;
+}
+
 static D3D12_FILTER getDXFilterMode(FilterMode MinFilter, FilterMode MagFilter,
                                     bool IsComparison) {
   if (IsComparison) {
@@ -495,6 +542,7 @@ public:
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
+  D3D12_SHADING_RATE ShadingRate = D3D12_SHADING_RATE_1X1;
   // True for pipelines created via createPipelineRT — used by SBT / dispatch
   // code to safely downcast to DXRayTracingPipelineState (parallel to
   // VulkanPipelineState::IsRayTracing).
@@ -504,10 +552,11 @@ public:
                   llvm::SmallVector<RootSignatureLayout> Layout,
                   ComPtr<ID3D12PipelineState> PSO,
                   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology,
-                  bool IsRT = false)
+                  bool IsRT = false,
+                  D3D12_SHADING_RATE ShadingRate = D3D12_SHADING_RATE_1X1)
       : offloadtest::PipelineState(GPUAPI::DirectX), Name(Name),
         RootSig(RootSig), Layout(std::move(Layout)), PSO(PSO),
-        Topology(Topology), IsRayTracing(IsRT) {}
+        Topology(Topology), IsRayTracing(IsRT), ShadingRate(ShadingRate) {}
 
   static bool classof(const offloadtest::PipelineState *B) {
     return B->getAPI() == GPUAPI::DirectX;
@@ -1210,6 +1259,7 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
   // Encoder contract: viewport and scissor must both be set before draw().
   bool ViewportSet = false;
   bool ScissorSet = false;
+  bool NonDefaultShadingRateSet = false;
 
   llvm::Error bindCommonDrawState(const offloadtest::PipelineState &PSO) {
     if (!ViewportSet)
@@ -1226,6 +1276,13 @@ class DXRenderEncoder : public offloadtest::RenderEncoder {
     // topology; only bind one when the pipeline actually has one.
     if (DXPSO.Topology)
       CB.CmdList->IASetPrimitiveTopology(*DXPSO.Topology);
+    if (DXPSO.ShadingRate != D3D12_SHADING_RATE_1X1) {
+      CB.CmdList->RSSetShadingRate(DXPSO.ShadingRate, nullptr);
+      NonDefaultShadingRateSet = true;
+    } else if (NonDefaultShadingRateSet) {
+      CB.CmdList->RSSetShadingRate(D3D12_SHADING_RATE_1X1, nullptr);
+      NonDefaultShadingRateSet = false;
+    }
     return llvm::Error::success();
   }
 
@@ -1308,6 +1365,9 @@ public:
 
 protected:
   void endEncodingImpl() override {
+    if (NonDefaultShadingRateSet)
+      CB.CmdList->RSSetShadingRate(D3D12_SHADING_RATE_1X1, nullptr);
+
     // State transitions
     for (offloadtest::Texture *Tex : Desc.ColorAttachments) {
       auto &DXTex = llvm::cast<DXTexture>(*Tex);
@@ -1671,6 +1731,9 @@ public:
       const TraditionalRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
 
+    auto ShadingRateOrErr = getDXShadingRate(Device.Get(), Desc.ShadingRate);
+    if (!ShadingRateOrErr)
+      return ShadingRateOrErr.takeError();
     if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
                                                Desc.RTFormats, Desc.DSFormat))
       return Err;
@@ -1743,7 +1806,8 @@ public:
 
     return std::make_unique<DXPipelineState>(
         Name, RootSig, std::move(Layout), PSO,
-        getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints));
+        getDXPrimitiveTopology(Desc.Topology, Desc.PatchControlPoints),
+        /*IsRT=*/false, *ShadingRateOrErr);
   }
 
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
@@ -1751,6 +1815,9 @@ public:
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
     assert(Desc.RTFormats.size() <= 8);
 
+    auto ShadingRateOrErr = getDXShadingRate(Device.Get(), Desc.ShadingRate);
+    if (!ShadingRateOrErr)
+      return ShadingRateOrErr.takeError();
     if (auto Err = validateDXRasterSampleCount(Device.Get(), Desc.SampleCount,
                                                Desc.RTFormats, Desc.DSFormat))
       return Err;
@@ -1825,7 +1892,8 @@ public:
       return Err;
 
     return std::make_unique<DXPipelineState>(Name, RootSig, std::move(Layout),
-                                             PSO, std::nullopt);
+                                             PSO, std::nullopt,
+                                             /*IsRT=*/false, *ShadingRateOrErr);
   }
 
   static std::wstring widen(llvm::StringRef S) {
@@ -3348,6 +3416,7 @@ public:
 
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
@@ -3387,6 +3456,7 @@ public:
       } else if (P.isMeshShaderRaster()) {
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {

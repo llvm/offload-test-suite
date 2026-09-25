@@ -64,6 +64,16 @@ enum class StoreAction {
 
 enum class PrimitiveTopology { TriangleList, PointList, PatchList, LineList };
 
+enum class FragmentShadingRate {
+  Rate1x1,
+  Rate1x2,
+  Rate2x1,
+  Rate2x2,
+  Rate2x4,
+  Rate4x2,
+  Rate4x4,
+};
+
 } // namespace offloadtest
 
 #endif // OFFLOADTEST_API_ENUMS_H

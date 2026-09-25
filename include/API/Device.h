@@ -109,6 +109,7 @@ struct TraditionalRasterPipelineCreateDesc {
   std::optional<Format> DSFormat;
   uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind.
   std::optional<uint32_t> PatchControlPoints;
@@ -157,6 +158,7 @@ struct MeshShaderRasterPipelineCreateDesc {
   std::optional<Format> DSFormat;
   uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
 
   ShaderContainer MS;
   std::optional<ShaderContainer> AS;

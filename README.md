@@ -113,6 +113,22 @@ linking the appropriate issue and whether the failure is due to a bug or an unim
 
 This framework provides a YAML representation for describing GPU pipelines and buffers. The format is implemented by the `API/Pipeline.{h|cpp}` sources. The following is an example pipeline YAML description:
 
+Raster pipelines can optionally select a pipeline fragment shading rate with
+`ShadingRate`. Supported values are `1x1`, `1x2`, `2x1`, `2x2`, `2x4`, `4x2`,
+and `4x4`; the default is `1x1`. For example:
+
+```yaml
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+ShadingRate: 2x2
+```
+
+Non-default rates require variable-rate shading support from the selected
+backend and device.
+
 ```yaml
 ---
 Shaders:
