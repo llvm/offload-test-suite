@@ -23,15 +23,16 @@ Shaders:
   - Stage: Pixel
     Entry: main
 Buffers:
-  # Oversized triangle covering the 1x1 render target. At the pixel center
-  # (NDC 0,0), the weights for vertices A, B, and C are 0.5, 0.25, and 0.25.
+  # Vary clip-space w to exercise perspective-correct barycentrics. At the
+  # pixel center (NDC 0,0), the affine weights are 6/11, 4/11, and 1/11;
+  # perspective correction produces A/B/C weights of 0.5, 0.25, and 0.25.
   - Name: VertexData
     Format: Float32
     Stride: 16
     Data: [
-      -1.0, -1.0, 0.0, 1.0, # A
-       3.0, -1.0, 0.0, 1.0, # B
-      -1.0,  3.0, 0.0, 1.0, # C
+      -1.0, -1.0, 0.0, 1.5, # A
+       3.0, -1.0, 0.0, 2.0, # B
+      -1.0,  3.0, 0.0, 0.5, # C
     ]
   - Name: RenderTarget
     Format: Float32
