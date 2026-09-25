@@ -1,0 +1,113 @@
+# Verifies that SV_StartVertexLocation reflects the FirstVertex value
+# passed to the draw call.
+#
+# A full-screen triangle is placed at vertex buffer indices 5-7 (indices
+# 0-4 are unused padding). The draw uses FirstVertex=5 so the IA starts
+# reading at the real triangle. The VS reads SV_StartVertexLocation and
+# forwards it to the PS, which writes it to a readback buffer.
+# Expected output: [5].
+
+#--- vertex.hlsl
+struct VSOutput {
+    float4 position : SV_POSITION;
+    float startVertexLocation : START_VERTEX;
+};
+
+VSOutput main(float4 pos : POSITION, uint svl : SV_StartVertexLocation) {
+    VSOutput o;
+    o.position = pos;
+    o.startVertexLocation = float(svl);
+    return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+    float4 position : SV_POSITION;
+    float startVertexLocation : START_VERTEX;
+};
+
+RWStructuredBuffer<uint> Output : register(u0);
+
+float4 main(PSInput input) : SV_TARGET {
+    Output[0] = (uint)input.startVertexLocation;
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+DispatchParameters:
+  VertexCount: 3
+  FirstVertex: 5
+Buffers:
+  # Indices 0-4 are unused padding; FirstVertex=5 skips them. Indices 5-7
+  # form an oversized triangle that covers the entire 1x1 render target.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 0.0, 0.0, 1.0,   # 0: padding
+            0.0, 0.0, 0.0, 1.0,   # 1: padding
+            0.0, 0.0, 0.0, 1.0,   # 2: padding
+            0.0, 0.0, 0.0, 1.0,   # 3: padding
+            0.0, 0.0, 0.0, 1.0,   # 4: padding
+           -1.0, -1.0, 0.0, 1.0,  # 5
+            3.0, -1.0, 0.0, 1.0,  # 6
+           -1.0,  3.0, 0.0, 1.0 ] # 7
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16   # 1x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: Output
+    Format: Hex32
+    Stride: 4
+    FillSize: 4
+    FillValue: 0xFF
+  - Name: Output_Expected
+    Format: Hex32
+    Stride: 4
+    Data: [ 5 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: StartVertexLocation
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# SV_StartVertexLocation: https://github.com/llvm/llvm-project/issues/212576
+# Not yet implemented in the Clang-DXC SPIRV or DXIL backend.
+# XFAIL: Clang
+
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
+# UNSUPPORTED: Lavapipe
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
