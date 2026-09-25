@@ -55,6 +55,17 @@ static llvm::Error toError(NS::Error *Err) {
   return llvm::createStringError(EC, ErrMsg);
 }
 
+static llvm::Error validateMetalSampleCount(MTL::Device *Device,
+                                            uint32_t SampleCount) {
+  if (auto Err = validateSampleCount(SampleCount, "SampleCount"))
+    return Err;
+  if (!Device->supportsTextureSampleCount(SampleCount))
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "SampleCount %u is not supported on this Metal device.", SampleCount);
+  return llvm::Error::success();
+}
+
 static llvm::Error toError(const IRError *Err, llvm::StringRef Context) {
   if (!Err)
     return llvm::Error::success();
@@ -480,15 +491,24 @@ public:
 class MTLTexture : public offloadtest::Texture {
 public:
   MTL::Texture *Tex;
+  MTL::Texture *ResolveTex;
   std::string Name;
   TextureCreateDesc Desc;
 
-  MTLTexture(MTL::Texture *Tex, llvm::StringRef Name, TextureCreateDesc Desc)
-      : offloadtest::Texture(GPUAPI::Metal), Tex(Tex), Name(Name), Desc(Desc) {}
+  MTLTexture(MTL::Texture *Tex, MTL::Texture *ResolveTex, llvm::StringRef Name,
+             TextureCreateDesc Desc)
+      : offloadtest::Texture(GPUAPI::Metal), Tex(Tex), ResolveTex(ResolveTex),
+        Name(Name), Desc(Desc) {}
 
   ~MTLTexture() override {
     if (Tex)
       Tex->release();
+    if (ResolveTex)
+      ResolveTex->release();
+  }
+
+  MTL::Texture *readbackTexture() const {
+    return ResolveTex ? ResolveTex : Tex;
   }
 
   TileShape querySparseTileShape(const Device &Dev) const override;
@@ -806,11 +826,20 @@ public:
     insertDebugSignpost(llvm::formatv("copyTextureToBuffer {0} -> {1}",
                                       MTLSrc.Name, MTLDst.Name)
                             .str());
-    BlitEnc->copyFromTexture(MTLSrc.Tex, /*sourceSlice=*/0, /*sourceLevel=*/0,
-                             MTL::Origin(0, 0, 0), CopySize, MTLDst.Buf,
+    BlitEnc->copyFromTexture(MTLSrc.readbackTexture(), /*sourceSlice=*/0,
+                             /*sourceLevel=*/0, MTL::Origin(0, 0, 0), CopySize,
+                             MTLDst.Buf,
                              /*destinationOffset=*/0, RowBytes, ImageBytes);
     addBarrierScope(MTL::BarrierScopeBuffers);
     return llvm::Error::success();
+  }
+
+  llvm::Error resolveTexture(offloadtest::Texture &,
+                             offloadtest::Texture &) override {
+    // Metal resolves through the render-pass store action.
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "Multisample resolve is not supported on the Metal backend.");
   }
 
   // Defined out-of-line below — needs MTLDevice's full type for access to the
@@ -1064,18 +1093,8 @@ MTLCommandBuffer::createRenderEncoder(
   auto &Pass = llvm::cast<MTLRenderPass>(*Desc.Pass);
   const offloadtest::RenderPassDesc &PassDesc = Pass.Desc;
 
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
   uint32_t Width = 0, Height = 0;
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+  if (auto Err = validateRenderPassBeginDesc(PassDesc, Desc, &Width, &Height))
     return Err;
 
   MTL::RenderPassDescriptor *MTLDesc =
@@ -1083,10 +1102,6 @@ MTLCommandBuffer::createRenderEncoder(
   auto DescScope = llvm::scope_exit([&] { MTLDesc->release(); });
 
   for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    if (!Desc.ColorAttachments[I])
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
     auto &Tex = llvm::cast<MTLTexture>(*Desc.ColorAttachments[I]);
     const offloadtest::ColorAttachmentFormatDesc &Color =
         PassDesc.ColorAttachments[I];
@@ -1094,7 +1109,14 @@ MTLCommandBuffer::createRenderEncoder(
     auto *CADesc = MTL::RenderPassColorAttachmentDescriptor::alloc()->init();
     CADesc->setTexture(Tex.Tex);
     CADesc->setLoadAction(getMTLLoadAction(Color.Load));
-    CADesc->setStoreAction(getMTLStoreAction(Color.Store));
+    if (Tex.ResolveTex) {
+      CADesc->setResolveTexture(Tex.ResolveTex);
+      CADesc->setStoreAction(Color.Store == offloadtest::StoreAction::Store
+                                 ? MTL::StoreActionStoreAndMultisampleResolve
+                                 : MTL::StoreActionMultisampleResolve);
+    } else {
+      CADesc->setStoreAction(getMTLStoreAction(Color.Store));
+    }
     if (Color.Load == offloadtest::LoadAction::Clear) {
       if (!Tex.getDesc().OptimizedClearValue) {
         CADesc->release();
@@ -1462,6 +1484,7 @@ public:
           Format, Width, MTL::ResourceStorageModeManaged, UsageFlags);
       break;
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
       // Metal Shader Converter maps Texture1D to a 2D texture with height 1.
       Desc =
           MTL::TextureDescriptor::texture2DDescriptor(Format, Width, 1, false);
@@ -1473,6 +1496,8 @@ public:
       break;
     case ResourceKind::Sampler:
       llvm_unreachable("Not implemented yet.");
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
       llvm_unreachable("Texture arrays aren't supported in Metal.");
@@ -1848,7 +1873,8 @@ public:
           "No render target bound for graphics pipeline.");
     const CPUBuffer &OutBuf = *P.Bindings.RTargetBufferPtr;
 
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, OutBuf);
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(
+        *this, OutBuf, P.Bindings.SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
 
@@ -1867,7 +1893,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height,
+        P.Bindings.SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -1948,7 +1975,7 @@ public:
     MTL::BlitCommandEncoder *Blit = IS.CB->CmdBuffer->blitCommandEncoder();
     const size_t ElemSize = getFormatSizeInBytes(FBTex.Desc.Fmt);
     const size_t RowBytes = Width * ElemSize;
-    Blit->copyFromTexture(FBTex.Tex, 0, 0, MTL::Origin(0, 0, 0),
+    Blit->copyFromTexture(FBTex.readbackTexture(), 0, 0, MTL::Origin(0, 0, 0),
                           MTL::Size(Width, Height, 1), FBReadback.Buf, 0,
                           RowBytes, 0);
     Blit->endEncoding();
@@ -2334,6 +2361,8 @@ public:
   createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
+      return Err;
 
     MTL::TextureDescriptor *TDesc = MTL::TextureDescriptor::texture2DDescriptor(
         getMetalPixelFormat(Desc.Fmt), Desc.Width, Desc.Height,
@@ -2341,12 +2370,35 @@ public:
     TDesc->setMipmapLevelCount(Desc.MipLevels);
     TDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));
     TDesc->setUsage(getMetalTextureUsage(Desc.Usage));
+    if (Desc.SampleCount > 1) {
+      TDesc->setTextureType(MTL::TextureType2DMultisample);
+      TDesc->setSampleCount(Desc.SampleCount);
+    }
 
     MTL::Texture *Tex = Device->newTexture(TDesc);
     if (!Tex)
       return llvm::createStringError(std::errc::not_enough_memory,
                                      "Failed to create Metal texture.");
-    return std::make_unique<MTLTexture>(Tex, Name, Desc);
+
+    MTL::Texture *ResolveTex = nullptr;
+    if (Desc.SampleCount > 1 &&
+        (Desc.Usage & TextureUsage::RenderTarget) != 0) {
+      MTL::TextureDescriptor *ResolveDesc =
+          MTL::TextureDescriptor::texture2DDescriptor(
+              getMetalPixelFormat(Desc.Fmt), Desc.Width, Desc.Height,
+              /*mipmapped=*/false);
+      ResolveDesc->setStorageMode(getMetalTextureStorageMode(Desc.Location));
+      ResolveDesc->setUsage(MTL::TextureUsageRenderTarget);
+      ResolveTex = Device->newTexture(ResolveDesc);
+      if (!ResolveTex) {
+        Tex->release();
+        return llvm::createStringError(
+            std::errc::not_enough_memory,
+            "Failed to create Metal multisample resolve texture.");
+      }
+    }
+
+    return std::make_unique<MTLTexture>(Tex, ResolveTex, Name, Desc);
   }
 
   llvm::Expected<std::unique_ptr<Sampler>>
@@ -2376,6 +2428,8 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
   createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
+      return Err;
     return std::make_unique<MTLRenderPass>(Desc);
   }
 
@@ -2434,6 +2488,8 @@ public:
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) override {
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
+      return Err;
     if (Desc.GS)
       return llvm::createStringError(
           std::errc::not_supported,
@@ -2508,6 +2564,7 @@ public:
     auto RPDescScope = llvm::scope_exit([&] { RPDesc->release(); });
     RPDesc->setVertexFunction(VSFn);
     RPDesc->setFragmentFunction(PSFn);
+    RPDesc->setRasterSampleCount(Desc.SampleCount);
 
     // Build vertex descriptor from InputLayout.
     if (!InputLayout.empty()) {
@@ -2622,6 +2679,8 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    if (auto Err = validateMetalSampleCount(Device, Desc.SampleCount))
+      return Err;
     IRRootSignaturePtr RootSig;
     std::unique_ptr<MTLTopLevelArgumentBuffer> ArgBuffer;
     if (auto Err = createRootSignature(BindingsDesc, /*IsGraphics=*/true,
@@ -2685,6 +2744,7 @@ public:
     auto DescScope = llvm::scope_exit([&] { MSPDesc->release(); });
 
     MSPDesc->setMeshFunction(MSFn.get());
+    MSPDesc->setRasterSampleCount(Desc.SampleCount);
     if (ASFn)
       MSPDesc->setObjectFunction(ASFn.get());
     if (PSFn)
@@ -2959,6 +3019,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
@@ -2989,6 +3050,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
@@ -3018,6 +3080,7 @@ public:
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
+      PassDesc.SampleCount = P.Bindings.SampleCount;
       PassDesc.ColorAttachments.push_back(ColorAttachment);
       PassDesc.DepthStencil = DSAttachment;
 

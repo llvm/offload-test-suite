@@ -14,9 +14,10 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerState Samp : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(3, 0)]] Texture1DArray<float4> Tex1D : register(t1);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // The UVs have a derivative of exactly 0.5, so LOD = log2(0.5 * 2) = 0.0
@@ -27,23 +28,34 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Mip selection is nearest, so a bias of 1.0 lands exactly on mip 1 while a
   // small positive bias would round back to mip 0. A negative bias keeps LOD
   // below 0 and so magnifies.
-  float4 r0 = Tex.SampleBias(Samp, float3(uv, 0), -0.1); // slice 0 mip 0
-  float4 r1 = Tex.SampleBias(Samp, float3(uv, 0), 1.0);  // slice 0 mip 1
+  float4 r0 = Tex2D.SampleBias(Samp, float3(uv, 0), -0.1); // slice 0 mip 0
+  float4 r1 = Tex2D.SampleBias(Samp, float3(uv, 0), 1.0);  // slice 0 mip 1
 
   // The same pair on slice 1. r3 is the key case: the mip 1 it lands on must
   // be slice 1's own, not slice 0's.
-  float4 r2 = Tex.SampleBias(Samp, float3(uv, 1), -0.1); // slice 1 mip 0
-  float4 r3 = Tex.SampleBias(Samp, float3(uv, 1), 1.0);  // slice 1 mip 1
+  float4 r2 = Tex2D.SampleBias(Samp, float3(uv, 1), -0.1); // slice 1 mip 0
+  float4 r3 = Tex2D.SampleBias(Samp, float3(uv, 1), 1.0);  // slice 1 mip 1
 
   // The LOD clamp argument is a *minimum* LOD: it raises a magnifying LOD of
   // -0.1 up to 1.0, reaching slice 1's mip 1 despite the negative bias.
-  float4 r4 = Tex.SampleBias(Samp, float3(uv, 1), -0.1, int2(0, 0), 1.0);
+  float4 r4 = Tex2D.SampleBias(Samp, float3(uv, 1), -0.1, int2(0, 0), 1.0);
 
   // A texel offset shifts the sample within the selected slice. uv is the
   // centre, so Nearest lands on texel (1,1); offsetting by (-1,-1) moves it to
   // texel (0,0) of that same slice.
-  float4 r5 = Tex.SampleBias(Samp, float3(uv, 0), -0.1, int2(-1, -1));
-  float4 r6 = Tex.SampleBias(Samp, float3(uv, 1), -0.1, int2(-1, -1));
+  float4 r5 = Tex2D.SampleBias(Samp, float3(uv, 0), -0.1, int2(-1, -1));
+  float4 r6 = Tex2D.SampleBias(Samp, float3(uv, 1), -0.1, int2(-1, -1));
+
+  // Texture1DArray::SampleBias
+  // Use 0.75 to avoid the nearest-filter tie at 0.5.
+  float u = 0.75 + float(GTid.x) * 0.5;
+  float4 r7 = Tex1D.SampleBias(Samp, float2(u, 0), -0.1); // slice 0 mip 0
+  float4 r8 = Tex1D.SampleBias(Samp, float2(u, 0), 1.0);  // slice 0 mip 1
+  float4 r9 = Tex1D.SampleBias(Samp, float2(u, 1), -0.1); // slice 1 mip 0
+  float4 r10 = Tex1D.SampleBias(Samp, float2(u, 1), 1.0); // slice 1 mip 1
+  float4 r11 = Tex1D.SampleBias(Samp, float2(u, 1), -0.1, 0, 1.0); // slice 1 mip 1 via clamp
+  float4 r12 = Tex1D.SampleBias(Samp, float2(u, 0), -0.1, -1); // slice 0 offset -1
+  float4 r13 = Tex1D.SampleBias(Samp, float2(u, 1), -0.1, -1); // slice 1 offset -1
 
   if (all(GTid.xy == 0)) {
     Out[0] = r0;
@@ -53,6 +65,13 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[4] = r4;
     Out[5] = r5;
     Out[6] = r6;
+    Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
+    Out[12] = r12;
+    Out[13] = r13;
   }
   return float4(0, 0, 0, 0);
 }
@@ -69,7 +88,7 @@ Buffers:
   # Slice-major, with the complete mip chain of each slice before the next:
   # slice 0 mip 0 (4 texels) then slice 0 mip 1 (1 texel), then the same for
   # slice 1.
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
@@ -84,10 +103,21 @@ Buffers:
             0.0, 0.0, 0.0, 1.0,   # slice 1 mip 0 (1,1) Black
             0.2, 0.4, 0.6, 1.0 ]  # slice 1 mip 1
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # slice 0 mip 0 (0) Red
+            0.0, 1.0, 0.0, 1.0,   # slice 0 mip 0 (1) Green
+            0.5, 0.5, 0.5, 1.0,   # slice 0 mip 1     Grey
+            0.0, 1.0, 1.0, 1.0,   # slice 1 mip 0 (0) Cyan
+            1.0, 0.0, 1.0, 1.0,   # slice 1 mip 0 (1) Magenta
+            0.2, 0.4, 0.6, 1.0 ]  # slice 1 mip 1
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 112 # 7 * sizeof(float4)
+    FillSize: 224 # 14 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -98,7 +128,14 @@ Buffers:
             0.2, 0.4, 0.6, 1.0,   # [3] slice 1 mip 1 -- not slice 0's Grey
             0.2, 0.4, 0.6, 1.0,   # [4] slice 1 mip 1 via the LOD clamp
             1.0, 0.0, 0.0, 1.0,   # [5] slice 0 offset (-1,-1) -> Red
-            0.0, 1.0, 1.0, 1.0 ]  # [6] slice 1 offset (-1,-1) -> Cyan
+            0.0, 1.0, 1.0, 1.0,   # [6] slice 1 offset (-1,-1) -> Cyan
+            0.0, 1.0, 0.0, 1.0,   # [7] 1D slice 0 mip 0, Nearest -> Green
+            0.5, 0.5, 0.5, 1.0,   # [8] 1D slice 0 mip 1 -> Grey
+            1.0, 0.0, 1.0, 1.0,   # [9] 1D slice 1 mip 0, Nearest -> Magenta
+            0.2, 0.4, 0.6, 1.0,   # [10] 1D slice 1 mip 1 -- not slice 0's Grey
+            0.2, 0.4, 0.6, 1.0,   # [11] 1D slice 1 mip 1 via the LOD clamp
+            1.0, 0.0, 0.0, 1.0,   # [12] 1D slice 0 offset (-1) -> Red
+            0.0, 1.0, 1.0, 1.0 ]  # [13] 1D slice 1 offset (-1) -> Cyan
 
   - Name: RT
     Format: Float32
@@ -137,7 +174,7 @@ Results:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -149,6 +186,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 2 }
+    - Name: Tex1D
+      Kind: Texture1DArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 3 }
 ...
 #--- end
 

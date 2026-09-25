@@ -1,18 +1,26 @@
 #--- source.hlsl
-[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(2, 0)]] Texture1DArray<float4> Tex1D : register(t1);
 
 [numthreads(1, 1, 1)]
 void main() {
   // Texture2DArray::mips[level][uint3(x, y, arraySlice)]. Each slice carries
   // its own mip chain.
-  Out[0] = Tex.mips[0][uint3(0, 0, 0)]; // Slice 0, Mip 0 Red
-  Out[1] = Tex.mips[1][uint3(0, 0, 0)]; // Slice 0, Mip 1 Yellow
-  Out[2] = Tex.mips[0][uint3(1, 0, 1)]; // Slice 1, Mip 0 Magenta
-  Out[3] = Tex.mips[1][uint3(0, 0, 1)]; // Slice 1, Mip 1 Navy
+  Out[0] = Tex2D.mips[0][uint3(0, 0, 0)]; // Slice 0, Mip 0 Red
+  Out[1] = Tex2D.mips[1][uint3(0, 0, 0)]; // Slice 0, Mip 1 Yellow
+  Out[2] = Tex2D.mips[0][uint3(1, 0, 1)]; // Slice 1, Mip 0 Magenta
+  Out[3] = Tex2D.mips[1][uint3(0, 0, 1)]; // Slice 1, Mip 1 Navy
 
   // Load must agree with mips[][] for the same subresource.
-  Out[4] = Tex.Load(int4(0, 0, 1, 1)); // Slice 1, Mip 1 Navy
+  Out[4] = Tex2D.Load(int4(0, 0, 1, 1)); // Slice 1, Mip 1 Navy
+
+  // Texture1DArray::mips[level][uint2(x, arraySlice)]
+  Out[5] = Tex1D.mips[0][uint2(0, 0)]; // Slice 0, Mip 0 Red
+  Out[6] = Tex1D.mips[1][uint2(0, 0)]; // Slice 0, Mip 1 Yellow
+  Out[7] = Tex1D.mips[0][uint2(1, 1)]; // Slice 1, Mip 0 Magenta
+  Out[8] = Tex1D.mips[1][uint2(0, 1)]; // Slice 1, Mip 1 Navy
+  Out[9] = Tex1D.Load(int3(0, 1, 1)); // Slice 1, Mip 1 Navy
 }
 
 //--- pipeline.yaml
@@ -22,7 +30,7 @@ Shaders:
     Entry: main
 
 Buffers:
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
@@ -43,10 +51,26 @@ Buffers:
             # --- Slice 1, Mip 1 (1x1) ---
             0.0, 0.0, 0.5, 1.0 ] # Navy
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+    Data: [ # --- Slice 0, Mip 0 (2 texels) ---
+            1.0, 0.0, 0.0, 1.0,  # (0) Red
+            0.0, 1.0, 0.0, 1.0,  # (1) Green
+            # --- Slice 0, Mip 1 (1 texel) ---
+            1.0, 1.0, 0.0, 1.0,  # Yellow
+
+            # --- Slice 1, Mip 0 (2 texels) ---
+            0.0, 1.0, 1.0, 1.0,  # (0) Cyan
+            1.0, 0.0, 1.0, 1.0,  # (1) Magenta
+            # --- Slice 1, Mip 1 (1 texel) ---
+            0.0, 0.0, 0.5, 1.0 ] # Navy
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 80 # 5 * sizeof(float4)
+    FillSize: 160 # 10 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -55,11 +79,16 @@ Buffers:
             1.0, 1.0, 0.0, 1.0,  # [1] Slice 0, Mip 1 Yellow
             1.0, 0.0, 1.0, 1.0,  # [2] Slice 1, Mip 0 Magenta
             0.0, 0.0, 0.5, 1.0,  # [3] Slice 1, Mip 1 Navy
-            0.0, 0.0, 0.5, 1.0 ] # [4] Load agrees with mips[][]
+            0.0, 0.0, 0.5, 1.0,  # [4] Load agrees with mips[][]
+            1.0, 0.0, 0.0, 1.0,  # [5] 1D Slice 0, Mip 0 Red
+            1.0, 1.0, 0.0, 1.0,  # [6] 1D Slice 0, Mip 1 Yellow
+            1.0, 0.0, 1.0, 1.0,  # [7] 1D Slice 1, Mip 0 Magenta
+            0.0, 0.0, 0.5, 1.0,  # [8] 1D Slice 1, Mip 1 Navy
+            0.0, 0.0, 0.5, 1.0 ] # [9] 1D Load agrees with mips[][]
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -67,6 +96,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 1 }
+    - Name: Tex1D
+      Kind: Texture1DArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
 
 Results:
   - Result: ArrayMipsOperatorIndexTest

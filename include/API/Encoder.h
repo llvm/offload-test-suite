@@ -110,6 +110,11 @@ public:
 
   virtual llvm::Error copyTextureToBuffer(Texture &Src, Buffer &Dst) = 0;
 
+  /// Resolve `Src` into `Dst`. Their descriptions must match except that
+  /// `Src` is multisampled and `Dst` is single-sampled. Only textures with a
+  /// single subresource are supported.
+  virtual llvm::Error resolveTexture(Texture &Src, Texture &Dst) = 0;
+
   /// Build a batch of acceleration structures in a single barrier slot. All
   /// items in `Items` must be independent — no item may depend on another's
   /// build output. Backends may issue this as one native batch call (Vulkan)

@@ -123,6 +123,7 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture1D:
+  case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::TextureCube:
@@ -133,6 +134,8 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
     return DescriptorKind::UAV;
@@ -279,6 +282,9 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -311,6 +317,9 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -336,6 +345,9 @@ struct Resource {
       return true;
     case ResourceKind::Sampler:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -352,6 +364,9 @@ struct Resource {
   bool isTexture() const {
     switch (Kind) {
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
@@ -376,6 +391,8 @@ struct Resource {
 
   bool isTextureArray() const {
     switch (Kind) {
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::TextureCubeArray:
@@ -388,6 +405,7 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::TextureCube:
@@ -413,6 +431,9 @@ struct Resource {
     assert(isTexture() && "Only textures have a dimension");
     switch (Kind) {
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
       return ResourceDimension::Dim1D;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
@@ -496,6 +517,7 @@ struct Resource {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::Texture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::TextureCube:
@@ -508,6 +530,8 @@ struct Resource {
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
     case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::RWTexture2DArray:
       return true;
@@ -566,6 +590,8 @@ struct IOBindings {
   std::string RenderTarget;
   CPUBuffer *RTargetBufferPtr = nullptr;
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
+
+  uint32_t SampleCount = 1;
 
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind. Valid range is 1..32 (matches both
@@ -1079,6 +1105,9 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
     ENUM_CASE(Texture1D);
+    ENUM_CASE(RWTexture1D);
+    ENUM_CASE(Texture1DArray);
+    ENUM_CASE(RWTexture1DArray);
     ENUM_CASE(Texture2D);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
