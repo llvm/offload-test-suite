@@ -6,6 +6,8 @@ Texture2D<float4> In2D[2] : register(t0);
 RWTexture2D<float4> Out2D[2] : register(u1);
 Texture1D<float4> In1D[2] : register(t2);
 RWTexture1D<float4> Out1D[2] : register(u3);
+Texture3D<float4> In3D[2] : register(t4);
+RWTexture3D<float4> Out3D[2] : register(u5);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
@@ -18,6 +20,11 @@ void main(uint GI : SV_GroupIndex) {
       float4 Color1D = In1D[i][GID.x];
       Out1D[i][GID.x] = Color1D.bgra;
     }
+
+    float4 Color3D0 = In3D[i][uint3(GID.xy, 0)];
+    float4 Color3D1 = In3D[i][uint3(GID.xy, 1)];
+    Out3D[i][uint3(GID.xy, 0)] = Color3D0.bgra;
+    Out3D[i][uint3(GID.xy, 1)] = Color3D1.bgra;
   }
 }
 //--- pipeline.yaml
@@ -104,6 +111,65 @@ Buffers:
       Height: 1
       Width: 2
       Depth: 1
+  - Name: In3D
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    Data:
+      - [1.0, 0.0, 0.0, 1.0,
+         0.0, 1.0, 0.0, 1.0,
+         0.0, 0.0, 1.0, 1.0,
+         1.0, 1.0, 0.0, 1.0,
+         1.0, 0.0, 1.0, 1.0,
+         0.0, 1.0, 1.0, 1.0,
+         1.0, 1.0, 1.0, 1.0,
+         0.0, 0.0, 0.0, 1.0]
+      - [2.0, 0.0, 0.0, 2.0,
+         0.0, 2.0, 0.0, 2.0,
+         0.0, 0.0, 2.0, 2.0,
+         2.0, 2.0, 0.0, 2.0,
+         2.0, 0.0, 2.0, 2.0,
+         0.0, 2.0, 2.0, 2.0,
+         2.0, 2.0, 2.0, 2.0,
+         0.0, 0.0, 0.0, 2.0]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 2
+  - Name: Out3D
+    Format: Float32
+    Channels: 4
+    FillSize: 128
+    ArraySize: 2
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 2
+  - Name: ExpectedOut3D
+    Format: Float32
+    Channels: 4
+    ArraySize: 2
+    Data:
+      - [0.0, 0.0, 1.0, 1.0,
+         0.0, 1.0, 0.0, 1.0,
+         1.0, 0.0, 0.0, 1.0,
+         0.0, 1.0, 1.0, 1.0,
+         1.0, 0.0, 1.0, 1.0,
+         1.0, 1.0, 0.0, 1.0,
+         1.0, 1.0, 1.0, 1.0,
+         0.0, 0.0, 0.0, 1.0]
+      - [0.0, 0.0, 2.0, 2.0,
+         0.0, 2.0, 0.0, 2.0,
+         2.0, 0.0, 0.0, 2.0,
+         0.0, 2.0, 2.0, 2.0,
+         2.0, 0.0, 2.0, 2.0,
+         2.0, 2.0, 0.0, 2.0,
+         2.0, 2.0, 2.0, 2.0,
+         0.0, 0.0, 0.0, 2.0]
+    OutputProps:
+      Height: 2
+      Width: 2
+      Depth: 2
 Results:
   - Result: Test2D
     Rule: BufferExact
@@ -113,6 +179,10 @@ Results:
     Rule: BufferExact
     Actual: Out1D
     Expected: ExpectedOut1D
+  - Result: Test3D
+    Rule: BufferExact
+    Actual: Out3D
+    Expected: ExpectedOut3D
 DescriptorSets:
   - Resources:
     - Name: In2D
@@ -143,6 +213,20 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 3
+    - Name: In3D
+      Kind: Texture3D
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: Out3D
+      Kind: RWTexture3D
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
 ...
 #--- end
 
