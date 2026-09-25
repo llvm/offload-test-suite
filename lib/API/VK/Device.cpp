@@ -1891,6 +1891,20 @@ public:
           SupportedAtomicFloat.shaderBufferFloat32Atomics;
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    const bool HasFragmentShaderBarycentricExt =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+        FeaturesFragmentShaderBarycentric{};
+    if (HasFragmentShaderBarycentricExt) {
+      FeaturesFragmentShaderBarycentric.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+      FeaturesFragmentShaderBarycentric.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShaderBarycentric;
+    }
+#endif
+
     const bool HasMeshShader = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
@@ -2026,6 +2040,18 @@ public:
       EnabledDeviceExtensions.push_back(
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
+
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    if (HasFragmentShaderBarycentricExt) {
+      if (!FeaturesFragmentShaderBarycentric.fragmentShaderBarycentric)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports fragmentShaderBarycentric=0",
+            VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    }
+#endif
 
     if (HasASExts) {
       if (!ASFeatures.accelerationStructure)
