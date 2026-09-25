@@ -3082,7 +3082,6 @@ public:
         Device->supportsFamily(MTL::GPUFamilyMetal3);
     Caps.insert(std::make_pair(
         "MeshShader", makeCapability<bool>("MeshShader", MeshShaderSupported)));
-
     Caps.insert(
         std::make_pair("supportsRaytracing",
                        makeCapability<bool>("supportsRaytracing",
