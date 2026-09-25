@@ -128,8 +128,6 @@ Buffers:
   - Name: ExpectedSeen
     Format: UInt32
     Stride: 4
-    # Flags, one per value handed in. Each value must turn up either as
-    # an original or as the value left behind, thus all of them are 1.
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -158,8 +156,6 @@ Buffers:
   - Name: ExpectedOnes
     Format: UInt32
     Stride: 4
-    # Pass flags, one per thread, not test data. A thread writes 1 only
-    # when its check holds, thus a single 0 fails the comparison.
     Data: [ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
@@ -271,9 +267,6 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Int64 && SM_6_6 && (!Vulkan || VulkanInt64BufferAtomics)
-
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99129
-# XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: Metal && DXC
