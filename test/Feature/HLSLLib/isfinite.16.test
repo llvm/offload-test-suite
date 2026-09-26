@@ -6,9 +6,9 @@ RWStructuredBuffer<bool4> Out : register(u1);
 [numthreads(1,1,1)]
 void main() {
   Out[0] = isfinite(In[0]);
-  bool4 Tmp = {isfinite(In[0].xyz), isfinite(In[0].w)};
-  Out[1] = Tmp;
-  Out[2].xy = isfinite(In[0].xy);
+  Out[1] = {isfinite(In[0].xyz), isfinite(In[0].w)};
+  Out[2] = bool4(isfinite(In[0].xy), isfinite(In[0].zw));
+  Out[3] = bool4(isfinite(half4(1.0/0.0, -1.0/0.0, 0.0, 0.0/0.0)));  // inf, -inf, 0, nan
 }
 
 //--- pipeline.yaml
@@ -25,11 +25,11 @@ Buffers:
   - Name: Out
     Format: Bool
     Stride: 16
-    FillSize: 48
+    FillSize: 64
   - Name: ExpectedOut
     Format: Bool
     Stride: 16
-    Data: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+    Data: [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0]
 Results:
   - Result: Test1
     Rule: BufferExact
