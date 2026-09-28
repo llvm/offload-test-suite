@@ -9,18 +9,18 @@
 // NonUniformResourceIndex is required because the branch (and thus
 // the chosen descriptor) is selected by Tid.x, which is wave-divergent.
 
-RWByteAddressBuffer In : register(u0);
-RWByteAddressBuffer OutArr[] : register(u1);
+RWStructuredBuffer<uint> In : register(u0);
+RWStructuredBuffer<uint> OutArr[] : register(u1);
 
 [numthreads(2,1,1)]
 void main(uint3 Tid : SV_DispatchThreadID) {
-    RWByteAddressBuffer Out;
+    RWStructuredBuffer<uint> Out;
     if (Tid.x == 0) {
         Out = OutArr[NonUniformResourceIndex(0)];
     } else {
         Out = OutArr[NonUniformResourceIndex(1)];
     }
-    Out.Store(0, In.Load(0) + Tid.x);
+    Out[0] = In[0] + Tid.x;
 }
 //--- pipeline.yaml
 ---
@@ -54,14 +54,14 @@ Results:
 DescriptorSets:
   - Resources:
     - Name: In
-      Kind: RWByteAddressBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
     - Name: OutArr
-      Kind: RWByteAddressBuffer
+      Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
