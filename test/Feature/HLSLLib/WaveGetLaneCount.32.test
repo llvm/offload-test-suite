@@ -1,0 +1,47 @@
+#--- source.hlsl
+RWStructuredBuffer<uint> Out : register(u0);
+
+[numthreads(1, 1, 1)]
+void main() {
+  uint LaneCount = WaveGetLaneCount();
+  Out[0] = LaneCount >= 4 && LaneCount <= 128 ? 1 : 0;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    Data: [ 1 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99159
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
