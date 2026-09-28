@@ -1937,6 +1937,8 @@ public:
           VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
       FeaturesFragmentShaderBarycentric.pNext = Features.pNext;
       Features.pNext = &FeaturesFragmentShaderBarycentric;
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     const bool HasFragmentShadingRateExt = isExtensionSupported(
         AvailableDeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
@@ -2097,6 +2099,8 @@ public:
             VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
       EnabledDeviceExtensions.push_back(
           VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     VkPhysicalDeviceFragmentShadingRateFeaturesKHR EnabledFragmentShadingRate{};
     const bool EnableFragmentShadingRate =
@@ -3612,6 +3616,8 @@ private:
     if (HasFragmentShaderBarycentricExt) {
       FeaturesFragmentShaderBarycentric.pNext = Features.pNext;
       Features.pNext = &FeaturesFragmentShaderBarycentric;
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     if (HasFragmentShadingRateExt) {
       FeaturesFragmentShadingRate.pNext = Features.pNext;
@@ -3666,6 +3672,7 @@ private:
       #Name, makeCapability<bool>(                                             \
                  #Name, HasFragmentShaderBarycentricExt &&                     \
                             FeaturesFragmentShaderBarycentric.Name)));
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
 #define VULKAN_KHR_FRAGMENT_SHADING_RATE_FEATURE_BOOL(Name)                    \
   Caps.insert(std::make_pair(                                                  \
