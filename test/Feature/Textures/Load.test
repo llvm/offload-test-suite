@@ -3,12 +3,6 @@
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(2, 0)]] RWTexture2D<float4> RWTex2D : register(u1);
 
-#ifndef NO_RWTEXTURE_LOAD
-#define RW_LOAD_OR(Call, Expect) (Call)
-#else
-#define RW_LOAD_OR(Call, Expect) (Expect)
-#endif
-
 [[vk::binding(3, 0)]] Texture1D<float4> Tex1D : register(t1);
 [[vk::binding(4, 0)]] RWTexture1D<float4> RWTex1D : register(u2);
 [[vk::binding(5, 0)]] Texture3D<float4> Tex3D : register(t2);
@@ -35,8 +29,8 @@ void main() {
 
   // RWTexture2D::Load takes an int2, not the int3 the SRV form takes: a UAV
   // has a single mip level, so there is no mip component to supply.
-  Out[7] = RW_LOAD_OR(RWTex2D.Load(int2(0, 0)), float4(0, 1, 1, 1));       // Cyan
-  Out[8] = RW_LOAD_OR(RWTex2D.Load(int2(1, 1)), float4(0.5, 0.5, 0.5, 1)); // Grey
+  Out[7] = RWTex2D.Load(int2(0, 0)); // Cyan
+  Out[8] = RWTex2D.Load(int2(1, 1)); // Grey
 
   // Texture1D::Load(int2)
   // Location: (x, mip)
@@ -51,8 +45,8 @@ void main() {
   Out[12] = Tex1D.Load(int2(1, 0), -1);
 
   // RWTexture1D::Load(int)
-  Out[13] = RW_LOAD_OR(RWTex1D.Load(int(0)), float4(0, 1, 1, 1));       // Cyan
-  Out[14] = RW_LOAD_OR(RWTex1D.Load(int(1)), float4(0.5, 0.5, 0.5, 1)); // Grey
+  Out[13] = RWTex1D.Load(int(0)); // Cyan
+  Out[14] = RWTex1D.Load(int(1)); // Grey
 
   // Texture3D::Load(int4)
   // Location: (x, y, z, mip)
@@ -76,8 +70,8 @@ void main() {
   Out[25] = Tex3D.Load(int4(0, 0, 0, 0), int3(1, 1, 1));
 
   // RWTexture3D::Load(int3)
-  Out[26] = RW_LOAD_OR(RWTex3D.Load(int3(0, 0, 0)), float4(0, 1, 1, 1));       // Cyan
-  Out[27] = RW_LOAD_OR(RWTex3D.Load(int3(1, 1, 1)), float4(0.5, 0.5, 0.5, 1)); // Grey
+  Out[26] = RWTex3D.Load(int3(0, 0, 0)); // Cyan
+  Out[27] = RWTex3D.Load(int3(1, 1, 1)); // Grey
 }
 
 //--- pipeline.yaml
@@ -223,7 +217,5 @@ Results:
 
 
 # RUN: split-file %s %t
-# Clang does not implement Load() on RW texture types yet, so those checks
-# compile out there: https://github.com/llvm/llvm-project/issues/218535
-# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_RWTEXTURE_LOAD %} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

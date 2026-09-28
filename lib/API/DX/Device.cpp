@@ -1306,23 +1306,29 @@ public:
   void popDebugGroup() override {}
   void insertDebugSignpost(llvm::StringRef Label) override {}
 
-  void setViewport(const offloadtest::Viewport &VP) override {
-    D3D12_VIEWPORT DXVP = {};
-    DXVP.TopLeftX = VP.X;
-    DXVP.TopLeftY = VP.Y;
-    DXVP.Width = VP.Width;
-    DXVP.Height = VP.Height;
-    DXVP.MinDepth = VP.MinDepth;
-    DXVP.MaxDepth = VP.MaxDepth;
-    CB.CmdList->RSSetViewports(1, &DXVP);
+  void setViewports(llvm::ArrayRef<offloadtest::Viewport> VPs) override {
+    assert(!VPs.empty() && "At least one viewport is required.");
+    assert(VPs.size() <= offloadtest::MaxViewports &&
+           "Viewport count exceeds D3D12's per-pipeline limit.");
+    llvm::SmallVector<D3D12_VIEWPORT, offloadtest::MaxViewports> DXVPs;
+    for (const offloadtest::Viewport &VP : VPs)
+      DXVPs.push_back(
+          {VP.X, VP.Y, VP.Width, VP.Height, VP.MinDepth, VP.MaxDepth});
+    CB.CmdList->RSSetViewports(static_cast<UINT>(DXVPs.size()), DXVPs.data());
     ViewportSet = true;
   }
 
-  void setScissor(const offloadtest::ScissorRect &Rect) override {
-    const D3D12_RECT DXRect = {Rect.X, Rect.Y,
-                               static_cast<LONG>(Rect.X + Rect.Width),
-                               static_cast<LONG>(Rect.Y + Rect.Height)};
-    CB.CmdList->RSSetScissorRects(1, &DXRect);
+  void setScissors(llvm::ArrayRef<offloadtest::ScissorRect> Rects) override {
+    assert(!Rects.empty() && "At least one scissor rectangle is required.");
+    assert(Rects.size() <= offloadtest::MaxViewports &&
+           "Scissor count exceeds D3D12's per-pipeline limit.");
+    llvm::SmallVector<D3D12_RECT, offloadtest::MaxViewports> DXRects;
+    for (const offloadtest::ScissorRect &Rect : Rects)
+      DXRects.push_back(D3D12_RECT{Rect.X, Rect.Y,
+                                   static_cast<LONG>(Rect.X + Rect.Width),
+                                   static_cast<LONG>(Rect.Y + Rect.Height)});
+    CB.CmdList->RSSetScissorRects(static_cast<UINT>(DXRects.size()),
+                                  DXRects.data());
     ScissorSet = true;
   }
 
@@ -3245,17 +3251,13 @@ public:
       return EncOrErr.takeError();
     auto &Encoder = *EncOrErr.get();
 
-    Viewport VP;
-    VP.Width =
-        static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
-    VP.Height =
-        static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-    Encoder.setViewport(VP);
-
-    ScissorRect Scissor;
-    Scissor.Width = static_cast<uint32_t>(VP.Width);
-    Scissor.Height = static_cast<uint32_t>(VP.Height);
-    Encoder.setScissor(Scissor);
+    const llvm::SmallVector<Viewport> Viewports = P.Bindings.getViewports();
+    const llvm::SmallVector<ScissorRect> Scissors = P.Bindings.getScissors();
+    const uint32_t ViewportCount = P.Bindings.getViewportCount();
+    assert(Viewports.size() == ViewportCount);
+    assert(Scissors.size() == ViewportCount);
+    Encoder.setViewports(Viewports);
+    Encoder.setScissors(Scissors);
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)
@@ -3419,6 +3421,7 @@ public:
         PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
@@ -3458,6 +3461,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
