@@ -211,6 +211,12 @@ def setDeviceFeatures(config, device, compiler):
         ):
             config.available_features.add("FragmentShadingRate")
         setWaveSizeFeaturesDirectX(config, device)
+        VPAndRTArrayIndexCap = (
+            "VPAndRTArrayIndexFromAnyShaderFeedingRasterizer"
+            "SupportedWithoutGSEmulation"
+        )
+        if device["Features"].get(VPAndRTArrayIndexCap, False):
+            config.available_features.add("multi-viewport")
         if device["Features"].get("RaytracingTier", "NotSupported") != "NotSupported":
             config.available_features.add("acceleration-structure")
             # PSO-based raytracing (state objects, DispatchRays, SBT) needs
@@ -224,6 +230,7 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
+        config.available_features.add("multi-viewport")
         if device["Features"].get("MeshShader", False):
             config.available_features.add("MeshShader")
         if device["Features"].get("supportsRaytracing", False):
@@ -258,6 +265,12 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("VulkanRuntimeDescriptorArray")
         if device["Features"].get("descriptorBindingPartiallyBound", False):
             config.available_features.add("VulkanDescriptorBindingPartiallyBound")
+        HasMultiViewport = device["Features"].get("multiViewport", False)
+        HasOutputViewportIndex = device["Features"].get(
+            "shaderOutputViewportIndex", False
+        )
+        if HasMultiViewport and HasOutputViewportIndex:
+            config.available_features.add("multi-viewport")
 
         # Add supported extensions.
         for Extension in device["Extensions"]:

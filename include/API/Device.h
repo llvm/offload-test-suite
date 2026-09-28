@@ -113,6 +113,7 @@ struct TraditionalRasterPipelineCreateDesc {
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind.
   std::optional<uint32_t> PatchControlPoints;
+  uint32_t ViewportCount = 1;
 
   ShaderContainer VS;
   // Hull and Domain are independent optionals here; Pipeline.cpp enforces that
@@ -159,6 +160,7 @@ struct MeshShaderRasterPipelineCreateDesc {
   uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
   FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
+  uint32_t ViewportCount = 1;
 
   ShaderContainer MS;
   std::optional<ShaderContainer> AS;

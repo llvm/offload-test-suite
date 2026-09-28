@@ -962,21 +962,32 @@ public:
         NS::String::string(Label.data(), NS::UTF8StringEncoding));
   }
 
-  void setViewport(const offloadtest::Viewport &VP) override {
-    RenderEnc->setViewport(MTL::Viewport{
-        static_cast<double>(VP.X), static_cast<double>(VP.Y),
-        static_cast<double>(VP.Width), static_cast<double>(VP.Height),
-        static_cast<double>(VP.MinDepth), static_cast<double>(VP.MaxDepth)});
+  void setViewports(llvm::ArrayRef<offloadtest::Viewport> VPs) override {
+    assert(!VPs.empty() && "At least one viewport is required.");
+    assert(VPs.size() <= offloadtest::MaxViewports &&
+           "Viewport count exceeds Metal's per-encoder limit.");
+    llvm::SmallVector<MTL::Viewport, offloadtest::MaxViewports> MTLVPs;
+    for (const offloadtest::Viewport &VP : VPs)
+      MTLVPs.push_back(MTL::Viewport{
+          static_cast<double>(VP.X), static_cast<double>(VP.Y),
+          static_cast<double>(VP.Width), static_cast<double>(VP.Height),
+          static_cast<double>(VP.MinDepth), static_cast<double>(VP.MaxDepth)});
+    RenderEnc->setViewports(MTLVPs.data(),
+                            static_cast<NS::UInteger>(MTLVPs.size()));
     ViewportSet = true;
   }
 
-  void setScissor(const offloadtest::ScissorRect &Rect) override {
-    MTL::ScissorRect MTLRect;
-    MTLRect.x = static_cast<NS::UInteger>(Rect.X);
-    MTLRect.y = static_cast<NS::UInteger>(Rect.Y);
-    MTLRect.width = Rect.Width;
-    MTLRect.height = Rect.Height;
-    RenderEnc->setScissorRect(MTLRect);
+  void setScissors(llvm::ArrayRef<offloadtest::ScissorRect> Rects) override {
+    assert(!Rects.empty() && "At least one scissor rectangle is required.");
+    assert(Rects.size() <= offloadtest::MaxViewports &&
+           "Scissor count exceeds Metal's per-encoder limit.");
+    llvm::SmallVector<MTL::ScissorRect, offloadtest::MaxViewports> MTLRects;
+    for (const offloadtest::ScissorRect &Rect : Rects)
+      MTLRects.push_back({static_cast<NS::UInteger>(Rect.X),
+                          static_cast<NS::UInteger>(Rect.Y), Rect.Width,
+                          Rect.Height});
+    RenderEnc->setScissorRects(MTLRects.data(),
+                               static_cast<NS::UInteger>(MTLRects.size()));
     ScissorSet = true;
   }
 
@@ -1943,15 +1954,13 @@ public:
                                         MTL::ResourceUsageWrite);
     }
 
-    Viewport VP;
-    VP.Width = static_cast<float>(Width);
-    VP.Height = static_cast<float>(Height);
-    Encoder.setViewport(VP);
-
-    ScissorRect Scissor;
-    Scissor.Width = static_cast<uint32_t>(Width);
-    Scissor.Height = static_cast<uint32_t>(Height);
-    Encoder.setScissor(Scissor);
+    const llvm::SmallVector<Viewport> Viewports = P.Bindings.getViewports();
+    const llvm::SmallVector<ScissorRect> Scissors = P.Bindings.getScissors();
+    const uint32_t ViewportCount = P.Bindings.getViewportCount();
+    assert(Viewports.size() == ViewportCount);
+    assert(Scissors.size() == ViewportCount);
+    Encoder.setViewports(Viewports);
+    Encoder.setScissors(Scissors);
 
     if (P.isTraditionalRaster()) {
       if (IS.VB)
@@ -3035,6 +3044,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
         PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
@@ -3066,6 +3076,7 @@ public:
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
         PipelineDesc.RTFormats = RTFormats;
         for (auto &Shader : P.Shaders) {
