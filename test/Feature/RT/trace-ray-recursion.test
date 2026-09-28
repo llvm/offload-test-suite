@@ -1,0 +1,134 @@
+#--- source.hlsl
+
+struct Payload {
+  uint Value;
+};
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[shader("raygeneration")]
+void RayGen() {
+  Payload P;
+  P.Value = 0;
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
+  Output[0] = P.Value;
+}
+
+[shader("miss")]
+void MissMain(inout Payload P) {
+  // Sentinel — never observed (every ray hits the triangle).
+  P.Value = 0xDEAD;
+}
+
+[shader("closesthit")]
+void RecursiveCH(inout Payload P, in BuiltInTriangleIntersectionAttributes Attr) {
+  // First entry into the hit shader: payload still carries raygen's 0.
+  // Bump it to a marker, fire a secondary ray from a fresh origin above the
+  // triangle so we hit the same triangle again, then OR in the high marker
+  // when the secondary chain unwinds. The secondary invocation sees a
+  // non-zero payload and goes down the second-level branch.
+  if (P.Value == 0) {
+    P.Value = 0x1;
+    RayDesc Ray;
+    Ray.Origin = float3(0, 0, 2);
+    Ray.Direction = float3(0, 0, -1);
+    Ray.TMin = 0.0;
+    Ray.TMax = 100.0;
+    TraceRay(Scene, RAY_FLAG_NONE, 0xFF, 0, 1, 0, Ray, P);
+    P.Value |= 0x100;
+  } else {
+    // Second-level hit: write the low marker and don't recurse further.
+    P.Value = 0x10;
+  }
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: RayGen
+  - Stage: Miss
+    Entry: MissMain
+  - Stage: ClosestHit
+    Entry: RecursiveCH
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    # First-level CH sets Value=0x1 (overwritten by secondary CH to 0x10), then
+    # OR's in 0x100 after the secondary chain unwinds — final = 0x110.
+    Data: [ 0x110 ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+RayTracingPipelineConfig:
+  # Raygen invokes TraceRay (depth 1) and the first-level CH invokes
+  # TraceRay again (depth 2). Both need to be allowed.
+  MaxTraceRecursionDepth: 2
+  MaxPayloadSizeInBytes: 4
+HitGroups:
+  - Name: TriangleHitGroup
+    Type: Triangles
+    ClosestHit: RecursiveCH
+ShaderBindingTable:
+  RayGen:
+    ShaderName: RayGen
+  Miss:
+    - ShaderName: MissMain
+  HitGroup:
+    - ShaderName: TriangleHitGroup
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+DispatchParameters:
+  DispatchGroupCount: [ 1, 1, 1 ]
+Results:
+  - Result: TraceRayRecursion
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: raytracing-pipeline
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

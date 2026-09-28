@@ -1,0 +1,127 @@
+#--- source.hlsl
+
+struct Payload {
+  uint Value;
+};
+
+[[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
+[[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);
+
+[shader("raygeneration")]
+void RayGen() {
+  // Both lanes fire identical rays that hit the same triangle. Lane 0
+  // uses RAY_FLAG_NONE so the closest-hit shader runs and writes
+  // 0xBEEF into the payload. Lane 1 sets
+  // RAY_FLAG_SKIP_CLOSEST_HIT_SHADER (a PSO-only flag — inline RT can't
+  // express this) so the traversal records a hit but the closest-hit
+  // shader is never invoked. With initial payload = 0xAAAA the output
+  // is the sentinel for lane 1 and 0xBEEF for lane 0.
+  const uint Idx = DispatchRaysIndex().x;
+  const uint Flags =
+      Idx == 0 ? RAY_FLAG_NONE : RAY_FLAG_SKIP_CLOSEST_HIT_SHADER;
+
+  Payload P;
+  P.Value = 0xAAAA;
+  RayDesc Ray;
+  Ray.Origin = float3(0, 0, 1);
+  Ray.Direction = float3(0, 0, -1);
+  Ray.TMin = 0.0;
+  Ray.TMax = 100.0;
+  TraceRay(Scene, Flags, 0xFF, 0, 1, 0, Ray, P);
+  Output[Idx] = P.Value;
+}
+
+[shader("miss")]
+void MissMain(inout Payload P) {
+  // Sentinel — every ray hits the triangle, so this never runs.
+  P.Value = 0xDEAD;
+}
+
+[shader("closesthit")]
+void ClosestHitMain(inout Payload P,
+                   in BuiltInTriangleIntersectionAttributes Attr) {
+  P.Value = 0xBEEF;
+}
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: RayGeneration
+    Entry: RayGen
+  - Stage: Miss
+    Entry: MissMain
+  - Stage: ClosestHit
+    Entry: ClosestHitMain
+Buffers:
+  - Name: Vertices
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0 ]
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 8
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    # Lane 0: closest-hit runs, writes 0xBEEF.
+    # Lane 1: closest-hit skipped, payload stays at the initial 0xAAAA.
+    Data: [ 0xBEEF, 0xAAAA ]
+AccelerationStructures:
+  BLAS:
+    - Name: TriangleBLAS
+      Triangles:
+        - VertexBuffer: Vertices
+          VertexFormat: RGB32Float
+          VertexStride: 12
+          VertexCount: 3
+  TLAS:
+    - Name: Scene
+      Instances:
+        - BLAS: TriangleBLAS
+RayTracingPipelineConfig:
+  MaxTraceRecursionDepth: 1
+  MaxPayloadSizeInBytes: 4
+HitGroups:
+  - Name: TriangleHitGroup
+    Type: Triangles
+    ClosestHit: ClosestHitMain
+ShaderBindingTable:
+  RayGen:
+    ShaderName: RayGen
+  Miss:
+    - ShaderName: MissMain
+  HitGroup:
+    - ShaderName: TriangleHitGroup
+DescriptorSets:
+  - Resources:
+    - Name: Scene
+      Kind: AccelerationStructure
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+DispatchParameters:
+  DispatchGroupCount: [ 2, 1, 1 ]
+Results:
+  - Result: RayFlagSkipClosestHit
+    Rule: BufferExact
+    Actual: Output
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: raytracing-pipeline
+# Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
