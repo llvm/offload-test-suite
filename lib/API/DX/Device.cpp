@@ -542,11 +542,11 @@ public:
   ComPtr<ID3D12PipelineState> PSO;
   // Only set for graphics pipelines.
   std::optional<D3D_PRIMITIVE_TOPOLOGY> Topology;
-  D3D12_SHADING_RATE ShadingRate = D3D12_SHADING_RATE_1X1;
   // True for pipelines created via createPipelineRT — used by SBT / dispatch
   // code to safely downcast to DXRayTracingPipelineState (parallel to
   // VulkanPipelineState::IsRayTracing).
   bool IsRayTracing = false;
+  D3D12_SHADING_RATE ShadingRate = D3D12_SHADING_RATE_1X1;
 
   DXPipelineState(llvm::StringRef Name, ComPtr<ID3D12RootSignature> RootSig,
                   llvm::SmallVector<RootSignatureLayout> Layout,
