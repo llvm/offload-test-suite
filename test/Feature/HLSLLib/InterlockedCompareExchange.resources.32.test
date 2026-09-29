@@ -306,8 +306,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99130
-# XFAIL: Clang
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal && DXC
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
 # UNSUPPORTED: WARP && DXC
