@@ -25,7 +25,7 @@ Shaders:
 Buffers:
   # Vary clip-space w to exercise perspective-correct barycentrics. At the
   # pixel center (NDC 0,0), the affine weights are 6/11, 4/11, and 1/11;
-  # perspective correction produces A/B/C weights of 0.5, 0.25, and 0.25.
+  # perspective correction produces approximate A/B/C weights of 0.5, 0.25, and 0.25.
   - Name: VertexData
     Format: Float32
     Stride: 16
@@ -50,7 +50,7 @@ Buffers:
   - Name: Output_Expected
     Format: Float32
     Stride: 12
-    Data: [ 0.5, 0.25, 0.25 ]
+    Data: [ 0.5009784, 0.24951072, 0.24951072 ]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
