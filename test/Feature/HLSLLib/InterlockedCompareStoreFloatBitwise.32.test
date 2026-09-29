@@ -1,10 +1,10 @@
 #--- source.hlsl
 
 // Tests InterlockedCompareStoreFloatBitwise on groupshared destinations.
-// 256 threads run at the same time. Each test value is exact in float, thus
-// the shader compares floats directly. The intrinsic does not report the
-// original value, thus each check reads the destination. There are three
-// checks:
+// 256 threads run at the same time. Each test value is exactly representable
+// as a 32-bit float, thus the shader compares floats directly. The intrinsic
+// does not report the original value, thus each check reads the destination.
+// There are three checks:
 //
 //   1. Private slots. A compare that does not match must not store. A later
 //      compare that matches must store.
@@ -22,8 +22,8 @@ RWStructuredBuffer<float> NanIn : register(u2);
 groupshared float SlotsMinusTwoPointFive[256]; // per-thread slots, each -2.5
 groupshared float MatchMinusFive;              // contended, compare matches
 groupshared float NoMatchSeventySeven;         // contended, never matches
-groupshared float ZeroPositive;                // +0.0, compared against -0.0
-groupshared float NanQuiet;                    // NaN, compared against NaN
+groupshared float PositiveZero;                // +0.0, compared against -0.0
+groupshared float QuietNaN;                    // NaN, compared against NaN
 
 [numthreads(256, 1, 1)]
 void main(uint3 GTID : SV_GroupThreadID) {
@@ -31,13 +31,15 @@ void main(uint3 GTID : SV_GroupThreadID) {
   if (GTID.x == 0) {
     MatchMinusFive = -5.0f;
     NoMatchSeventySeven = 77.0f;
-    ZeroPositive = 0.0f;
-    NanQuiet = NanIn[0];
+    PositiveZero = 0.0f;
+    QuietNaN = NanIn[0];
   }
   GroupMemoryBarrierWithGroupSync();
 
-  // Check 1. Only the second call stores. If the first call stored, the
-  // second compare cannot match and the slot keeps the wrong value.
+  // Check 1. The compare against 1.0f must not store, leaving the slot at
+  // -2.5f. The following compare against -2.5f must store the per-thread
+  // value. If the first call stored, the second compare cannot match and the
+  // slot keeps the wrong value.
   InterlockedCompareStoreFloatBitwise(SlotsMinusTwoPointFive[GTID.x], 1.0f,
                                       99.0f);
   InterlockedCompareStoreFloatBitwise(SlotsMinusTwoPointFive[GTID.x], -2.5f,
@@ -51,16 +53,16 @@ void main(uint3 GTID : SV_GroupThreadID) {
   InterlockedCompareStoreFloatBitwise(NoMatchSeventySeven, 78.0f, -1.0f);
 
   // Check 3.
-  InterlockedCompareStoreFloatBitwise(ZeroPositive, -0.0f, 99.0f);
-  InterlockedCompareStoreFloatBitwise(NanQuiet, NanIn[0], 7.0f);
+  InterlockedCompareStoreFloatBitwise(PositiveZero, -0.0f, 99.0f);
+  InterlockedCompareStoreFloatBitwise(QuietNaN, NanIn[0], 7.0f);
 
   GroupMemoryBarrierWithGroupSync();
 
   if (GTID.x == 0) {
     OutFinal[0] = MatchMinusFive;      // 42.0
     OutFinal[1] = NoMatchSeventySeven; // 77.0
-    OutFinal[2] = ZeroPositive;        // +0.0, -0.0 must not have matched
-    OutFinal[3] = NanQuiet;            // 7.0, the NaN must have matched
+    OutFinal[2] = PositiveZero;        // +0.0, -0.0 must not have matched
+    OutFinal[3] = QuietNaN;            // 7.0, the NaN must have matched
   }
 }
 
