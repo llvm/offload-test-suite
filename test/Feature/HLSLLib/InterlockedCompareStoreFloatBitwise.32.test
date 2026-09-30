@@ -146,7 +146,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/llvm-project/issues/227051
 # XFAIL: Clang && (DirectX || Metal)
 
-# Bug: https://github.com/llvm/llvm-project/issues/227064
+# Bug: https://github.com/llvm/llvm-project/issues/221370
 # XFAIL: Clang && Vulkan
 
 # Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8864

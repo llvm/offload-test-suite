@@ -144,7 +144,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/llvm-project/issues/227530
 # XFAIL: Clang && (DirectX || Metal)
 
-# Bug: https://github.com/llvm/llvm-project/issues/227064
+# Bug: https://github.com/llvm/llvm-project/issues/221370
 # XFAIL: Clang && Vulkan
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1418
