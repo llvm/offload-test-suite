@@ -143,13 +143,15 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug: https://github.com/llvm/llvm-project/issues/227051
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug: https://github.com/llvm/llvm-project/issues/227064
+# XFAIL: Clang && Vulkan
+
 # Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8864
 # XFAIL: Vulkan && DXC
 
-# Bug: https://github.com/llvm/llvm-project/issues/227051
-# XFAIL: Clang && (DirectX || Metal)
-# Bug: https://github.com/llvm/llvm-project/issues/227064
-# XFAIL: Clang && Vulkan
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
