@@ -17,7 +17,7 @@ struct PSInput {
 float4 main(PSInput input) : SV_TARGET {
   vector<float, 5> Input5;
   for (uint I = 0; I < 5; ++I)
-    Input5[I] = input.position.x - 2.0;
+    Input5[I] = input.position.x - float(I) * 0.5;
   clip(Input5);
   return float4(1.0, 0.0, 0.0, 1.0);
 }
@@ -70,6 +70,9 @@ Results:
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/220626
 # XFAIL: Clang
+
+# REQUIRES: !Vulkan || VK_EXT_shader_long_vector
+# REQUIRES: Clang || SM_6_9
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl

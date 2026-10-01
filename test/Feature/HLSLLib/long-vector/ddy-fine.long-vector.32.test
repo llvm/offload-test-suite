@@ -80,6 +80,9 @@ Results:
 # Unimplemented https://github.com/llvm/llvm-project/issues/220631
 # XFAIL: Clang
 
+# REQUIRES: !Vulkan || VK_EXT_shader_long_vector
+# REQUIRES: Clang || SM_6_9
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T %if Clang %{ps_6_0%} %else %{ps_6_9%} -Fo %t-pixel.o %t/pixel.hlsl

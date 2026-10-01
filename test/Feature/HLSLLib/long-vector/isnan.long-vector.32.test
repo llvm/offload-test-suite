@@ -60,6 +60,9 @@ DescriptorSets:
 # Bug https://github.com/llvm/offload-test-suite/issues/1506
 # XFAIL: Metal && DXC
 
+# REQUIRES: !Vulkan || VK_EXT_shader_long_vector
+# REQUIRES: Clang || SM_6_9
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
