@@ -10,8 +10,13 @@
 //===----------------------------------------------------------------------===//
 
 #include "Support/Pipeline.h"
+
+#include "API/Texture.h"
+
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
+
+#include <cmath>
 
 using namespace offloadtest;
 
@@ -106,6 +111,28 @@ uint32_t PushConstantBlock::size() const {
   return Size;
 }
 
+llvm::SmallVector<Viewport> IOBindings::getViewports() const {
+  if (!Viewports.empty())
+    return Viewports;
+
+  assert(RTargetBufferPtr && "Raster pipeline has no render target");
+  Viewport VP;
+  VP.Width = static_cast<float>(RTargetBufferPtr->OutputProps.Width);
+  VP.Height = static_cast<float>(RTargetBufferPtr->OutputProps.Height);
+  return {VP};
+}
+
+llvm::SmallVector<ScissorRect> IOBindings::getScissors() const {
+  if (!Scissors.empty())
+    return Scissors;
+
+  assert(RTargetBufferPtr && "Raster pipeline has no render target");
+  ScissorRect Rect;
+  Rect.Width = static_cast<uint32_t>(RTargetBufferPtr->OutputProps.Width);
+  Rect.Height = static_cast<uint32_t>(RTargetBufferPtr->OutputProps.Height);
+  return {Rect};
+}
+
 namespace llvm {
 namespace yaml {
 
@@ -115,6 +142,8 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
 
   // Runtime-specific settings.
   I.mapOptional("RuntimeSettings", P.Settings);
+  I.mapOptional("ShadingRate", P.ShadingRate,
+                offloadtest::FragmentShadingRate::Rate1x1);
 
   I.mapRequired("Buffers", P.Buffers);
   I.mapOptional("Samplers", P.Samplers);
@@ -569,6 +598,59 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
   I.mapOptional("Topology", B.Topology,
                 offloadtest::PrimitiveTopology::TriangleList);
   I.mapOptional("PatchControlPoints", B.PatchControlPoints);
+  I.mapOptional("SampleCount", B.SampleCount, 1u);
+  I.mapOptional("Viewports", B.Viewports);
+  I.mapOptional("Scissors", B.Scissors);
+
+  const size_t MaxVPs = offloadtest::MaxViewports;
+  if (B.Viewports.size() > MaxVPs)
+    I.setError(Twine("Bindings: at most ") + std::to_string(MaxVPs) +
+               " Viewports may be specified, found " +
+               std::to_string(B.Viewports.size()) + ".");
+  if (B.Scissors.size() > MaxVPs)
+    I.setError(Twine("Bindings: at most ") + std::to_string(MaxVPs) +
+               " Scissors may be specified, found " +
+               std::to_string(B.Scissors.size()) + ".");
+  if (B.Viewports.size() != B.Scissors.size())
+    I.setError(Twine("Bindings: 'Scissors' has ") +
+               std::to_string(B.Scissors.size()) + " entries but there are " +
+               std::to_string(B.Viewports.size()) +
+               " viewports; they must match.");
+}
+
+void MappingTraits<offloadtest::Viewport>::mapping(IO &I,
+                                                   offloadtest::Viewport &V) {
+  I.mapOptional("X", V.X, 0.0f);
+  I.mapOptional("Y", V.Y, 0.0f);
+  I.mapRequired("Width", V.Width);
+  I.mapRequired("Height", V.Height);
+  I.mapOptional("MinDepth", V.MinDepth, 0.0f);
+  I.mapOptional("MaxDepth", V.MaxDepth, 1.0f);
+
+  if (!std::isfinite(V.X) || !std::isfinite(V.Y) || !std::isfinite(V.Width) ||
+      !std::isfinite(V.Height) || !std::isfinite(V.MinDepth) ||
+      !std::isfinite(V.MaxDepth)) {
+    I.setError("Viewport values must be finite.");
+    return;
+  }
+  if (V.Width <= 0 || V.Height <= 0)
+    I.setError("Viewport width and height must be positive.");
+  if (V.MinDepth < 0 || V.MaxDepth > 1 || V.MinDepth > V.MaxDepth)
+    I.setError(
+        "Viewport depth range must satisfy 0 <= MinDepth <= MaxDepth <= 1.");
+}
+
+void MappingTraits<offloadtest::ScissorRect>::mapping(
+    IO &I, offloadtest::ScissorRect &S) {
+  I.mapOptional("X", S.X, 0);
+  I.mapOptional("Y", S.Y, 0);
+  I.mapRequired("Width", S.Width);
+  I.mapRequired("Height", S.Height);
+
+  if (S.X < 0 || S.Y < 0)
+    I.setError("Scissor X and Y must be non-negative.");
+  if (S.Width == 0 || S.Height == 0)
+    I.setError("Scissor width and height must be positive.");
 }
 
 void MappingTraits<offloadtest::PushConstantBlock>::mapping(
@@ -891,7 +973,17 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
   const bool HasAmplificationStage =
       HasShaderType[llvm::to_underlying(Stages::Amplification)];
 
+  if (auto Err =
+          validateSampleCount(Bindings.SampleCount, "Bindings.SampleCount"))
+    return Err;
+  if (Bindings.SampleCount != 1 && !HasVertexStage && !HasMeshStage)
+    return llvm::createStringError(
+        "Bindings.SampleCount is only valid on a raster pipeline.");
+
   if (HasAnyRayTracingStage) {
+    if (ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          "ShadingRate is only valid on a raster pipeline.");
     if (HasComputeStage || HasVertexStage || HasMeshStage ||
         HasAmplificationStage)
       return llvm::createStringError(
@@ -910,6 +1002,9 @@ llvm::Error offloadtest::Pipeline::validatePipelineKind() {
         "valid on a RayTracing pipeline.");
 
   if (HasComputeStage) {
+    if (ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          "ShadingRate is only valid on a raster pipeline.");
     if (Shaders.size() > 1)
       return llvm::createStringError(
           "Compute Pipeline is only allowed to have Compute Shader.");

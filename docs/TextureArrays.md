@@ -1,15 +1,16 @@
 # Texture Arrays
 
-The test suite supports the 2D texture array types, so tests can verify
+The test suite supports the 1D and 2D texture array types, so tests can verify
 array-aware indexing, sampling and readback:
 
 | YAML `Kind`        | HLSL type            | Descriptor |
 | ------------------ | -------------------- | ---------- |
+| `Texture1DArray`   | `Texture1DArray`     | SRV        |
+| `RWTexture1DArray` | `RWTexture1DArray`   | UAV        |
 | `Texture2DArray`   | `Texture2DArray`     | SRV        |
 | `RWTexture2DArray` | `RWTexture2DArray`   | UAV        |
 
-1D texture arrays are not supported yet. Texture cubes are built from
-array layers and reuse everything on this page; see
+Texture cubes are built from array layers and reuse everything on this page; see
 [TextureCubes.md](TextureCubes.md).
 
 ## Defining Array Slices

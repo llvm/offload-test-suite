@@ -21,6 +21,7 @@ VSOutput mainVS(VSInput input) {
 [[vk::binding(4, 0)]] SamplerState MirrorSamp : register(s3);
 [[vk::binding(5, 0)]] RWBuffer<float4> Out : register(u0);
 [[vk::binding(6, 0)]] Texture1D<float4> Tex1D : register(t1);
+[[vk::binding(7, 0)]] Texture3D<float4> Tex3D : register(t2);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Texture 2x1: [Red, Green]
@@ -46,11 +47,19 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Note: Repeat/Clamp would map 1.75 to Green (0.75 or 1.0).
   float4 r3 = Tex2D.SampleLevel(MirrorSamp, float2(1.75, 0.5), 0);
 
+  // Texture1D::SampleLevel
   float u = 1.25;
   float4 r4 = Tex1D.SampleLevel(ClampSamp, u, 0);
   float4 r5 = Tex1D.SampleLevel(RepeatSamp, u, 0);
   float4 r6 = Tex1D.SampleLevel(BorderSamp, u, 0);
   float4 r7 = Tex1D.SampleLevel(MirrorSamp, 1.75, 0);
+
+  // Texture3D::SampleLevel
+  float3 uvw = float3(0.25, 0.25, 1.25);
+  float4 r8 = Tex3D.SampleLevel(ClampSamp, uvw, 0);
+  float4 r9 = Tex3D.SampleLevel(RepeatSamp, uvw, 0);
+  float4 r10 = Tex3D.SampleLevel(BorderSamp, uvw, 0);
+  float4 r11 = Tex3D.SampleLevel(MirrorSamp, float3(0.25, 0.25, 1.75), 0);
 
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
@@ -61,6 +70,10 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[5] = r5;
     Out[6] = r6;
     Out[7] = r7;
+    Out[8] = r8;
+    Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
   }
   return float4(0,0,0,0);
 }
@@ -88,10 +101,23 @@ Buffers:
     Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
             0.0, 1.0, 0.0, 1.0 ] # Green
 
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Red
+            0.0, 1.0, 0.0, 1.0,  # Green
+            0.0, 0.0, 1.0, 1.0,  # Blue
+            1.0, 1.0, 1.0, 1.0,  # White
+            0.0, 1.0, 1.0, 1.0,  # Cyan
+            1.0, 0.0, 1.0, 1.0,  # Magenta
+            1.0, 1.0, 0.0, 1.0,  # Yellow
+            0.0, 0.0, 0.0, 1.0 ] # Black
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 128 # 8 * sizeof(float4)
+    FillSize: 192 # 12 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -103,7 +129,11 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,  # 1D Clamp -> Green
             1.0, 0.0, 0.0, 1.0,  # 1D Repeat -> Red
             0.0, 0.0, 0.0, 0.0,  # 1D Border -> Transparent Black
-            1.0, 0.0, 0.0, 1.0 ] # 1D Mirror -> Red
+            1.0, 0.0, 0.0, 1.0,  # 1D Mirror -> Red
+            0.0, 1.0, 1.0, 1.0,  # 3D Clamp -> Cyan
+            1.0, 0.0, 0.0, 1.0,  # 3D Repeat -> Red
+            0.0, 0.0, 0.0, 0.0,  # 3D Border -> Transparent Black
+            1.0, 0.0, 0.0, 1.0 ] # 3D Mirror -> Red
 
   - Name: RT
     Format: Float32
@@ -175,6 +205,10 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 6 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 7 }
 
 Results:
   - Result: AddressTest

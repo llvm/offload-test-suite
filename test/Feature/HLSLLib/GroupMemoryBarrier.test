@@ -1,0 +1,64 @@
+#--- source.hlsl
+
+// Runs 8,192 cross-wave store-buffering trials on group-shared memory.
+// A trial fails only if both threads read the initial value.
+
+RWStructuredBuffer<uint> Out : register(u0);
+
+groupshared uint Data[256];
+groupshared uint Read[256];
+
+[numthreads(256, 1, 1)]
+void main(uint GI : SV_GroupIndex, uint3 Gid : SV_GroupID) {
+  uint Other = GI ^ 128;
+
+  Data[GI] = 0;
+  GroupMemoryBarrierWithGroupSync();
+  Data[GI] = 1;
+  GroupMemoryBarrier();
+  Read[GI] = Data[Other];
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GI < 128)
+    Out[Gid.x * 128 + GI] = Read[GI] | Read[Other];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [64, 1, 1]
+Buffers:
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 32768
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    FillSize: 32768
+    FillValue: 1
+Results:
+  - Result: TestGroupMemoryBarrier
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

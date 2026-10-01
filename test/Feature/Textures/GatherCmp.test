@@ -4,12 +4,7 @@
 [[vk::binding(3, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
 [[vk::binding(4, 0)]] SamplerComparisonState SampRepeat : register(s2); // Less, Repeat
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);
-#ifndef NO_TEXTURECUBE
 [[vk::binding(5, 0)]] TextureCube<float4> TexCube : register(t1);
-#define CUBE_OR(Call, Expect) (Call)
-#else
-#define CUBE_OR(Call, Expect) (Expect)
-#endif
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -71,19 +66,16 @@ void main() {
   //
   // 8: face +X holds the same values as the 2D texture above, so ref=0.5 with
   // Less gives the same [0, 1, 1, 0].
-  Out[8] = CUBE_OR(TexCube.GatherCmp(Samp, float3(1, 0, 0), 0.5),
-                   float4(0, 1, 1, 0));
+  Out[8] = TexCube.GatherCmp(Samp, float3(1, 0, 0), 0.5);
 
   // 9: the same face with Greater inverts every comparison -> [1, 0, 0, 1].
-  Out[9] = CUBE_OR(TexCube.GatherCmp(SampGreater, float3(1, 0, 0), 0.5),
-                   float4(1, 0, 0, 1));
+  Out[9] = TexCube.GatherCmp(SampGreater, float3(1, 0, 0), 0.5);
 
   // 10: face -Z holds 0.9/0.1 instead, so ref=0.5 with Less gives
   // [ (0,1)=0.9 -> 1, (1,1)=0.1 -> 0, (1,0)=0.1 -> 0, (0,0)=0.9 -> 1 ].
   // The faces in between are a uniform 0.5, so straying over a face edge
   // would not produce this pattern.
-  Out[10] = CUBE_OR(TexCube.GatherCmp(Samp, float3(0, 0, -1), 0.5),
-                    float4(1, 0, 0, 1));
+  Out[10] = TexCube.GatherCmp(Samp, float3(0, 0, -1), 0.5);
 }
 
 //--- pipeline.yaml
@@ -190,6 +182,5 @@ Results:
 # XFAIL: Metal
 
 # RUN: split-file %s %t
-# Clang does not implement TextureCube yet: https://github.com/llvm/llvm-project/issues/194740
-# RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBE %} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

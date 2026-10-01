@@ -48,6 +48,45 @@ llvm::Error offloadtest::findAndValidateRenderPassTextureSize(
   return llvm::Error::success();
 }
 
+llvm::Error offloadtest::validateRenderPassBeginDesc(
+    const RenderPassDesc &PassDesc, const RenderPassBeginDesc &Desc,
+    uint32_t *OutWidth, uint32_t *OutHeight) {
+
+  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "RenderPassBeginDesc color attachment count does not match its "
+        "RenderPass.");
+
+  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "RenderPassBeginDesc depth-stencil "
+                                   "presence does not match its RenderPass.");
+
+  for (const Texture *Attachment : Desc.ColorAttachments) {
+    if (!Attachment)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "RenderPassBeginDesc has a null color attachment texture.");
+    if (Attachment->getDesc().SampleCount != PassDesc.SampleCount)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "Color attachment was created with SampleCount %u but its render "
+          "pass expects %u.",
+          Attachment->getDesc().SampleCount, PassDesc.SampleCount);
+  }
+
+  if (Desc.DepthStencil &&
+      Desc.DepthStencil->getDesc().SampleCount != PassDesc.SampleCount)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "Depth-stencil attachment was created with SampleCount %u but its "
+        "render pass expects %u.",
+        Desc.DepthStencil->getDesc().SampleCount, PassDesc.SampleCount);
+
+  return findAndValidateRenderPassTextureSize(Desc, OutWidth, OutHeight);
+}
+
 offloadtest::IntelGpuEra offloadtest::getIntelGpuEra(uint16_t DeviceId) {
   const uint16_t FamilyPrefix = DeviceId & 0xFF00;
   switch (FamilyPrefix) {
@@ -70,4 +109,45 @@ offloadtest::IntelGpuEra offloadtest::getIntelGpuEra(uint16_t DeviceId) {
   default:
     return IntelGpuEra::UnknownOrLegacy;
   }
+}
+
+llvm::Error offloadtest::validateResolve(const Texture &Src,
+                                         const Texture &Dst) {
+  const TextureCreateDesc &SrcDesc = Src.getDesc();
+  const TextureCreateDesc &DstDesc = Dst.getDesc();
+
+  if (SrcDesc.SampleCount <= 1)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "resolveTexture source must be multisampled, got SampleCount %u.",
+        SrcDesc.SampleCount);
+  if (DstDesc.SampleCount != 1)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "resolveTexture destination must be single-sampled, got SampleCount "
+        "%u.",
+        DstDesc.SampleCount);
+  if (SrcDesc.getSubresourceCount() != 1 || DstDesc.getSubresourceCount() != 1)
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "resolveTexture only supports single-subresource textures.");
+  if (SrcDesc.Fmt != DstDesc.Fmt)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "resolveTexture source format '%s' does not match destination format "
+        "'%s'.",
+        getFormatName(SrcDesc.Fmt).data(), getFormatName(DstDesc.Fmt).data());
+  if (SrcDesc.Dim != DstDesc.Dim || SrcDesc.Width != DstDesc.Width ||
+      SrcDesc.Height != DstDesc.Height)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "resolveTexture source and destination dimensions must match.");
+  if (SrcDesc.MipLevels != DstDesc.MipLevels ||
+      SrcDesc.ArraySlices != DstDesc.ArraySlices ||
+      SrcDesc.IsArray != DstDesc.IsArray)
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "resolveTexture source and destination subresources must match.");
+
+  return llvm::Error::success();
 }
