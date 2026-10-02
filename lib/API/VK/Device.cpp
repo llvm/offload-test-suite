@@ -1928,6 +1928,19 @@ public:
           SupportedAtomicFloat.shaderBufferFloat32Atomics;
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    const bool HasFragmentShaderBarycentricExt =
+        isExtensionSupported(AvailableDeviceExtensions,
+                             VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+        FeaturesFragmentShaderBarycentric{};
+    if (HasFragmentShaderBarycentricExt) {
+      FeaturesFragmentShaderBarycentric.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+      FeaturesFragmentShaderBarycentric.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShaderBarycentric;
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     const bool HasFragmentShadingRateExt = isExtensionSupported(
         AvailableDeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
@@ -2079,6 +2092,17 @@ public:
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    if (HasFragmentShaderBarycentricExt) {
+      if (!FeaturesFragmentShaderBarycentric.fragmentShaderBarycentric)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports fragmentShaderBarycentric=0",
+            VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     VkPhysicalDeviceFragmentShadingRateFeaturesKHR EnabledFragmentShadingRate{};
     const bool EnableFragmentShadingRate =
@@ -3541,6 +3565,14 @@ private:
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT;
     const bool HasShaderAtomicFloatExt = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR
+        FeaturesFragmentShaderBarycentric{};
+    FeaturesFragmentShaderBarycentric.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+    const bool HasFragmentShaderBarycentricExt = isExtensionSupported(
+        DeviceExtensions, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+#endif
 
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     VkPhysicalDeviceFragmentShadingRateFeaturesKHR
@@ -3586,6 +3618,12 @@ private:
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
     }
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+    if (HasFragmentShaderBarycentricExt) {
+      FeaturesFragmentShaderBarycentric.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShaderBarycentric;
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     if (HasFragmentShadingRateExt) {
       FeaturesFragmentShadingRate.pNext = Features.pNext;
@@ -3634,6 +3672,13 @@ private:
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
                                              FeaturesAtomicFloat.Name)));
+#ifdef VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME
+#define VULKAN_KHR_FRAGMENT_SHADER_BARYCENTRIC_FEATURE_BOOL(Name)              \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(                                             \
+                 #Name, HasFragmentShaderBarycentricExt &&                     \
+                            FeaturesFragmentShaderBarycentric.Name)));
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
 #define VULKAN_KHR_FRAGMENT_SHADING_RATE_FEATURE_BOOL(Name)                    \
   Caps.insert(std::make_pair(                                                  \
