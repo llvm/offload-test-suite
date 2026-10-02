@@ -82,9 +82,9 @@ Results:
 # REQUIRES: SM_6_1
 # REQUIRES: Barycentrics
 # UNSUPPORTED: Metal
-# UNSUPPORTED: Lavapipe
+# XFAIL: Lavapipe
 
-# TODO: Remove when Clang supports graphics-stage DXIL input/output lowering.
+# https://github.com/llvm/llvm-project/issues/90504
 # XFAIL: Clang
 
 # RUN: split-file %s %t
