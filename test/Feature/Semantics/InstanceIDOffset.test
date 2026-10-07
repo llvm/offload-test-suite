@@ -108,7 +108,10 @@ Results:
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
 # UNSUPPORTED: Lavapipe
 
+# Unimplemented: https://github.com/llvm/llvm-project/issues/90504
+# XFAIL: Clang && DirectX
+
 # RUN: split-file %s %t
-# RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T vs_6_1 %if DXC %{ -fvk-support-nonzero-base-instance %} -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
