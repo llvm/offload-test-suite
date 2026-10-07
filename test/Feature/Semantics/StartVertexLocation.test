@@ -108,6 +108,6 @@ Results:
 # UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
-# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %dxc_target -T vs_6_8 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_8 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
