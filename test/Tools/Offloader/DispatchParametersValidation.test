@@ -17,6 +17,7 @@ Shaders:
   - Stage: RayGeneration
     Entry: main
 DescriptorSets: []
+Buffers: []
 Results: []
 DispatchParameters:
   InstanceCount: 2
@@ -28,6 +29,7 @@ Shaders:
   - Stage: RayGeneration
     Entry: main
 DescriptorSets: []
+Buffers: []
 Results: []
 DispatchParameters:
   FirstVertex: 1
@@ -39,6 +41,7 @@ Shaders:
   - Stage: RayGeneration
     Entry: main
 DescriptorSets: []
+Buffers: []
 Results: []
 DispatchParameters:
   FirstInstance: 1
