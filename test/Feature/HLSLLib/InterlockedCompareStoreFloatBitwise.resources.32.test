@@ -152,8 +152,8 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99202
-# XFAIL: Clang
+# Bug: https://github.com/llvm/llvm-project/issues/221370
+# XFAIL: Clang && Vulkan
 
 # Unimplemented: https://github.com/microsoft/DirectXShaderCompiler/issues/8864
 # XFAIL: Vulkan && DXC

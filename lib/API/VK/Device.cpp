@@ -83,14 +83,19 @@ static VkDescriptorType getDescriptorType(const ResourceKind RK) {
     return VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER;
 
   case ResourceKind::Texture1D:
+  case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
     return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::RWTexture3D:
     return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 
   case ResourceKind::ByteAddressBuffer:
@@ -268,10 +273,15 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   case ResourceKind::ConstantBuffer:
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::Sampler:
@@ -286,7 +296,11 @@ static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
 static VkImageViewType getImageViewType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
     return VK_IMAGE_VIEW_TYPE_1D;
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
+    return VK_IMAGE_VIEW_TYPE_1D_ARRAY;
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
   case ResourceKind::SampledTexture2D:
@@ -294,6 +308,9 @@ static VkImageViewType getImageViewType(const ResourceKind RK) {
   case ResourceKind::Texture2DArray:
   case ResourceKind::RWTexture2DArray:
     return VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
+    return VK_IMAGE_VIEW_TYPE_3D;
   case ResourceKind::TextureCube:
     return VK_IMAGE_VIEW_TYPE_CUBE;
   case ResourceKind::TextureCubeArray:
@@ -329,6 +346,9 @@ static VkImageType getVKImageType(ResourceDimension Dim) {
 static VkImageType getVKImageType(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Texture1D:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::Texture1DArray:
+  case ResourceKind::RWTexture1DArray:
     return getVKImageType(ResourceDimension::Dim1D);
   case ResourceKind::Texture2D:
   case ResourceKind::RWTexture2D:
@@ -337,6 +357,9 @@ static VkImageType getVKImageType(const ResourceKind RK) {
   case ResourceKind::RWTexture2DArray:
     // Texture arrays are 2D images with more than one layer.
     return getVKImageType(ResourceDimension::Dim2D);
+  case ResourceKind::Texture3D:
+  case ResourceKind::RWTexture3D:
+    return getVKImageType(ResourceDimension::Dim3D);
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
     return getVKImageType(ResourceDimension::Cube);
@@ -471,6 +494,26 @@ static VkPrimitiveTopology getVkPrimitiveTopology(PrimitiveTopology Topology) {
     return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
   }
   llvm_unreachable("All PrimitiveTopology cases handled");
+}
+
+static VkExtent2D getVkFragmentShadingRateExtent(FragmentShadingRate Rate) {
+  switch (Rate) {
+  case FragmentShadingRate::Rate1x1:
+    return {1, 1};
+  case FragmentShadingRate::Rate1x2:
+    return {1, 2};
+  case FragmentShadingRate::Rate2x1:
+    return {2, 1};
+  case FragmentShadingRate::Rate2x2:
+    return {2, 2};
+  case FragmentShadingRate::Rate2x4:
+    return {2, 4};
+  case FragmentShadingRate::Rate4x2:
+    return {4, 2};
+  case FragmentShadingRate::Rate4x4:
+    return {4, 4};
+  }
+  llvm_unreachable("All FragmentShadingRate cases handled");
 }
 
 static std::string getMessageSeverityString(
@@ -1387,6 +1430,61 @@ public:
     return llvm::Error::success();
   }
 
+  llvm::Error resolveTexture(offloadtest::Texture &Src,
+                             offloadtest::Texture &Dst) override {
+    if (auto Err = validateResolve(Src, Dst))
+      return Err;
+    if (isDepthFormat(Src.getDesc().Fmt))
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "vkCmdResolveImage only supports color images.");
+
+    auto &VKSrc = llvm::cast<VulkanTexture>(Src);
+    auto &VKDst = llvm::cast<VulkanTexture>(Dst);
+
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_READ_BIT,        /*DstAccessMask*/
+                          VKSrc.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*NewLayout*/
+                          VKSrc);
+    CB.addImageTransition(CB.PendingSrcAccess,                /*SrcAccessMask*/
+                          VK_ACCESS_TRANSFER_WRITE_BIT,       /*DstAccessMask*/
+                          VKDst.preferredLayoutOrUndefined(), /*OldLayout*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*NewLayout*/
+                          VKDst);
+
+    CB.addPendingBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_ACCESS_TRANSFER_READ_BIT |
+                             VK_ACCESS_TRANSFER_WRITE_BIT);
+    CB.flushBarrier();
+
+    VkImageResolve Region = {};
+    Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.srcSubresource.layerCount = 1;
+    Region.dstSubresource = Region.srcSubresource;
+    Region.extent = {VKSrc.Desc.Width, VKSrc.Desc.Height, 1};
+
+    insertDebugSignpost(
+        llvm::formatv("resolveTexture {0} -> {1}", VKSrc.Name, VKDst.Name)
+            .str());
+    vkCmdResolveImage(CB.CmdBuffer, VKSrc.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VKDst.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+
+    CB.addImageTransition(VK_ACCESS_TRANSFER_READ_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,              /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, /*OldLayout*/
+                          VKSrc.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKSrc);
+    CB.addImageTransition(VK_ACCESS_TRANSFER_WRITE_BIT, /*SrcAccessMask*/
+                          VK_ACCESS_NONE,               /*DstAccessMask*/
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, /*OldLayout*/
+                          VKDst.preferredLayoutOrUndefined(),   /*NewLayout*/
+                          VKDst);
+
+    return llvm::Error::success();
+  }
+
   // Defined out-of-line below — needs VulkanDevice's full type for access to
   // the device-loaded ray-tracing entry points and helpers.
   llvm::Error batchBuildAS(llvm::ArrayRef<ASBuildItem> Items) override;
@@ -1455,28 +1553,30 @@ public:
     CB.insertDebugSignpost(Label);
   }
 
-  void setViewport(const offloadtest::Viewport &VP) override {
-    // Negative viewport height (with Y origin at the bottom) flips clip->
-    // framebuffer Y the same way DX12 and Metal do, so a CCW-in-clip-space
-    // triangle is front-facing on every backend.
-    VkViewport VKVP = {};
-    VKVP.x = VP.X;
-    VKVP.y = VP.Y + VP.Height;
-    VKVP.width = VP.Width;
-    VKVP.height = -VP.Height;
-    VKVP.minDepth = VP.MinDepth;
-    VKVP.maxDepth = VP.MaxDepth;
-    vkCmdSetViewport(CB.CmdBuffer, 0, 1, &VKVP);
+  void setViewports(llvm::ArrayRef<offloadtest::Viewport> VPs) override {
+    assert(!VPs.empty() && "At least one viewport is required.");
+    assert(VPs.size() <= offloadtest::MaxViewports &&
+           "Viewport count exceeds the guaranteed Vulkan maxViewports.");
+    llvm::SmallVector<VkViewport, offloadtest::MaxViewports> VKVPs;
+    for (const offloadtest::Viewport &VP : VPs) {
+      // Flip framebuffer Y to match D3D12 and Metal clip-space winding.
+      VKVPs.push_back({VP.X, VP.Y + VP.Height, VP.Width, -VP.Height,
+                       VP.MinDepth, VP.MaxDepth});
+    }
+    vkCmdSetViewport(CB.CmdBuffer, 0, static_cast<uint32_t>(VKVPs.size()),
+                     VKVPs.data());
     ViewportSet = true;
   }
 
-  void setScissor(const offloadtest::ScissorRect &Rect) override {
-    VkRect2D VKRect = {};
-    VKRect.offset.x = Rect.X;
-    VKRect.offset.y = Rect.Y;
-    VKRect.extent.width = Rect.Width;
-    VKRect.extent.height = Rect.Height;
-    vkCmdSetScissor(CB.CmdBuffer, 0, 1, &VKRect);
+  void setScissors(llvm::ArrayRef<offloadtest::ScissorRect> Rects) override {
+    assert(!Rects.empty() && "At least one scissor rectangle is required.");
+    assert(Rects.size() <= offloadtest::MaxViewports &&
+           "Scissor count exceeds the guaranteed Vulkan maxViewports.");
+    llvm::SmallVector<VkRect2D, offloadtest::MaxViewports> VKRects;
+    for (const offloadtest::ScissorRect &Rect : Rects)
+      VKRects.push_back({{Rect.X, Rect.Y}, {Rect.Width, Rect.Height}});
+    vkCmdSetScissor(CB.CmdBuffer, 0, static_cast<uint32_t>(VKRects.size()),
+                    VKRects.data());
     ScissorSet = true;
   }
 
@@ -1592,6 +1692,11 @@ private:
   bool HasRTPipelineSupport = false;
   bool HasDescriptorIndexing = false;
   bool HasMutableDescriptorType = false;
+  bool HasFragmentShadingRateSupport = false;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+  PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR
+      GetPhysicalDeviceFragmentShadingRates = nullptr;
+#endif
   struct ASFunctions {
     PFN_vkCreateAccelerationStructureKHR Create = nullptr;
     PFN_vkDestroyAccelerationStructureKHR Destroy = nullptr;
@@ -1684,6 +1789,7 @@ private:
 
     std::unique_ptr<offloadtest::RenderPass> RenderPass;
     std::unique_ptr<offloadtest::Texture> RenderTarget;
+    std::unique_ptr<offloadtest::Texture> ResolveTarget;
     std::unique_ptr<offloadtest::Buffer> RTReadback;
     std::unique_ptr<offloadtest::Texture> DepthStencil;
     std::unique_ptr<offloadtest::Buffer> VB;
@@ -1822,6 +1928,21 @@ public:
           SupportedAtomicFloat.shaderBufferFloat32Atomics;
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    const bool HasFragmentShadingRateExt = isExtensionSupported(
+        AvailableDeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+        SupportedFragmentShadingRate{};
+    if (HasFragmentShadingRateExt) {
+      SupportedFragmentShadingRate.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+      VkPhysicalDeviceFeatures2 ProbeFeatures{};
+      ProbeFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+      ProbeFeatures.pNext = &SupportedFragmentShadingRate;
+      vkGetPhysicalDeviceFeatures2(PhysicalDevice, &ProbeFeatures);
+    }
+#endif
+
     const bool HasMeshShader = isExtensionSupported(
         AvailableDeviceExtensions, VK_EXT_MESH_SHADER_EXTENSION_NAME);
     VkPhysicalDeviceMeshShaderFeaturesEXT MeshFeatures{};
@@ -1958,6 +2079,22 @@ public:
           VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
     }
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR EnabledFragmentShadingRate{};
+    const bool EnableFragmentShadingRate =
+        HasFragmentShadingRateExt &&
+        SupportedFragmentShadingRate.pipelineFragmentShadingRate;
+    if (EnableFragmentShadingRate) {
+      EnabledFragmentShadingRate.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+      EnabledFragmentShadingRate.pipelineFragmentShadingRate = VK_TRUE;
+      EnabledFragmentShadingRate.pNext = Features.pNext;
+      Features.pNext = &EnabledFragmentShadingRate;
+      EnabledDeviceExtensions.push_back(
+          VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+    }
+#endif
+
     if (HasASExts) {
       if (!ASFeatures.accelerationStructure)
         return llvm::createStringError(
@@ -2044,6 +2181,20 @@ public:
                                  Features12.runtimeDescriptorArray &&
                                  Features12.descriptorBindingPartiallyBound;
     Dev->HasMutableDescriptorType = HasMutableDescriptorTypeExt;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    Dev->HasFragmentShadingRateSupport = EnableFragmentShadingRate;
+    if (EnableFragmentShadingRate) {
+      Dev->GetPhysicalDeviceFragmentShadingRates =
+          reinterpret_cast<PFN_vkGetPhysicalDeviceFragmentShadingRatesKHR>(
+              vkGetInstanceProcAddr(
+                  Instance->Instance,
+                  "vkGetPhysicalDeviceFragmentShadingRatesKHR"));
+      if (!Dev->GetPhysicalDeviceFragmentShadingRates)
+        return llvm::createStringError(
+            std::errc::function_not_supported,
+            "Failed to load vkGetPhysicalDeviceFragmentShadingRatesKHR.");
+    }
+#endif
 
     // Load acceleration-structure and ray-tracing-pipeline function pointers
     // after device creation. These two feature sets are independent; the RT
@@ -2396,10 +2547,63 @@ public:
         Name, Device, Pipeline, PipelineLayout, std::move(SetLayouts));
   }
 
+  llvm::Expected<VkExtent2D>
+  getSupportedFragmentShadingRate(FragmentShadingRate Rate) const {
+    const VkExtent2D Requested = getVkFragmentShadingRateExtent(Rate);
+    if (Rate == FragmentShadingRate::Rate1x1)
+      return Requested;
+
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    if (!HasFragmentShadingRateSupport)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "The Vulkan device does not support pipeline fragment shading "
+          "rates.");
+
+    uint32_t RateCount = 0;
+    if (auto Err =
+            VK::toError(GetPhysicalDeviceFragmentShadingRates(
+                            PhysicalDevice, &RateCount, nullptr),
+                        "Failed to query Vulkan fragment shading rates."))
+      return std::move(Err);
+
+    llvm::SmallVector<VkPhysicalDeviceFragmentShadingRateKHR> Rates(RateCount);
+    for (auto &SupportedRate : Rates)
+      SupportedRate.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_KHR;
+    if (auto Err =
+            VK::toError(GetPhysicalDeviceFragmentShadingRates(
+                            PhysicalDevice, &RateCount, Rates.data()),
+                        "Failed to query Vulkan fragment shading rates."))
+      return std::move(Err);
+
+    for (const auto &SupportedRate : Rates)
+      if (SupportedRate.fragmentSize.width == Requested.width &&
+          SupportedRate.fragmentSize.height == Requested.height &&
+          (SupportedRate.sampleCounts & VK_SAMPLE_COUNT_1_BIT))
+        return Requested;
+
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "The Vulkan device does not support the requested fragment shading "
+        "rate for one sample per pixel.");
+#else
+    return llvm::createStringError(
+        std::errc::not_supported,
+        "The Vulkan headers do not support VK_KHR_fragment_shading_rate.");
+#endif
+  }
+
   llvm::Expected<std::unique_ptr<PipelineState>>
   createTraditionalRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const TraditionalRasterPipelineCreateDesc &Desc) override {
+    assert(Desc.ViewportCount > 0 &&
+           Desc.ViewportCount <= offloadtest::MaxViewports);
+    if (auto Err =
+            validateVulkanSampleCount(Desc.SampleCount, "Pipeline SampleCount"))
+      return Err;
+
     const ShaderContainer &VS = Desc.VS;
     const ShaderContainer &PS = Desc.PS;
     const std::optional<ShaderContainer> &HS = Desc.HS;
@@ -2542,6 +2746,7 @@ public:
 
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
+    PassDesc.SampleCount = Desc.SampleCount;
     PassDesc.ColorAttachments.reserve(RTFormats.size());
     for (const Format F : RTFormats) {
       ColorAttachmentFormatDesc CA = {};
@@ -2627,8 +2832,8 @@ public:
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    ViewportCI.viewportCount = 1;
-    ViewportCI.scissorCount = 1;
+    ViewportCI.viewportCount = Desc.ViewportCount;
+    ViewportCI.scissorCount = Desc.ViewportCount;
 
     const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
                                         VK_DYNAMIC_STATE_SCISSOR};
@@ -2647,7 +2852,7 @@ public:
     VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
     MultisampleCI.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MultisampleCI.rasterizationSamples = getVulkanSampleCount(Desc.SampleCount);
 
     VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
     DepthStencilCI.sType =
@@ -2671,6 +2876,28 @@ public:
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPipelineFragmentShadingRateStateCreateInfoKHR FragmentShadingRateCI{};
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1) {
+      auto FragmentSizeOrErr =
+          getSupportedFragmentShadingRate(Desc.ShadingRate);
+      if (!FragmentSizeOrErr)
+        return FragmentSizeOrErr.takeError();
+      FragmentShadingRateCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR;
+      FragmentShadingRateCI.fragmentSize = *FragmentSizeOrErr;
+      FragmentShadingRateCI.combinerOps[0] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      FragmentShadingRateCI.combinerOps[1] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      PipelineCI.pNext = &FragmentShadingRateCI;
+    }
+#else
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "The Vulkan headers do not support VK_KHR_fragment_shading_rate.");
+#endif
     PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pVertexInputState = &VertexInputCI;
@@ -2704,7 +2931,13 @@ public:
   llvm::Expected<std::unique_ptr<PipelineState>> createMeshShaderRasterPipeline(
       llvm::StringRef Name, const BindingsDesc &BindingsDesc,
       const MeshShaderRasterPipelineCreateDesc &Desc) override {
+    if (auto Err =
+            validateVulkanSampleCount(Desc.SampleCount, "Pipeline SampleCount"))
+      return Err;
+
     assert(Desc.RTFormats.size() <= 8);
+    assert(Desc.ViewportCount > 0 &&
+           Desc.ViewportCount <= offloadtest::MaxViewports);
 
     VkShaderStageFlags GraphicsFlags = VK_SHADER_STAGE_MESH_BIT_EXT;
     llvm::SmallVector<VkPipelineShaderStageCreateInfo, 3> ShaderStages;
@@ -2789,6 +3022,7 @@ public:
 
     // Build a RenderPassDesc from the PSO's RT/DS formats.
     RenderPassDesc PassDesc;
+    PassDesc.SampleCount = Desc.SampleCount;
     PassDesc.ColorAttachments.reserve(Desc.RTFormats.size());
     for (const Format F : Desc.RTFormats) {
       ColorAttachmentFormatDesc CA = {};
@@ -2821,8 +3055,8 @@ public:
 
     VkPipelineViewportStateCreateInfo ViewportCI = {};
     ViewportCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    ViewportCI.viewportCount = 1;
-    ViewportCI.scissorCount = 1;
+    ViewportCI.viewportCount = Desc.ViewportCount;
+    ViewportCI.scissorCount = Desc.ViewportCount;
 
     const VkDynamicState DynStates[] = {VK_DYNAMIC_STATE_VIEWPORT,
                                         VK_DYNAMIC_STATE_SCISSOR};
@@ -2841,7 +3075,7 @@ public:
     VkPipelineMultisampleStateCreateInfo MultisampleCI = {};
     MultisampleCI.sType =
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    MultisampleCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    MultisampleCI.rasterizationSamples = getVulkanSampleCount(Desc.SampleCount);
 
     VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
     DepthStencilCI.sType =
@@ -2865,6 +3099,28 @@ public:
 
     VkGraphicsPipelineCreateInfo PipelineCI = {};
     PipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPipelineFragmentShadingRateStateCreateInfoKHR FragmentShadingRateCI{};
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1) {
+      auto FragmentSizeOrErr =
+          getSupportedFragmentShadingRate(Desc.ShadingRate);
+      if (!FragmentSizeOrErr)
+        return FragmentSizeOrErr.takeError();
+      FragmentShadingRateCI.sType =
+          VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR;
+      FragmentShadingRateCI.fragmentSize = *FragmentSizeOrErr;
+      FragmentShadingRateCI.combinerOps[0] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      FragmentShadingRateCI.combinerOps[1] =
+          VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      PipelineCI.pNext = &FragmentShadingRateCI;
+    }
+#else
+    if (Desc.ShadingRate != FragmentShadingRate::Rate1x1)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "The Vulkan headers do not support VK_KHR_fragment_shading_rate.");
+#endif
     PipelineCI.stageCount = static_cast<uint32_t>(ShaderStages.size());
     PipelineCI.pStages = ShaderStages.data();
     PipelineCI.pViewportState = &ViewportCI;
@@ -3053,10 +3309,51 @@ public:
                                           SizeInBytes);
   }
 
+  // Framebuffer limits are format-independent; intersect them with the
+  // per-format image properties.
+  llvm::Error validateSampleCountSupport(const TextureCreateDesc &Desc,
+                                         const VkImageCreateInfo &ImageInfo) {
+    if (Desc.SampleCount == 1)
+      return llvm::Error::success();
+
+    VkImageFormatProperties FmtProps = {};
+    if (auto Err = VK::toError(
+            vkGetPhysicalDeviceImageFormatProperties(
+                PhysicalDevice, ImageInfo.format, ImageInfo.imageType,
+                ImageInfo.tiling, ImageInfo.usage, ImageInfo.flags, &FmtProps),
+            "Format is not supported for the requested image usage."))
+      return Err;
+
+    VkSampleCountFlags Supported = FmtProps.sampleCounts;
+    if (isDepthFormat(Desc.Fmt)) {
+      Supported &= Props.limits.framebufferDepthSampleCounts;
+      if (isStencilFormat(Desc.Fmt))
+        Supported &= Props.limits.framebufferStencilSampleCounts;
+    } else {
+      Supported &= Props.limits.framebufferColorSampleCounts;
+    }
+    const VkSampleCountFlagBits Wanted = getVulkanSampleCount(Desc.SampleCount);
+    if ((Supported & Wanted) == 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "SampleCount %u is not supported for format '%s' on this device "
+          "(supported mask 0x%x).",
+          Desc.SampleCount, getFormatName(Desc.Fmt).data(),
+          static_cast<unsigned>(Supported));
+
+    return llvm::Error::success();
+  }
+
   llvm::Expected<std::unique_ptr<offloadtest::Texture>>
   createTexture(std::string Name, const TextureCreateDesc &Desc) override {
     if (auto Err = validateTextureCreateDesc(Desc))
       return Err;
+    if (auto Err = validateVulkanSampleCount(Desc.SampleCount, "SampleCount"))
+      return Err;
+    if (Desc.Backing == MemoryBacking::Sparse)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Vulkan backend does not yet support sparse texture backing.");
 
     VkImageCreateInfo ImageInfo = {};
     ImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -3065,13 +3362,16 @@ public:
     ImageInfo.extent = {Desc.Width, Desc.Height, 1};
     ImageInfo.mipLevels = Desc.MipLevels;
     ImageInfo.arrayLayers = Desc.ArraySlices;
-    ImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    ImageInfo.samples = getVulkanSampleCount(Desc.SampleCount);
     ImageInfo.tiling = Desc.Location == MemoryLocation::GpuOnly
                            ? VK_IMAGE_TILING_OPTIMAL
                            : VK_IMAGE_TILING_LINEAR;
     ImageInfo.usage = getVulkanImageUsage(Desc.Usage);
     ImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     ImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    if (auto Err = validateSampleCountSupport(Desc, ImageInfo))
+      return Err;
 
     VkImage Image;
     if (auto Err =
@@ -3242,6 +3542,15 @@ private:
     const bool HasShaderAtomicFloatExt = isExtensionSupported(
         DeviceExtensions, VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME);
 
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    VkPhysicalDeviceFragmentShadingRateFeaturesKHR
+        FeaturesFragmentShadingRate{};
+    FeaturesFragmentShadingRate.sType =
+        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADING_RATE_FEATURES_KHR;
+    const bool HasFragmentShadingRateExt = isExtensionSupported(
+        DeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
+#endif
+
     Features.pNext = &Features11;
     if (HasVulkan12)
       Features11.pNext = &Features12;
@@ -3277,6 +3586,12 @@ private:
       FeaturesAtomicFloat.pNext = Features.pNext;
       Features.pNext = &FeaturesAtomicFloat;
     }
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+    if (HasFragmentShadingRateExt) {
+      FeaturesFragmentShadingRate.pNext = Features.pNext;
+      Features.pNext = &FeaturesFragmentShadingRate;
+    }
+#endif
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
 
     Caps.insert(std::make_pair(
@@ -3319,6 +3634,13 @@ private:
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, HasShaderAtomicFloatExt &&            \
                                              FeaturesAtomicFloat.Name)));
+#ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
+#define VULKAN_KHR_FRAGMENT_SHADING_RATE_FEATURE_BOOL(Name)                    \
+  Caps.insert(std::make_pair(                                                  \
+      #Name,                                                                   \
+      makeCapability<bool>(#Name, HasFragmentShadingRateExt &&                 \
+                                      FeaturesFragmentShadingRate.Name)));
+#endif
 #include "VKFeatures.def"
   }
 
@@ -3336,13 +3658,17 @@ public:
 
   llvm::Expected<std::unique_ptr<offloadtest::RenderPass>>
   createRenderPass(const offloadtest::RenderPassDesc &Desc) override {
+    if (auto Err = validateVulkanSampleCount(Desc.SampleCount,
+                                             "RenderPassDesc.SampleCount"))
+      return Err;
+
     llvm::SmallVector<VkAttachmentDescription, 9> Attachments;
     llvm::SmallVector<VkAttachmentReference, 8> ColorRefs;
 
     for (const ColorAttachmentFormatDesc &Color : Desc.ColorAttachments) {
       VkAttachmentDescription AD = {};
       AD.format = getVulkanFormat(Color.Fmt);
-      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.samples = getVulkanSampleCount(Desc.SampleCount);
       AD.loadOp = getVkLoadOp(Color.Load);
       AD.storeOp = getVkStoreOp(Color.Store);
       AD.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -3371,7 +3697,7 @@ public:
       const auto &DS = *Desc.DepthStencil;
       VkAttachmentDescription AD = {};
       AD.format = getVulkanFormat(DS.Fmt);
-      AD.samples = VK_SAMPLE_COUNT_1_BIT;
+      AD.samples = getVulkanSampleCount(Desc.SampleCount);
       AD.loadOp = getVkLoadOp(DS.DepthLoad);
       AD.storeOp = getVkStoreOp(DS.DepthStore);
       AD.stencilLoadOp = getVkLoadOp(DS.StencilLoad);
@@ -3673,7 +3999,8 @@ public:
     // Set initial layout of the image to undefined
     ImageCreateInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     ImageCreateInfo.extent = {static_cast<uint32_t>(B.OutputProps.Width),
-                              static_cast<uint32_t>(B.OutputProps.Height), 1};
+                              static_cast<uint32_t>(B.OutputProps.Height),
+                              static_cast<uint32_t>(B.OutputProps.Depth)};
     if (UsageOverride == 0) {
       ImageCreateInfo.usage =
           VK_IMAGE_USAGE_TRANSFER_DST_BIT |
@@ -3833,11 +4160,20 @@ public:
           "No render target bound for graphics pipeline.");
     const CPUBuffer &RTBuf = *P.Bindings.RTargetBufferPtr;
 
-    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+    auto TexOrErr = offloadtest::createRenderTargetFromCPUBuffer(
+        *this, RTBuf, P.Bindings.SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
 
     IS.RenderTarget = std::move(*TexOrErr);
+
+    if (P.Bindings.SampleCount > 1) {
+      auto ResolveOrErr =
+          offloadtest::createRenderTargetFromCPUBuffer(*this, RTBuf);
+      if (!ResolveOrErr)
+        return ResolveOrErr.takeError();
+      IS.ResolveTarget = std::move(*ResolveOrErr);
+    }
 
     // Create a host-visible staging buffer for readback.
     BufferCreateDesc BufDesc = {};
@@ -3854,7 +4190,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height,
+        P.Bindings.SampleCount);
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -4445,6 +4782,46 @@ public:
     }
   }
 
+  // The legacy executeProgram path records raw barriers rather than using
+  // ComputeEncoder's barrier tracking.
+  void resolveMultisampledTexture(VkCommandBuffer CmdBuffer,
+                                  const VulkanTexture &Src,
+                                  const VulkanTexture &Dst,
+                                  VkImageLayout SrcOldLayout,
+                                  VkAccessFlags SrcAccessMask,
+                                  VkPipelineStageFlags SrcStageMask) {
+    VkImageMemoryBarrier Barriers[2] = {};
+    Barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    Barriers[0].subresourceRange = Src.FullRange;
+    Barriers[0].srcAccessMask = SrcAccessMask;
+    Barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    Barriers[0].oldLayout = SrcOldLayout;
+    Barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    Barriers[0].image = Src.Image;
+
+    // The new resolve target has no contents to preserve.
+    Barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    Barriers[1].subresourceRange = Dst.FullRange;
+    Barriers[1].srcAccessMask = 0;
+    Barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    Barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    Barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    Barriers[1].image = Dst.Image;
+
+    vkCmdPipelineBarrier(CmdBuffer, SrcStageMask,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 2, Barriers);
+
+    VkImageResolve Region = {};
+    Region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    Region.srcSubresource.layerCount = 1;
+    Region.dstSubresource = Region.srcSubresource;
+    Region.extent = {Src.Desc.Width, Src.Desc.Height, 1};
+    vkCmdResolveImage(CmdBuffer, Src.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Dst.Image,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &Region);
+  }
+
   // Record commands to copy a texture into a readback buffer.
   void copyTextureToReadback(VkCommandBuffer CmdBuffer,
                              const VulkanTexture &Tex,
@@ -4515,7 +4892,7 @@ public:
       ImageBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 
       ImageBarrier.subresourceRange = SubRange;
-      ImageBarrier.srcAccessMask = 0;
+      ImageBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
       ImageBarrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
       ImageBarrier.oldLayout = R.ImageLayout;
       ImageBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -4662,17 +5039,13 @@ public:
         return EncOrErr.takeError();
       auto &Encoder = *EncOrErr.get();
 
-      Viewport VP;
-      VP.Width =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Width);
-      VP.Height =
-          static_cast<float>(P.Bindings.RTargetBufferPtr->OutputProps.Height);
-      Encoder.setViewport(VP);
-
-      ScissorRect Scissor;
-      Scissor.Width = static_cast<uint32_t>(VP.Width);
-      Scissor.Height = static_cast<uint32_t>(VP.Height);
-      Encoder.setScissor(Scissor);
+      const llvm::SmallVector<Viewport> Viewports = P.Bindings.getViewports();
+      const llvm::SmallVector<ScissorRect> Scissors = P.Bindings.getScissors();
+      const uint32_t ViewportCount = P.Bindings.getViewportCount();
+      assert(Viewports.size() == ViewportCount);
+      assert(Scissors.size() == ViewportCount);
+      Encoder.setViewports(Viewports);
+      Encoder.setScissors(Scissors);
 
       if (P.isTraditionalRaster()) {
         if (IS.VB)
@@ -4694,12 +5067,26 @@ public:
       }
       Encoder.endEncoding();
 
-      copyTextureToReadback(IS.CB->CmdBuffer,
-                            llvm::cast<VulkanTexture>(*IS.RenderTarget),
-                            llvm::cast<VulkanBuffer>(*IS.RTReadback),
-                            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+      if (IS.ResolveTarget) {
+        resolveMultisampledTexture(
+            IS.CB->CmdBuffer, llvm::cast<VulkanTexture>(*IS.RenderTarget),
+            llvm::cast<VulkanTexture>(*IS.ResolveTarget),
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+        copyTextureToReadback(
+            IS.CB->CmdBuffer, llvm::cast<VulkanTexture>(*IS.ResolveTarget),
+            llvm::cast<VulkanBuffer>(*IS.RTReadback),
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_PIPELINE_STAGE_TRANSFER_BIT);
+      } else {
+        copyTextureToReadback(IS.CB->CmdBuffer,
+                              llvm::cast<VulkanTexture>(*IS.RenderTarget),
+                              llvm::cast<VulkanBuffer>(*IS.RTReadback),
+                              VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                              VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT);
+      }
     }
 
     for (auto &R : IS.Resources)
@@ -4942,6 +5329,7 @@ public:
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
+      PassDesc.SampleCount = P.Bindings.SampleCount;
       PassDesc.ColorAttachments.push_back(ColorAttachment);
       PassDesc.DepthStencil = DSAttachment;
 
@@ -4954,8 +5342,11 @@ public:
       if (P.isTraditionalRaster()) {
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -4992,7 +5383,10 @@ public:
       } else if (P.isMeshShaderRaster()) {
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
+        PipelineDesc.ShadingRate = P.ShadingRate;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
+        PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
+        PipelineDesc.SampleCount = P.Bindings.SampleCount;
         for (auto &Shader : P.Shaders) {
           ShaderContainer SC = {};
           SC.EntryPoint = Shader.Entry;
@@ -5106,28 +5500,14 @@ VulkanCommandBuffer::createRenderEncoder(
         "RenderPassBeginDesc is missing its RenderPass.");
   auto &VKPass = llvm::cast<VulkanRenderPass>(*Desc.Pass);
   const offloadtest::RenderPassDesc &PassDesc = VKPass.Desc;
-  if (Desc.ColorAttachments.size() != PassDesc.ColorAttachments.size())
-    return llvm::createStringError(
-        std::errc::invalid_argument,
-        "RenderPassBeginDesc color attachment count does not match its "
-        "RenderPass.");
-  if (PassDesc.DepthStencil.has_value() != (Desc.DepthStencil != nullptr))
-    return llvm::createStringError(std::errc::invalid_argument,
-                                   "RenderPassBeginDesc depth-stencil "
-                                   "presence does not match its RenderPass.");
-
   uint32_t Width = 0, Height = 0;
-  if (auto Err = findAndValidateRenderPassTextureSize(Desc, &Width, &Height))
+  if (auto Err = validateRenderPassBeginDesc(PassDesc, Desc, &Width, &Height))
     return Err;
 
   llvm::SmallVector<VkImageView, 9> Views;
   llvm::SmallVector<VkClearValue, 9> ClearValues;
 
   for (size_t I = 0; I < Desc.ColorAttachments.size(); ++I) {
-    if (!Desc.ColorAttachments[I])
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "RenderPassBeginDesc has a null color attachment texture.");
     auto &Tex = llvm::cast<VulkanTexture>(*Desc.ColorAttachments[I]);
     if (Tex.View == VK_NULL_HANDLE)
       return llvm::createStringError(

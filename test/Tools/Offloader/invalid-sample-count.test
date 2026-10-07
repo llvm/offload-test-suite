@@ -1,0 +1,82 @@
+#--- vertex.hlsl
+float4 main(float4 position : POSITION) : SV_POSITION { return position; }
+
+#--- pixel.hlsl
+float4 main() : SV_TARGET { return float4(1.0, 0.0, 0.0, 1.0); }
+
+#--- non-power-of-two.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 0.25, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256 # 4x4 @ 16 bytes per pixel
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+  SampleCount: 3
+DescriptorSets: []
+...
+
+#--- too-many-samples.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 12
+    Data: [ 0.0, 0.25, 0.0 ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256 # 4x4 @ 16 bytes per pixel
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+  SampleCount: 128
+DescriptorSets: []
+...
+#--- end
+
+# REQUIRES: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+
+# RUN: not %offloader %t/non-power-of-two.yaml %t-vertex.o %t-pixel.o 2>&1 | FileCheck %s --check-prefix=NOT-POW2
+# NOT-POW2: SampleCount must be one of 1, 2, 4, 8, 16, 32, or 64; got 3
+
+# RUN: not %offloader %t/too-many-samples.yaml %t-vertex.o %t-pixel.o 2>&1 | FileCheck %s --check-prefix=TOO-MANY
+# TOO-MANY: SampleCount must be one of 1, 2, 4, 8, 16, 32, or 64; got 128

@@ -14,8 +14,9 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
+[[vk::binding(2, 0)]] Texture1DArray<float4> Tex1D : register(t1);
 [[vk::binding(0, 1)]] SamplerState Samp : register(s0);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
@@ -30,19 +31,31 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   float2 UVMin = float2(0.5, 0.5) + Offset * 2.0;
 
   // Slice 0: mip 0 all Red, mip 1 Yellow.
-  float4 R0 = Tex.Sample(Samp, float3(UVMag, 0));
-  float4 R1 = Tex.Sample(Samp, float3(UVMin, 0));
+  float4 R0 = Tex2D.Sample(Samp, float3(UVMag, 0));
+  float4 R1 = Tex2D.Sample(Samp, float3(UVMin, 0));
 
   // Slice 1: mip 0 all Blue, mip 1 Green. Minification must stay inside the
   // slice's own mip chain rather than reaching into slice 0.
-  float4 R2 = Tex.Sample(Samp, float3(UVMag, 1));
-  float4 R3 = Tex.Sample(Samp, float3(UVMin, 1));
+  float4 R2 = Tex2D.Sample(Samp, float3(UVMag, 1));
+  float4 R3 = Tex2D.Sample(Samp, float3(UVMin, 1));
+
+  // Texture1DArray::Sample
+  float UMag = 0.5 + float(GTid.x) * 0.0001;
+  float UMin = 0.5 + float(GTid.x) * 2.0;
+  float4 R4 = Tex1D.Sample(Samp, float2(UMag, 0));
+  float4 R5 = Tex1D.Sample(Samp, float2(UMin, 0));
+  float4 R6 = Tex1D.Sample(Samp, float2(UMag, 1));
+  float4 R7 = Tex1D.Sample(Samp, float2(UMin, 1));
 
   if (all(GTid.xy == 0)) {
     Out[0] = R0;
     Out[1] = R1;
     Out[2] = R2;
     Out[3] = R3;
+    Out[4] = R4;
+    Out[5] = R5;
+    Out[6] = R6;
+    Out[7] = R7;
   }
   return float4(0, 0, 0, 0);
 }
@@ -57,7 +70,7 @@ Shaders:
 
 Buffers:
   # 2x2 with 2 mips across 2 slices, slice-major.
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
@@ -73,10 +86,25 @@ Buffers:
             # --- Slice 1, Mip 1 (Green) ---
             0.0, 1.0, 0.0, 1.0 ]
 
+  # 2 texels with 2 mips across 2 slices, slice-major.
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+    Data: [ # --- Slice 0, Mip 0 (all Red) ---
+            1.0, 0.0, 0.0, 1.0,  1.0, 0.0, 0.0, 1.0,
+            # --- Slice 0, Mip 1 (Yellow) ---
+            1.0, 1.0, 0.0, 1.0,
+
+            # --- Slice 1, Mip 0 (all Blue) ---
+            0.0, 0.0, 1.0, 1.0,  0.0, 0.0, 1.0, 1.0,
+            # --- Slice 1, Mip 1 (Green) ---
+            0.0, 1.0, 0.0, 1.0 ]
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 64 # 4 * sizeof(float4)
+    FillSize: 128 # 8 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -84,7 +112,11 @@ Buffers:
     Data: [ 1.0, 0.0, 0.0, 1.0,   # [0] slice 0 magnified -> mip 0 Red
             1.0, 1.0, 0.0, 1.0,   # [1] slice 0 minified  -> mip 1 Yellow
             0.0, 0.0, 1.0, 1.0,   # [2] slice 1 magnified -> mip 0 Blue
-            0.0, 1.0, 0.0, 1.0 ]  # [3] slice 1 minified  -> mip 1 Green
+            0.0, 1.0, 0.0, 1.0,   # [3] slice 1 minified  -> mip 1 Green
+            1.0, 0.0, 0.0, 1.0,   # [4] 1D slice 0 magnified -> mip 0 Red
+            1.0, 1.0, 0.0, 1.0,   # [5] 1D slice 0 minified  -> mip 1 Yellow
+            0.0, 0.0, 1.0, 1.0,   # [6] 1D slice 1 magnified -> mip 0 Blue
+            0.0, 1.0, 0.0, 1.0 ]  # [7] 1D slice 1 minified  -> mip 1 Green
 
   - Name: RT
     Format: Float32
@@ -116,7 +148,7 @@ Samplers:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -124,6 +156,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 1 }
+    - Name: Tex1D
+      Kind: Texture1DArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
   - Resources:
     - Name: Samp
       Kind: Sampler

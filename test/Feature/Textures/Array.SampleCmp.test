@@ -14,10 +14,11 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
-[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] SamplerComparisonState Samp : register(s0);        // Less
 [[vk::binding(2, 0)]] SamplerComparisonState SampGreater : register(s1); // Greater
 [[vk::binding(3, 0)]] RWBuffer<float> Out : register(u0);
+[[vk::binding(4, 0)]] Texture1DArray<float4> Tex1D : register(t1);
 
 float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // Each of the four taps is compared against the reference and the results are
@@ -25,27 +26,42 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
   // uniform slice 1 to 1.0.
   float2 uv = float2(0.5, 0.5);
 
-  float r0 = Tex.SampleCmp(Samp, float3(uv, 0), 0.5); // 0.5<0.2=0, 0.5<0.8=1 -> 0.5
-  float r1 = Tex.SampleCmp(Samp, float3(uv, 1), 0.5); // 0.5<0.9 everywhere  -> 1.0
+  float r0 = Tex2D.SampleCmp(Samp, float3(uv, 0), 0.5); // 0.5<0.2=0, 0.5<0.8=1 -> 0.5
+  float r1 = Tex2D.SampleCmp(Samp, float3(uv, 1), 0.5); // 0.5<0.9 everywhere  -> 1.0
 
   // A ref above slice 1's value fails every tap.
-  float r2 = Tex.SampleCmp(Samp, float3(uv, 1), 0.95); // 0.95<0.9 nowhere -> 0.0
+  float r2 = Tex2D.SampleCmp(Samp, float3(uv, 1), 0.95); // 0.95<0.9 nowhere -> 0.0
 
   // The comparison operator belongs to the sampler, so Greater inverts each
   // per-tap result before the blend.
-  float r3 = Tex.SampleCmp(SampGreater, float3(uv, 0), 0.5); // -> 0.5
-  float r4 = Tex.SampleCmp(SampGreater, float3(uv, 1), 0.5); // 0.5>0.9 nowhere -> 0.0
+  float r3 = Tex2D.SampleCmp(SampGreater, float3(uv, 0), 0.5); // -> 0.5
+  float r4 = Tex2D.SampleCmp(SampGreater, float3(uv, 1), 0.5); // 0.5>0.9 nowhere -> 0.0
 
   // A texel offset moves the footprint within the selected slice. All four
   // taps clamp onto texel (0,0) of that slice: 0.2 on slice 0, 0.9 on slice 1.
-  float r5 = Tex.SampleCmp(Samp, float3(uv, 0), 0.5, int2(-1, -1)); // -> 0.0
-  float r6 = Tex.SampleCmp(Samp, float3(uv, 1), 0.5, int2(-1, -1)); // -> 1.0
+  float r5 = Tex2D.SampleCmp(Samp, float3(uv, 0), 0.5, int2(-1, -1)); // -> 0.0
+  float r6 = Tex2D.SampleCmp(Samp, float3(uv, 1), 0.5, int2(-1, -1)); // -> 1.0
 
   // SampleCmpLevelZero takes the same coordinate and must select the slice the
   // same way, with the mip pinned to 0.
-  float r7 = Tex.SampleCmpLevelZero(Samp, float3(uv, 0), 0.5);        // -> 0.5
-  float r8 = Tex.SampleCmpLevelZero(Samp, float3(uv, 1), 0.5);        // -> 1.0
-  float r9 = Tex.SampleCmpLevelZero(SampGreater, float3(uv, 1), 0.5); // -> 0.0
+  float r7 = Tex2D.SampleCmpLevelZero(Samp, float3(uv, 0), 0.5);        // -> 0.5
+  float r8 = Tex2D.SampleCmpLevelZero(Samp, float3(uv, 1), 0.5);        // -> 1.0
+  float r9 = Tex2D.SampleCmpLevelZero(SampGreater, float3(uv, 1), 0.5); // -> 0.0
+
+  // Texture1DArray::SampleCmp
+  // Use 0.375 so Less and Greater produce different filtered results.
+  float u = 0.375;
+  float r10 = Tex1D.SampleCmp(Samp, float2(u, 0), 0.5);        // 0.5<0.2=0, 0.5<0.8=1 -> 0.25
+  float r11 = Tex1D.SampleCmp(Samp, float2(u, 1), 0.5);        // 0.5<0.9 everywhere -> 1.0
+  float r12 = Tex1D.SampleCmp(Samp, float2(u, 1), 0.95);       // 0.95<0.9 nowhere -> 0.0
+  float r13 = Tex1D.SampleCmp(SampGreater, float2(u, 0), 0.5); // -> 0.75
+  float r14 = Tex1D.SampleCmp(SampGreater, float2(u, 1), 0.5); // 0.5>0.9 nowhere -> 0.0
+  float r15 = Tex1D.SampleCmp(Samp, float2(u, 0), 0.5, -1);    // -> 0.0
+  float r16 = Tex1D.SampleCmp(Samp, float2(u, 1), 0.5, -1);    // -> 1.0
+
+  float r17 = Tex1D.SampleCmpLevelZero(Samp, float2(u, 0), 0.5);        // -> 0.25
+  float r18 = Tex1D.SampleCmpLevelZero(Samp, float2(u, 1), 0.5);        // -> 1.0
+  float r19 = Tex1D.SampleCmpLevelZero(SampGreater, float2(u, 1), 0.5); // -> 0.0
 
   if (all((int2)Pos.xy == 0)) {
     Out[0] = r0;
@@ -58,6 +74,16 @@ float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
     Out[7] = r7;
     Out[8] = r8;
     Out[9] = r9;
+    Out[10] = r10;
+    Out[11] = r11;
+    Out[12] = r12;
+    Out[13] = r13;
+    Out[14] = r14;
+    Out[15] = r15;
+    Out[16] = r16;
+    Out[17] = r17;
+    Out[18] = r18;
+    Out[19] = r19;
   }
   return float4(0, 0, 0, 0);
 }
@@ -72,7 +98,7 @@ Shaders:
 
 Buffers:
   # Slice-major: the whole of slice 0, then slice 1.
-  - Name: Tex
+  - Name: Tex2D
     Format: Depth32
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 2 }
@@ -85,10 +111,19 @@ Buffers:
             0.9,   # slice 1 (0,1)
             0.9 ]  # slice 1 (1,1)
 
+  - Name: Tex1D
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+    Data: [ 0.2,   # slice 0 (0)
+            0.8,   # slice 0 (1)
+            0.9,   # slice 1 (0)
+            0.9 ]  # slice 1 (1)
+
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 40 # 10 * sizeof(float)
+    FillSize: 80 # 20 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -102,7 +137,17 @@ Buffers:
             1.0,   # [6] slice 1, offset (-1,-1) onto 0.9
             0.5,   # [7] slice 0, SampleCmpLevelZero
             1.0,   # [8] slice 1, SampleCmpLevelZero
-            0.0 ]  # [9] slice 1, SampleCmpLevelZero, Greater
+            0.0,   # [9] slice 1, SampleCmpLevelZero, Greater
+            0.25,  # [10] 1D slice 0, Less, ref 0.5
+            1.0,   # [11] 1D slice 1, Less, ref 0.5 -- uniform 0.9
+            0.0,   # [12] 1D slice 1, Less, ref 0.95
+            0.75,  # [13] 1D slice 0, Greater, ref 0.5
+            0.0,   # [14] 1D slice 1, Greater, ref 0.5
+            0.0,   # [15] 1D slice 0, offset (-1) onto 0.2
+            1.0,   # [16] 1D slice 1, offset (-1) onto 0.9
+            0.25,  # [17] 1D slice 0, SampleCmpLevelZero
+            1.0,   # [18] 1D slice 1, SampleCmpLevelZero
+            0.0 ]  # [19] 1D slice 1, SampleCmpLevelZero, Greater
 
   - Name: RT
     Format: Float32
@@ -149,7 +194,7 @@ Results:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -165,6 +210,10 @@ DescriptorSets:
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: Tex1D
+      Kind: Texture1DArray
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 4 }
 ...
 #--- end
 

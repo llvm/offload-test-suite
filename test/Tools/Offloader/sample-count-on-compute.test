@@ -1,0 +1,36 @@
+#--- source.hlsl
+RWStructuredBuffer<int> Out : register(u0);
+
+[numthreads(1,1,1)]
+void main(uint GI : SV_GroupIndex) {
+  Out[GI] = 0;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Out
+    Format: Hex32
+    Stride: 4
+    FillSize: 4
+Bindings:
+  SampleCount: 4
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: not %offloader %t/pipeline.yaml %t.o 2>&1 | FileCheck %s
+# CHECK: Bindings.SampleCount is only valid on a raster pipeline

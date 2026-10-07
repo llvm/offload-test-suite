@@ -96,7 +96,7 @@ Results: []
 
 # RUN: not %offloader %t/too-many-mips.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=TOO-MANY
-# TOO-MANY: error: Texture dimensions 2x2 support at most 2 mip levels, got 3.
+# TOO-MANY: error: Texture dimensions 2x2x1 support at most 2 mip levels, got 3.
 
 # RUN: not %offloader %t/zero-mips.yaml %t.o 2>&1 \
 # RUN:   | FileCheck %s --check-prefix=ZERO-MIPS

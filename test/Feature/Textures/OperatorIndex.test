@@ -1,8 +1,11 @@
 #--- source.hlsl
 [[vk::binding(0, 0)]] Texture2D<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
-[[vk::binding(2, 0)]] RWTexture2D<float> RWTex : register(u1);
+[[vk::binding(2, 0)]] RWTexture2D<float> RWTex2D : register(u1);
 [[vk::binding(3, 0)]] Texture1D<float4> Tex1D : register(t1);
+[[vk::binding(4, 0)]] RWTexture1D<float> RWTex1D : register(u2);
+[[vk::binding(5, 0)]] Texture3D<float4> Tex3D : register(t2);
+[[vk::binding(6, 0)]] RWTexture3D<float> RWTex3D : register(u3);
 
 [numthreads(1, 1, 1)]
 void main() {
@@ -14,12 +17,42 @@ void main() {
 
   // The UAV is single-channel: a typed UAV load is only guaranteed for the
   // single-component 32-bit formats. All four texels are packed into one result.
-  Out[4] = float4(RWTex[uint2(0, 0)], RWTex[uint2(1, 0)],
-                  RWTex[uint2(0, 1)], RWTex[uint2(1, 1)]);
+  Out[4] = float4(RWTex2D[uint2(0, 0)], RWTex2D[uint2(1, 0)],
+                  RWTex2D[uint2(0, 1)], RWTex2D[uint2(1, 1)]);
 
   // Texture1D::operator[] (int)
   Out[5] = Tex1D[0]; // Red
   Out[6] = Tex1D[1]; // Green
+
+  // RWTexture1D::operator[] (uint)
+  float2 values = float2(RWTex1D[uint(0)], RWTex1D[uint(1)]);
+
+  // Reverse the texels to test writing through operator[].
+  RWTex1D[uint(0)] = values.y;
+  RWTex1D[uint(1)] = values.x;
+  Out[7] = float4(values, RWTex1D[uint(0)], RWTex1D[uint(1)]);
+
+  // Texture3D::operator[] (int3)
+  Out[8] = Tex3D[int3(0, 0, 0)];  // Red
+  Out[9] = Tex3D[int3(1, 0, 0)];  // Green
+  Out[10] = Tex3D[int3(0, 1, 0)]; // Blue
+  Out[11] = Tex3D[int3(1, 1, 0)]; // White
+  Out[12] = Tex3D[int3(0, 0, 1)]; // Cyan
+  Out[13] = Tex3D[int3(1, 0, 1)]; // Magenta
+  Out[14] = Tex3D[int3(0, 1, 1)]; // Yellow
+  Out[15] = Tex3D[int3(1, 1, 1)]; // Black
+
+  // RWTexture3D::operator[] (uint3)
+  Out[16] = float4(RWTex3D[uint3(0, 0, 0)], RWTex3D[uint3(1, 0, 0)],
+                   RWTex3D[uint3(0, 1, 0)], RWTex3D[uint3(1, 1, 0)]); // z = 0
+  Out[17] = float4(RWTex3D[uint3(0, 0, 1)], RWTex3D[uint3(1, 0, 1)],
+                   RWTex3D[uint3(0, 1, 1)], RWTex3D[uint3(1, 1, 1)]); // z = 1
+
+  // Swap the texels across the two z planes to test writing through operator[].
+  float2 values3D = float2(RWTex3D[uint3(0, 0, 0)], RWTex3D[uint3(0, 0, 1)]);
+  RWTex3D[uint3(0, 0, 0)] = values3D.y;
+  RWTex3D[uint3(0, 0, 1)] = values3D.x;
+  Out[18] = float4(values3D, RWTex3D[uint3(0, 0, 0)], RWTex3D[uint3(0, 0, 1)]);
 }
 
 //--- pipeline.yaml
@@ -39,7 +72,7 @@ Buffers:
             1.0, 1.0, 1.0, 1.0,
             1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1x1) - Yellow
 
-  - Name: RWTex
+  - Name: RWTex2D
     Format: Float32
     Channels: 1
     OutputProps: { Width: 2, Height: 2, Depth: 1 }
@@ -56,21 +89,67 @@ Buffers:
             0.0, 1.0, 0.0, 1.0,
             1.0, 1.0, 0.0, 1.0 ] # Mip 1 (1 texel) - Yellow
 
+  - Name: RWTex1D
+    Format: Float32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0.25,   # (0)
+            0.5 ]   # (1)
+
+  - Name: Tex3D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,  # Mip 0 (2x2x2)
+            0.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 1.0, 1.0,
+            0.0, 1.0, 1.0, 1.0,
+            1.0, 0.0, 1.0, 1.0,
+            1.0, 1.0, 0.0, 1.0,
+            0.0, 0.0, 0.0, 1.0,
+            0.5, 0.5, 0.5, 1.0 ] # Mip 1 (1x1x1) - Grey
+
+  - Name: RWTex3D
+    Format: Float32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 0.25,   # (0,0,0)
+            0.5,    # (1,0,0)
+            0.75,   # (0,1,0)
+            1.0,    # (1,1,0)
+            1.25,   # (0,0,1)
+            1.5,    # (1,0,1)
+            1.75,   # (0,1,1)
+            2.0 ]   # (1,1,1)
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 112 # 7 * sizeof(float4)
+    FillSize: 304 # 19 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
     Channels: 4
-    Data: [ 1.0, 0.0, 0.0, 1.0,   # [0]
-            0.0, 1.0, 0.0, 1.0,   # [1]
-            0.0, 0.0, 1.0, 1.0,   # [2]
-            1.0, 1.0, 1.0, 1.0,   # [3]
-            0.25, 0.5, 0.75, 1.0, # [4] the UAV's four texels
-            1.0, 0.0, 0.0, 1.0,   # [5]
-            0.0, 1.0, 0.0, 1.0 ]  # [6]
+    Data: [ 1.0, 0.0, 0.0, 1.0,      # [0]
+            0.0, 1.0, 0.0, 1.0,      # [1]
+            0.0, 0.0, 1.0, 1.0,      # [2]
+            1.0, 1.0, 1.0, 1.0,      # [3]
+            0.25, 0.5, 0.75, 1.0,    # [4] the UAV's four texels
+            1.0, 0.0, 0.0, 1.0,      # [5]
+            0.0, 1.0, 0.0, 1.0,      # [6]
+            0.25, 0.5, 0.5, 0.25,    # [7] before and after reversing the 1D UAV
+            1.0, 0.0, 0.0, 1.0,      # [8]
+            0.0, 1.0, 0.0, 1.0,      # [9]
+            0.0, 0.0, 1.0, 1.0,      # [10]
+            1.0, 1.0, 1.0, 1.0,      # [11]
+            0.0, 1.0, 1.0, 1.0,      # [12]
+            1.0, 0.0, 1.0, 1.0,      # [13]
+            1.0, 1.0, 0.0, 1.0,      # [14]
+            0.0, 0.0, 0.0, 1.0,      # [15]
+            0.25, 0.5, 0.75, 1.0,    # [16] 3D UAV z = 0 plane
+            1.25, 1.5, 1.75, 2.0,    # [17] 3D UAV z = 1 plane
+            0.25, 1.25, 1.25, 0.25 ] # [18] before and after swapping across z
 
 DescriptorSets:
   - Resources:
@@ -78,7 +157,7 @@ DescriptorSets:
       Kind: Texture2D
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
-    - Name: RWTex
+    - Name: RWTex2D
       Kind: RWTexture2D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
@@ -86,6 +165,18 @@ DescriptorSets:
       Kind: Texture1D
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 3 }
+    - Name: RWTex1D
+      Kind: RWTexture1D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+    - Name: RWTex3D
+      Kind: RWTexture3D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 6 }
     - Name: Out
       Kind: RWBuffer
       DirectXBinding: { Register: 0, Space: 0 }

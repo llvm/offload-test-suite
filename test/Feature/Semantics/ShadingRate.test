@@ -1,0 +1,102 @@
+#--- vertex.hlsl
+struct VSOutput {
+    float4 position : SV_POSITION;
+    uint shadingRate : SV_ShadingRate;
+};
+
+VSOutput main(float4 Pos : POSITION) {
+    VSOutput O;
+    O.position = Pos;
+    O.shadingRate = 5; // 2x2
+    return O;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+  uint shadingRate : SV_ShadingRate;
+};
+
+RWStructuredBuffer<uint> Output : register(u0);
+
+float4 main(PSInput Input) : SV_TARGET {
+    Output[0] = Input.shadingRate;
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+ShadingRate: 2x2
+Buffers:
+  # Full-screen triangle covering the 2x2 render target.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+      -1.0, -1.0, 0.0, 1.0,
+      -1.0,  3.0, 0.0, 1.0,
+       3.0, -1.0, 0.0, 1.0,
+    ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 2x2 @ 16 bytes per pixel
+    OutputProps:
+      Width: 2
+      Height: 2
+      Depth: 1
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+    FillValue: 0
+  - Name: Output_Expected
+    Format: UInt32
+    Stride: 4
+    # Shading-rate encoding: horizontal 2x is bit 2, vertical 2x is bit 0.
+    Data: [ 5 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: ShadingRate
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# SV_ShadingRate is a Shader Model 6.4 pixel-shader input containing the
+# encoded final shading rate selected for the invocation.
+# REQUIRES: SM_6_4
+# REQUIRES: FragmentShadingRate
+# UNSUPPORTED: Metal
+# UNSUPPORTED: Lavapipe
+
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/212567
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_4 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_4 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o

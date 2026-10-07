@@ -65,6 +65,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1531
+# XFAIL Clang  && Vulkan && AMD
+
 # Unimplemented https://github.com/microsoft/DirectXShaderCompiler/issues/8796
 # XFAIL: DXC && Vulkan
 

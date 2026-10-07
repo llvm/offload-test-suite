@@ -68,10 +68,15 @@ struct ClearDepthStencil {
 
 using ClearValue = std::variant<ClearColor, ClearDepthStencil>;
 
-// TODO: only 1D and 2D textures (2D texture arrays, and texture cubes) are
-// supported. 3D textures need their ResourceDimension case filled in, plus
-// validation between usage and shape (e.g. 3D textures cannot be used as
-// DepthStencil).
+inline llvm::Error validateSampleCount(uint32_t SampleCount,
+                                       llvm::StringRef FieldName) {
+  if (SampleCount != 0)
+    return llvm::Error::success();
+  return llvm::createStringError(std::errc::invalid_argument,
+                                 "%s must be greater than zero.",
+                                 FieldName.str().c_str());
+}
+
 struct TextureCreateDesc {
   MemoryLocation Location = MemoryLocation::GpuOnly;
   MemoryBacking Backing = MemoryBacking::Automatic;
@@ -80,9 +85,11 @@ struct TextureCreateDesc {
   ResourceDimension Dim = ResourceDimension::Dim2D;
   uint32_t Width = 1;
   uint32_t Height = 1;
+  uint32_t Depth = 1;
   uint32_t MipLevels = 1;
   uint32_t ArraySlices = 1;
   bool IsArray = false;
+  uint32_t SampleCount = 1;
   // Clear value for render target or depth/stencil textures.
   // How and when this is applied depends on the backend:
   // - DX uses it as an optimized clear hint at resource creation time
@@ -100,6 +107,10 @@ struct TextureCreateDesc {
     assert(Mip < MipLevels && "Mip level index out of bounds.");
     return std::max(1u, Height >> Mip);
   }
+  uint32_t getMipDepth(uint32_t Mip) const {
+    assert(Mip < MipLevels && "Mip level index out of bounds.");
+    return std::max(1u, Depth >> Mip);
+  }
 };
 
 inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
@@ -109,38 +120,36 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "Format '%s' is not compatible with texture creation.",
         getFormatName(Desc.Fmt).data());
 
-  // 3D textures are not implemented yet.
-  if (Desc.Dim == ResourceDimension::Dim3D)
-    return llvm::createStringError(
-        std::errc::not_supported,
-        "Only 1D and 2D textures and texture cubes are supported.");
-
-  if (Desc.Width == 0 || Desc.Height == 0)
+  if (Desc.Width == 0 || Desc.Height == 0 || Desc.Depth == 0)
     return llvm::createStringError(
         std::errc::invalid_argument,
-        "Texture dimensions must be non-zero, got %ux%u.", Desc.Width,
-        Desc.Height);
+        "Texture dimensions must be non-zero, got %ux%ux%u.", Desc.Width,
+        Desc.Height, Desc.Depth);
 
   if (Desc.MipLevels == 0)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "Texture must have at least one mip level.");
 
-  // A full mip chain halves the largest extent until it reaches 1x1, so the
-  // texture supports floor(log2(max(Width, Height))) + 1 levels.
-  // TODO: Account for Depth when 3D textures are supported.
+  // A full mip chain halves the largest extent until it reaches 1, so the
+  // texture supports floor(log2(max(Width, Height, Depth))) + 1 levels.
   uint32_t MaxMipLevels = 0;
-  for (uint32_t Extent = std::max(Desc.Width, Desc.Height); Extent != 0;
-       Extent >>= 1)
+  for (uint32_t Extent = std::max({Desc.Width, Desc.Height, Desc.Depth});
+       Extent != 0; Extent >>= 1)
     ++MaxMipLevels;
   if (Desc.MipLevels > MaxMipLevels)
     return llvm::createStringError(
         std::errc::invalid_argument,
-        "Texture dimensions %ux%u support at most %u mip levels, got %u.",
-        Desc.Width, Desc.Height, MaxMipLevels, Desc.MipLevels);
+        "Texture dimensions %ux%ux%u support at most %u mip levels, got %u.",
+        Desc.Width, Desc.Height, Desc.Depth, MaxMipLevels, Desc.MipLevels);
 
   if (Desc.ArraySlices == 0)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "A texture requires at least one slice.");
+
+  if (Desc.Dim == ResourceDimension::Dim3D &&
+      (Desc.IsArray || Desc.ArraySlices != 1))
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "A 3D texture cannot be a texture array.");
 
   if (Desc.Dim == ResourceDimension::Cube) {
     // A cube is six layers, one per face.
@@ -183,6 +192,12 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         "DepthStencil usage requires a depth format, got '%s'.",
         getFormatName(Desc.Fmt).data());
 
+  if (Desc.Dim == ResourceDimension::Dim3D && (IsDepth || IsDS))
+    return llvm::createStringError(
+        std::errc::invalid_argument,
+        "A 3D texture cannot have a depth format or be created with "
+        "DepthStencil usage.");
+
   // Render targets and depth/stencil textures only support a single mip level.
   if ((IsRT || IsDS) && Desc.MipLevels != 1)
     return llvm::createStringError(
@@ -196,6 +211,36 @@ inline llvm::Error validateTextureCreateDesc(const TextureCreateDesc &Desc) {
         std::errc::not_supported,
         "Array slices are not supported for render target or depth/stencil "
         "textures.");
+
+  if (auto Err = validateSampleCount(Desc.SampleCount, "SampleCount"))
+    return Err;
+  if (Desc.SampleCount > 1) {
+    // TODO: Remove this error on (!IsRT && !IsDS) with Texture2DMS support.
+    if (!IsRT && !IsDS)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Standalone multisampled textures are not supported yet; "
+          "RenderTarget or DepthStencil usage is required.");
+    if ((Desc.Usage & TextureUsage::Sampled) != 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Shader-readable multisampled textures (Texture2DMS) are not "
+          "supported yet.");
+    if ((Desc.Usage & TextureUsage::Storage) != 0)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Writable multisampled textures (RWTexture2DMS) are not supported "
+          "yet.");
+    // Sparse residency is not implemented for multisampled attachments.
+    if (Desc.Backing == MemoryBacking::Sparse)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Sparse multisampled attachments are not supported.");
+    if (Desc.Dim != ResourceDimension::Dim2D)
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Multisampling is only supported for 2D textures.");
+  }
 
   // A clear value requires RenderTarget or DepthStencil usage, and the
   // variant must match.

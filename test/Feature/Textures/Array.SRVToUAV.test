@@ -1,7 +1,9 @@
 #--- source.hlsl
 
-[[vk::binding(0, 0)]] Texture2DArray<float4> In : register(t0);
-[[vk::binding(1, 0)]] RWTexture2DArray<float4> Out : register(u1);
+[[vk::binding(0, 0)]] Texture2DArray<float4> In2D : register(t0);
+[[vk::binding(1, 0)]] RWTexture2DArray<float4> Out2D : register(u1);
+[[vk::binding(2, 0)]] Texture1DArray<float4> In1D : register(t1);
+[[vk::binding(3, 0)]] RWTexture1DArray<float4> Out1D : register(u2);
 
 [numthreads(4,1,1)]
 void main(uint GI : SV_GroupIndex) {
@@ -9,7 +11,11 @@ void main(uint GI : SV_GroupIndex) {
   // Both textures declare two mips, but a UAV only addresses the most detailed
   // one, so mip 1 of Out must survive the round trip untouched.
   for (uint Slice = 0; Slice < 2; ++Slice)
-    Out[uint3(GID.xy, Slice)] = In[uint3(GID.xy, Slice)].bgra;
+    Out2D[uint3(GID.xy, Slice)] = In2D[uint3(GID.xy, Slice)].bgra;
+
+  if (GID.y == 0)
+    for (uint Slice = 0; Slice < 2; ++Slice)
+      Out1D[uint2(GID.x, Slice)] = In1D[uint2(GID.x, Slice)].bgra;
 }
 //--- pipeline.yaml
 ---
@@ -18,7 +24,7 @@ Shaders:
     Entry: main
 Buffers:
   # Slice-major data: the full mip chain of slice 0, then slice 1.
-  - Name: In
+  - Name: In2D
     Format: Float32
     Channels: 4
     Data: [1.0, 0.0, 0.0, 1.0,  # Slice 0, Mip 0
@@ -33,7 +39,7 @@ Buffers:
            0.0, 0.0, 0.5, 1.0]  # Slice 1, Mip 1
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
   # Mip 1 is seeded so the readback can prove the UAV writes left it alone.
-  - Name: Out
+  - Name: Out2D
     Format: Float32
     Channels: 4
     Data: [0.0, 0.0, 0.0, 0.0,  # Slice 0, Mip 0
@@ -47,41 +53,90 @@ Buffers:
            0.0, 0.0, 0.0, 0.0,
            0.75, 0.75, 0.75, 1.0]  # Slice 1, Mip 1 (untouched by the UAV)
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
-  - Name: ExpectedOut
+  - Name: ExpectedOut2D
     Format: Float32
     Channels: 4
-    Data: [0.0, 0.0, 1.0, 1.0,  # Slice 0, Mip 0: In swizzled
+    Data: [0.0, 0.0, 1.0, 1.0,  # Slice 0, Mip 0: In2D swizzled
            0.0, 1.0, 0.0, 1.0,
            1.0, 0.0, 0.0, 1.0,
            0.0, 1.0, 1.0, 1.0,
            0.25, 0.25, 0.25, 1.0,  # Slice 0, Mip 1 unchanged
-           1.0, 1.0, 0.0, 1.0,  # Slice 1, Mip 0: In swizzled
+           1.0, 1.0, 0.0, 1.0,  # Slice 1, Mip 0: In2D swizzled
            1.0, 0.0, 1.0, 1.0,
            0.5, 0.5, 0.5, 1.0,
            1.0, 1.0, 1.0, 1.0,
            0.75, 0.75, 0.75, 1.0]  # Slice 1, Mip 1 unchanged
     OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+  - Name: In1D
+    Format: Float32
+    Channels: 4
+    Data: [1.0, 0.0, 0.0, 1.0,  # Slice 0, Mip 0
+           0.0, 1.0, 0.0, 1.0,
+           0.5, 0.0, 0.0, 1.0,  # Slice 0, Mip 1
+           0.0, 1.0, 1.0, 1.0,  # Slice 1, Mip 0
+           1.0, 0.0, 1.0, 1.0,
+           0.0, 0.0, 0.5, 1.0]  # Slice 1, Mip 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+  # Mip 1 is seeded so the readback can prove the UAV writes left it alone.
+  - Name: Out1D
+    Format: Float32
+    Channels: 4
+    Data: [0.0, 0.0, 0.0, 0.0,     # Slice 0, Mip 0
+           0.0, 0.0, 0.0, 0.0,
+           0.25, 0.25, 0.25, 1.0,  # Slice 0, Mip 1 (untouched by the UAV)
+           0.0, 0.0, 0.0, 0.0,     # Slice 1, Mip 0
+           0.0, 0.0, 0.0, 0.0,
+           0.75, 0.75, 0.75, 1.0]  # Slice 1, Mip 1 (untouched by the UAV)
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
+  - Name: ExpectedOut1D
+    Format: Float32
+    Channels: 4
+    Data: [0.0, 0.0, 1.0, 1.0,     # Slice 0, Mip 0: In1D swizzled
+           0.0, 1.0, 0.0, 1.0,
+           0.25, 0.25, 0.25, 1.0,  # Slice 0, Mip 1 unchanged
+           1.0, 1.0, 0.0, 1.0,     # Slice 1, Mip 0: In1D swizzled
+           1.0, 0.0, 1.0, 1.0,
+           0.75, 0.75, 0.75, 1.0]  # Slice 1, Mip 1 unchanged
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2, ArraySlices: 2 }
 Results:
-  - Result: ArraySRVToUAVTest
+  - Result: 2DArraySRVToUAVTest
     Rule: BufferExact
-    Actual: Out
-    Expected: ExpectedOut
+    Actual: Out2D
+    Expected: ExpectedOut2D
+  - Result: 1DArraySRVToUAVTest
+    Rule: BufferExact
+    Actual: Out1D
+    Expected: ExpectedOut1D
 DescriptorSets:
   - Resources:
-    - Name: In
+    - Name: In2D
       Kind: Texture2DArray
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
+    - Name: Out2D
       Kind: RWTexture2DArray
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
+    - Name: In1D
+      Kind: Texture1DArray
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out1D
+      Kind: RWTexture1DArray
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 3
 ...
 #--- end
 

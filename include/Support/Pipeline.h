@@ -17,6 +17,7 @@
 #include "API/Enums.h"
 #include "API/Resources.h"
 #include "API/Sampler.h"
+#include "API/Viewport.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
@@ -122,8 +123,10 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::StructuredBuffer:
   case ResourceKind::ByteAddressBuffer:
   case ResourceKind::Texture1D:
+  case ResourceKind::Texture1DArray:
   case ResourceKind::Texture2D:
   case ResourceKind::Texture2DArray:
+  case ResourceKind::Texture3D:
   case ResourceKind::TextureCube:
   case ResourceKind::TextureCubeArray:
   case ResourceKind::AccelerationStructure:
@@ -132,8 +135,11 @@ static inline DescriptorKind getDescriptorKind(ResourceKind RK) {
   case ResourceKind::RWStructuredBuffer:
   case ResourceKind::RWBuffer:
   case ResourceKind::RWByteAddressBuffer:
+  case ResourceKind::RWTexture1D:
+  case ResourceKind::RWTexture1DArray:
   case ResourceKind::RWTexture2D:
   case ResourceKind::RWTexture2DArray:
+  case ResourceKind::RWTexture3D:
     return DescriptorKind::UAV;
 
   case ResourceKind::ConstantBuffer:
@@ -278,10 +284,15 @@ struct Resource {
     case ResourceKind::Buffer:
     case ResourceKind::RWBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::Sampler:
@@ -310,10 +321,15 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -335,10 +351,15 @@ struct Resource {
       return true;
     case ResourceKind::Sampler:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -351,10 +372,15 @@ struct Resource {
   bool isTexture() const {
     switch (Kind) {
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::SampledTexture2D:
@@ -375,6 +401,8 @@ struct Resource {
 
   bool isTextureArray() const {
     switch (Kind) {
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::Texture2DArray:
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::TextureCubeArray:
@@ -387,8 +415,11 @@ struct Resource {
     case ResourceKind::RWByteAddressBuffer:
     case ResourceKind::ConstantBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::Sampler:
     case ResourceKind::SampledTexture2D:
@@ -412,6 +443,9 @@ struct Resource {
     assert(isTexture() && "Only textures have a dimension");
     switch (Kind) {
     case ResourceKind::Texture1D:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::Texture1DArray:
+    case ResourceKind::RWTexture1DArray:
       return ResourceDimension::Dim1D;
     case ResourceKind::Texture2D:
     case ResourceKind::RWTexture2D:
@@ -419,6 +453,9 @@ struct Resource {
     case ResourceKind::RWTexture2DArray:
     case ResourceKind::SampledTexture2D:
       return ResourceDimension::Dim2D;
+    case ResourceKind::Texture3D:
+    case ResourceKind::RWTexture3D:
+      return ResourceDimension::Dim3D;
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
       return ResourceDimension::Cube;
@@ -495,8 +532,10 @@ struct Resource {
     case ResourceKind::StructuredBuffer:
     case ResourceKind::ByteAddressBuffer:
     case ResourceKind::Texture1D:
+    case ResourceKind::Texture1DArray:
     case ResourceKind::Texture2D:
     case ResourceKind::Texture2DArray:
+    case ResourceKind::Texture3D:
     case ResourceKind::TextureCube:
     case ResourceKind::TextureCubeArray:
     case ResourceKind::ConstantBuffer:
@@ -507,8 +546,11 @@ struct Resource {
     case ResourceKind::RWBuffer:
     case ResourceKind::RWStructuredBuffer:
     case ResourceKind::RWByteAddressBuffer:
+    case ResourceKind::RWTexture1D:
+    case ResourceKind::RWTexture1DArray:
     case ResourceKind::RWTexture2D:
     case ResourceKind::RWTexture2DArray:
+    case ResourceKind::RWTexture3D:
       return true;
     }
     llvm_unreachable("All cases handled");
@@ -566,11 +608,24 @@ struct IOBindings {
   CPUBuffer *RTargetBufferPtr = nullptr;
   PrimitiveTopology Topology = PrimitiveTopology::TriangleList;
 
+  uint32_t SampleCount = 1;
+
   // Set if Topology == PatchList. Validated in
   // Pipeline.cpp::validatePipelineKind. Valid range is 1..32 (matches both
   // D3D12's per-CP-patchlist topologies and Vulkan's
   // VkPipelineTessellationStateCreateInfo::patchControlPoints).
   std::optional<uint32_t> PatchControlPoints;
+
+  // Leave both empty to use one full-target viewport and scissor.
+  llvm::SmallVector<Viewport> Viewports;
+  llvm::SmallVector<ScissorRect> Scissors;
+
+  uint32_t getViewportCount() const {
+    return Viewports.empty() ? 1 : static_cast<uint32_t>(Viewports.size());
+  }
+
+  llvm::SmallVector<Viewport> getViewports() const;
+  llvm::SmallVector<ScissorRect> getScissors() const;
 
   uint32_t getVertexStride() const {
     uint32_t Stride = 0;
@@ -727,6 +782,7 @@ struct Pipeline {
   ShaderPipelineKind Kind;
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
+  FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
 
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
@@ -818,6 +874,8 @@ LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Shader)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::dx::RootParameter)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Result)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::VertexAttribute)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::Viewport)
+LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::ScissorRect)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::SpecializationConstant)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantBlock)
 LLVM_YAML_IS_SEQUENCE_VECTOR(offloadtest::PushConstantValue)
@@ -867,6 +925,14 @@ template <> struct MappingTraits<offloadtest::VulkanBinding> {
 
 template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::Viewport> {
+  static void mapping(IO &I, offloadtest::Viewport &V);
+};
+
+template <> struct MappingTraits<offloadtest::ScissorRect> {
+  static void mapping(IO &I, offloadtest::ScissorRect &S);
 };
 
 template <> struct MappingTraits<offloadtest::PushConstantValue> {
@@ -1060,6 +1126,9 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(StructuredBuffer);
     ENUM_CASE(ByteAddressBuffer);
     ENUM_CASE(Texture1D);
+    ENUM_CASE(RWTexture1D);
+    ENUM_CASE(Texture1DArray);
+    ENUM_CASE(RWTexture1DArray);
     ENUM_CASE(Texture2D);
     ENUM_CASE(RWBuffer);
     ENUM_CASE(RWStructuredBuffer);
@@ -1071,6 +1140,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::ResourceKind> {
     ENUM_CASE(AccelerationStructure);
     ENUM_CASE(Texture2DArray);
     ENUM_CASE(RWTexture2DArray);
+    ENUM_CASE(Texture3D);
+    ENUM_CASE(RWTexture3D);
     ENUM_CASE(TextureCube);
     ENUM_CASE(TextureCubeArray);
 #undef ENUM_CASE
@@ -1149,6 +1220,18 @@ template <> struct ScalarEnumerationTraits<offloadtest::PrimitiveTopology> {
     ENUM_CASE(PatchList);
     ENUM_CASE(LineList);
 #undef ENUM_CASE
+  }
+};
+
+template <> struct ScalarEnumerationTraits<offloadtest::FragmentShadingRate> {
+  static void enumeration(IO &I, offloadtest::FragmentShadingRate &V) {
+    I.enumCase(V, "1x1", offloadtest::FragmentShadingRate::Rate1x1);
+    I.enumCase(V, "1x2", offloadtest::FragmentShadingRate::Rate1x2);
+    I.enumCase(V, "2x1", offloadtest::FragmentShadingRate::Rate2x1);
+    I.enumCase(V, "2x2", offloadtest::FragmentShadingRate::Rate2x2);
+    I.enumCase(V, "2x4", offloadtest::FragmentShadingRate::Rate2x4);
+    I.enumCase(V, "4x2", offloadtest::FragmentShadingRate::Rate4x2);
+    I.enumCase(V, "4x4", offloadtest::FragmentShadingRate::Rate4x4);
   }
 };
 

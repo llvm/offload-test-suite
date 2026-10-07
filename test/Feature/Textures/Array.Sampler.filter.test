@@ -1,5 +1,5 @@
 #--- source.hlsl
-[[vk::binding(0, 0)]] Texture2DArray<float4> Tex : register(t0);
+[[vk::binding(0, 0)]] Texture2DArray<float4> Tex2D : register(t0);
 [[vk::binding(1, 0)]] RWBuffer<float4> Out : register(u0);
 #ifndef NO_TEXTURECUBEARRAY
 [[vk::binding(2, 0)]] TextureCubeArray<float4> TexCubeArray : register(t1);
@@ -7,6 +7,7 @@
 #else
 #define CUBEARRAY_OR(Call, Expect) (Expect)
 #endif
+[[vk::binding(3, 0)]] Texture1DArray<float4> Tex1D : register(t2);
 [[vk::binding(0, 1)]] SamplerState Samp : register(s0);
 
 [numthreads(1, 1, 1)]
@@ -18,16 +19,16 @@ void main() {
   // Slice 0 is [Red, Green], slice 1 is [Blue, White]. Sampling each slice at
   // its texel centres must return that slice's texels: filtering happens
   // within a slice and never between slices.
-  Out[0] = Tex.SampleLevel(Samp, float3(0.25, 0.5, 0), 0.0); // Red
-  Out[1] = Tex.SampleLevel(Samp, float3(0.75, 0.5, 0), 0.0); // Green
-  Out[2] = Tex.SampleLevel(Samp, float3(0.25, 0.5, 1), 0.0); // Blue
-  Out[3] = Tex.SampleLevel(Samp, float3(0.75, 0.5, 1), 0.0); // White
+  Out[0] = Tex2D.SampleLevel(Samp, float3(0.25, 0.5, 0), 0.0); // Red
+  Out[1] = Tex2D.SampleLevel(Samp, float3(0.75, 0.5, 0), 0.0); // Green
+  Out[2] = Tex2D.SampleLevel(Samp, float3(0.25, 0.5, 1), 0.0); // Blue
+  Out[3] = Tex2D.SampleLevel(Samp, float3(0.75, 0.5, 1), 0.0); // White
 
   // Midway between the two texels of a slice, Linear filtering does blend --
   // within that slice only. If the slice coordinate were treated as a third
   // texel axis these would pull in the other slice's colours instead.
-  Out[4] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 0), 0.0); // (0.5, 0.5, 0, 1)
-  Out[5] = Tex.SampleLevel(Samp, float3(0.5, 0.5, 1), 0.0); // (0.5, 0.5, 1, 1)
+  Out[4] = Tex2D.SampleLevel(Samp, float3(0.5, 0.5, 0), 0.0); // (0.5, 0.5, 0, 1)
+  Out[5] = Tex2D.SampleLevel(Samp, float3(0.5, 0.5, 1), 0.0); // (0.5, 0.5, 1, 1)
 
   // TextureCubeArray: N cubes of six faces each (6*N layers) in the face order
   // +X, -X, +Y, -Y, +Z, -Z. The coordinate is a float4: xyz (direction) and w
@@ -44,6 +45,14 @@ void main() {
                          float4(0.0, 0.5, 0.5, 1.0)); // cube 1 -Z
   Out[11] = CUBEARRAY_OR(TexCubeArray.SampleLevel(Samp, float4( 0, 1,  0, 1), 0),
                          float4(0.0, 0.0, 0.5, 1.0)); // cube 1 +Y
+
+  // Texture1DArray::SampleLevel
+  Out[12] = Tex1D.SampleLevel(Samp, float2(0.25, 0), 0.0); // Red
+  Out[13] = Tex1D.SampleLevel(Samp, float2(0.75, 0), 0.0); // Green
+  Out[14] = Tex1D.SampleLevel(Samp, float2(0.25, 1), 0.0); // Blue
+  Out[15] = Tex1D.SampleLevel(Samp, float2(0.75, 1), 0.0); // White
+  Out[16] = Tex1D.SampleLevel(Samp, float2(0.5, 0), 0.0);  // (0.5, 0.5, 0, 1)
+  Out[17] = Tex1D.SampleLevel(Samp, float2(0.5, 1), 0.0);  // (0.5, 0.5, 1, 1)
 }
 
 //--- pipeline.yaml
@@ -54,7 +63,7 @@ Shaders:
 
 Buffers:
   # Slice-major: the whole of slice 0, then slice 1.
-  - Name: Tex
+  - Name: Tex2D
     Format: Float32
     Channels: 4
     OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
@@ -83,10 +92,19 @@ Buffers:
             0.5, 0.0, 0.5, 1.0,   # +Z
             0.0, 0.5, 0.5, 1.0 ]  # -Z
 
+  - Name: Tex1D
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1, ArraySlices: 2 }
+    Data: [ 1.0, 0.0, 0.0, 1.0,   # slice 0, texel 0: Red
+            0.0, 1.0, 0.0, 1.0,   # slice 0, texel 1: Green
+            0.0, 0.0, 1.0, 1.0,   # slice 1, texel 0: Blue
+            1.0, 1.0, 1.0, 1.0 ]  # slice 1, texel 1: White
+
   - Name: Out
     Format: Float32
     Channels: 4
-    FillSize: 192 # 12 * sizeof(float4)
+    FillSize: 288 # 18 * sizeof(float4)
 
   - Name: Expected
     Format: Float32
@@ -102,7 +120,13 @@ Buffers:
             0.0, 0.0, 1.0, 1.0,   # [8]  cube array, cube 0 +Y Blue
             0.5, 0.0, 0.0, 1.0,   # [9]  cube array, cube 1 +X
             0.0, 0.5, 0.5, 1.0,   # [10] cube array, cube 1 -Z
-            0.0, 0.0, 0.5, 1.0 ]  # [11] cube array, cube 1 +Y
+            0.0, 0.0, 0.5, 1.0,   # [11] cube array, cube 1 +Y
+            1.0, 0.0, 0.0, 1.0,   # [12] 1D slice 0 Red
+            0.0, 1.0, 0.0, 1.0,   # [13] 1D slice 0 Green
+            0.0, 0.0, 1.0, 1.0,   # [14] 1D slice 1 Blue
+            1.0, 1.0, 1.0, 1.0,   # [15] 1D slice 1 White
+            0.5, 0.5, 0.0, 1.0,   # [16] 1D slice 0 Red/Green blend
+            0.5, 0.5, 1.0, 1.0 ]  # [17] 1D slice 1 Blue/White blend
 
 Samplers:
   - Name: Samp
@@ -119,7 +143,7 @@ Results:
 
 DescriptorSets:
   - Resources:
-    - Name: Tex
+    - Name: Tex2D
       Kind: Texture2DArray
       DirectXBinding: { Register: 0, Space: 0 }
       VulkanBinding: { Binding: 0 }
@@ -131,6 +155,10 @@ DescriptorSets:
       Kind: TextureCubeArray
       DirectXBinding: { Register: 1, Space: 0 }
       VulkanBinding: { Binding: 2 }
+    - Name: Tex1D
+      Kind: Texture1DArray
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 3 }
   - Resources:
     - Name: Samp
       Kind: Sampler

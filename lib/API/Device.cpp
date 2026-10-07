@@ -129,8 +129,8 @@ offloadtest::initializeDevices(const DeviceConfig Config) {
 }
 
 llvm::Expected<std::unique_ptr<Texture>>
-offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
-                                             const CPUBuffer &Buf) {
+offloadtest::createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf,
+                                             uint32_t SampleCount) {
   auto TexFmtOrErr = toFormat(Buf.Format, Buf.Channels);
   if (!TexFmtOrErr)
     return TexFmtOrErr.takeError();
@@ -142,6 +142,7 @@ offloadtest::createRenderTargetFromCPUBuffer(Device &Dev,
   Desc.Width = Buf.OutputProps.Width;
   Desc.Height = Buf.OutputProps.Height;
   Desc.MipLevels = 1;
+  Desc.SampleCount = SampleCount;
   Desc.OptimizedClearValue = ClearColor{};
 
   if (auto Err = validateTextureDescMatchesCPUBuffer(Desc, Buf))
@@ -323,7 +324,8 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
 
 llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
-                                             uint32_t Height) {
+                                             uint32_t Height,
+                                             uint32_t SampleCount) {
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
   Desc.Usage = TextureUsage::DepthStencil;
@@ -331,6 +333,7 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   Desc.Width = Width;
   Desc.Height = Height;
   Desc.MipLevels = 1;
+  Desc.SampleCount = SampleCount;
   Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
 
   return Dev.createTexture("DepthStencil", Desc);

@@ -125,9 +125,6 @@ Results:
 # REQUIRES: !DirectX || ResourceBindingTier3
 # REQUIRES: !Vulkan || (VulkanRuntimeDescriptorArray && VulkanDescriptorBindingPartiallyBound)
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/133831
-# XFAIL: Clang
-
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
 # XFAIL: Metal
