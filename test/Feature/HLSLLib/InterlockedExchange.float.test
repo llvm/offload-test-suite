@@ -200,8 +200,8 @@ DescriptorSets:
 
 # REQUIRES: Float32GroupSharedAtomics
 
-# Bug: https://github.com/llvm/llvm-project/issues/227051
-# XFAIL: Clang && DirectX
+# Bug: https://github.com/llvm/llvm-project/issues/229600
+# XFAIL: Clang && WARP && DirectX
 
 # Bug: https://github.com/llvm/llvm-project/issues/227064
 # XFAIL: Clang && Vulkan
