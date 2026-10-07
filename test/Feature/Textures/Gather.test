@@ -184,6 +184,12 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # XFAIL: Metal
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
+
+# Driver bug https://github.com/llvm/offload-test-suite/issues/1552
+# UNSUPPORTED: Lavapipe
+
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

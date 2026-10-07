@@ -83,7 +83,8 @@ DescriptorSets:
 # XFAIL: DXC && Metal
 
 # Bug https://github.com/llvm/llvm-project/issues/220731
-# XFAIL: Clang && Vulkan
+# Does not reproduce on lavapipe.
+# XFAIL: Clang && Vulkan && !Lavapipe
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

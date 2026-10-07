@@ -64,7 +64,9 @@ llvm_config.with_system_environment(
 
 # Environment equivalents (useful for ninja):
 #   OFFLOADTEST_GPU_NAME
-GPUName = os.environ.get("OFFLOADTEST_GPU_NAME", "")
+GPUName = os.environ.get(
+    "OFFLOADTEST_GPU_NAME", getattr(config, "offloadtest_gpu_name", "")
+)
 ShouldSearchByGPUName = len(GPUName) > 0
 
 tools = [
@@ -378,7 +380,7 @@ tools.append(ToolSubst("obj2yaml", FindTool("obj2yaml")))
 llvm_config.add_tool_substitutions(tools, tool_dirs)
 
 api_query = os.path.join(config.offloadtest_tools_dir, "api-query")
-query_string = subprocess.check_output(api_query)
+query_string = subprocess.check_output(api_query, env=config.environment)
 devices = yaml.safe_load(query_string)
 target_device = None
 # Find the right device to configure against

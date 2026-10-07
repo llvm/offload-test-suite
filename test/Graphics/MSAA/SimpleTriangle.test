@@ -70,6 +70,9 @@ DescriptorSets: []
 # XFAIL: Clang && !Vulkan
 # REQUIRES: goldenimage
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
+# XFAIL: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl

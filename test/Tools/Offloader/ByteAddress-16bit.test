@@ -86,6 +86,9 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
+# Bug https://github.com/llvm/offload-test-suite/issues/1554
+# XFAIL: Lavapipe && DXC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

@@ -232,6 +232,9 @@ DescriptorSets:
 
 # REQUIRES: Int16
 
+# Lavapipe does not support SPV_KHR_compute_shader_derivatives.
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

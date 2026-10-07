@@ -192,8 +192,7 @@ DescriptorSets:
 # own Vulkan driver uses the order above and passes.)
 # XFAIL: Intel && DirectX
 
-# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
-# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
 # UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t

@@ -75,6 +75,11 @@ DescriptorSets:
 
 # REQUIRES: Vulkan
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
+
+# Bug https://github.com/llvm/offload-test-suite/issues/1562
+# XFAIL: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/simple.hlsl
 # RUN: %offloader %t/simple.yaml %t.o | FileCheck %s

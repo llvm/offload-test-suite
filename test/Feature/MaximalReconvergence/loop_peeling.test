@@ -48,6 +48,9 @@ DescriptorSets:
 
 # UNSUPPORTED: Vulkan && !VK_KHR_shader_maximal_reconvergence
 
+# Lavapipe does not support SPV_KHR_maximal_reconvergence.
+# UNSUPPORTED: Lavapipe
+
 # Bug https://github.com/llvm/llvm-project/issues/165288
 # XFAIL: Clang && !Vulkan
 

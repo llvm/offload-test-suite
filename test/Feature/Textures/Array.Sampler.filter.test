@@ -170,6 +170,12 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
 # XFAIL: Metal
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
+
+# Driver bug https://github.com/llvm/offload-test-suite/issues/1552
+# UNSUPPORTED: Lavapipe
+
+
 # RUN: split-file %s %t
 # Clang does not implement TextureCubeArray yet: https://github.com/llvm/offload-test-suite/issues/1381
 # RUN: %dxc_target -T cs_6_0 %if Clang %{ -DNO_TEXTURECUBEARRAY %} -Fo %t.o %t/source.hlsl
