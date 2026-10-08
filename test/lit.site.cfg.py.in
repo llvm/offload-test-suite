@@ -7,9 +7,7 @@ config.offloadtest_src_root = path(r"@OFFLOADTEST_TEST_ROOT@")
 config.offloadtest_tools_dir = lit_config.substitute(path(r"@OFFLOADTEST_TOOLS_DIR@"))
 config.llvm_tools_dir = lit_config.substitute(path(r"@LLVM_TOOLS_DIR@"))
 config.offloadtest_dxc = '"' + path(r"@DXC_EXECUTABLE@") + '"'
-config.offloadtest_supports_spirv = (
-    r"@SUPPORTS_SPIRV@".lower() in ("1", "on", "true", "yes")
-)
+config.offloadtest_supports_spirv = @SUPPORTS_SPIRV@
 config.offloadtest_test_clang = @FORCE_CLANG@
 config.offloadtest_test_warp = @FORCE_WARP@
 if config.offloadtest_test_warp:
