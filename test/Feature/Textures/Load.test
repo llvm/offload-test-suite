@@ -215,8 +215,6 @@ Results:
 ...
 #--- end
 
-# Bug: https://github.com/llvm/llvm-project/issues/229618
-# XFAIL: Lavapipe && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl

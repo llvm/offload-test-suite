@@ -135,8 +135,8 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/llvm-project/issues/164008
 # XFAIL: Clang && Vulkan
 
-# Test bug https://github.com/llvm/offload-test-suite/issues/1560
-# XFAIL: Lavapipe
+# Fails with the Vulkan validation layer enabled:
+# https://github.com/llvm/offload-test-suite/issues/1560
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
