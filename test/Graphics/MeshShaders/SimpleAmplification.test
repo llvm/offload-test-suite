@@ -103,8 +103,9 @@ REQUIRES: MeshShader,goldenimage
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/136966
 # XFAIL: Clang
-# Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
-# XFAIL: Lavapipe
+
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
+# UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T as_6_5 -Fo %t-amplification.o %t/amplification.hlsl

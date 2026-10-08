@@ -80,6 +80,8 @@ Results:
 # REQUIRES: acceleration-structure
 # XFAIL: Clang
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
+# UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl

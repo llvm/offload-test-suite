@@ -80,6 +80,8 @@ Results:
 ...
 #--- end
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
+# UNSUPPORTED: Lavapipe
 
 # REQUIRES: acceleration-structure
 # XFAIL: Clang
