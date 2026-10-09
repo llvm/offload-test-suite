@@ -172,13 +172,6 @@ def main():
         default="",
         help="WARP_ARCHITECTURE value (only for *-warp-d3d12 suites).",
     )
-    p.add_argument(
-        "--gpu-name",
-        default="",
-        help="Regex matched against the GPU description to select a device "
-        "(default: none; OFFLOADTEST_GPU_NAME in the environment overrides at run time).",
-    )
-
     args = p.parse_args()
 
     if args.list_suites:
@@ -259,7 +252,7 @@ def main():
             "DXC_DIR": dxc_dir,
             "GOLDENIMAGE_DIR": golden_dir,
             "suite": suite,
-            "gpu_name": args.gpu_name,
+            "gpu_name": "",
             "TEST_d3d12": "True" if d3d12 else "False",
             "TEST_vk": "True" if vk else "False",
             "TEST_mtl": "True" if mtl else "False",
