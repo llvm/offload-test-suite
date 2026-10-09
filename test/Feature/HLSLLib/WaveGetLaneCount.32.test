@@ -39,10 +39,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Clang/Vulkan passes on Lavapipe; other drivers still require XFAIL.
-# https://github.com/llvm/llvm-project/issues/99159
-# XFAIL: Clang && Vulkan && !Lavapipe
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
