@@ -54,9 +54,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/99131
-# XFAIL: Clang
-
 # A bug in the Metal Shader Converter caused it to mis-translate this operation.
 # Version 3 fixes this issue.
 # UNSUPPORTED: Clang && Metal && !metal-shaderconverter-3.0.0-or-later
