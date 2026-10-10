@@ -71,7 +71,8 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/llvm-project/issues/192523
-# XFAIL: Clang && Vulkan
+# Does not reproduce on lavapipe.
+# XFAIL: Clang && Vulkan && !Lavapipe
 
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8581
 # XFAIL: DXC && Vulkan

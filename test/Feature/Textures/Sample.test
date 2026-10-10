@@ -310,9 +310,11 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # XFAIL: Metal
 
-# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
-# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# Driver bug https://github.com/llvm/offload-test-suite/issues/1553
+
+# Driver bug https://github.com/llvm/offload-test-suite/issues/1552
 # UNSUPPORTED: Lavapipe
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
