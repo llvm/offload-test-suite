@@ -172,6 +172,7 @@ def main():
         default="",
         help="WARP_ARCHITECTURE value (only for *-warp-d3d12 suites).",
     )
+
     args = p.parse_args()
 
     if args.list_suites:
@@ -252,7 +253,6 @@ def main():
             "DXC_DIR": dxc_dir,
             "GOLDENIMAGE_DIR": golden_dir,
             "suite": suite,
-            "gpu_name": "",
             "TEST_d3d12": "True" if d3d12 else "False",
             "TEST_vk": "True" if vk else "False",
             "TEST_mtl": "True" if mtl else "False",
