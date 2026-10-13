@@ -73,7 +73,7 @@ REQUIRES: MeshShader, goldenimage
 # Unimplemented https://github.com/llvm/llvm-project/issues/136966
 # XFAIL: Clang
 
-# Lavapipe crash: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
 # UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t

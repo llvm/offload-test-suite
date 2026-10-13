@@ -178,6 +178,13 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1466
 # XFAIL: Metal
 
+# Unimplemented: https://github.com/llvm/llvm-project/issues/143523
+# XFAIL: Clang && DirectX
+
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
