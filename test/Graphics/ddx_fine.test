@@ -81,6 +81,10 @@ DescriptorSets: []
 ...
 #--- end
 
+# Bug https://github.com/llvm/wg-hlsl/issues/145
+# Bug https://github.com/llvm/wg-hlsl/issues/146
+# XFAIL: Clang && DirectX || Clang && Metal
+
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe
