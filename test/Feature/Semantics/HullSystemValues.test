@@ -241,6 +241,7 @@ Results:
 # UNSUPPORTED: Metal
 
 # Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
 # UNSUPPORTED: Lavapipe
 
 # XFAIL: Clang
