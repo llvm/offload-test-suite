@@ -181,6 +181,9 @@ Results:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/143523
 # XFAIL: Clang && DirectX
 
+# Driver bug: https://github.com/llvm/offload-test-suite/issues/1552
+# UNSUPPORTED: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
