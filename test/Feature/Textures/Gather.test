@@ -184,6 +184,9 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # XFAIL: Metal
 
+# Driver Bug:https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
+# XFAIL: Lavapipe
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
