@@ -120,7 +120,8 @@ Results:
 # XFAIL: Clang
 
 # Driver bug: https://github.com/llvm/offload-test-suite/issues/1553
-# XFAIL: Lavapipe
+# Bug: https://github.com/llvm/offload-test-suite/issues/1561
+# UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t
 # RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
