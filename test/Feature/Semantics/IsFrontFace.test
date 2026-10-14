@@ -1,0 +1,112 @@
+# Checks that SV_IsFrontFace reports the facing of the rasterized triangle.
+#
+# Draws 4 triangles into a 4x1 render target, each covering exactly one pixel.
+# Pixel centers are at NDC x = -0.75, -0.25, +0.25, +0.75 (y = 0). Shared edges
+# fall at NDC x in {-0.5, 0, +0.5}, so none coincide with a pixel center.
+#
+#   Triangles 0,1 are CCW (front-facing under the CCW=front convention).
+#   Triangles 2,3 are CW  (back-facing).
+#
+# The pixel shader writes Output[pixel.x] = SV_IsFrontFace ? 1 : 0, so the
+# input is live and cannot be optimized away. Expected: [1, 1, 0, 0].
+
+#--- vertex.hlsl
+float4 main(float4 pos : POSITION) : SV_POSITION {
+  return pos;
+}
+
+#--- pixel.hlsl
+RWStructuredBuffer<uint> Output : register(u0);
+
+float4 main(float4 position : SV_POSITION,
+            bool isFront : SV_IsFrontFace) : SV_TARGET {
+  Output[(uint)position.x] = isFront ? 1u : 0u;
+  return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+      # Triangle 0 (CCW, pixel 0):
+      -1.0, -1.0, 0.0, 1.0,
+       0.0, -1.0, 0.0, 1.0,
+      -1.0,  1.0, 0.0, 1.0,
+      # Triangle 1 (CCW, pixel 1):
+       0.0, -1.0, 0.0, 1.0,
+       0.0,  1.0, 0.0, 1.0,
+      -1.0,  1.0, 0.0, 1.0,
+      # Triangle 2 (CW, pixel 2):
+       0.0, -1.0, 0.0, 1.0,
+       0.0,  1.0, 0.0, 1.0,
+       1.0, -1.0, 0.0, 1.0,
+      # Triangle 3 (CW, pixel 3):
+       0.0,  1.0, 0.0, 1.0,
+       1.0,  1.0, 0.0, 1.0,
+       1.0, -1.0, 0.0, 1.0,
+    ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 64 # 4x1 @ 16 bytes per pixel
+    OutputProps:
+      Height: 1
+      Width: 4
+      Depth: 1
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 16 # 4 x uint32
+    # Sentinel so an unwritten pixel is distinguishable from back-facing (0).
+    FillValue: 0xFFFFFFFF
+  - Name: Output_Expected
+    Format: UInt32
+    Stride: 4
+    Data: [ 1, 1, 0, 0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: IsFrontFace
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
+# UNSUPPORTED: Lavapipe
+
+# Clang's DXIL lowering of plain graphics-stage inputs (even the vertex shader's
+# POSITION) emits loadInput with an undef row index, which dxv rejects.
+# Unrelated to SV_IsFrontFace; same reason GraphicsSystemValues.test is XFAIL.
+# Clang's SPIR-V path works (verified on a real Vulkan GPU).
+# XFAIL: Clang && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
