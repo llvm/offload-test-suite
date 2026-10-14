@@ -133,7 +133,7 @@ DescriptorSets:
 # XFAIL: Metal
 
 # Barrier is only available for the DirectX target
-# XFAIL: Vulkan
+# XFAIL: Vulkan && Clang
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_8 -Fo %t.o %t/source.hlsl
