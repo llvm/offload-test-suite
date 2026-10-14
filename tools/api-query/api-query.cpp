@@ -11,20 +11,36 @@
 
 #include "API/Capabilities.h"
 #include "API/Device.h"
+#include "Support/HostInfo.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/InitLLVM.h"
+#include "llvm/Support/YAMLParser.h"
 
 using namespace llvm;
 using namespace offloadtest;
+
+static void printQuotedYAMLScalar(raw_ostream &OS, StringRef Value) {
+  OS << '"' << yaml::escape(Value, /*EscapePrintable=*/false) << '"';
+}
 
 int main(int ArgC, char **ArgV) {
   const InitLLVM X(ArgC, ArgV);
   cl::ParseCommandLineOptions(ArgC, ArgV, "GPU API Query Tool");
 
   const ExitOnError ExitOnErr("api-query: error: ");
+
+  const HostInfo Host = ExitOnErr(HostInfo::query());
+  outs() << "Host:\n";
+  outs() << "  Operating System: ";
+  printQuotedYAMLScalar(outs(), Host.OperatingSystem);
+  outs() << "\n  OS Version: ";
+  printQuotedYAMLScalar(outs(), Host.OSVersion);
+  outs() << "\n  Architecture: ";
+  printQuotedYAMLScalar(outs(), Host.Architecture);
+  outs() << '\n';
 
   const DeviceConfig Config;
   auto DevicesOrErr = initializeDevices(Config);
@@ -44,13 +60,9 @@ int main(int ArgC, char **ArgV) {
     // may contain ':' characters (e.g. Qualcomm's Vulkan driverInfo is
     // "Driver Build: ..."). Emit as a double-quoted YAML scalar so
     // lit.cfg.py's yaml.safe_load() can parse the output.
-    outs() << "  Driver Version: \"";
-    for (const char C : D->getDriverVersion()) {
-      if (C == '"' || C == '\\')
-        outs() << '\\';
-      outs() << C;
-    }
-    outs() << "\"\n";
+    outs() << "  Driver Version: ";
+    printQuotedYAMLScalar(outs(), D->getDriverVersion());
+    outs() << '\n';
     outs() << "  GPUGeneration: " << D->getGPUGeneration() << "\n";
     outs() << "  FamilyPrefix: " << format_hex(D->getFamilyPrefix(), 6) << "\n";
     outs() << "  Features: \n";

@@ -1,0 +1,8 @@
+# RUN: %api_query | FileCheck %s --check-prefixes=CHECK,%if host-arm64 %{ARM%} %else %{X86%}
+
+# CHECK-LABEL: Host:
+# CHECK: Operating System: "
+# CHECK: OS Version: "
+# CHECK: Architecture: "
+# X86-SAME: x86
+# ARM-SAME: arm
