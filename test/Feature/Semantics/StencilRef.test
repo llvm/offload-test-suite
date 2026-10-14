@@ -10,6 +10,9 @@ float4 main(float4 position : POSITION) : SV_POSITION {
 #ifndef REFERENCE_BASE
 #define REFERENCE_BASE 1
 #endif
+#ifndef REFERENCE_STEP
+#define REFERENCE_STEP 1
+#endif
 
 struct PSOutput {
   float4 color : SV_Target;
@@ -19,7 +22,7 @@ struct PSOutput {
 PSOutput main(float4 position : SV_Position) {
   PSOutput output;
   output.color = float4(1, 0, 0, 1);
-  output.reference = REFERENCE_BASE + (position.x < 1 ? 0 : 1);
+  output.reference = REFERENCE_BASE + (position.x < 1 ? 0 : REFERENCE_STEP);
   return output;
 }
 
@@ -260,6 +263,7 @@ Results:
 
 # Shader references 1 and 2 are compared against a stencil clear value of 1.
 # Equal accepts only the first pixel; NotEqual accepts only the second.
+# The max case uses references 255 and 254 to stay within 8 bits.
 # Ignoring SV_StencilRef (the fixed-function reference is 0) cannot produce
 # either expected pattern. Reversing winding exercises both stencil faces.
 # REQUIRES: !DirectX || ShaderStencilRef
@@ -272,7 +276,7 @@ Results:
 # RUN: %dxc_target -T vs_6_0 -DREVERSE_WINDING -Fo %t-reversed.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %dxc_target -T ps_6_0 -DREFERENCE_BASE=0 -Fo %t-defaults.o %t/pixel.hlsl
-# RUN: %dxc_target -T ps_6_0 -DREFERENCE_BASE=255 -Fo %t-max.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -DREFERENCE_BASE=255 -DREFERENCE_STEP=-1 -Fo %t-max.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
 # RUN: %offloader %t/pipeline.yaml %t-reversed.o %t-pixel.o
 # RUN: %offloader %t/not-equal.yaml %t-vertex.o %t-pixel.o
