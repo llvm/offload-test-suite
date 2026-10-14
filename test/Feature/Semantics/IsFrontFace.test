@@ -1,14 +1,14 @@
 # Checks that SV_IsFrontFace reports the facing of the rasterized triangle.
 #
-# Draws 4 triangles into a 4x1 render target, each covering exactly one pixel.
+# Draws 4 triangles into a 4x1 render target, each covering one pixel center.
 # Pixel centers are at NDC x = -0.75, -0.25, +0.25, +0.75 (y = 0). Shared edges
 # fall at NDC x in {-0.5, 0, +0.5}, so none coincide with a pixel center.
 #
-#   Triangles 0,1 are CCW (front-facing under the CCW=front convention).
+#   Triangles 0,1 are CCW (front-facing under our CCW=front convention).
 #   Triangles 2,3 are CW  (back-facing).
 #
-# The pixel shader writes Output[pixel.x] = SV_IsFrontFace ? 1 : 0, so the
-# input is live and cannot be optimized away. Expected: [1, 1, 0, 0].
+# The pixel shader writes Output[pixel.x] = SV_IsFrontFace ? 1 : 0.
+# Expected: [1, 1, 0, 0].
 
 #--- vertex.hlsl
 float4 main(float4 pos : POSITION) : SV_POSITION {
@@ -100,10 +100,9 @@ Results:
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
 # UNSUPPORTED: Lavapipe
 
-# Clang's DXIL lowering of plain graphics-stage inputs (even the vertex shader's
-# POSITION) emits loadInput with an undef row index, which dxv rejects.
-# Unrelated to SV_IsFrontFace; same reason GraphicsSystemValues.test is XFAIL.
-# Clang's SPIR-V path works (verified on a real Vulkan GPU).
+# Clang's DXIL lowering of graphics-stage inputs emits a loadInput with an
+# invalid row index, which dxv rejects. Not specific to SV_IsFrontFace.
+# TODO: Remove when Clang supports graphics-stage DXIL input/output lowering.
 # XFAIL: Clang && DirectX
 
 # RUN: split-file %s %t
