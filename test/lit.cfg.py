@@ -207,6 +207,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("MeshShader")
         if device["Features"].get("BarycentricsSupported", False):
             config.available_features.add("Barycentrics")
+        if device["Features"].get("PSSpecifiedStencilRefSupported", False):
+            config.available_features.add("ShaderStencilRef")
         if (
             device["Features"].get("VariableShadingRateTier", "NotSupported")
             != "NotSupported"

@@ -1,1 +1,2 @@
 add_offloadtest_library(Support Pipeline.cpp Check.cpp OffloadMigration.cpp)
+target_link_libraries(OffloadTestSupport INTERFACE LLVMSupport)

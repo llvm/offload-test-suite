@@ -66,6 +66,45 @@ static llvm::Error validateMetalSampleCount(MTL::Device *Device,
   return llvm::Error::success();
 }
 
+static MTL::CompareFunction getMetalCompareFunction(CompareFunction Func) {
+  switch (Func) {
+  case CompareFunction::Never:
+    return MTL::CompareFunctionNever;
+  case CompareFunction::Less:
+    return MTL::CompareFunctionLess;
+  case CompareFunction::Equal:
+    return MTL::CompareFunctionEqual;
+  case CompareFunction::LessEqual:
+    return MTL::CompareFunctionLessEqual;
+  case CompareFunction::Greater:
+    return MTL::CompareFunctionGreater;
+  case CompareFunction::NotEqual:
+    return MTL::CompareFunctionNotEqual;
+  case CompareFunction::GreaterEqual:
+    return MTL::CompareFunctionGreaterEqual;
+  case CompareFunction::Always:
+    return MTL::CompareFunctionAlways;
+  }
+  llvm_unreachable("All compare function cases handled");
+}
+
+static void configureMetalStencilState(MTL::DepthStencilDescriptor *Desc,
+                                       const StencilState &State) {
+  if (!State.Enabled)
+    return;
+  MTL::StencilDescriptor *Stencil = MTL::StencilDescriptor::alloc()->init();
+  Stencil->setStencilCompareFunction(
+      getMetalCompareFunction(State.ComparisonOp));
+  Stencil->setStencilFailureOperation(MTL::StencilOperationKeep);
+  Stencil->setDepthFailureOperation(MTL::StencilOperationKeep);
+  Stencil->setDepthStencilPassOperation(MTL::StencilOperationKeep);
+  Stencil->setReadMask(0xff);
+  Stencil->setWriteMask(0xff);
+  Desc->setFrontFaceStencil(Stencil);
+  Desc->setBackFaceStencil(Stencil);
+  Stencil->release();
+}
+
 static llvm::Error toError(const IRError *Err, llvm::StringRef Context) {
   if (!Err)
     return llvm::Error::success();
@@ -1905,8 +1944,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height,
-        P.Bindings.SampleCount);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height, P.Bindings.SampleCount,
+        static_cast<uint8_t>(P.Stencil ? P.Stencil->ClearValue : 0));
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -2689,8 +2728,15 @@ public:
         MTL::DepthStencilDescriptor::alloc()->init();
     DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
     DSDesc->setDepthWriteEnabled(true);
+    configureMetalStencilState(DSDesc, Desc.Stencil);
     MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
     DSDesc->release();
+    if (!DSState) {
+      PSO->release();
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to create Metal depth/stencil state.");
+    }
 
     return std::make_unique<MTLPipelineState>(Name, std::move(RootSig),
                                               std::move(ArgBuffer), PSO,
@@ -2800,8 +2846,15 @@ public:
         MTL::DepthStencilDescriptor::alloc()->init();
     DSDesc->setDepthCompareFunction(MTL::CompareFunctionLess);
     DSDesc->setDepthWriteEnabled(true);
+    configureMetalStencilState(DSDesc, Desc.Stencil);
     MTL::DepthStencilState *DSState = Device->newDepthStencilState(DSDesc);
     DSDesc->release();
+    if (!DSState) {
+      PSO->release();
+      return llvm::createStringError(
+          std::errc::not_supported,
+          "Failed to create Metal depth/stencil state.");
+    }
 
     // Pull threads-per-threadgroup from shader reflection.
     MTL::Size MeshTGSize(1, 1, 1);
@@ -3043,6 +3096,7 @@ public:
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
+        PipelineDesc.Stencil = P.Stencil.value_or(StencilState{});
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
@@ -3075,6 +3129,7 @@ public:
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
+        PipelineDesc.Stencil = P.Stencil.value_or(StencilState{});
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;
@@ -3103,7 +3158,9 @@ public:
       DSAttachment.Fmt = Format::D32FloatS8Uint;
       DSAttachment.DepthLoad = LoadAction::Clear;
       DSAttachment.DepthStore = StoreAction::Store;
-      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilLoad = P.Stencil && P.Stencil->Enabled
+                                     ? LoadAction::Clear
+                                     : LoadAction::DontCare;
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;

@@ -1,0 +1,154 @@
+#--- vertex.hlsl
+float4 main(float4 position : POSITION) : SV_Position { return position; }
+
+#--- pixel.hlsl
+float4 main() : SV_Target { return float4(1, 0, 0, 1); }
+
+#--- pipeline.yaml
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 1
+  ComparisonOp: Less
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilLess
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+#--- equal.yaml
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 1
+  ComparisonOp: Equal
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0, 0, 0, 0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilEqual
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+#--- disabled.yaml
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: false
+  ClearValue: 1
+  ComparisonOp: Equal
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilDisabled
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+#--- end
+
+# Without a shader-exported reference, stencil compares reference 0 against
+# the clear value 1. Less passes; Equal rejects. This needs no optional
+# shader-stencil-export capability.
+# Clang does not yet lower DXIL vertex/pixel input and output operations.
+# XFAIL: Clang && !Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/equal.yaml %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/disabled.yaml %t-vertex.o %t-pixel.o

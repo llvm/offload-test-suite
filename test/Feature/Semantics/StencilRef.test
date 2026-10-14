@@ -1,0 +1,281 @@
+#--- vertex.hlsl
+float4 main(float4 position : POSITION) : SV_POSITION {
+#ifdef REVERSE_WINDING
+  position.x = -position.x;
+#endif
+  return position;
+}
+
+#--- pixel.hlsl
+#ifndef REFERENCE_BASE
+#define REFERENCE_BASE 1
+#endif
+
+struct PSOutput {
+  float4 color : SV_Target;
+  uint reference : SV_StencilRef;
+};
+
+PSOutput main(float4 position : SV_Position) {
+  PSOutput output;
+  output.color = float4(1, 0, 0, 1);
+  output.reference = REFERENCE_BASE + (position.x < 1 ? 0 : 1);
+  return output;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 1
+  ComparisonOp: Equal
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 32
+    OutputProps:
+      Width: 2
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1, 0, 0, 0, 0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilEqual
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- not-equal.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 1
+  ComparisonOp: NotEqual
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 32
+    OutputProps:
+      Width: 2
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0, 0, 0, 0, 1, 0, 0, 1 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilNotEqual
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- disabled.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: false
+  ClearValue: 1
+  ComparisonOp: Equal
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 32
+    OutputProps:
+      Width: 2
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1, 1, 0, 0, 1 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilDisabled
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- defaults.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 32
+    OutputProps:
+      Width: 2
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1, 0, 0, 0, 0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilDefaults
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- max.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 255
+  ComparisonOp: Equal
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [
+       0,  3, 0.5, 1,
+       3, -3, 0.5, 1,
+      -3, -3, 0.5, 1,
+    ]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 32
+    OutputProps:
+      Width: 2
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1, 0, 0, 0, 0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilMaxClearValue
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# Shader references 1 and 2 are compared against a stencil clear value of 1.
+# Equal accepts only the first pixel; NotEqual accepts only the second.
+# Ignoring SV_StencilRef (the fixed-function reference is 0) cannot produce
+# either expected pattern. Reversing winding exercises both stencil faces.
+# REQUIRES: !DirectX || ShaderStencilRef
+# REQUIRES: !Vulkan || VK_EXT_shader_stencil_export
+# Clang does not yet lower SV_StencilRef.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T vs_6_0 -DREVERSE_WINDING -Fo %t-reversed.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -DREFERENCE_BASE=0 -Fo %t-defaults.o %t/pixel.hlsl
+# RUN: %dxc_target -T ps_6_0 -DREFERENCE_BASE=255 -Fo %t-max.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/pipeline.yaml %t-reversed.o %t-pixel.o
+# RUN: %offloader %t/not-equal.yaml %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/disabled.yaml %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/defaults.yaml %t-vertex.o %t-defaults.o
+# RUN: %offloader %t/max.yaml %t-vertex.o %t-max.o
