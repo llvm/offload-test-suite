@@ -253,7 +253,7 @@ DescriptorSets:
 # XFAIL: Intel-Gen-10 && DirectX
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
-# XFAIL: Clang
+# XFAIL: Clang && DirectX
 
 # Metal doesn't support 64-bit wave operations
 # Bug: https://github.com/llvm/offload-test-suite/issues/355
