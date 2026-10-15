@@ -100,11 +100,6 @@ Results:
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
 # UNSUPPORTED: Lavapipe
 
-# Clang's DXIL lowering of graphics-stage inputs emits a loadInput with an
-# invalid row index, which dxv rejects. Not specific to SV_IsFrontFace.
-# TODO: Remove when Clang supports graphics-stage DXIL input/output lowering.
-# XFAIL: Clang && DirectX
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
