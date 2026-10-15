@@ -304,7 +304,9 @@ if config.offloadtest_enable_validation:
     offloader_args.append("-validation-layer")
 if ShouldSearchByGPUName:
     offloader_args.extend([f'-adapter-regex="{GPUName}"'])
-tools.append(ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args))
+tools.append(
+    ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
+)
 tools.append(ToolSubst("%api_query", command=FindTool("api-query")))
 
 ExtraCompilerArgs = []
