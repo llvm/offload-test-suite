@@ -1,0 +1,8 @@
+# REQUIRES: Metal, DXC
+
+# References 0 and 1 are compared against clear value 0: expect red/black.
+# Red/red instead would be consistent with both references remaining 0.
+# RUN: split-file %S/StencilRef.test %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -DREFERENCE_BASE=0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/defaults.yaml %t-vertex.o %t-pixel.o
