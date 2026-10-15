@@ -67,7 +67,6 @@ DescriptorSets: []
 ...
 #--- end
 
-# XFAIL: Clang && !Vulkan
 # REQUIRES: goldenimage
 
 # RUN: split-file %s %t

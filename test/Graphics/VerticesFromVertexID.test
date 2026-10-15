@@ -68,7 +68,6 @@ DispatchParameters:
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe
 
-# XFAIL: Clang && !Vulkan
 # REQUIRES: goldenimage
 
 # RUN: split-file %s %t

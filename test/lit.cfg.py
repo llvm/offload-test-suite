@@ -309,6 +309,7 @@ if ShouldSearchByGPUName:
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
+tools.append(ToolSubst("%api_query", command=FindTool("api-query")))
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:

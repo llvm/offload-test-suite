@@ -250,7 +250,7 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
-# XFAIL: Clang
+# XFAIL: Clang && (DirectX || Metal)
 
 # REQUIRES Int16
 # RUN: split-file %s %t
