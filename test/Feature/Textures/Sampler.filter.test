@@ -230,9 +230,6 @@ Results:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/143523
-# XFAIL: Clang && DirectX
-
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # XFAIL: Metal
 
