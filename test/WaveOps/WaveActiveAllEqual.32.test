@@ -359,7 +359,7 @@ DescriptorSets:
 #--- end
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
-# XFAIL: Clang && DirectX
+# XFAIL: Clang && (DirectX || Metal)
 
 # Bug https://github.com/llvm/offload-test-suite/issues/1047
 # XFAIL: QC && DirectX
