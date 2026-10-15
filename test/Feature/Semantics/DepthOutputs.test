@@ -96,7 +96,10 @@ DescriptorSets: []
 # GreaterEqual: 0.25 >= 0.1,  0.75 >= 0.05
 # Centroid SV_Position satisfies conservative-depth validation while keeping
 # the vertex/pixel signatures aligned for DirectX stage linkage.
-# Clang does not yet lower these pixel-shader output semantics.
+
+# Unimplimented: https://github.com/llvm/llvm-project/issues/136978
+# Unimplimented: https://github.com/llvm/llvm-project/issues/212551
+# Unimplimented: https://github.com/llvm/llvm-project/issues/212560
 # XFAIL: Clang
 
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,

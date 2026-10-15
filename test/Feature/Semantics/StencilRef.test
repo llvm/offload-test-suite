@@ -222,8 +222,12 @@ Results:
 # reference (the max case uses references 255 and 254).
 # REQUIRES: !DirectX || ShaderStencilRef
 # REQUIRES: !Vulkan || VK_EXT_shader_stencil_export
-# Clang does not yet lower SV_StencilRef.
+
+# Unimplimented: https://github.com/llvm/llvm-project/issues/136980
 # XFAIL: Clang
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/9038
+# XFAIL: DXC && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
