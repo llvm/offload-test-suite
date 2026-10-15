@@ -30,7 +30,13 @@ namespace offloadtest {
 
 #ifdef _WIN32
 
-using RtlGetVersionFn = LONG(WINAPI *)(PRTL_OSVERSIONINFOW);
+#ifdef __clang__
+// GetProcAddress returns an untyped function pointer, which we need to cast to
+// the appropriate function type.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wcast-function-type-mismatch"
+#endif
+using RtlGetVersionFn = NTSTATUS(WINAPI *)(PRTL_OSVERSIONINFOW);
 
 llvm::Expected<HostInfo> HostInfo::query() {
   HMODULE NtDll = GetModuleHandleW(L"ntdll.dll");
@@ -67,6 +73,9 @@ llvm::Expected<HostInfo> HostInfo::query() {
                 << '.' << Version.dwBuildNumber;
   return Info;
 }
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 
 #else
 
