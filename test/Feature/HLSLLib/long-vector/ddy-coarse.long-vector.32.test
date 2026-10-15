@@ -77,9 +77,6 @@ Results:
 # Unimplemented https://github.com/llvm/wg-hlsl/issues/467
 # XFAIL: Vulkan
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/220630
-# XFAIL: Clang
-
 # REQUIRES: !Vulkan || VK_EXT_shader_long_vector
 # REQUIRES: Clang || SM_6_9
 
