@@ -5,4 +5,4 @@
 # CHECK: OS Version: "
 # CHECK: Architecture: "
 # X86-SAME: x86
-# ARM-SAME: arm
+# ARM-SAME: {{(arm64|aarch64)}}
