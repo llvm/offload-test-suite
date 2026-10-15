@@ -206,7 +206,7 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865 (flakey),
-# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output).
+# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe
 
 # REQUIRES: goldenimage
