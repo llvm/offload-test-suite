@@ -405,6 +405,9 @@ Results:
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/9038
 # XFAIL: DXC && Vulkan
 
+# Unimplimented
+# XFAIL: Metal
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
