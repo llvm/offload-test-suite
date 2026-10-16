@@ -82,7 +82,7 @@ Results:
 # REQUIRES: SM_6_1
 # REQUIRES: Barycentrics
 # UNSUPPORTED: Metal
-# XFAIL: Lavapipe
+
 
 # https://github.com/llvm/llvm-project/issues/90504
 # XFAIL: Clang

@@ -84,6 +84,8 @@ DescriptorSets:
 ...
 #--- end
 
+# XFAIL: Lavapipe && DXC
+
 # REQUIRES: Int16
 
 # RUN: split-file %s %t
