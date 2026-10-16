@@ -396,8 +396,7 @@ Results:
 # giving every comparison function a distinct pass/reject pattern:
 #   Never 000, Less 100, Equal 010, LessEqual 110,
 #   Greater 001, NotEqual 101, GreaterEqual 011, Always 111.
-# REQUIRES: !DirectX || ShaderStencilRef
-# REQUIRES: !Vulkan || VK_EXT_shader_stencil_export
+# REQUIRES: ShaderStencilRef
 
 # Unimplimented: https://github.com/llvm/llvm-project/issues/136980
 # XFAIL: Clang

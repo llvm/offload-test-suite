@@ -144,8 +144,7 @@ Results:
 # Without a shader-exported reference, stencil compares reference 0 against
 # the clear value 1. Less passes; Equal rejects. This needs no optional
 # shader-stencil-export capability.
-# Clang does not yet lower DXIL vertex/pixel input and output operations.
-# XFAIL: Clang && !Vulkan
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
