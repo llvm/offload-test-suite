@@ -150,6 +150,9 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
 # XFAIL: Clang && (DirectX || Metal)
 
+# Driver Bug: https://github.com/llvm/offload-test-suite/issues/1609
+# XFAIL: Intel-Gen-Current && DirectX
+
 # REQUIRES Half
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -enable-16bit-types -Fo %t.o %t/source.hlsl
