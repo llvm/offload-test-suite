@@ -70,6 +70,14 @@ Buffers:
       Width: 1
       Height: 1
       Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1 ]
+  - Name: Control_Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0, 1, 0, 1 ]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
@@ -87,6 +95,16 @@ Bindings:
       Name: DEPTH
   RenderTarget: Output
 DescriptorSets: []
+Results:
+  - Result: ShaderDepth
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+  - Result: RasterDepth
+    Rule: BufferExact
+    Actual: Output
+    Expected: Control_Output_Expected
+  
 ...
 #--- end
 
@@ -114,14 +132,9 @@ DescriptorSets: []
 # RUN: %dxc_target -T ps_6_0 -DDEPTH_SEMANTIC=SV_DepthLessEqual -Fo %t-less-ps.o %t/pixel.hlsl
 # RUN: %dxc_target -T ps_6_0 -DDEPTH_SEMANTIC=SV_DepthGreaterEqual -Fo %t-greater-ps.o %t/pixel.hlsl
 # RUN: %dxc_target -T ps_6_0 -DIGNORE_DEPTH -Fo %t-control-ps.o %t/pixel.hlsl
-# RUN: %offloader %t/pipeline.yaml %t-depth-vs.o %t-depth-ps.o | FileCheck %s --check-prefix=SHADER-DEPTH
-# RUN: %offloader %t/pipeline.yaml %t-less-vs.o %t-less-ps.o | FileCheck %s --check-prefix=SHADER-DEPTH
-# RUN: %offloader %t/pipeline.yaml %t-greater-vs.o %t-greater-ps.o | FileCheck %s --check-prefix=SHADER-DEPTH
-# RUN: %offloader %t/pipeline.yaml %t-depth-vs.o %t-control-ps.o | FileCheck %s --check-prefix=RASTER-DEPTH
-# RUN: %offloader %t/pipeline.yaml %t-less-vs.o %t-control-ps.o | FileCheck %s --check-prefix=RASTER-DEPTH
-# RUN: %offloader %t/pipeline.yaml %t-greater-vs.o %t-control-ps.o | FileCheck %s --check-prefix=RASTER-DEPTH
-
-# SHADER-DEPTH: Name: Output
-# SHADER-DEPTH: Data: [ 1, 0, 0, 1 ]
-# RASTER-DEPTH: Name: Output
-# RASTER-DEPTH: Data: [ 0, 1, 0, 1 ]
+# RUN: %offloader %t/pipeline.yaml %t-depth-vs.o %t-depth-ps.o
+# RUN: %offloader %t/pipeline.yaml %t-less-vs.o %t-less-ps.o
+# RUN: %offloader %t/pipeline.yaml %t-greater-vs.o %t-greater-ps.o
+# RUN: %offloader %t/pipeline.yaml %t-depth-vs.o %t-control-ps.o
+# RUN: %offloader %t/pipeline.yaml %t-less-vs.o %t-control-ps.o
+# RUN: %offloader %t/pipeline.yaml %t-greater-vs.o %t-control-ps.o
