@@ -269,6 +269,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("VulkanRuntimeDescriptorArray")
         if device["Features"].get("descriptorBindingPartiallyBound", False):
             config.available_features.add("VulkanDescriptorBindingPartiallyBound")
+        if device["Features"].get("largePoints", False):
+            config.available_features.add("VulkanLargePoints")
         HasMultiViewport = device["Features"].get("multiViewport", False)
         HasOutputViewportIndex = device["Features"].get(
             "shaderOutputViewportIndex", False
