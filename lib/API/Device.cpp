@@ -325,7 +325,8 @@ llvm::Error offloadtest::buildPipelineAccelerationStructures(
 llvm::Expected<std::unique_ptr<Texture>>
 offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
                                              uint32_t Height,
-                                             uint32_t SampleCount) {
+                                             uint32_t SampleCount,
+                                             uint8_t StencilClearValue) {
   TextureCreateDesc Desc = {};
   Desc.Location = MemoryLocation::GpuOnly;
   Desc.Usage = TextureUsage::DepthStencil;
@@ -334,7 +335,7 @@ offloadtest::createDefaultDepthStencilTarget(Device &Dev, uint32_t Width,
   Desc.Height = Height;
   Desc.MipLevels = 1;
   Desc.SampleCount = SampleCount;
-  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, 0};
+  Desc.OptimizedClearValue = ClearDepthStencil{1.0f, StencilClearValue};
 
   return Dev.createTexture("DepthStencil", Desc);
 }

@@ -396,6 +396,15 @@ static D3D12_COMPARISON_FUNC getDXComparisonFunc(CompareFunction ComparisonOp) {
   llvm_unreachable("All cases handled.");
 }
 
+static D3D12_DEPTH_STENCIL_DESC
+getDXDepthStencilState(const StencilState &Stencil) {
+  CD3DX12_DEPTH_STENCIL_DESC Desc(D3D12_DEFAULT);
+  Desc.StencilEnable = Stencil.Enabled;
+  Desc.FrontFace.StencilFunc = getDXComparisonFunc(Stencil.ComparisonOp);
+  Desc.BackFace = Desc.FrontFace;
+  return Desc;
+}
+
 namespace {
 class DXDevice;
 
@@ -1791,10 +1800,7 @@ public:
     PSODesc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     PSODesc.RasterizerState.FrontCounterClockwise = TRUE;
     PSODesc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
-    PSODesc.DepthStencilState.DepthEnable = true;
-    PSODesc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    PSODesc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-    PSODesc.DepthStencilState.StencilEnable = false;
+    PSODesc.DepthStencilState = getDXDepthStencilState(Desc.Stencil);
     PSODesc.SampleMask = UINT_MAX;
     PSODesc.PrimitiveTopologyType = getDXPrimitiveTopologyType(Desc.Topology);
     PSODesc.NumRenderTargets = static_cast<UINT>(Desc.RTFormats.size());
@@ -1864,11 +1870,8 @@ public:
     for (size_t I = 0; I < Desc.RTFormats.size(); ++I)
       RTArray.RTFormats[I] = getDXGIFormat(Desc.RTFormats[I]);
 
-    CD3DX12_DEPTH_STENCIL_DESC1 DepthStencil(D3D12_DEFAULT);
-    DepthStencil.DepthEnable = true;
-    DepthStencil.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
-    DepthStencil.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
-    DepthStencil.StencilEnable = false;
+    CD3DX12_DEPTH_STENCIL_DESC1 DepthStencil(
+        getDXDepthStencilState(Desc.Stencil));
 
     DXGI_SAMPLE_DESC SampleDesc = {};
     SampleDesc.Count = Desc.SampleCount;
@@ -3378,18 +3381,21 @@ public:
 
     } else if (P.isRaster()) {
 
-      // Begin a render pass: bind RT/DSV and clear depth-stencil. Color
-      // load action is Load — the existing inline code didn't clear color.
+      // Stencil rejection leaves pixels untouched, so enabled stencil tests
+      // need a defined background. Preserve the existing load action otherwise.
       ColorAttachmentFormatDesc ColorAttachment = {};
       ColorAttachment.Fmt = State.RenderTarget->getDesc().Fmt;
-      ColorAttachment.Load = LoadAction::Load;
+      ColorAttachment.Load = P.Stencil && P.Stencil->Enabled ? LoadAction::Clear
+                                                             : LoadAction::Load;
       ColorAttachment.Store = StoreAction::Store;
 
       DepthStencilAttachmentFormatDesc DSAttachment = {};
       DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
       DSAttachment.DepthLoad = LoadAction::Clear;
       DSAttachment.DepthStore = StoreAction::Store;
-      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilLoad = P.Stencil && P.Stencil->Enabled
+                                     ? LoadAction::Clear
+                                     : LoadAction::DontCare;
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
@@ -3419,6 +3425,7 @@ public:
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
+        PipelineDesc.Stencil = P.Stencil.value_or(StencilState{});
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
@@ -3460,6 +3467,7 @@ public:
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
+        PipelineDesc.Stencil = P.Stencil.value_or(StencilState{});
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;

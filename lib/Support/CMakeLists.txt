@@ -9,6 +9,7 @@ add_offloadtest_library(Support
   Check.cpp
   OffloadMigration.cpp
   HostInfo.cpp)
+target_link_libraries(OffloadTestSupport INTERFACE LLVMSupport)
 
 if (OFFLOADTEST_HAVE_SYSCTLBYNAME)
   target_compile_definitions(OffloadTestSupport

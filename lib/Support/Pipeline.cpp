@@ -144,6 +144,7 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   I.mapOptional("RuntimeSettings", P.Settings);
   I.mapOptional("ShadingRate", P.ShadingRate,
                 offloadtest::FragmentShadingRate::Rate1x1);
+  I.mapOptional("StencilState", P.Stencil);
 
   I.mapRequired("Buffers", P.Buffers);
   I.mapOptional("Samplers", P.Samplers);
@@ -162,6 +163,9 @@ void MappingTraits<offloadtest::Pipeline>::mapping(IO &I,
   // before validateDispatchParameters, which reads P.Kind.
   if (auto Err = P.validatePipelineKind())
     I.setError(llvm::toString(std::move(Err)));
+
+  if (P.Stencil && !P.isRaster())
+    I.setError("StencilState is only valid on a raster pipeline");
 
   I.mapOptional("DispatchParameters", P.DispatchParameters);
   if (auto Err = P.validateDispatchParameters())
@@ -616,6 +620,16 @@ void MappingTraits<offloadtest::IOBindings>::mapping(
                std::to_string(B.Scissors.size()) + " entries but there are " +
                std::to_string(B.Viewports.size()) +
                " viewports; they must match.");
+}
+
+void MappingTraits<offloadtest::StencilState>::mapping(
+    IO &I, offloadtest::StencilState &S) {
+  I.mapOptional("Enabled", S.Enabled, false);
+  I.mapOptional("ClearValue", S.ClearValue, 0u);
+  I.mapOptional("ComparisonOp", S.ComparisonOp,
+                offloadtest::CompareFunction::Equal);
+  if (S.ClearValue > 255)
+    I.setError("StencilState.ClearValue must be in the range 0..255");
 }
 
 void MappingTraits<offloadtest::Viewport>::mapping(IO &I,

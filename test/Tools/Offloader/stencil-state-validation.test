@@ -1,0 +1,44 @@
+#--- out-of-range.yaml
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 256
+Buffers: []
+DescriptorSets: []
+
+#--- compute.yaml
+Shaders:
+  - Stage: Compute
+    Entry: main
+StencilState:
+  Enabled: false
+Buffers: []
+DescriptorSets: []
+
+#--- comparison.yaml
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ComparisonOp: Invalid
+Buffers: []
+DescriptorSets: []
+#--- end
+
+# Invalid YAML is rejected before shader loading, so no compiled shaders
+# are required for these parser tests.
+# RUN: split-file %s %t
+# RUN: not %offloader %t/out-of-range.yaml 2>&1 | FileCheck %s --check-prefix=RANGE
+# RUN: not %offloader %t/compute.yaml 2>&1 | FileCheck %s --check-prefix=COMPUTE
+# RUN: not %offloader %t/comparison.yaml 2>&1 | FileCheck %s --check-prefix=COMPARISON
+
+# RANGE: StencilState.ClearValue must be in the range 0..255
+# COMPUTE: StencilState is only valid on a raster pipeline
+# COMPARISON: unknown enumerated scalar
