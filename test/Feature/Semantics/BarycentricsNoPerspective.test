@@ -83,7 +83,7 @@ Results:
 # REQUIRES: SM_6_1
 # REQUIRES: Barycentrics
 # UNSUPPORTED: Metal
-# UNSUPPORTED: Lavapipe
+
 
 # TODO: Remove when Clang supports graphics-stage DXIL input/output lowering.
 # XFAIL: Clang

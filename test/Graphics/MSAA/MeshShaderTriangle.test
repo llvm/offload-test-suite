@@ -74,7 +74,7 @@ REQUIRES: MeshShader, goldenimage
 # XFAIL: Clang
 
 # Lavapipe crash: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865
-# UNSUPPORTED: Lavapipe
+
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl

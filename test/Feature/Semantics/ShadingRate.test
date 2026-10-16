@@ -90,7 +90,7 @@ Results:
 # REQUIRES: SM_6_4
 # REQUIRES: FragmentShadingRate
 # UNSUPPORTED: Metal
-# UNSUPPORTED: Lavapipe
+
 
 
 # Unimplemented: https://github.com/llvm/llvm-project/issues/212567
