@@ -94,6 +94,9 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1414
 # XFAIL: Metal
 
+# Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
+# XFAIL: Lavapipe && AMD
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

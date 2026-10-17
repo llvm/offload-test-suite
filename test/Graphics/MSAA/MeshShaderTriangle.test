@@ -73,6 +73,9 @@ REQUIRES: MeshShader, goldenimage
 # Unimplemented https://github.com/llvm/llvm-project/issues/136966
 # XFAIL: Clang
 
+# Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
+# XFAIL: Lavapipe && AMD && DXC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
 # RUN: %dxc_target -T ps_6_5 -Fo %t-pixel.o %t/pixel.hlsl
