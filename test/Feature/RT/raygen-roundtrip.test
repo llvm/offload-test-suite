@@ -108,8 +108,8 @@ Results:
 # Unimplemented https://github.com/llvm/offload-test-suite/issues/1268
 # XFAIL: Clang
 
-# Driver Bug:https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
-# XFAIL: Lavapipe
+# Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
+# XFAIL: Lavapipe && AMD && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target_lib -T lib_6_5 -Fo %t.o %t/source.hlsl
