@@ -70,6 +70,9 @@ DescriptorSets:
 #--- end
 
 # REQUIRES: Half
+# Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
+# XFAIL: Lavapipe && AMD
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -Gis -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

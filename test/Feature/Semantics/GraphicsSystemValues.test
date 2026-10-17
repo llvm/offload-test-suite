@@ -163,9 +163,6 @@ Results:
 ...
 #--- end
 
-# Driver Bug:https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
-# XFAIL: Lavapipe
-
 
 # XFAIL: Clang
 
