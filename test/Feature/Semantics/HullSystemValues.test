@@ -240,9 +240,6 @@ Results:
 # [[patch(...)]]. Mapping HLSL HS/DS onto that isn't wired up, so skip Metal.
 # UNSUPPORTED: Metal
 
-# Driver Bug:https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
-# XFAIL: Lavapipe
-
 # XFAIL: Clang
 
 # RUN: split-file %s %t
