@@ -93,7 +93,7 @@ DescriptorSets:
 #--- end
 
 # Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
-# XFAIL: Lavapipe && AMD
+# XFAIL: Lavapipe && !host-arm64
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl

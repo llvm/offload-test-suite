@@ -72,7 +72,7 @@ DescriptorSets:
 # XFAIL: AMD && Vulkan && Clang
 
 # Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
-# XFAIL: Lavapipe && AMD
+# XFAIL: Lavapipe && !host-arm64
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Gis -Fo %t.o %t/source.hlsl
