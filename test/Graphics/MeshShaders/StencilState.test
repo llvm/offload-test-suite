@@ -1,0 +1,94 @@
+#--- mesh.hlsl
+struct Vertex {
+  float4 position : SV_Position;
+};
+
+[outputtopology("triangle")]
+[numthreads(1, 1, 1)]
+void main(out vertices Vertex vertices[3],
+          out indices uint3 triangles[1]) {
+  SetMeshOutputCounts(3, 1);
+  vertices[0].position = float4(0, 3, 0.5, 1);
+  vertices[1].position = float4(3, -3, 0.5, 1);
+  vertices[2].position = float4(-3, -3, 0.5, 1);
+  triangles[0] = uint3(0, 1, 2);
+}
+
+#--- pixel.hlsl
+float4 main() : SV_Target { return float4(1, 0, 0, 1); }
+
+#--- pipeline.yaml
+Shaders:
+  - Stage: Mesh
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 1
+  ComparisonOp: Less
+Buffers:
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 1, 0, 0, 1 ]
+Bindings:
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilLess
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+#--- equal.yaml
+Shaders:
+  - Stage: Mesh
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+StencilState:
+  Enabled: true
+  ClearValue: 1
+  ComparisonOp: Equal
+Buffers:
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Width: 1
+      Height: 1
+      Depth: 1
+  - Name: Output_Expected
+    Format: Float32
+    Channels: 4
+    Data: [ 0, 0, 0, 0 ]
+Bindings:
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: StencilEqual
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+#--- end
+
+# Both mesh PSO creation and render-pass setup must apply stencil state.
+# The fixed-function reference 0 passes Less against 1, but fails Equal.
+# REQUIRES: MeshShader
+# Clang does not yet lower mesh shaders.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T ms_6_5 -Fo %t-mesh.o %t/mesh.hlsl
+# RUN: %dxc_target -T ps_6_5 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-mesh.o %t-pixel.o
+# RUN: %offloader %t/equal.yaml %t-mesh.o %t-pixel.o
