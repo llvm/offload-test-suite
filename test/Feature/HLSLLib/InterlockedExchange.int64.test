@@ -243,7 +243,7 @@ DescriptorSets:
 # Bug: https://github.com/llvm/offload-test-suite/issues/1440
 # XFAIL: WARP && arm64 && DirectX
 
-# Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
 # XFAIL: Lavapipe && (host-x86 || host-x86_64) && DXC
 
 # RUN: split-file %s %t
