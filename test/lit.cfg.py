@@ -434,8 +434,13 @@ if "llvmpipe" in target_device.get("Description", "").lower():
 
 # Expose the host CPU architecture so tests can gate on it (e.g. XFAIL a test
 # only when running on an ARM host).
-if platform.machine().lower() in ("arm64", "aarch64"):
+host_machine = platform.machine().lower()
+if host_machine in ("arm64", "aarch64"):
     config.available_features.add("host-arm64")
+elif host_machine in ("x86_64", "amd64", "x64"):
+    config.available_features.add("host-x86_64")
+elif host_machine in ("x86", "i386", "i486", "i586", "i686"):
+    config.available_features.add("host-x86")
 
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))
