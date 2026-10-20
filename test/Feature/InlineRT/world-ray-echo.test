@@ -94,7 +94,7 @@ Results:
 # XFAIL: AMD && DirectX
 
 # Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
-# XFAIL: Lavapipe && !host-arm64 && DXC
+# XFAIL: Lavapipe && (host-x86 || host-x86_64) && DXC
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -fvk-use-dx-layout -Fo %t.o %t/source.hlsl
