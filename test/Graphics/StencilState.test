@@ -141,6 +141,9 @@ Results:
     Expected: Output_Expected
 #--- end
 
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
+# XFAIL: Lavapipe && (host-x86 || host-x86_64) && DXC
+
 # Without a shader-exported reference, stencil compares reference 0 against
 # the clear value 1. Less passes; Equal rejects. This needs no optional
 # shader-stencil-export capability.

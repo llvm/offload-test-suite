@@ -235,7 +235,7 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # XFAIL: Metal
 
-# Driver Bug: https://gitlab.freedesktop.org/api/v4/projects/mesa%2Fmesa/issues/16596
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
 # XFAIL: Lavapipe && (host-x86 || host-x86_64)
 
 # RUN: split-file %s %t
