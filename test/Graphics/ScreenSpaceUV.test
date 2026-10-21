@@ -67,7 +67,6 @@ DescriptorSets: []
 ...
 #--- end
 
-# XFAIL: Clang && !Vulkan
 # REQUIRES: goldenimage
 
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,

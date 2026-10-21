@@ -205,6 +205,10 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("MeshShaderTier", "NotSupported") != "NotSupported":
             config.available_features.add("MeshShader")
+        if device["Features"].get("BarycentricsSupported", False):
+            config.available_features.add("Barycentrics")
+        if device["Features"].get("PSSpecifiedStencilRefSupported", False):
+            config.available_features.add("ShaderStencilRef")
         if (
             device["Features"].get("VariableShadingRateTier", "NotSupported")
             != "NotSupported"
@@ -259,6 +263,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("shaderBufferFloat32Atomics", False):
             config.available_features.add("VulkanFloat32BufferAtomics")
+        if device["Features"].get("fragmentShaderBarycentric", False):
+            config.available_features.add("Barycentrics")
         if device["Features"].get("pipelineFragmentShadingRate", False):
             config.available_features.add("FragmentShadingRate")
         if device["Features"].get("runtimeDescriptorArray", False):
@@ -279,6 +285,8 @@ def setDeviceFeatures(config, device, compiler):
                 config.available_features.add("MeshShader")
             if Extension["ExtensionName"] == "VK_EXT_mutable_descriptor_type":
                 config.available_features.add("VulkanMutableDescriptorType")
+            if Extension["ExtensionName"] == "VK_EXT_shader_stencil_export":
+                config.available_features.add("ShaderStencilRef")
 
         if "VK_KHR_acceleration_structure" in config.available_features:
             config.available_features.add("acceleration-structure")
@@ -303,6 +311,7 @@ if ShouldSearchByGPUName:
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
+tools.append(ToolSubst("%api_query", command=FindTool("api-query")))
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:

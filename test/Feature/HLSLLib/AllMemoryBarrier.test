@@ -1,0 +1,85 @@
+#--- source.hlsl
+
+// Runs 8,192 cross-wave trials on group-shared and UAV memory.
+// A domain fails only if both threads read its initial value.
+
+RWStructuredBuffer<uint> UavData : register(u0);
+RWStructuredBuffer<uint> Out : register(u1);
+
+groupshared uint GroupData[256];
+groupshared uint GroupRead[256];
+groupshared uint UavRead[256];
+
+[numthreads(256, 1, 1)]
+void main(uint GI : SV_GroupIndex, uint3 Gid : SV_GroupID) {
+  uint GroupBase = Gid.x * 256;
+  uint Index = GroupBase + GI;
+  uint Other = GI ^ 128;
+
+  GroupData[GI] = 0;
+  GroupMemoryBarrierWithGroupSync();
+
+  GroupData[GI] = 1;
+  UavData[Index] = 1;
+  AllMemoryBarrier();
+  GroupRead[GI] = GroupData[Other];
+  UavRead[GI] = UavData[GroupBase + Other];
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GI < 128) {
+    uint OutIndex = Gid.x * 256 + 2 * GI;
+    Out[OutIndex] = GroupRead[GI] | GroupRead[Other];
+    Out[OutIndex + 1] = UavRead[GI] | UavRead[Other];
+  }
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [64, 1, 1]
+Buffers:
+  - Name: UavData
+    Format: UInt32
+    Stride: 4
+    FillSize: 65536
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 65536
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    FillSize: 65536
+    FillValue: 1
+Results:
+  - Result: TestAllMemoryBarrier
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: UavData
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

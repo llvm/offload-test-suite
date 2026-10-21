@@ -33,6 +33,7 @@ set(LLVM_DISTRIBUTION_COMPONENTS
     LLVMCore
     LLVMRemarks # Dependency of LLVMCore
     LLVMMC
+    LLVMOption # Dependency of LLVMMC (and eventually more)
     LLVMDebugInfoDWARFLowLevel # Dependency of LLVMMC
     LLVMIRReader
     LLVMAsmParser # Dependency of LLVMIRReader

@@ -275,7 +275,8 @@ Results:
 ...
 #--- end
 
-# Unimplemented: https://github.com/llvm/llvm-project/issues/143523
+# Unimplemented SampleCmp: https://github.com/llvm/llvm-project/issues/231729
+# Unimplemented SampleCmpLevelZero: https://github.com/llvm/llvm-project/issues/231733
 # XFAIL: Clang && DirectX
 
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226

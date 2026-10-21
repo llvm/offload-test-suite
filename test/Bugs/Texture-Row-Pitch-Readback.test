@@ -274,12 +274,6 @@ Results:
 # Height > 1 is required everywhere -- a 1-row RT would only read the
 # unpadded last row and silently sidestep the bug.
 
-# Clang's HLSL -> DXIL lowering does not yet implement the graphics-stage
-# signature intrinsics (llvm.dx.load.input / llvm.dx.store.output) needed
-# for SV_POSITION / SV_TARGET plumbing; clang -> SPIR-V is unaffected.
-# XFAIL: Clang && DirectX
-# XFAIL: Clang && Metal
-
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe

@@ -1,0 +1,75 @@
+#--- source.hlsl
+
+// Runs 8,192 cross-wave store-buffering trials on UAV memory.
+// A trial fails only if both threads read the initial value.
+
+RWStructuredBuffer<uint> Data : register(u0);
+RWStructuredBuffer<uint> Out : register(u1);
+
+groupshared uint Read[256];
+
+[numthreads(256, 1, 1)]
+void main(uint GI : SV_GroupIndex, uint3 Gid : SV_GroupID) {
+  uint GroupBase = Gid.x * 256;
+  uint Index = GroupBase + GI;
+  uint Other = GI ^ 128;
+
+  Data[Index] = 1;
+  DeviceMemoryBarrier();
+  Read[GI] = Data[GroupBase + Other];
+
+  GroupMemoryBarrierWithGroupSync();
+
+  if (GI < 128)
+    Out[Gid.x * 128 + GI] = Read[GI] | Read[GI ^ 128];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [64, 1, 1]
+Buffers:
+  - Name: Data
+    Format: UInt32
+    Stride: 4
+    FillSize: 65536
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 32768
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 4
+    FillSize: 32768
+    FillValue: 1
+Results:
+  - Result: TestDeviceMemoryBarrier
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: Data
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

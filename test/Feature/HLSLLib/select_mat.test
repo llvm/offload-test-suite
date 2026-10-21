@@ -164,9 +164,6 @@ DescriptorSets:
         Binding: 4
 #--- end
 
-# Unimplemented https://github.com/llvm/llvm-project/issues/184487
-# XFAIL: Clang
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 202x -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

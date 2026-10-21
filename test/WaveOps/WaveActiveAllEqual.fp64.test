@@ -153,11 +153,14 @@ DescriptorSets:
 # XFAIL: Intel-Gen-10 && DirectX
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/981
-# XFAIL: Clang
+# XFAIL: Clang && (DirectX || Metal)
 
 # Metal doesn't support 64-bit wave operations
 # Bug: https://github.com/llvm/offload-test-suite/issues/355
 # XFAIL: Metal
+
+# Driver Bug: https://github.com/llvm/offload-test-suite/issues/1609
+# XFAIL: Intel-Gen-Current && DirectX
 
 # REQUIRES: Double
 
