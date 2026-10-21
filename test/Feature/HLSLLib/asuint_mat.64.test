@@ -207,5 +207,5 @@ DescriptorSets:
 # XFAIL: DXC && DirectX
 
 # RUN: split-file %s %t
-# RUN: %dxc_target  -T cs_6_5 -HV 202x -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target  -T cs_6_5 -HV 2021 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

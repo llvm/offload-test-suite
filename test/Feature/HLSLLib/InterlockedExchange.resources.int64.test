@@ -278,5 +278,5 @@ DescriptorSets:
 # XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -HV 2021 -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
