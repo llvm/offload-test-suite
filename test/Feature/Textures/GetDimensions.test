@@ -47,109 +47,109 @@ void main() {
   Tex3.GetDimensions(1, uwidth, uheight, ulevels);
   Out[13] = (float)uwidth;
   Out[14] = (float)uheight;
-  Out[64] = (float)ulevels;
+  Out[15] = (float)ulevels;
   
   // Mip 2: 1x1
   Tex3.GetDimensions(2, w, h, levels);
-  Out[15] = w;
-  Out[16] = h;
-  Out[65] = levels;
+  Out[16] = w;
+  Out[17] = h;
+  Out[18] = levels;
 
   // RWTexture2D (8x2). A UAV has a single mip level, so its GetDimensions has
   // no mip or level parameters at all -- just the two extents.
   RWTex2D.GetDimensions(uwidth, uheight);
-  Out[17] = (float)uwidth;
-  Out[18] = (float)uheight;
+  Out[19] = (float)uwidth;
+  Out[20] = (float)uheight;
 
   // TexCube (4x4 faces, 3 mips). A cube reports its face dimensions and has
   // no element count: the six faces are not an array dimension.
   TexCube.GetDimensions(0, width, height, levels);
-  Out[19] = width;
-  Out[20] = height;
-  Out[21] = levels;
+  Out[21] = width;
+  Out[22] = height;
+  Out[23] = levels;
 
   // Mip 1 halves the face extents; the face count is not a texel dimension so
   // nothing else changes.
   TexCube.GetDimensions(1, uwidth, uheight, ulevels);
-  Out[22] = (float)uwidth;
-  Out[23] = (float)uheight;
-  Out[66] = (float)ulevels;
+  Out[24] = (float)uwidth;
+  Out[25] = (float)uheight;
+  Out[26] = (float)ulevels;
 
   TexCube.GetDimensions(w, h);
-  Out[24] = w;
-  Out[25] = h;
+  Out[27] = w;
+  Out[28] = h;
 
   // Texture1D (4 texels, 3 mips).
   Tex1D.GetDimensions(0, width, levels);
-  Out[26] = width;
-  Out[27] = levels;
+  Out[29] = width;
+  Out[30] = levels;
 
   Tex1D.GetDimensions(1, uwidth, ulevels);
-  Out[28] = (float)uwidth;
-  Out[29] = (float)ulevels;
+  Out[31] = (float)uwidth;
+  Out[32] = (float)ulevels;
 
   Tex1D.GetDimensions(2, width, levels);
-  Out[30] = width;
-  Out[31] = levels;
+  Out[33] = width;
+  Out[34] = levels;
 
   Tex1D.GetDimensions(uwidth);
-  Out[32] = (float)uwidth;
+  Out[35] = (float)uwidth;
 
   Tex1D.GetDimensions(width);
-  Out[33] = width;
+  Out[36] = width;
 
   // RWTexture1D (8 texels).
   RWTex1D.GetDimensions(uwidth);
-  Out[34] = (float)uwidth;
+  Out[37] = (float)uwidth;
 
   RWTex1D.GetDimensions(width);
-  Out[35] = width;
+  Out[38] = width;
 
   // Texture3D (4x2x8, 4 mips).
   Tex3D.GetDimensions(0, width, height, depth, levels);
-  Out[36] = width;
-  Out[37] = height;
-  Out[38] = depth;
-  Out[39] = levels;
+  Out[39] = width;
+  Out[40] = height;
+  Out[41] = depth;
+  Out[42] = levels;
 
   Tex3D.GetDimensions(1, uwidth, uheight, udepth, ulevels);
-  Out[40] = (float)uwidth;
-  Out[41] = (float)uheight;
-  Out[42] = (float)udepth;
-  Out[43] = (float)ulevels;
+  Out[43] = (float)uwidth;
+  Out[44] = (float)uheight;
+  Out[45] = (float)udepth;
+  Out[46] = (float)ulevels;
 
   Tex3D.GetDimensions(2, width, height, depth, levels);
-  Out[44] = width;
-  Out[45] = height;
-  Out[46] = depth;
-  Out[47] = levels;
+  Out[47] = width;
+  Out[48] = height;
+  Out[49] = depth;
+  Out[50] = levels;
 
   Tex3D.GetDimensions(3, uwidth, uheight, udepth, ulevels);
-  Out[48] = (float)uwidth;
-  Out[49] = (float)uheight;
-  Out[50] = (float)udepth;
-  Out[51] = (float)ulevels;
+  Out[51] = (float)uwidth;
+  Out[52] = (float)uheight;
+  Out[53] = (float)udepth;
+  Out[54] = (float)ulevels;
 
   Tex3D.GetDimensions(uwidth, uheight, udepth);
-  Out[52] = (float)uwidth;
-  Out[53] = (float)uheight;
-  Out[54] = (float)udepth;
+  Out[55] = (float)uwidth;
+  Out[56] = (float)uheight;
+  Out[57] = (float)udepth;
 
   Tex3D.GetDimensions(width, height, depth);
-  Out[55] = width;
-  Out[56] = height;
-  Out[57] = depth;
+  Out[58] = width;
+  Out[59] = height;
+  Out[60] = depth;
 
   // RWTexture3D (8x2x4).
   RWTex3D.GetDimensions(uwidth, uheight, udepth);
-  Out[58] = (float)uwidth;
-  Out[59] = (float)uheight;
-  Out[60] = (float)udepth;
+  Out[61] = (float)uwidth;
+  Out[62] = (float)uheight;
+  Out[63] = (float)udepth;
 
   RWTex3D.GetDimensions(width, height, depth);
-  Out[61] = width;
-  Out[62] = height;
-  Out[63] = depth;
+  Out[64] = width;
+  Out[65] = height;
+  Out[66] = depth;
 }
 
 //--- pipeline.yaml
@@ -225,11 +225,11 @@ Buffers:
     Data: [ 4.0, 8.0, 1.0, 4.0, 8.0,     # Tex1
             16.0, 32.0, 1.0, 16.0, 32.0, # Tex2
             4.0, 4.0, 3.0,               # Tex3 Mip 0
-            2.0, 2.0,                    # Tex3 Mip 1
-            1.0, 1.0,                    # Tex3 Mip 2
+            2.0, 2.0, 3.0,               # Tex3 Mip 1
+            1.0, 1.0, 3.0,               # Tex3 Mip 2
             8.0, 2.0,                    # RWTex2D
             4.0, 4.0, 3.0,               # TexCube Mip 0 (w, h, levels)
-            2.0, 2.0,                    # TexCube Mip 1
+            2.0, 2.0, 3.0,               # TexCube Mip 1
             4.0, 4.0,                    # TexCube (w, h)
             4.0, 3.0,                    # Tex1D Mip 0 (w, levels)
             2.0, 3.0,                    # Tex1D Mip 1
@@ -243,8 +243,7 @@ Buffers:
             4.0, 2.0, 8.0,               # Tex3D width, height, depth (uint)
             4.0, 2.0, 8.0,               # Tex3D width, height, depth (float)
             8.0, 2.0, 4.0,               # RWTex3D width, height, depth (uint)
-            8.0, 2.0, 4.0,               # RWTex3D width, height, depth (float)
-            3.0, 3.0, 3.0 ]              # Tex3 Mips 1/2 and TexCube Mip 1 levels
+            8.0, 2.0, 4.0 ]              # RWTex3D width, height, depth (float)
 
 DescriptorSets:
   - Resources:
