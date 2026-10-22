@@ -47,11 +47,13 @@ void main() {
   Tex3.GetDimensions(1, uwidth, uheight, ulevels);
   Out[13] = (float)uwidth;
   Out[14] = (float)uheight;
+  Out[64] = (float)ulevels;
   
   // Mip 2: 1x1
   Tex3.GetDimensions(2, w, h, levels);
   Out[15] = w;
   Out[16] = h;
+  Out[65] = levels;
 
   // RWTexture2D (8x2). A UAV has a single mip level, so its GetDimensions has
   // no mip or level parameters at all -- just the two extents.
@@ -71,6 +73,7 @@ void main() {
   TexCube.GetDimensions(1, uwidth, uheight, ulevels);
   Out[22] = (float)uwidth;
   Out[23] = (float)uheight;
+  Out[66] = (float)ulevels;
 
   TexCube.GetDimensions(w, h);
   Out[24] = w;
@@ -214,7 +217,7 @@ Buffers:
   - Name: Out
     Format: Float32
     Channels: 1
-    FillSize: 256 # 64 * sizeof(float)
+    FillSize: 268 # 67 * sizeof(float)
 
   - Name: Expected
     Format: Float32
@@ -240,7 +243,8 @@ Buffers:
             4.0, 2.0, 8.0,               # Tex3D width, height, depth (uint)
             4.0, 2.0, 8.0,               # Tex3D width, height, depth (float)
             8.0, 2.0, 4.0,               # RWTex3D width, height, depth (uint)
-            8.0, 2.0, 4.0 ]              # RWTex3D width, height, depth (float)
+            8.0, 2.0, 4.0,               # RWTex3D width, height, depth (float)
+            3.0, 3.0, 3.0 ]              # Tex3 Mips 1/2 and TexCube Mip 1 levels
 
 DescriptorSets:
   - Resources:
