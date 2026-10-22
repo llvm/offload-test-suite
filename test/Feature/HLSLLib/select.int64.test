@@ -8,7 +8,7 @@
 //   - Vector condition, scalar true/false values
 //   - Non-boolean vector condition, vector true/false values
 // For each vector condition scenario, there are tests for vec4, vec3, and vec2.
-// For the scalar condition scenario, there are four tests. One uses the buffers 
+// For the scalar condition scenario, there are four tests. One uses the buffers
 // for inputs and the other three use constants.
 
 StructuredBuffer<bool> Cond : register(t0);
@@ -204,5 +204,5 @@ DescriptorSets:
 
 # REQUIRES: Int64
 # RUN: split-file %s %t
-# RUN: %dxc_target -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
