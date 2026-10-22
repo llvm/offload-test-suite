@@ -96,9 +96,6 @@ Results:
 ...
 #--- end
 
-# Semantics are not implemented in the DXIL backend.
-# XFAIL: Clang && !Vulkan
-
 # Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
 # XFAIL: Lavapipe && (host-x86 || host-x86_64)
 
