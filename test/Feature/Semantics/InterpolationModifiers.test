@@ -148,6 +148,9 @@ Results:
 # Tracking: https://github.com/llvm/wg-hlsl/issues/303
 # XFAIL: Clang && Vulkan
 
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
+# XFAIL: Lavapipe && (host-x86 || host-x86_64) && DXC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl

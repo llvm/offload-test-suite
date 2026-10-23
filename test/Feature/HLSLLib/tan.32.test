@@ -68,6 +68,9 @@ DescriptorSets:
 ...
 #--- end
 
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
+# XFAIL: Lavapipe && (host-x86 || host-x86_64)
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

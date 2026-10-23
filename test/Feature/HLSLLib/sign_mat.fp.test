@@ -86,6 +86,9 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/llvm-project/issues/184488
 # XFAIL: Clang
 
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
+# XFAIL: Lavapipe && (host-x86 || host-x86_64) && DXC
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 2021 -T cs_6_0 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

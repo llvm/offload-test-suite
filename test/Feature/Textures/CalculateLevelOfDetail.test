@@ -217,6 +217,9 @@ Results:
 # Unimplemented: https://github.com/llvm/offload-test-suite/issues/1226
 # XFAIL: Metal
 
+# Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
+# XFAIL: Lavapipe && (host-x86 || host-x86_64)
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_6 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_6 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
