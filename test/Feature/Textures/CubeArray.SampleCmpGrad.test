@@ -1,0 +1,138 @@
+# Exercise DXC's TextureCubeArray.SampleCmpGrad interface even though proposal
+# 0014 excludes this receiver. Check values, not just successful compilation.
+# https://microsoft.github.io/hlsl-specs/proposals/0014-expanded-comparison-sampling/#hlsl-additions
+#
+# At the center of +X, cube projection scales the Y/Z direction gradients by
+# 1/2. With a 2x2 base face, gradients of 0.125 magnify and select mip 0;
+# gradients of 4 minify beyond the chain and select the final mip, mip 1.
+# Separate pixels enlarge DDX and DDY independently so ignoring either fails.
+# https://docs.vulkan.org/spec/latest/chapters/textures.html#textures-scale-factor
+
+#--- vertex.hlsl
+float4 mainVS(float3 Pos : POSITION) : SV_Position {
+  return float4(Pos, 1.0);
+}
+
+#--- pixel.hlsl
+[[vk::binding(0, 0)]] TextureCubeArray<float> Tex : register(t0);
+[[vk::binding(1, 0)]] SamplerComparisonState Less : register(s0);
+[[vk::binding(2, 0)]] SamplerComparisonState Greater : register(s1);
+
+float4 mainPS(float4 Pos : SV_Position) : SV_Target {
+  uint Case = (uint)Pos.x;
+  float3 GradX = float3(0, Case == 1 ? 4.0 : 0.125, 0);
+  float3 GradY = float3(0, 0, Case == 2 ? 4.0 : 0.125);
+  float4 Cube0 = float4(1, 0, 0, 0);
+  float4 Cube1 = float4(1, 0, 0, 1);
+
+  return float4(Tex.SampleCmpGrad(Less, Cube0, 0.5, GradX, GradY),
+                Tex.SampleCmpGrad(Less, Cube1, 0.5, GradX, GradY),
+                Tex.SampleCmpGrad(Greater, Cube0, 0.5, GradX, GradY),
+                Tex.SampleCmpGrad(Greater, Cube1, 0.5, GradX, GradY));
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  # Slice-major, each face's complete mip chain before the next face.
+  # Cube 0 uses layers 0-5; cube 1 uses layers 6-11.
+  - Name: Tex
+    Format: Depth32
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1, ArraySlices: 12, MipLevels: 2 }
+    Data: [ 0.25, 0.25, 0.25, 0.25, 0.75, # cube 0, +X: mip 0 then mip 1
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 0, -X
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 0, +Y
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 0, -Y
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 0, +Z
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 0, -Z
+            0.75, 0.75, 0.75, 0.75, 0.25, # cube 1, +X: opposite comparisons
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 1, -X
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 1, +Y
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 1, -Y
+            0.5, 0.5, 0.5, 0.5, 0.5,      # cube 1, +Z
+            0.5, 0.5, 0.5, 0.5, 0.5 ]     # cube 1, -Z
+
+  - Name: Out
+    Format: Float32
+    Channels: 4
+    FillSize: 48
+    OutputProps: { Width: 3, Height: 1, Depth: 1 }
+
+  - Name: Expected
+    Format: Float32
+    Channels: 4
+    # Less means reference < depth; Greater means reference > depth.
+    Data: [ 0, 1, 1, 0,  # both gradients small: mip 0
+            1, 0, 0, 1,  # only DDX large: mip 1
+            1, 0, 0, 1 ] # only DDY large: mip 1
+
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [ -1, -1, 0,
+             3, -1, 0,
+            -1,  3, 0 ]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Out
+
+Samplers:
+  - Name: Less
+    Kind: SamplerComparison
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+    ComparisonOp: Less
+  - Name: Greater
+    Kind: SamplerComparison
+    MinFilter: Nearest
+    MagFilter: Nearest
+    Address: Clamp
+    ComparisonOp: Greater
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: TextureCubeArray
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Less
+      Kind: Sampler
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Greater
+      Kind: Sampler
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+
+Results:
+  - Result: CubeArraySampleCmpGrad
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+...
+#--- end
+
+# REQUIRES: SM_6_8
+# UNSUPPORTED: Metal
+
+# Clang does not implement SampleCmpGrad yet.
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_8 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vs.o %t-ps.o
