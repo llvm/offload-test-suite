@@ -1,6 +1,6 @@
 #--- vertex.hlsl
-float4 main(float4 Position : POSITION) : SV_Position {
-  return Position;
+float4 main(float2 Position : POSITION) : SV_Position {
+  return float4(Position, 0, 1);
 }
 
 //--- pixel.hlsl
@@ -36,9 +36,9 @@ Shaders:
 Buffers:
   - Name: VertexData
     Format: Float32
-    Stride: 12
-    Data: [-1, -1, 0, -1, 1, 0, 1, 1, 0,
-           1, 1, 0, 1, -1, 0, -1, -1, 0]
+    Stride: 8
+    Data: [-1, -1, -1, 1, 1, 1,
+           1, 1, 1, -1, -1, -1]
   - Name: Output
     Format: Float32
     Channels: 4
@@ -56,7 +56,7 @@ Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
     - Format: Float32
-      Channels: 3
+      Channels: 2
       Offset: 0
       Name: POSITION
   RenderTarget: Output
