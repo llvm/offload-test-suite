@@ -43,7 +43,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: llvm/llvm-project
-          ref: main
+          ref: ${{ github.base_ref }}
           sparse-checkout: |
             llvm/utils/git/requirements_formatting.txt
             llvm/utils/git/code-format-helper.py

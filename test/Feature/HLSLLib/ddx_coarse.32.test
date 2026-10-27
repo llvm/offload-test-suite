@@ -17,6 +17,8 @@ float4 main(float4 Position : SV_Position) : SV_Target {
   float3 Vector3 = ddx_coarse(Value.xyz);
   float4 Vector4 = ddx_coarse(Value);
 
+  // For the first pixel pair, 1.5^2 - 0.5^2 = 2.
+  // Each pair gives 2 * even_integer_x + 2.
   float ExpectedX = 2 * ((uint)Position.x & ~1u) + 2;
   bool Check1 = Scalar == ExpectedX && Vector1.x == ExpectedX;
   bool Check2 = Vector2.x == ExpectedX && Vector2.y == -2;
