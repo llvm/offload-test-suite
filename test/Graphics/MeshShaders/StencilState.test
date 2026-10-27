@@ -82,7 +82,7 @@ Results:
 #--- end
 
 # Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
-# XFAIL: Lavapipe && (host-x86 || host-x86_64) && DXC
+# XFAIL: Lavapipe && (host-x86 || host-x86_64)
 
 # Both mesh PSO creation and render-pass setup must apply stencil state.
 # The fixed-function reference 0 passes Less against 1, but fails Equal.
