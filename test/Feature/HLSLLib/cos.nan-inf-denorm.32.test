@@ -65,7 +65,7 @@ DescriptorSets:
 # XFAIL: Metal && !AppleM1 && !AppleM2 && Clang
 
 # Driver Bug: https://gitlab.freedesktop.org/mesa/mesa/-/work_items/16596
-# XFAIL: Lavapipe && (host-x86 || host-x86_64)
+# XFAIL: Lavapipe && host-x86_64
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -Gis -T cs_6_5 -Fo %t.o %t/source.hlsl
