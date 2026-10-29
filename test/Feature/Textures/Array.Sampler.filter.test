@@ -5,6 +5,9 @@
 [[vk::binding(3, 0)]] Texture1DArray<float4> Tex1D : register(t2);
 [[vk::binding(0, 1)]] SamplerState Samp : register(s0);
 
+#define CUBEARRAY_OR(Call, Expect) (Call)
+
+
 [numthreads(1, 1, 1)]
 void main() {
   // Each slice is 2x1. Texel centres are at u = 0.25 and u = 0.75, so
