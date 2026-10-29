@@ -145,9 +145,6 @@ Results:
 #   * `noperspective`             - linear in screen space (no W correction)
 #   * `centroid`                  - same as `linear` without MSAA
 #
-# Tracking: https://github.com/llvm/wg-hlsl/issues/303
-# XFAIL: Clang && Vulkan
-
 # Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
 # Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
 # UNSUPPORTED: Lavapipe
