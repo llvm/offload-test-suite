@@ -1,0 +1,77 @@
+#--- vertex.hlsl
+float4 main(float2 Position : POSITION) : SV_Position {
+  return float4(Position, 0, 1);
+}
+
+//--- pixel.hlsl
+// Checks scalar and vector overloads with positive, negative, zero,
+// and fractional derivatives.
+float4 main(float4 Position : SV_Position) : SV_Target {
+  float X = Position.x;
+  float Y = Position.y;
+  float4 Value = float4(X * X, -2 * X + Y, Y, X / 2 + 2 * Y);
+
+  float Scalar = ddx_coarse(Value.x);
+  float1 Vector1 = ddx_coarse(float1(Value.x));
+  float2 Vector2 = ddx_coarse(Value.xy);
+  float3 Vector3 = ddx_coarse(Value.xyz);
+  float4 Vector4 = ddx_coarse(Value);
+
+  // For the first pixel pair, 1.5^2 - 0.5^2 = 2.
+  // Each pair gives 2 * even_integer_x + 2.
+  float ExpectedX = 2 * ((uint)Position.x & ~1u) + 2;
+  bool Check1 = Scalar == ExpectedX && Vector1.x == ExpectedX;
+  bool Check2 = Vector2.x == ExpectedX && Vector2.y == -2;
+  bool Check3 = Vector3.x == ExpectedX && Vector3.y == -2 && Vector3.z == 0;
+  bool Check4 = Vector4.x == ExpectedX && Vector4.y == -2 &&
+                Vector4.z == 0 && Vector4.w == 0.5;
+  return (float4)(Check1 && Check2 && Check3 && Check4);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [-1, -1, -1, 1, 1, 1,
+           1, 1, 1, -1, -1, -1]
+  - Name: Output
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    OutputProps:
+      Height: 4
+      Width: 4
+      Depth: 1
+  - Name: ExpectedOut
+    Format: Float32
+    Channels: 4
+    FillSize: 256
+    FillValue: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: Output
+DescriptorSets: []
+Results:
+  - Result: Derivatives
+    Rule: BufferExact
+    Actual: Output
+    Expected: ExpectedOut
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
