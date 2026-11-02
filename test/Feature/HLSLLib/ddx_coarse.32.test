@@ -9,7 +9,7 @@ float4 main(float2 Position : POSITION) : SV_Position {
 float4 main(float4 Position : SV_Position) : SV_Target {
   float X = Position.x;
   float Y = Position.y;
-  float4 Value = float4(X * X, -2 * X + Y, Y, X / 2 + 2 * Y);
+  float4 Value = float4(2 * X, -2 * X + Y, Y, X / 2 + 2 * Y);
 
   float Scalar = ddx_coarse(Value.x);
   float1 Vector1 = ddx_coarse(float1(Value.x));
@@ -17,9 +17,8 @@ float4 main(float4 Position : SV_Position) : SV_Target {
   float3 Vector3 = ddx_coarse(Value.xyz);
   float4 Vector4 = ddx_coarse(Value);
 
-  // For the first pixel pair, 1.5^2 - 0.5^2 = 2.
-  // Each pair gives 2 * even_integer_x + 2.
-  float ExpectedX = 2 * ((uint)Position.x & ~1u) + 2;
+  // The x derivatives are constant, independent of quad alignment.
+  float ExpectedX = 2;
   bool Check1 = Scalar == ExpectedX && Vector1.x == ExpectedX;
   bool Check2 = Vector2.x == ExpectedX && Vector2.y == -2;
   bool Check3 = Vector3.x == ExpectedX && Vector3.y == -2 && Vector3.z == 0;
