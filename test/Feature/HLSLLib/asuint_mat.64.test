@@ -200,9 +200,6 @@ DescriptorSets:
 
 # REQUIRES: Double
 
-# Bug: https://github.com/llvm/llvm-project/issues/186864
-# XFAIL: Clang && Vulkan
-
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8477
 # XFAIL: DXC && DirectX
 
