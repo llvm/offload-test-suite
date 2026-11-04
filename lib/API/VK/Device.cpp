@@ -690,6 +690,8 @@ static constexpr VkStructureType ComputeShaderDerivativesType =
 static constexpr VkStructureType ShaderMaximalReconvergenceType =
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR;
 
+namespace {
+
 struct VulkanQuadFeatures {
 #ifdef VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME
   VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR ComputeDerivatives{};
@@ -752,6 +754,8 @@ struct VulkanQuadFeatures {
     }
   }
 };
+
+} // namespace
 
 static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
   switch (Action) {
