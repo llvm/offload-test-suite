@@ -1,0 +1,14 @@
+# Test QuadAll emulation at SM 6.6.
+
+# Allow only compute derivatives to select SPIR-V quad-read emulation.
+# REQUIRES: !Vulkan || ComputeDerivativeGroupQuads
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99215
+# XFAIL: Clang
+
+# RUN: split-file %S/QuadAll.test %t
+# RUN: %dxc_target -T cs_6_6 \
+# RUN:   %if Vulkan %{ \
+# RUN:     -fspv-extension=SPV_KHR_compute_shader_derivatives \
+# RUN:   %} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
