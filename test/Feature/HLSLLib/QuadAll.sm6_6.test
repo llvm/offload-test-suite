@@ -7,7 +7,7 @@
 # XFAIL: Clang
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
-# XFAIL: Vulkan && Metal
+# XFAIL: Metal
 
 # RUN: split-file %S/QuadAll.test %t
 # RUN: %dxc_target -T cs_6_6 \
