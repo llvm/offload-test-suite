@@ -252,10 +252,9 @@ def setDeviceFeatures(config, device, compiler):
     if device["API"] == "Vulkan":
         if device["Features"].get("computeDerivativeGroupQuads", False):
             config.available_features.add("ComputeDerivativeGroupQuads")
-            if (
-                device["Features"].get("shaderQuadControl", False)
-                and device["Features"].get("shaderMaximalReconvergence", False)
-            ):
+            if device["Features"].get("shaderQuadControl", False) and device[
+                "Features"
+            ].get("shaderMaximalReconvergence", False):
                 config.available_features.add("NativeQuadAll")
                 config.available_features.add("NativeQuadAny")
         if device["Features"].get("shaderInt16", False):
