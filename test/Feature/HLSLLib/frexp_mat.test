@@ -1,0 +1,143 @@
+#--- source.hlsl
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u1);
+RWStructuredBuffer<float4> ExpOut : register(u2);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 E32;
+  float2x4 E24;
+  float3x1 E31;
+  float4x4 E44;
+  float2x2 E22Const;
+
+  float3x2 R32 = frexp(float3x2(In[0].xyz, In[1].xyz), E32);
+  float2x4 R24 = frexp(float2x4(In[2], In[3]), E24);
+  float3x1 R31 = frexp(float3x1(In[4].xyz), E31);
+  float4x4 R44 = frexp(float4x4(In[0], In[1], In[2], In[3]), E44);
+  float2x2 R22Const = frexp(float2x2(-1.0, 0.0, 1.0, 2.0), E22Const);
+
+  Out[0] = float4(R32[0], R32[1]);
+  Out[1] = float4(R32[2], 0.0, 0.0);
+  Out[2] = R24[0];
+  Out[3] = R24[1];
+  Out[4] = float4(R31[0], R31[1], R31[2], 0.0);
+  Out[5] = R44[0];
+  Out[6] = R44[1];
+  Out[7] = R44[2];
+  Out[8] = R44[3];
+  Out[9] = float4(R22Const[0], R22Const[1]);
+
+  ExpOut[0] = float4(E32[0], E32[1]);
+  ExpOut[1] = float4(E32[2], 0.0, 0.0);
+  ExpOut[2] = E24[0];
+  ExpOut[3] = E24[1];
+  ExpOut[4] = float4(E31[0], E31[1], E31[2], 0.0);
+  ExpOut[5] = E44[0];
+  ExpOut[6] = E44[1];
+  ExpOut[7] = E44[2];
+  ExpOut[8] = E44[3];
+  ExpOut[9] = float4(E22Const[0], E22Const[1]);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ 0.5, 1, 2, 3,
+            -4, 0, 10, 0.1,
+            5.5, -1.5, 1000.25, 0.0625,
+            -0.2, 7, -33, 123456,
+            0.75, -6.5, 0.001, 0 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 0.5, 0.5, 0.5, -0.5,
+            0, 0.625, 0, 0,
+            0.6875, -0.75, 0.97680664, 0.5,
+            -0.8, 0.875, -0.515625, 0.94189453,
+            0.75, -0.8125, 0.512, 0,
+            0.5, 0.5, 0.5, 0.75,
+            -0.5, 0, 0.625, 0.8,
+            0.6875, -0.75, 0.97680664, 0.5,
+            -0.8, 0.875, -0.515625, 0.94189453,
+            -0.5, 0, 0.5, 0.5 ]
+  - Name: ExpOut
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedExpOut
+    Format: Float32
+    Stride: 16
+    Data: [ 0, 1, 2, 3,
+            0, 4, 0, 0,
+            3, 1, 10, -3,
+            -2, 3, 6, 17,
+            0, 3, -9, 0,
+            0, 1, 2, 2,
+            3, 0, 4, -3,
+            3, 1, 10, -3,
+            -2, 3, 6, 17,
+            1, 0, 1, 2 ]
+Results:
+  - Result: Mantissa
+    Rule: BufferFloatULP
+    ULPT: 1
+    Actual: Out
+    Expected: ExpectedOut
+  - Result: Exponent
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: ExpOut
+    Expected: ExpectedExpOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: ExpOut
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99119
+# XFAIL: Clang
+
+# DXC loses the sign of the mantissa for negative inputs when targeting
+# DirectX or Metal.
+# XFAIL: DXC && DirectX
+# XFAIL: DXC && Metal
+
+# The SPIR-V backend does not legalize wide or non-power-of-two vectors for
+# Vulkan. Matrices are lowered to vectors, and a G_SITOFP on <6 x i32> cannot be
+# legalized. See also https://github.com/llvm/llvm-project/issues/220002.
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 2021 -T cs_6_3 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
