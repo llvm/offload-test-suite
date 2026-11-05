@@ -402,7 +402,7 @@ Results:
 # XFAIL: Clang
 
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/9038
-# XFAIL: DXC && Vulkan
+# XFAIL: DXC && Vulkan && !Lavapipe
 
 # Unimplimented: https://github.com/llvm/offload-test-suite/issues/1607
 # XFAIL: Metal
