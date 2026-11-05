@@ -1,0 +1,204 @@
+#--- source.hlsl
+
+// Checks integer and floating-point scalars, vectors, and matrices.
+// Masks cover the full wave, even and odd lanes, four-lane groups,
+// single lanes, and inactive lanes.
+
+#if TEST_FLOAT
+#if TYPE_BITS == 16
+typedef float16_t Element;
+#elif TYPE_BITS == 64
+typedef double Element;
+#else
+typedef float Element;
+#endif
+#else
+#if TYPE_BITS == 16
+typedef int16_t Element;
+typedef uint16_t UnsignedElement;
+#elif TYPE_BITS == 64
+typedef int64_t Element;
+typedef uint64_t UnsignedElement;
+#else
+typedef int Element;
+typedef uint UnsignedElement;
+#endif
+typedef vector<UnsignedElement, 4> Unsigned4;
+#if TEST_MATRIX
+typedef matrix<UnsignedElement, 2, 3> Unsigned2x3;
+#endif
+#endif
+
+typedef vector<Element, 4> Value4;
+#if TEST_MATRIX
+typedef matrix<Element, 2, 3> Value2x3;
+#endif
+
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<uint4> OutGroups : register(u1);
+RWStructuredBuffer<uint> OutDivergent : register(u2);
+
+Value4 laneValue(Value4 Seed, uint Lane) {
+  Value4 Sign = Value4((Lane & 1) == 0 ? 1 : -1, Lane % 3 == 0 ? -1 : 1,
+                      (Lane & 2) == 0 ? 1 : -1, Lane % 5 == 0 ? -1 : 1);
+  Value4 Offset = Value4(int(Lane % 3) - 1, int(Lane % 5) - 2,
+                        int(Lane % 7) - 3, int(Lane % 3) - 1);
+#if TEST_FLOAT
+  Offset /= Element(4);
+#endif
+  return Seed * Sign + Offset;
+}
+
+uint4 laneMask(uint Lane, uint Bits) {
+  uint Word = Lane / 32;
+  return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
+               Word == 3 ? Bits : 0);
+}
+
+uint check(Value4 Value, Value4 Expected, uint4 Mask) {
+#if TEST_MATRIX
+  Value2x3 Matrix = Value2x3(Value.xyz, Value.wxy);
+  Value2x3 Result = WaveMultiPrefixSum(Matrix, Mask);
+  uint Passed = uint(all(Result[0] == Expected.xyz) &&
+                     all(Result[1] == Expected.wxy));
+#if !TEST_FLOAT
+  Unsigned2x3 UMatrix = Unsigned2x3(Matrix);
+  Unsigned2x3 UResult = WaveMultiPrefixSum(UMatrix, Mask);
+  Passed &= uint(all(UResult[0] == Unsigned4(Expected).xyz) &&
+                 all(UResult[1] == Unsigned4(Expected).wxy));
+#endif
+  return Passed;
+#else
+  uint Passed = uint(WaveMultiPrefixSum(Value.x, Mask) == Expected.x);
+  Passed |= uint(all(WaveMultiPrefixSum(Value.xy, Mask) == Expected.xy)) << 1;
+  Passed |= uint(all(WaveMultiPrefixSum(Value.xyz, Mask) == Expected.xyz)) << 2;
+  Passed |= uint(all(WaveMultiPrefixSum(Value, Mask) == Expected)) << 3;
+#if TEST_FLOAT
+  return uint(Passed == 15);
+#else
+  Unsigned4 UValue = Unsigned4(Value);
+  Unsigned4 UExpected = Unsigned4(Expected);
+  Passed |= uint(WaveMultiPrefixSum(UValue.x, Mask) == UExpected.x) << 4;
+  Passed |= uint(all(WaveMultiPrefixSum(UValue.xy, Mask) == UExpected.xy)) << 5;
+  Passed |= uint(all(WaveMultiPrefixSum(UValue.xyz, Mask) == UExpected.xyz))
+            << 6;
+  Passed |= uint(all(WaveMultiPrefixSum(UValue, Mask) == UExpected)) << 7;
+  return uint(Passed == 255);
+#endif
+#endif
+}
+
+#ifdef WAVE_SIZE
+[WaveSize(WAVE_SIZE)]
+#endif
+[numthreads(128, 1, 1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint Lane = WaveGetLaneIndex();
+  Value4 Seed = Value4(In[0]);
+#if TYPE_BITS == 64
+#if TEST_FLOAT
+  Seed += Element(4294967296.0);
+#else
+  Seed += Element(1) << 40;
+#endif
+#endif
+#if TEST_FLOAT
+  Seed /= Element(2);
+#endif
+  Value4 Value = laneValue(Seed, Lane);
+  Value4 Identity = Value4(0, 0, 0, 0);
+  Value4 Full = Identity;
+  Value4 Parity = Identity;
+  Value4 Block = Identity;
+  Value4 Divergent = Identity;
+
+  for (uint Previous = 0; Previous < Lane; ++Previous) {
+    Value4 V = laneValue(Seed, Previous);
+    Full += V;
+    if ((Previous & 1) == (Lane & 1))
+      Parity += V;
+    if (Previous / 4 == Lane / 4)
+      Block += V;
+    if (Previous % 3 != 1)
+      Divergent += V;
+  }
+
+  uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
+  uint4 ParityMask =
+      (Lane & 1) == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
+                      : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
+  uint4 BlockMask = laneMask(Lane, 0xFu << ((Lane % 32) & ~3u));
+  uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
+
+  OutGroups[TID.x] =
+      uint4(check(Value, Full, FullMask), check(Value, Parity, ParityMask),
+            check(Value, Block, BlockMask), check(Value, Identity, SingleMask));
+
+  uint Passed = 1;
+  if (Lane % 3 != 1)
+    Passed = check(Value, Divergent, FullMask);
+  OutDivergent[TID.x] = Passed;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 16
+    Data: [ 3, 5, 7, 9 ]
+  - Name: OutGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+  - Name: ExpectedGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+    FillValue: 1
+  - Name: OutDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: ExpectedDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: TestGroups
+    Rule: BufferExact
+    Actual: OutGroups
+    Expected: ExpectedGroups
+  - Result: TestDivergent
+    Rule: BufferExact
+    Actual: OutDivergent
+    Expected: ExpectedDivergent
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutGroups
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutDivergent
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
