@@ -1,0 +1,132 @@
+#--- source.hlsl
+
+// Checks false, true, and mixed predicates.
+// Masks cover the full wave, even and odd lanes, four-lane groups,
+// single lanes, and inactive lanes.
+
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<uint4> OutGroups : register(u1);
+RWStructuredBuffer<uint> OutDivergent : register(u2);
+
+bool4 laneValue(uint4 Seed, uint Lane) {
+  return ((Seed >> (Lane % 32)) & 1u) != 0;
+}
+
+uint4 laneMask(uint Lane, uint Bits) {
+  uint Word = Lane / 32;
+  return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
+               Word == 3 ? Bits : 0);
+}
+
+uint check(bool4 Value, uint4 Expected, uint4 Mask) {
+  uint4 Result = uint4(WaveMultiPrefixCountBits(Value.x, Mask),
+                       WaveMultiPrefixCountBits(Value.y, Mask),
+                       WaveMultiPrefixCountBits(Value.z, Mask),
+                       WaveMultiPrefixCountBits(Value.w, Mask));
+  return uint(all(Result == Expected));
+}
+
+#ifdef WAVE_SIZE
+[WaveSize(WAVE_SIZE)]
+#endif
+[numthreads(128, 1, 1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint Lane = WaveGetLaneIndex();
+  uint4 Seed = In[0];
+  bool4 Value = laneValue(Seed, Lane);
+  uint4 Identity = uint4(0, 0, 0, 0);
+  uint4 Full = Identity;
+  uint4 Parity = Identity;
+  uint4 Block = Identity;
+  uint4 Divergent = Identity;
+
+  for (uint Previous = 0; Previous < Lane; ++Previous) {
+    uint4 V = uint4(laneValue(Seed, Previous));
+    Full += V;
+    if ((Previous & 1) == (Lane & 1))
+      Parity += V;
+    if (Previous / 4 == Lane / 4)
+      Block += V;
+    if (Previous % 3 != 1)
+      Divergent += V;
+  }
+
+  uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
+  uint4 ParityMask =
+      (Lane & 1) == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
+                      : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
+  uint4 BlockMask = laneMask(Lane, 0xFu << ((Lane % 32) & ~3u));
+  uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
+
+  OutGroups[TID.x] =
+      uint4(check(Value, Full, FullMask), check(Value, Parity, ParityMask),
+            check(Value, Block, BlockMask), check(Value, Identity, SingleMask));
+
+  uint Passed = 1;
+  if (Lane % 3 != 1)
+    Passed = check(Value, Divergent, FullMask);
+  OutDivergent[TID.x] = Passed;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 16
+    Data: [ 0, 0xFFFFFFFF, 0xDEADBEEF, 0x13579BDF ]
+  - Name: OutGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+  - Name: ExpectedGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+    FillValue: 1
+  - Name: OutDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: ExpectedDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: TestGroups
+    Rule: BufferExact
+    Actual: OutGroups
+    Expected: ExpectedGroups
+  - Result: TestDivergent
+    Rule: BufferExact
+    Actual: OutDivergent
+    Expected: ExpectedDivergent
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutGroups
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutDivergent
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...
