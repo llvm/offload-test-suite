@@ -145,9 +145,6 @@ Results:
 #   * `noperspective`             - linear in screen space (no W correction)
 #   * `centroid`                  - same as `linear` without MSAA
 #
-# Driver bug https://gitlab.freedesktop.org/mesa/mesa/-/work_items/15865,
-# Lavapipe (llvmpipe) intermittently crashes (0xc0000005 / SIGSEGV, no output). 
-# UNSUPPORTED: Lavapipe
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
