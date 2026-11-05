@@ -189,6 +189,9 @@ def setDeviceFeatures(config, device, compiler):
     if device["API"] == "DirectX":
         if device["Features"].get("ResourceBindingTier", 0) >= 3:
             config.available_features.add("ResourceBindingTier3")
+        # Tier 2 adds the shader instructions that take an LOD clamp.
+        if device["Features"].get("TiledResourcesTier", 0) >= 2:
+            config.available_features.add("LodClamp")
         if device["Features"].get("Native16BitShaderOpsSupported", False):
             config.available_features.add("Int16")
             config.available_features.add("Half")
@@ -267,6 +270,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Barycentrics")
         if device["Features"].get("pipelineFragmentShadingRate", False):
             config.available_features.add("FragmentShadingRate")
+        if device["Features"].get("shaderResourceMinLod", False):
+            config.available_features.add("LodClamp")
         if device["Features"].get("runtimeDescriptorArray", False):
             config.available_features.add("VulkanRuntimeDescriptorArray")
         if device["Features"].get("descriptorBindingPartiallyBound", False):
