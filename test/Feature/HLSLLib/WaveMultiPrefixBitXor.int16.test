@@ -1,0 +1,6 @@
+# REQUIRES: Int16 && SM_6_5
+# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitXor.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 -Fo %t.o \
+# RUN:   %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
