@@ -1,0 +1,84 @@
+#--- source.hlsl
+
+StructuredBuffer<half4> In : register(t0);
+
+RWTexture2D<half4> Tex : register(u1);
+RWBuffer<half4> Buf : register(u2);
+
+[numthreads(1, 1, 1)]
+void main() {
+  half4 H = In[0];
+  Tex[int2(1, 0)].yw = H.zx;
+  Buf[0].z = H.y;
+  Buf[1].w += H.w;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3e00, 0x4100, 0xc200, 0x4400 ]  # 1.5, 2.5, -3.0, 4.0
+  # The views are 32-bit float; the shader writes the elements as half.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 10.0, 20.0, 30.0, 40.0,   # (0,0)
+            50.0, 60.0, 70.0, 80.0 ]  # (1,0)
+  - Name: ExpectedTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 10.0, 20.0, 30.0, 40.0,
+            50.0, -3.0, 70.0, 1.5 ]   # .yw = H.zx
+  - Name: Buf
+    Format: Float32
+    Channels: 4
+    Data: [ 0.25, 0.5, 0.75, 1.0,
+            2.0, 4.0, 6.0, 8.0 ]
+  - Name: ExpectedBuf
+    Format: Float32
+    Channels: 4
+    Data: [ 0.25, 0.5, 2.5, 1.0,      # .z = H.y
+            2.0, 4.0, 6.0, 12.0 ]     # .w += H.w
+
+Results:
+  - Result: Texture
+    Rule: BufferExact
+    Actual: Tex
+    Expected: ExpectedTex
+  - Result: TypedBuffer
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Tex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+...
+#--- end
+
+# Vulkan rejects 16-bit texture and typed buffer elements.
+# UNSUPPORTED: Vulkan
+# REQUIRES: Half
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

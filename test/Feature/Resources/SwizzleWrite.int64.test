@@ -1,0 +1,169 @@
+#--- source.hlsl
+
+struct Pair {
+  int64_t2 A;
+  int64_t2 B;
+};
+
+StructuredBuffer<int64_t2> InI : register(t0);
+StructuredBuffer<uint64_t2> InU : register(t1);
+
+RWTexture2D<uint64_t2> Tex : register(u2);
+RWBuffer<int64_t2> Buf : register(u3);
+RWStructuredBuffer<uint64_t3> SB : register(u4);
+RWStructuredBuffer<Pair> SBS : register(u5);
+RWByteAddressBuffer BAB : register(u6);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int64_t2 I = InI[0];
+  uint64_t2 U = InU[0];
+
+  // Packed typed elements.
+  Tex[int2(1, 0)].y = U.x;
+  Buf[0].x = I.y;
+  Buf[1].y += I.y;
+
+  // Structured buffer element and struct member.
+  SB[0].zy = U.yx;
+  SBS[0].A.y = I.x;
+
+  // Byte-address store; the surrounding words are unchanged.
+  BAB.Store<uint64_t2>(8, U.yx);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: InI
+    Format: Int64
+    Stride: 16
+    Data: [ -21474836491, 25769803789 ]
+  - Name: InU
+    Format: UInt64
+    Stride: 16
+    Data: [ 0x0000001100000012, 0x0000001300000014 ]
+  - Name: Tex
+    Format: UInt64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0x0000000100000002, 0x0000000300000004,   # (0,0)
+            0x0000000500000006, 0x0000000700000008 ]  # (1,0)
+  - Name: ExpectedTex
+    Format: UInt64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0x0000000100000002, 0x0000000300000004,
+            0x0000000500000006, 0x0000001100000012 ]  # .y = U.x
+  - Name: Buf
+    Format: Int64
+    Channels: 2
+    Data: [ -4294967299, 8589934597,
+            -12884901895, 17179869193 ]
+  - Name: ExpectedBuf
+    Format: Int64
+    Channels: 2
+    Data: [ 25769803789, 8589934597,     # .x = I.y
+            -12884901895, 42949672982 ]  # .y += I.y
+  - Name: SB
+    Format: UInt64
+    Stride: 24
+    Data: [ 0x0000002100000022, 0x0000002300000024, 0x0000002500000026 ]
+  - Name: ExpectedSB
+    Format: UInt64
+    Stride: 24
+    Data: [ 0x0000002100000022, 0x0000001100000012,
+            0x0000001300000014 ]  # .zy = U.yx
+  - Name: SBS
+    Format: Int64
+    Stride: 32
+    Data: [ -30064771087, 60129542163,  -55834574865, 8589934597 ]
+  - Name: ExpectedSBS
+    Format: Int64
+    Stride: 32
+    Data: [ -30064771087, -21474836491,  # A.y = I.x
+            -55834574865, 8589934597 ]
+  - Name: BAB
+    Format: UInt64
+    Stride: 8
+    Data: [ 0x0000003100000032, 0x0000003300000034,
+            0x0000003500000036, 0x0000003700000038 ]
+  - Name: ExpectedBAB
+    Format: UInt64
+    Stride: 8
+    Data: [ 0x0000003100000032, 0x0000001300000014,   # Store<uint64_t2>(8, U.yx)
+            0x0000001100000012, 0x0000003700000038 ]
+
+Results:
+  - Result: Texture
+    Rule: BufferExact
+    Actual: Tex
+    Expected: ExpectedTex
+  - Result: TypedBuffer
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+  - Result: StructuredBuffer
+    Rule: BufferExact
+    Actual: SB
+    Expected: ExpectedSB
+  - Result: StructMember
+    Rule: BufferExact
+    Actual: SBS
+    Expected: ExpectedSBS
+  - Result: ByteAddressBuffer
+    Rule: BufferExact
+    Actual: BAB
+    Expected: ExpectedBAB
+
+DescriptorSets:
+  - Resources:
+    - Name: InI
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: InU
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Tex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: SB
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: SBS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 5, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+    - Name: BAB
+      Kind: RWByteAddressBuffer
+      DirectXBinding: { Register: 6, Space: 0 }
+      VulkanBinding: { Binding: 6 }
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug: https://github.com/llvm/llvm-project/issues/235868
+# XFAIL: Clang && Vulkan
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8615
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Int64
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

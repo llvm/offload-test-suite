@@ -1,0 +1,97 @@
+#--- source.hlsl
+
+struct Pair {
+  double2 A;
+  double2 B;
+};
+
+StructuredBuffer<double4> In : register(t0);
+
+RWStructuredBuffer<double3> SB : register(u1);
+RWStructuredBuffer<Pair> SBS : register(u2);
+RWByteAddressBuffer BAB : register(u3);
+
+[numthreads(1, 1, 1)]
+void main() {
+  double4 D = In[0];
+  SB[0].zx = D.yw;
+  SBS[0].B.y = D.z;
+  BAB.Store<double2>(8, D.wx);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: In
+    Format: Float64
+    Stride: 32
+    Data: [ 1.5, -2.25, 3.125, -4.0 ]
+  - Name: SB
+    Format: Float64
+    Stride: 24
+    Data: [ 10.5, 20.5, 30.5 ]
+  - Name: ExpectedSB
+    Format: Float64
+    Stride: 24
+    Data: [ -4.0, 20.5, -2.25 ]  # .zx = D.yw
+  - Name: SBS
+    Format: Float64
+    Stride: 32
+    Data: [ 0.25, 0.75,  1.25, 1.75 ]
+  - Name: ExpectedSBS
+    Format: Float64
+    Stride: 32
+    Data: [ 0.25, 0.75,  1.25, 3.125 ]  # B.y = D.z
+  - Name: BAB
+    Format: Float64
+    Stride: 8
+    Data: [ 8.0, 16.0, 32.0, 64.0 ]
+  - Name: ExpectedBAB
+    Format: Float64
+    Stride: 8
+    Data: [ 8.0, -4.0, 1.5, 64.0 ]  # Store<double2>(8, D.wx)
+
+Results:
+  - Result: StructuredBuffer
+    Rule: BufferExact
+    Actual: SB
+    Expected: ExpectedSB
+  - Result: StructMember
+    Rule: BufferExact
+    Actual: SBS
+    Expected: ExpectedSBS
+  - Result: ByteAddressBuffer
+    Rule: BufferExact
+    Actual: BAB
+    Expected: ExpectedBAB
+
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: SB
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: SBS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: BAB
+      Kind: RWByteAddressBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

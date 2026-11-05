@@ -1,0 +1,97 @@
+#--- source.hlsl
+
+StructuredBuffer<double4> SB : register(t0);
+ByteAddressBuffer BAB : register(t1);
+cbuffer CB : register(b2) {
+  double2 CD;
+};
+
+RWStructuredBuffer<double> OutD : register(u3);
+RWStructuredBuffer<double4> OutD4 : register(u4);
+
+[numthreads(1, 1, 1)]
+void main() {
+  OutD[0] = SB[1].z;
+  OutD4[0] = SB.Load(0).wwyx;
+  OutD4[1] = BAB.Load<double2>(16).yxxy;
+  OutD[1] = CD.y;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: SB
+    Format: Float64
+    Stride: 32
+    Data: [ 1.5, -2.25, 3.125, -4.0,
+            5.5, 6.75, -7.5, 8.25 ]
+  - Name: BAB
+    Format: Float64
+    Stride: 8
+    Data: [ 0.5, 1.0, 2.0, 4.0 ]
+  - Name: CB
+    Format: Float64
+    Data: [ 10.5, -20.25 ]
+  - Name: OutD
+    Format: Float64
+    Stride: 8
+    FillSize: 16
+  - Name: OutD4
+    Format: Float64
+    Stride: 32
+    FillSize: 64
+  - Name: ExpectedD
+    Format: Float64
+    Stride: 8
+    Data: [ -7.5,     # SB[1].z
+            -20.25 ]  # CD.y
+  - Name: ExpectedD4
+    Format: Float64
+    Stride: 32
+    Data: [ -4.0, -4.0, -2.25, 1.5,  # SB.Load(0).wwyx
+            4.0, 2.0, 2.0, 4.0 ]     # BAB.Load<double2>(16).yxxy
+
+Results:
+  - Result: Double
+    Rule: BufferExact
+    Actual: OutD
+    Expected: ExpectedD
+  - Result: Double4
+    Rule: BufferExact
+    Actual: OutD4
+    Expected: ExpectedD4
+
+DescriptorSets:
+  - Resources:
+    - Name: SB
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: BAB
+      Kind: ByteAddressBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: CB
+      Kind: ConstantBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutD
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: OutD4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+...
+#--- end
+
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

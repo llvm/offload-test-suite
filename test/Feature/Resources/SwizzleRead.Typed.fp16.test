@@ -1,0 +1,92 @@
+#--- source.hlsl
+
+Texture2D<half4> Tex : register(t0);
+Buffer<half4> Buf : register(t1);
+
+RWStructuredBuffer<half> OutH : register(u2);
+RWStructuredBuffer<half4> OutH4 : register(u3);
+
+[numthreads(1, 1, 1)]
+void main() {
+  OutH[0] = Tex[int2(1, 0)].z;
+  OutH4[0] = Tex.Load(int3(0, 0, 0)).wwyx;
+  OutH[1] = Buf.Load(0).w;
+  OutH4[1] = Buf[1].ywzx;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # The views are 32-bit float; the shader reads the elements as half.
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1.0, 2.0, 3.0, 4.0,   # (0,0)
+            5.0, 6.0, 7.0, 8.0 ]  # (1,0)
+  - Name: Buf
+    Format: Float32
+    Channels: 4
+    Data: [ 0.5, 1.5, 2.5, 3.5,
+            9.0, 10.0, 11.0, 12.0 ]
+  - Name: OutH
+    Format: Float16
+    Stride: 2
+    FillSize: 4
+  - Name: OutH4
+    Format: Float16
+    Stride: 8
+    FillSize: 16
+  - Name: ExpectedH
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4700,   # Tex[(1,0)].z = 7.0
+            0x4300 ]  # Buf.Load(0).w = 3.5
+  - Name: ExpectedH4
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4400, 0x4400, 0x4000, 0x3c00,   # Tex.Load((0,0)).wwyx
+            0x4900, 0x4a00, 0x4980, 0x4880 ]  # Buf[1].ywzx
+
+Results:
+  - Result: Half
+    Rule: BufferExact
+    Actual: OutH
+    Expected: ExpectedH
+  - Result: Half4
+    Rule: BufferExact
+    Actual: OutH4
+    Expected: ExpectedH4
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Buf
+      Kind: Buffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: OutH
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutH4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# Vulkan rejects 16-bit texture and typed buffer elements.
+# UNSUPPORTED: Vulkan
+# REQUIRES: Half
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,96 @@
+#--- source.hlsl
+
+Texture2D<double2> Tex : register(t0);
+Buffer<double2> Buf : register(t1);
+
+RWStructuredBuffer<double> OutD : register(u2);
+RWStructuredBuffer<double2> OutD2 : register(u3);
+
+[numthreads(1, 1, 1)]
+void main() {
+  OutD[0] = Buf[1].x;
+  OutD2[0] = Buf.Load(0).yy;
+  OutD[1] = Tex[int2(1, 0)].y;
+  OutD2[1] = Tex.Load(int3(0, 0, 0)).yx;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  # Typed resources have no double format; the data are double bit patterns.
+  - Name: Tex
+    Format: UInt64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0x4016000000000000, 0x401B000000000000,   # (0,0): 5.5, 6.75
+            0xC01E000000000000, 0x4020800000000000 ]  # (1,0): -7.5, 8.25
+  - Name: Buf
+    Format: UInt64
+    Channels: 2
+    Data: [ 0x3FF8000000000000, 0xC002000000000000,   # 1.5, -2.25
+            0x4009000000000000, 0xC010000000000000 ]  # 3.125, -4.0
+  - Name: OutD
+    Format: Hex64
+    Stride: 8
+    FillSize: 16
+  - Name: OutD2
+    Format: Hex64
+    Stride: 16
+    FillSize: 32
+  - Name: ExpectedD
+    Format: Hex64
+    Stride: 8
+    Data: [ 0x4009000000000000,   # Buf[1].x = 3.125
+            0x4020800000000000 ]  # Tex[(1,0)].y = 8.25
+  - Name: ExpectedD2
+    Format: Hex64
+    Stride: 16
+    Data: [ 0xC002000000000000, 0xC002000000000000,   # Buf.Load(0).yy
+            0x401B000000000000, 0x4016000000000000 ]  # Tex.Load((0,0)).yx
+
+Results:
+  - Result: Double
+    Rule: BufferExact
+    Actual: OutD
+    Expected: ExpectedD
+  - Result: Double2
+    Rule: BufferExact
+    Actual: OutD2
+    Expected: ExpectedD2
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Buf
+      Kind: Buffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: OutD
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutD2
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/191248
+# Bug: https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && DirectX
+
+# Vulkan rejects double texture and typed buffer elements.
+# UNSUPPORTED: Vulkan
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

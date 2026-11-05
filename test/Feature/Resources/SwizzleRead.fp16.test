@@ -1,0 +1,98 @@
+#--- source.hlsl
+
+StructuredBuffer<half4> SB : register(t0);
+ByteAddressBuffer BAB : register(t1);
+cbuffer CB : register(b2) {
+  half4 CH;
+};
+
+RWStructuredBuffer<half> OutH : register(u3);
+RWStructuredBuffer<half4> OutH4 : register(u4);
+
+[numthreads(1, 1, 1)]
+void main() {
+  OutH[0] = SB[1].w;
+  OutH4[0] = SB.Load(0).yxzy;
+  OutH4[1] = BAB.Load<half4>(8).zwxx;
+  OutH[1] = CH.y;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: SB
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3c00, 0x4000, 0x4200, 0x4400,   # 1.0, 2.0, 3.0, 4.0
+            0x4500, 0x4600, 0x4700, 0x4800 ]  # 5.0, 6.0, 7.0, 8.0
+  - Name: BAB
+    Format: Float16
+    Stride: 2
+    Data: [ 0x3800, 0x3e00, 0x4100, 0x4300,   # 0.5, 1.5, 2.5, 3.5
+            0x4880, 0x4900, 0x4980, 0x4a00 ]  # 9.0, 10.0, 11.0, 12.0
+  - Name: CB
+    Format: Float16
+    Data: [ 0xbc00, 0xc000, 0x3800, 0x3e00 ]  # -1.0, -2.0, 0.5, 1.5
+  - Name: OutH
+    Format: Float16
+    Stride: 2
+    FillSize: 4
+  - Name: OutH4
+    Format: Float16
+    Stride: 8
+    FillSize: 16
+  - Name: ExpectedH
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4800,   # SB[1].w = 8.0
+            0xc000 ]  # CH.y = -2.0
+  - Name: ExpectedH4
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4000, 0x3c00, 0x4200, 0x4000,   # SB.Load(0).yxzy
+            0x4980, 0x4a00, 0x4880, 0x4880 ]  # BAB.Load<half4>(8).zwxx
+
+Results:
+  - Result: Half
+    Rule: BufferExact
+    Actual: OutH
+    Expected: ExpectedH
+  - Result: Half4
+    Rule: BufferExact
+    Actual: OutH4
+    Expected: ExpectedH4
+
+DescriptorSets:
+  - Resources:
+    - Name: SB
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: BAB
+      Kind: ByteAddressBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: CB
+      Kind: ConstantBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutH
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: OutH4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+...
+#--- end
+
+# REQUIRES: Half
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
