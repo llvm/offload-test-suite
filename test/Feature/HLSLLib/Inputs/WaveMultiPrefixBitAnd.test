@@ -1,0 +1,182 @@
+#--- source.hlsl
+
+// Checks signed and unsigned scalars, vectors, and matrices.
+// Masks cover the full wave, even and odd lanes, four-lane groups,
+// single lanes, and inactive lanes.
+
+#if TYPE_BITS == 16
+typedef uint16_t UInt;
+typedef int16_t Int;
+#elif TYPE_BITS == 64
+typedef uint64_t UInt;
+typedef int64_t Int;
+#else
+typedef uint UInt;
+typedef int Int;
+#endif
+
+typedef vector<UInt, 4> UInt4;
+typedef vector<Int, 4> Int4;
+#if TEST_MATRIX
+typedef matrix<UInt, 2, 3> UInt2x3;
+typedef matrix<Int, 2, 3> Int2x3;
+#endif
+
+StructuredBuffer<uint4> In : register(t0);
+RWStructuredBuffer<uint4> OutGroups : register(u1);
+RWStructuredBuffer<uint> OutDivergent : register(u2);
+
+UInt4 laneValue(UInt4 Seed, uint Lane) {
+  uint4 Shift = (Lane + uint4(0, 3, 7, 11)) % TYPE_BITS;
+  return Seed & ~(UInt4(1, 1, 1, 1) << UInt4(Shift));
+}
+
+uint4 laneMask(uint Lane, uint Bits) {
+  uint Word = Lane / 32;
+  return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
+               Word == 3 ? Bits : 0);
+}
+
+uint check(UInt4 Value, UInt4 Expected, uint4 Mask) {
+  Int4 SignedValue = Int4(Value);
+  Int4 SignedExpected = Int4(Expected);
+#if TEST_MATRIX
+  UInt2x3 UMatrix = UInt2x3(Value.xyz, Value.wxy);
+  Int2x3 IMatrix = Int2x3(SignedValue.xyz, SignedValue.wxy);
+  UInt2x3 UResult = WaveMultiPrefixBitAnd(UMatrix, Mask);
+  Int2x3 IResult = WaveMultiPrefixBitAnd(IMatrix, Mask);
+  return uint(all(UResult[0] == Expected.xyz) &&
+              all(UResult[1] == Expected.wxy) &&
+              all(IResult[0] == SignedExpected.xyz) &&
+              all(IResult[1] == SignedExpected.wxy));
+#else
+  uint Passed = uint(WaveMultiPrefixBitAnd(Value.x, Mask) == Expected.x);
+  Passed |= uint(all(WaveMultiPrefixBitAnd(Value.xy, Mask) == Expected.xy))
+            << 1;
+  Passed |= uint(all(WaveMultiPrefixBitAnd(Value.xyz, Mask) == Expected.xyz))
+            << 2;
+  Passed |= uint(all(WaveMultiPrefixBitAnd(Value, Mask) == Expected)) << 3;
+
+  Passed |= uint(WaveMultiPrefixBitAnd(SignedValue.x, Mask) == SignedExpected.x)
+            << 4;
+  Passed |= uint(all(WaveMultiPrefixBitAnd(SignedValue.xy, Mask) ==
+                     SignedExpected.xy))
+            << 5;
+  Passed |= uint(all(WaveMultiPrefixBitAnd(SignedValue.xyz, Mask) ==
+                     SignedExpected.xyz))
+            << 6;
+  Passed |=
+      uint(all(WaveMultiPrefixBitAnd(SignedValue, Mask) == SignedExpected))
+      << 7;
+
+  return uint(Passed == 255);
+#endif
+}
+
+#ifdef WAVE_SIZE
+[WaveSize(WAVE_SIZE)]
+#endif
+[numthreads(128, 1, 1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint Lane = WaveGetLaneIndex();
+  UInt4 Seed = UInt4(In[0]);
+#if TYPE_BITS == 64
+  Seed = (Seed << 32) | UInt4(In[0].wzyx);
+#endif
+  UInt4 Value = laneValue(Seed, Lane);
+  UInt4 Identity = ~UInt4(0, 0, 0, 0);
+  UInt4 Full = Identity;
+  UInt4 Parity = Identity;
+  UInt4 Block = Identity;
+  UInt4 Divergent = Identity;
+
+  for (uint Previous = 0; Previous < Lane; ++Previous) {
+    UInt4 V = laneValue(Seed, Previous);
+    Full &= V;
+    if ((Previous & 1) == (Lane & 1))
+      Parity &= V;
+    if (Previous / 4 == Lane / 4)
+      Block &= V;
+    if (Previous % 3 != 1)
+      Divergent &= V;
+  }
+
+  uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
+  uint4 ParityMask =
+      (Lane & 1) == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
+                      : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
+  uint4 BlockMask = laneMask(Lane, 0xFu << ((Lane % 32) & ~3u));
+  uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
+
+  OutGroups[TID.x] =
+      uint4(check(Value, Full, FullMask), check(Value, Parity, ParityMask),
+            check(Value, Block, BlockMask), check(Value, Identity, SingleMask));
+
+  uint Passed = 1;
+  if (Lane % 3 != 1)
+    Passed = check(Value, Divergent, FullMask);
+  OutDivergent[TID.x] = Passed;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 16
+    Data: [ 0xFEDCBA98, 0x87654321, 0xDEADBEEF, 0x13579BDF ]
+  - Name: OutGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+  - Name: ExpectedGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+    FillValue: 1
+  - Name: OutDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: ExpectedDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: TestGroups
+    Rule: BufferExact
+    Actual: OutGroups
+    Expected: ExpectedGroups
+  - Result: TestDivergent
+    Rule: BufferExact
+    Actual: OutDivergent
+    Expected: ExpectedDivergent
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: OutGroups
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: OutDivergent
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+...

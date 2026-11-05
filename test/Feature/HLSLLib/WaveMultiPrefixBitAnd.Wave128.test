@@ -1,0 +1,8 @@
+# REQUIRES: SM_6_6 && WaveSize_128
+# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# Bug: TODO: Add the issue for the WARP 128-lane failure.
+# XFAIL: WARP && DirectX
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitAnd.test %t
+# RUN: %dxc_target -T cs_6_6 -DTYPE_BITS=32 -DWAVE_SIZE=128 -Fo %t.o \
+# RUN:   %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
