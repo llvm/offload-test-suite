@@ -1175,6 +1175,8 @@ template <> struct ScalarEnumerationTraits<offloadtest::Format> {
     ENUM_CASE(RGBA32Sint);
     ENUM_CASE(RGBA32Uint);
     ENUM_CASE(RGBA32Float);
+    ENUM_CASE(R64Float);
+    ENUM_CASE(RG64Float);
     ENUM_CASE(D32Float);
     ENUM_CASE(D32FloatS8Uint);
 #undef ENUM_CASE

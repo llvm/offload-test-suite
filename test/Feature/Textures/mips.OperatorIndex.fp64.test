@@ -1,0 +1,137 @@
+#--- source.hlsl
+
+// mips[][] reads on textures with double and double2 elements at mip 0 and 1.
+// Readable decimal fractions have distinct high words and nonzero low words,
+// so a lost or swapped 32-bit word changes the result.
+
+Texture1D<double> Tex1D : register(t0);
+Texture2D<double2> Tex2D : register(t1);
+Texture3D<double> Tex3D : register(t2);
+RWStructuredBuffer<double> OutS : register(u0);
+RWStructuredBuffer<double2> OutV : register(u1);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture1D::mips.operator[][]
+  OutS[0] = Tex1D.mips[0][0];
+  OutS[1] = Tex1D.mips[0][1];
+  OutS[2] = Tex1D.mips[1][0];
+
+  // Texture3D::mips.operator[][]
+  OutS[3] = Tex3D.mips[0][uint3(0, 0, 0)];
+  OutS[4] = Tex3D.mips[0][uint3(1, 1, 1)];
+  OutS[5] = Tex3D.mips[1][uint3(0, 0, 0)];
+
+  // Texture2D::mips.operator[][]
+  OutV[0] = Tex2D.mips[0][int2(0, 0)];
+  OutV[1] = Tex2D.mips[0][int2(1, 1)];
+  OutV[2] = Tex2D.mips[1][int2(0, 0)];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex1D
+    Format: Float64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 1.1,   # Mip 0 (0)
+            -1.2,  # Mip 0 (1)
+            1.3 ]  # Mip 1 (0)
+
+  - Name: Tex2D
+    Format: Float64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
+    Data: [ 2.1, -12.1,   # Mip 0 (0,0)
+            -2.2, 12.2,   # Mip 0 (1,0)
+            2.3, -12.3,   # Mip 0 (0,1)
+            -2.4, 12.4,   # Mip 0 (1,1)
+            2.6, -12.6 ]  # Mip 1 (0,0)
+
+  - Name: Tex3D
+    Format: Float64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 3.1,    # Mip 0 (0,0,0)
+            -3.2,   # Mip 0 (1,0,0)
+            3.3,    # Mip 0 (0,1,0)
+            -3.4,   # Mip 0 (1,1,0)
+            3.6,    # Mip 0 (0,0,1)
+            -3.7,   # Mip 0 (1,0,1)
+            3.8,    # Mip 0 (0,1,1)
+            -3.9,   # Mip 0 (1,1,1)
+            3.01 ]  # Mip 1 (0,0,0)
+
+  - Name: OutS
+    Format: Float64
+    Stride: 8
+    FillSize: 48
+
+  - Name: ExpectedS
+    Format: Float64
+    Stride: 8
+    Data: [ 1.1,    # [0] Tex1D mip 0 (0)
+            -1.2,   # [1] Tex1D mip 0 (1)
+            1.3,    # [2] Tex1D mip 1 (0)
+            3.1,    # [3] Tex3D mip 0 (0,0,0)
+            -3.9,   # [4] Tex3D mip 0 (1,1,1)
+            3.01 ]  # [5] Tex3D mip 1 (0,0,0)
+
+  - Name: OutV
+    Format: Float64
+    Stride: 16
+    FillSize: 48
+
+  - Name: ExpectedV
+    Format: Float64
+    Stride: 16
+    Data: [ 2.1, -12.1,   # [0] Tex2D mip 0 (0,0)
+            -2.4, 12.4,   # [1] Tex2D mip 0 (1,1)
+            2.6, -12.6 ]  # [2] Tex2D mip 1 (0,0)
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: Tex2D
+      Kind: Texture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+    - Name: OutS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+    - Name: OutV
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+
+Results:
+  - Result: ScalarMipsOperatorIndex
+    Rule: BufferExact
+    Actual: OutS
+    Expected: ExpectedS
+  - Result: VectorMipsOperatorIndex
+    Rule: BufferExact
+    Actual: OutV
+    Expected: ExpectedV
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && (DirectX || Metal)
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
+# XFAIL: Metal
+
+# REQUIRES: Double
+# UNSUPPORTED: Vulkan
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

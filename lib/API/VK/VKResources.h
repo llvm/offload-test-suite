@@ -74,6 +74,10 @@ inline VkFormat getVulkanFormat(Format Format) {
     return VK_FORMAT_R64G64_UINT;
   case Format::RG64Sint:
     return VK_FORMAT_R64G64_SINT;
+  case Format::R64Float:
+    return VK_FORMAT_R64_SFLOAT;
+  case Format::RG64Float:
+    return VK_FORMAT_R64G64_SFLOAT;
   case Format::D32Float:
     return VK_FORMAT_D32_SFLOAT;
   case Format::D32FloatS8Uint:

@@ -1,0 +1,228 @@
+#--- source.hlsl
+
+// operator[] reads and stores on textures with scalar 64-bit integer
+// elements. Every texel and stored value has a nonzero high word that differs
+// between values and a nonzero low word, so a lost or swapped word changes the
+// result. Stored values come from an input buffer.
+
+Texture1D<int64_t> Tex1D : register(t0);
+Texture2D<uint64_t> Tex2D : register(t1);
+Texture3D<int64_t> Tex3D : register(t2);
+StructuredBuffer<int64_t> InS : register(t3);
+StructuredBuffer<uint64_t> InU : register(t4);
+RWTexture1D<uint64_t> RWTex1D : register(u5);
+RWTexture2D<int64_t> RWTex2D : register(u6);
+RWTexture3D<uint64_t> RWTex3D : register(u7);
+RWStructuredBuffer<int64_t> OutS : register(u8);
+RWStructuredBuffer<uint64_t> OutU : register(u9);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture1D::operator[] (int)
+  OutS[0] = Tex1D[0];
+  OutS[1] = Tex1D[1];
+
+  // Texture3D::operator[] (int3)
+  OutS[2] = Tex3D[int3(0, 0, 0)];
+  OutS[3] = Tex3D[int3(1, 0, 1)];
+
+  // RWTexture2D::operator[] (uint2): read, then a whole-element store and a
+  // .x store, read back.
+  OutS[4] = RWTex2D[uint2(0, 1)];
+  RWTex2D[uint2(0, 1)] = InS[0];
+  RWTex2D[uint2(1, 0)].x = InS[1];
+  OutS[5] = RWTex2D[uint2(0, 1)];
+  OutS[6] = RWTex2D[uint2(1, 0)];
+
+  // Texture2D::operator[] (int2)
+  OutU[0] = Tex2D[int2(0, 0)];
+  OutU[1] = Tex2D[int2(1, 1)];
+
+  // RWTexture1D::operator[] (uint)
+  OutU[2] = RWTex1D[0];
+  RWTex1D[0] = InU[0];
+  RWTex1D[1].x = InU[1];
+  OutU[3] = RWTex1D[0];
+  OutU[4] = RWTex1D[1];
+
+  // RWTexture3D::operator[] (uint3)
+  OutU[5] = RWTex3D[uint3(1, 0, 1)];
+  RWTex3D[uint3(1, 0, 1)] = InU[2];
+  RWTex3D[uint3(0, 1, 1)].x = InU[3];
+  OutU[6] = RWTex3D[uint3(1, 0, 1)];
+  OutU[7] = RWTex3D[uint3(0, 1, 1)];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex1D
+    Format: Int64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0x0000011080000210,    # (0)
+            -0x0000011180000211 ]  # (1)
+
+  - Name: Tex2D
+    Format: UInt64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0xC000012080000220,    # (0,0)
+            0xC000012180000221,    # (1,0)
+            0xC000012280000222,    # (0,1)
+            0xC000012380000223 ]   # (1,1)
+
+  - Name: Tex3D
+    Format: Int64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 0x0000013080000230,    # (0,0,0)
+            -0x0000013180000231,   # (1,0,0)
+            0x0000013280000232,    # (0,1,0)
+            -0x0000013380000233,   # (1,1,0)
+            0x0000013480000234,    # (0,0,1)
+            -0x0000013580000235,   # (1,0,1)
+            0x0000013680000236,    # (0,1,1)
+            -0x0000013780000237 ]  # (1,1,1)
+
+  - Name: InS
+    Format: Int64
+    Stride: 8
+    Data: [ 0x0000017080000270, -0x0000017180000271 ]
+
+  - Name: InU
+    Format: UInt64
+    Stride: 8
+    Data: [ 0xC000018080000280, 0xC000018180000281,
+            0xC000018280000282, 0xC000018380000283 ]
+
+  - Name: RWTex1D
+    Format: UInt64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0xC000014080000240,    # (0)
+            0xC000014180000241 ]   # (1)
+
+  - Name: RWTex2D
+    Format: Int64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 0x0000015080000250,    # (0,0)
+            -0x0000015180000251,   # (1,0)
+            0x0000015280000252,    # (0,1)
+            -0x0000015380000253 ]  # (1,1)
+
+  - Name: RWTex3D
+    Format: UInt64
+    Channels: 1
+    OutputProps: { Width: 2, Height: 2, Depth: 2 }
+    Data: [ 0xC000016080000260,    # (0,0,0)
+            0xC000016180000261,    # (1,0,0)
+            0xC000016280000262,    # (0,1,0)
+            0xC000016380000263,    # (1,1,0)
+            0xC000016480000264,    # (0,0,1)
+            0xC000016580000265,    # (1,0,1)
+            0xC000016680000266,    # (0,1,1)
+            0xC000016780000267 ]   # (1,1,1)
+
+  - Name: OutS
+    Format: Int64
+    Stride: 8
+    FillSize: 56
+
+  - Name: ExpectedS
+    Format: Int64
+    Stride: 8
+    Data: [ 0x0000011080000210,    # [0] Tex1D (0)
+            -0x0000011180000211,   # [1] Tex1D (1)
+            0x0000013080000230,    # [2] Tex3D (0,0,0)
+            -0x0000013580000235,   # [3] Tex3D (1,0,1)
+            0x0000015280000252,    # [4] RWTex2D (0,1) before the store
+            0x0000017080000270,    # [5] RWTex2D (0,1) = InS[0]
+            -0x0000017180000271 ]  # [6] RWTex2D (1,0).x = InS[1]
+
+  - Name: OutU
+    Format: UInt64
+    Stride: 8
+    FillSize: 64
+
+  - Name: ExpectedU
+    Format: UInt64
+    Stride: 8
+    Data: [ 0xC000012080000220,    # [0] Tex2D (0,0)
+            0xC000012380000223,    # [1] Tex2D (1,1)
+            0xC000014080000240,    # [2] RWTex1D (0) before the store
+            0xC000018080000280,    # [3] RWTex1D (0) = InU[0]
+            0xC000018180000281,    # [4] RWTex1D (1).x = InU[1]
+            0xC000016580000265,    # [5] RWTex3D (1,0,1) before the store
+            0xC000018280000282,    # [6] RWTex3D (1,0,1) = InU[2]
+            0xC000018380000283 ]   # [7] RWTex3D (0,1,1).x = InU[3]
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Tex2D
+      Kind: Texture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: InS
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: InU
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: RWTex1D
+      Kind: RWTexture1D
+      DirectXBinding: { Register: 5, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+    - Name: RWTex2D
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 6, Space: 0 }
+      VulkanBinding: { Binding: 6 }
+    - Name: RWTex3D
+      Kind: RWTexture3D
+      DirectXBinding: { Register: 7, Space: 0 }
+      VulkanBinding: { Binding: 7 }
+    - Name: OutS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 8, Space: 0 }
+      VulkanBinding: { Binding: 8 }
+    - Name: OutU
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 9, Space: 0 }
+      VulkanBinding: { Binding: 9 }
+
+Results:
+  - Result: SignedOperatorIndex
+    Rule: BufferExact
+    Actual: OutS
+    Expected: ExpectedS
+  - Result: UnsignedOperatorIndex
+    Rule: BufferExact
+    Actual: OutU
+    Expected: ExpectedU
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && (DirectX || Metal)
+
+# REQUIRES: Int64
+# REQUIRES: Int64TypedResources
+# REQUIRES: Int64SampledTextures
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
