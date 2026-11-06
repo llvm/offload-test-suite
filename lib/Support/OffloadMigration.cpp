@@ -463,7 +463,8 @@ llvm::Error createDepthStencil(Device &Dev, Pipeline &P,
                                SharedInvocationState &IS) {
   auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
       Dev, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-      P.Bindings.RTargetBufferPtr->OutputProps.Height, P.Bindings.SampleCount);
+      P.Bindings.RTargetBufferPtr->OutputProps.Height, P.Bindings.SampleCount,
+      static_cast<uint8_t>(P.Stencil ? P.Stencil->ClearValue : 0));
   if (!TexOrErr)
     return TexOrErr.takeError();
   IS.DepthStencil = std::move(*TexOrErr);

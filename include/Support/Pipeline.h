@@ -599,6 +599,12 @@ struct VertexAttribute {
   uint32_t size() const { return getFormatSize(Format) * Channels; }
 };
 
+struct StencilState {
+  bool Enabled = false;
+  uint32_t ClearValue = 0;
+  CompareFunction ComparisonOp = CompareFunction::Equal;
+};
+
 struct IOBindings {
   std::string VertexBuffer;
   CPUBuffer *VertexBufferPtr = nullptr;
@@ -780,6 +786,7 @@ struct Pipeline {
   llvm::SmallVector<Shader> Shaders;
   RuntimeSettings Settings;
   FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
+  std::optional<StencilState> Stencil;
 
   IOBindings Bindings;
   llvm::SmallVector<PushConstantBlock> PushConstants;
@@ -922,6 +929,10 @@ template <> struct MappingTraits<offloadtest::VulkanBinding> {
 
 template <> struct MappingTraits<offloadtest::IOBindings> {
   static void mapping(IO &I, offloadtest::IOBindings &B);
+};
+
+template <> struct MappingTraits<offloadtest::StencilState> {
+  static void mapping(IO &I, offloadtest::StencilState &S);
 };
 
 template <> struct MappingTraits<offloadtest::Viewport> {

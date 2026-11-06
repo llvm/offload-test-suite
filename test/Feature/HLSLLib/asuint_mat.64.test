@@ -200,12 +200,9 @@ DescriptorSets:
 
 # REQUIRES: Double
 
-# Bug: https://github.com/llvm/llvm-project/issues/186864
-# XFAIL: Clang && Vulkan
-
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/8477
 # XFAIL: DXC && DirectX
 
 # RUN: split-file %s %t
-# RUN: %dxc_target  -T cs_6_5 -HV 202x -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target  -T cs_6_5 -HV 2021 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

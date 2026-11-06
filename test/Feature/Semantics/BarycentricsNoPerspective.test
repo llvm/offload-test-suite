@@ -85,9 +85,6 @@ Results:
 # UNSUPPORTED: Metal
 # UNSUPPORTED: Lavapipe
 
-# TODO: Remove when Clang supports graphics-stage DXIL input/output lowering.
-# XFAIL: Clang
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl

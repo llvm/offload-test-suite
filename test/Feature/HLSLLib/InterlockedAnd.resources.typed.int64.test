@@ -18,8 +18,8 @@
 //   * RWBuffer<int64_t>[i]   (free function, 3-arg, signed)
 //
 // 64 threads of a single threadgroup atomically AND their own unique bit
-// mask ~(1ull << tid) into a single accumulator slot that starts with 
-// all bits set. With correct atomic semantics, every bit must be set 
+// mask ~(1ull << tid) into a single accumulator slot that starts with
+// all bits set. With correct atomic semantics, every bit must be set
 // back to 0, so each accumulator must end at
 // exactly 0x0000000000000000. If any read-modify-write were lost, the
 // corresponding bit would remain clear.
@@ -134,5 +134,5 @@ DescriptorSets:
 
 # REQUIRES: Int64TypedResourceAtomics && SM_6_6
 # RUN: split-file %s %t
-# RUN: %dxc_target -HV 202x -T cs_6_6 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -HV 2021 -T cs_6_6 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

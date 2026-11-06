@@ -207,6 +207,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("MeshShader")
         if device["Features"].get("BarycentricsSupported", False):
             config.available_features.add("Barycentrics")
+        if device["Features"].get("PSSpecifiedStencilRefSupported", False):
+            config.available_features.add("ShaderStencilRef")
         if (
             device["Features"].get("VariableShadingRateTier", "NotSupported")
             != "NotSupported"
@@ -283,6 +285,8 @@ def setDeviceFeatures(config, device, compiler):
                 config.available_features.add("MeshShader")
             if Extension["ExtensionName"] == "VK_EXT_mutable_descriptor_type":
                 config.available_features.add("VulkanMutableDescriptorType")
+            if Extension["ExtensionName"] == "VK_EXT_shader_stencil_export":
+                config.available_features.add("ShaderStencilRef")
 
         if "VK_KHR_acceleration_structure" in config.available_features:
             config.available_features.add("acceleration-structure")
@@ -307,6 +311,7 @@ if ShouldSearchByGPUName:
 tools.append(
     ToolSubst("%offloader", command=FindTool("offloader"), extra_args=offloader_args)
 )
+tools.append(ToolSubst("%api_query", command=FindTool("api-query")))
 
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
@@ -429,8 +434,13 @@ if "llvmpipe" in target_device.get("Description", "").lower():
 
 # Expose the host CPU architecture so tests can gate on it (e.g. XFAIL a test
 # only when running on an ARM host).
-if platform.machine().lower() in ("arm64", "aarch64"):
+host_machine = platform.machine().lower()
+if host_machine in ("arm64", "aarch64"):
     config.available_features.add("host-arm64")
+elif host_machine in ("x86_64", "amd64", "x64"):
+    config.available_features.add("host-x86_64")
+elif host_machine in ("x86", "i386", "i486", "i586", "i686"):
+    config.available_features.add("host-x86")
 
 if os.path.exists(config.goldenimage_dir):
     config.substitutions.append(("%goldenimage_dir", config.goldenimage_dir))

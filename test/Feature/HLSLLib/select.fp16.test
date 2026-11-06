@@ -8,7 +8,7 @@
 //   - Vector condition, scalar true/false values
 //   - Non-boolean vector condition, vector true/false values
 // For each vector condition scenario, there are tests for vec4, vec3, and vec2.
-// For the scalar condition scenario, there are four tests. One uses the buffers 
+// For the scalar condition scenario, there are four tests. One uses the buffers
 // for inputs and the other three use constants.
 
 StructuredBuffer<bool> Cond : register(t0);
@@ -76,7 +76,7 @@ Buffers:
   - Name: ExpectedOut
     Format: Float16
     Stride: 8
-    Data: [ 
+    Data: [
       0x3c00, 0xc000, 0x4200, 0xc400, 0x3c00, 0xc000, 0x3c00, 0xc400, 0x3c00, 0xbc00, 0x4200, 0xbc00, 0x3c00, 0xbc00, 0x3c00, 0xbc00,
       0x4466, 0xc580, 0xc8f3, 0x211f, 0x4466, 0x4466, 0xc8f3, 0x3c00, 0x4466, 0xc580, 0x47b3, 0xc000, 0x4466, 0x4466, 0x47b3, 0x4200,
       0xc900, 0x5a40, 0xcb80, 0x4b80, 0xc900, 0x5640, 0xcb80, 0x4b80,
@@ -132,5 +132,5 @@ DescriptorSets:
 
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -enable-16bit-types -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

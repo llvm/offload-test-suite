@@ -2,7 +2,7 @@
 #   * SV_VertexID     - VS input, forwarded via a `nointerpolation` varying
 #   * SV_PrimitiveID  - PS input
 #   * SV_IsFrontFace  - PS input
-#   * SV_POSITION            - VS output / PS input, asserted at pixel center
+#   * SV_POSITION     - VS output / PS input, asserted at pixel center
 #
 # SV_VertexID: https://github.com/llvm/wg-hlsl/issues/151
 # SV_PrimitiveID: https://github.com/llvm/wg-hlsl/issues/160

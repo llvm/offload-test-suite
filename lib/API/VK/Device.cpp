@@ -259,6 +259,24 @@ static VkCompareOp getVKCompareOp(CompareFunction Func) {
   llvm_unreachable("All compare op cases handled");
 }
 
+static VkPipelineDepthStencilStateCreateInfo
+getVKDepthStencilState(const StencilState &Stencil) {
+  VkPipelineDepthStencilStateCreateInfo Desc = {};
+  Desc.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  Desc.depthTestEnable = VK_TRUE;
+  Desc.depthWriteEnable = VK_TRUE;
+  Desc.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+  Desc.stencilTestEnable = Stencil.Enabled;
+  Desc.front.failOp = VK_STENCIL_OP_KEEP;
+  Desc.front.passOp = VK_STENCIL_OP_KEEP;
+  Desc.front.depthFailOp = VK_STENCIL_OP_KEEP;
+  Desc.front.compareOp = getVKCompareOp(Stencil.ComparisonOp);
+  Desc.front.compareMask = 0xff;
+  Desc.front.writeMask = 0xff;
+  Desc.back = Desc.front;
+  return Desc;
+}
+
 static VkBufferUsageFlagBits getFlagBits(const ResourceKind RK) {
   switch (RK) {
   case ResourceKind::Buffer:
@@ -1896,6 +1914,13 @@ public:
 
     llvm::SmallVector<const char *> EnabledDeviceExtensions;
 
+#ifdef VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME
+    if (isExtensionSupported(AvailableDeviceExtensions,
+                             VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME))
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
+#endif
+
 #ifdef VK_EXT_SHADER_IMAGE_ATOMIC_INT64_EXTENSION_NAME
     const bool HasShaderImageAtomicInt64Ext =
         isExtensionSupported(AvailableDeviceExtensions,
@@ -2878,16 +2903,8 @@ public:
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     MultisampleCI.rasterizationSamples = getVulkanSampleCount(Desc.SampleCount);
 
-    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
-    DepthStencilCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    DepthStencilCI.depthTestEnable = VK_TRUE;
-    DepthStencilCI.depthWriteEnable = VK_TRUE;
-    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
-    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
-    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
-    DepthStencilCI.front = DepthStencilCI.back;
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI =
+        getVKDepthStencilState(Desc.Stencil);
 
     llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
         RTFormats.size());
@@ -3101,16 +3118,8 @@ public:
         VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     MultisampleCI.rasterizationSamples = getVulkanSampleCount(Desc.SampleCount);
 
-    VkPipelineDepthStencilStateCreateInfo DepthStencilCI = {};
-    DepthStencilCI.sType =
-        VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    DepthStencilCI.depthTestEnable = VK_TRUE;
-    DepthStencilCI.depthWriteEnable = VK_TRUE;
-    DepthStencilCI.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    DepthStencilCI.back.failOp = VK_STENCIL_OP_KEEP;
-    DepthStencilCI.back.passOp = VK_STENCIL_OP_KEEP;
-    DepthStencilCI.back.compareOp = VK_COMPARE_OP_ALWAYS;
-    DepthStencilCI.front = DepthStencilCI.back;
+    VkPipelineDepthStencilStateCreateInfo DepthStencilCI =
+        getVKDepthStencilState(Desc.Stencil);
 
     llvm::SmallVector<VkPipelineColorBlendAttachmentState> BlendAttachments(
         Desc.RTFormats.size());
@@ -4235,8 +4244,8 @@ public:
   llvm::Error createDepthStencil(Pipeline &P, InvocationState &IS) {
     auto TexOrErr = offloadtest::createDefaultDepthStencilTarget(
         *this, P.Bindings.RTargetBufferPtr->OutputProps.Width,
-        P.Bindings.RTargetBufferPtr->OutputProps.Height,
-        P.Bindings.SampleCount);
+        P.Bindings.RTargetBufferPtr->OutputProps.Height, P.Bindings.SampleCount,
+        static_cast<uint8_t>(P.Stencil ? P.Stencil->ClearValue : 0));
     if (!TexOrErr)
       return TexOrErr.takeError();
     IS.DepthStencil = std::move(*TexOrErr);
@@ -5368,7 +5377,9 @@ public:
       DSAttachment.Fmt = State.DepthStencil->getDesc().Fmt;
       DSAttachment.DepthLoad = LoadAction::Clear;
       DSAttachment.DepthStore = StoreAction::Store;
-      DSAttachment.StencilLoad = LoadAction::DontCare;
+      DSAttachment.StencilLoad = P.Stencil && P.Stencil->Enabled
+                                     ? LoadAction::Clear
+                                     : LoadAction::DontCare;
       DSAttachment.StencilStore = StoreAction::DontCare;
 
       RenderPassDesc PassDesc;
@@ -5386,6 +5397,7 @@ public:
         TraditionalRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
+        PipelineDesc.Stencil = P.Stencil.value_or(StencilState{});
         PipelineDesc.PatchControlPoints = P.Bindings.PatchControlPoints;
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
@@ -5427,6 +5439,7 @@ public:
         MeshShaderRasterPipelineCreateDesc PipelineDesc = {};
         PipelineDesc.Topology = P.Bindings.Topology;
         PipelineDesc.ShadingRate = P.ShadingRate;
+        PipelineDesc.Stencil = P.Stencil.value_or(StencilState{});
         PipelineDesc.DSFormat = Format::D32FloatS8Uint;
         PipelineDesc.ViewportCount = P.Bindings.getViewportCount();
         PipelineDesc.SampleCount = P.Bindings.SampleCount;

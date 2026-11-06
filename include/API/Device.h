@@ -107,6 +107,7 @@ struct TraditionalRasterPipelineCreateDesc {
   llvm::SmallVector<InputLayoutDesc> InputLayout;
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
+  StencilState Stencil;
   uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
   FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
@@ -157,6 +158,7 @@ struct TraditionalRasterPipelineCreateDesc {
 struct MeshShaderRasterPipelineCreateDesc {
   llvm::SmallVector<Format> RTFormats;
   std::optional<Format> DSFormat;
+  StencilState Stencil;
   uint32_t SampleCount = 1;
   PrimitiveTopology Topology;
   FragmentShadingRate ShadingRate = FragmentShadingRate::Rate1x1;
@@ -433,7 +435,8 @@ createRenderTargetFromCPUBuffer(Device &Dev, const CPUBuffer &Buf,
 // Creates a depth/stencil texture matching the dimensions of a render target.
 llvm::Expected<std::unique_ptr<Texture>>
 createDefaultDepthStencilTarget(Device &Dev, uint32_t Width, uint32_t Height,
-                                uint32_t SampleCount = 1);
+                                uint32_t SampleCount = 1,
+                                uint8_t StencilClearValue = 0);
 
 llvm::Expected<std::unique_ptr<offloadtest::Buffer>>
 createBufferWithData(Device &Dev, std::string Name,

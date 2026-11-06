@@ -46,7 +46,7 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 4
-    Data: [ 11, -11, 21, -1, 6, 6, -19, -19, 200, -200, 1.00002e+07, -1.00002e+07, 11, -1, 64992, -2 ] 
+    Data: [ 11, -11, 21, -1, 6, 6, -19, -19, 200, -200, 1.00002e+07, -1.00002e+07, 11, -1, 64992, -2 ]
 
 Results:
   - Result: Test0
@@ -91,5 +91,5 @@ DescriptorSets:
 
 # REQUIRES: Half
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -Gis -HV 202x -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -enable-16bit-types -Gis -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
