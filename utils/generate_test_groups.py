@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a JSON inventory of offload tests grouped by equivalent REQUIRES expressions.
-
-Uses lit to discover tests and read directives without running tests.
-UNSUPPORTED and XFAIL are preserved separately as test metadata.
-"""
+"""Generate JSON groups from equivalent REQUIRES expressions without running tests. Use lit to discover tests and preserve UNSUPPORTED and XFAIL as test metadata."""
 
 import argparse
 import json
@@ -18,13 +14,51 @@ NO_REQUIREMENTS = "No requirements"
 
 
 def parse_expression(text):
-    """Parse a REQUIRES expression using lit, rejecting regex requirements."""
+    """Parse a REQUIRES expression using lit's tokenizer, rejecting regexes."""
     from lit.BooleanExpression import BooleanExpression
 
     if "{{" in text:
         raise ValueError("regex requirements are not supported: %r" % text)
 
-    return BooleanExpression.normalize(text)
+    parser = BooleanExpression(text, set())
+
+    def parse_not():
+        if parser.accept("!"):
+            return {"op": "not", "operand": parse_not()}
+        if parser.accept("("):
+            node = parse_or()
+            parser.expect(")")
+            return node
+        if not BooleanExpression.isMatchExpression(parser.token):
+            raise ValueError(
+                "expected: '!', '(' or identifier\nhave: %s"
+                % parser.quote(parser.token)
+            )
+        node = parser.token
+        parser.token = next(parser.tokens)
+        return node
+
+    def parse_and():
+        operands = [parse_not()]
+        while parser.accept("&&"):
+            operands.append(parse_not())
+        return (
+            operands[0] if len(operands) == 1 else {"op": "and", "operands": operands}
+        )
+
+    def parse_or():
+        operands = [parse_and()]
+        while parser.accept("||"):
+            operands.append(parse_and())
+        return operands[0] if len(operands) == 1 else {"op": "or", "operands": operands}
+
+    try:
+        parser.token = next(parser.tokens)
+        node = parse_or()
+        parser.expect(BooleanExpression.END)
+        return node
+    except ValueError as error:
+        raise ValueError("%s\nin expression: %r" % (error, text)) from error
 
 
 def collect_variables(node, variables):
@@ -41,11 +75,10 @@ def collect_variables(node, variables):
 
 
 def truth_table(node, variables):
-    """Pack expression results for all feature assignments into an integer."""
+    """Evaluate every feature combination and store the results as bits. Each bit records whether the expression is true for that feature combination."""
     assignment_count = 1 << len(variables)
     all_assignments = (1 << assignment_count) - 1
     feature_masks = {}
-    # Each assignment's bits indicate which features are present.
     for feature_index, name in enumerate(variables):
         bits = 0
         for assignment in range(assignment_count):
@@ -88,7 +121,7 @@ def relevant_variables(table, variables):
 
 
 def matching_combinations(table, variable_count):
-    """List the feature assignments where the expression is true."""
+    """Return the indices of feature combinations where the expression is true. Each index uses one bit per feature to represent its value."""
     return [
         assignment
         for assignment in range(1 << variable_count)
@@ -97,8 +130,7 @@ def matching_combinations(table, variable_count):
 
 
 def merge_matching_terms(minterms, variable_count):
-    """Merge satisfying assignments into terms that cannot simplify further."""
-    # An implicant is (value, mask): mask bits are "don't care".
+    """Merge terms that differ in one feature and return those that cannot merge further. Each (value, mask) pair marks ignored features with set mask bits."""
     current = {(minterm, 0) for minterm in minterms}
     primes = set()
     work = 0
@@ -135,26 +167,23 @@ def covers(implicant, minterm):
 
 
 def literal_count(implicant, variable_count):
-    """Count the features a term requires to be present or absent."""
     return variable_count - bin(implicant[1]).count("1")
 
 
 def select_group_terms(minterms, variable_count):
-    """Choose a repeatable set of terms covering every satisfying assignment."""
+    """Choose terms covering every matching combination, starting with uniquely needed terms. Prefer more remaining combinations, fewer literals, then lower (value, mask), without guaranteeing the smallest result."""
     primes = sorted(merge_matching_terms(minterms, variable_count))
     work = len(primes) * len(minterms)
     if work > MAX_NORMALIZATION_WORK:
         raise ValueError("Boolean expression is too complex to normalize")
     remaining = set(minterms)
     chosen = []
-    # Essential prime implicants first.
     for minterm in minterms:
         candidates = [implicant for implicant in primes if covers(implicant, minterm)]
         if len(candidates) == 1 and candidates[0] not in chosen:
             chosen.append(candidates[0])
     for implicant in chosen:
         remaining -= {minterm for minterm in remaining if covers(implicant, minterm)}
-    # Then greedy: most newly covered minterms, fewest literals, deterministic.
     while remaining:
         work += len(primes) * len(remaining)
         if work > MAX_NORMALIZATION_WORK:
@@ -173,7 +202,7 @@ def select_group_terms(minterms, variable_count):
 
 
 def build_group_name(variables, table):
-    """Render a repeatable OR of AND terms using lit syntax."""
+    """Build a stable name from sorted features using AND and OR, or 'true' and '!true' for constant results. The name is not necessarily the shortest expression."""
     variable_count = len(variables)
     if variable_count == 0:
         return "true" if table & 1 else "!true"
@@ -196,9 +225,7 @@ def build_group_name(variables, table):
 
 
 def compute_requires_group(requires):
-    """Returns (key, display_name, features) for a list of REQUIRES strings."""
-    from lit.BooleanExpression import BooleanExpression
-
+    """Combine requirements with AND and return a grouping key, name, and relevant features, treating empty requirements as true. The key uses sorted relevant features and their truth table so equivalent expressions match."""
     nodes = []
     for text in requires:
         for part in text.split(","):
@@ -212,7 +239,7 @@ def compute_requires_group(requires):
         raise ValueError(
             "REQUIRES uses %d distinct features (max %d)" % (len(names), MAX_VARIABLES)
         )
-    combined = BooleanExpression.combine("and", nodes)
+    combined = {"op": "and", "operands": nodes}
     table = truth_table(combined, names)
     support = relevant_variables(table, names)
     # Irrelevant variables don't affect the result, so re-evaluate over the support
@@ -222,7 +249,7 @@ def compute_requires_group(requires):
 
 
 def discover_tests(source_root):
-    """Discover suite tests without loading the runtime tool and GPU setup."""
+    """Discover tests without loading tool and GPU setup from the root lit configuration. Start with the same suffixes and exclusions, then apply local lit configurations."""
     import lit.discovery
     import lit.formats
     from lit.LitConfig import LitConfig
@@ -247,7 +274,6 @@ def discover_tests(source_root):
     config = TestingConfig.fromdefaults(lit_config)
     config.name = "OffloadTest"
     config.test_format = lit.formats.ShTest()
-    # Match test/lit.cfg.py's discovery rules, without its tool/GPU setup.
     config.suffixes = [".test", ".yaml"]
     config.excludes = [
         "Inputs",
@@ -282,7 +308,7 @@ def discover_tests(source_root):
 
 
 def describe_test(test, test_runner):
-    """Read each test's directives without evaluating its applicability."""
+    """Read test directives without checking feature availability or removing tests marked config.unsupported. Require a RUN directive but do not execute it."""
     entry = {
         "name": test.getFullName(),
         "suite": test.suite.name,
@@ -298,12 +324,11 @@ def describe_test(test, test_runner):
         entry["unsupported"] += parsed["UNSUPPORTED:"] or []
     except (ValueError, OSError, UnicodeDecodeError) as error:
         raise ValueError("%s: %s" % (entry["name"], error)) from error
-    # Local config.unsupported depends on runtime features, not this inventory.
     return entry
 
 
 def build_requires_groups(entries):
-    """Group tests by equivalent REQUIRES expressions using relative paths."""
+    """Group equivalent requirements, add group names to entries, and collect paths relative to the suite. Requirements that are always true join 'No requirements', while those that are always false remain in '!true'."""
     groups = {}
     for entry in entries:
         try:
@@ -327,8 +352,7 @@ def build_requires_groups(entries):
     return result
 
 
-def generate_inventory(source_root):
-    """Assemble the complete test inventory and its REQUIRES groups."""
+def generate_test_groups(source_root):
     from lit import TestRunner
 
     entries = [describe_test(test, TestRunner) for test in discover_tests(source_root)]
@@ -336,8 +360,7 @@ def generate_inventory(source_root):
     return {"requires_groups": groups, "tests": entries}
 
 
-def write_inventory(result, destination):
-    """Write JSON to stdout or atomically replace the destination file."""
+def write_json(result, destination):
     if destination is None:
         json.dump(result, sys.stdout, indent=2)
         sys.stdout.write("\n")
@@ -362,10 +385,12 @@ def write_inventory(result, destination):
 
 
 def main():
-    """Parse command-line options and report inventory errors."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--dump-json", metavar="FILE", type=Path, help="default: stdout"
+        "--output",
+        metavar="FILE",
+        type=Path,
+        help="write JSON to FILE (default: stdout)",
     )
     parser.add_argument("--lit-path", metavar="DIR", help="directory containing lit")
     parser.add_argument(
@@ -380,8 +405,8 @@ def main():
         sys.path.insert(0, args.lit_path)
 
     try:
-        result = generate_inventory(args.source_root.resolve())
-        write_inventory(result, args.dump_json)
+        result = generate_test_groups(args.source_root.resolve())
+        write_json(result, args.output)
     except (ImportError, ValueError, OSError, UnicodeDecodeError) as error:
         parser.exit(1, "error: %s\n" % error)
 
