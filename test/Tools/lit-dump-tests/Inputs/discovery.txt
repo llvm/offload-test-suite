@@ -1,0 +1,14 @@
+#--- keep.test
+# RUN: never-execute-this-test
+#--- custom/ignored.test
+This file must not be discovered with the local suffix rules.
+#--- custom/keep.case
+# RUN: never-execute-this-test
+#--- custom/lit.local.cfg
+config.suffixes = [".case"]
+#--- Inputs/ignored.test
+This fixture directory must not be discovered.
+#--- skip/keep.test
+# RUN: never-execute-this-test
+#--- skip/lit.local.cfg
+config.unsupported = True

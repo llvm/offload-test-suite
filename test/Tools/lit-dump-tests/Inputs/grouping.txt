@@ -1,0 +1,57 @@
+#--- and.test
+# RUN: never-execute-this-test
+# REQUIRES: Half, Double
+#--- continuation.test
+# RUN: never-execute-this-test
+# REQUIRES: Double && \
+# REQUIRES: Half
+# END.
+# REQUIRES: Vulkan
+#--- contradiction-constant.test
+# RUN: never-execute-this-test
+# REQUIRES: !true
+#--- contradiction.test
+# RUN: never-execute-this-test
+# REQUIRES: Half && !Half
+#--- distributed.test
+# RUN: never-execute-this-test
+# REQUIRES: Half && (Double || Int64)
+#--- environments.test
+# RUN: never-execute-this-test
+# REQUIRES: Windows, DirectX, DXC
+#--- equivalent-and.test
+# RUN: never-execute-this-test
+# REQUIRES: Double && !(!Half)
+#--- equivalent-distributed.test
+# RUN: never-execute-this-test
+# REQUIRES: (Half && Double) || (Half && Int64)
+#--- equivalent-or.test
+# RUN: never-execute-this-test
+# REQUIRES: SM_6_9 || Clang
+#--- false-feature.test
+# RUN: never-execute-this-test
+# REQUIRES: false
+#--- irrelevant-feature.test
+# RUN: never-execute-this-test
+# REQUIRES: Double && (Unused || !Unused)
+#--- nested/relative-path.test
+# RUN: never-execute-this-test
+#--- no-requirements.test
+# RUN: never-execute-this-test
+#--- not.test
+# RUN: never-execute-this-test
+# REQUIRES: Double && !WARP
+#--- or.test
+# RUN: never-execute-this-test
+# REQUIRES: Clang || SM_6_9
+#--- tautology.test
+# RUN: never-execute-this-test
+# REQUIRES: Half || !Half
+#--- unsupported-xfail.test
+# RUN: never-execute-this-test
+# REQUIRES: Double
+# UNSUPPORTED: WARP && DXC, Lavapipe, {{GPU.*}}
+# XFAIL: Intel, *
+#--- vulkan.test
+# RUN: never-execute-this-test
+# REQUIRES: Vulkan && Clang
