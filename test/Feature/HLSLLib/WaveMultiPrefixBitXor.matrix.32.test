@@ -1,0 +1,8 @@
+# REQUIRES: SM_6_5
+# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/7093
+# XFAIL: DXC && Vulkan
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitXor.test %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=32 -DTEST_MATRIX=1 -Fo %t.o \
+# RUN:   %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
