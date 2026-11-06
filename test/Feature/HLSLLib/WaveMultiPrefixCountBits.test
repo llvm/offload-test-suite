@@ -1,6 +1,9 @@
 # REQUIRES: SM_6_5
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99211
+# XFAIL: Clang
 # XFAIL: Vulkan
+# Bug: https://github.com/llvm/offload-test-suite/issues/1712
+# XFAIL: Metal && DXC
 # RUN: split-file %S/Inputs/WaveMultiPrefixCountBits.test %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
