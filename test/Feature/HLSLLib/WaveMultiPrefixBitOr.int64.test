@@ -1,0 +1,8 @@
+# REQUIRES: Int64 && SM_6_5
+# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# Bug: https://github.com/llvm/offload-test-suite/issues/959
+# XFAIL: Metal && Clang
+# XFAIL: Metal && DXC
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitOr.test %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=64 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
