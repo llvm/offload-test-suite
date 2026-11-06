@@ -313,6 +313,18 @@ tools.append(
 )
 tools.append(ToolSubst("%api_query", command=FindTool("api-query")))
 
+config.substitutions.append(("%python", '"%s"' % (sys.executable)))
+generate_test_groups_path = os.path.join(
+    config.offloadtest_src_root, "utils", "generate_test_groups.py"
+)
+lit_path = os.path.dirname(os.path.dirname(lit.__file__))
+tools.append(
+    ToolSubst(
+        "%generate_test_groups",
+        f'"{sys.executable}" "{generate_test_groups_path}" --lit-path "{lit_path}"',
+    )
+)
+
 ExtraCompilerArgs = []
 if config.offloadtest_enable_vulkan:
     ExtraCompilerArgs = ["-spirv", "-fspv-target-env=vulkan1.3"]

@@ -1,0 +1,7 @@
+# RUN: split-file "%S/Inputs/discovery.txt" "%t.inputs"
+# RUN: %generate_test_groups "%t.inputs" --output "%t.json"
+# RUN: %python -m json.tool --sort-keys "%S/Inputs/discovery.json" "%t.expected"
+# RUN: %python -m json.tool --sort-keys "%t.json" "%t.actual"
+# RUN: diff --strip-trailing-cr "%t.expected" "%t.actual"
+
+# Honor local suffix overrides and retain tests marked config.unsupported.

@@ -1,0 +1,39 @@
+{
+  "requires_groups": [
+    {
+      "group": "No requirements",
+      "features": [],
+      "tests": ["custom/keep.case", "keep.test", "skip/keep.test"],
+      "test_count": 3
+    }
+  ],
+  "tests": [
+    {
+      "name": "OffloadTest :: custom/keep.case",
+      "suite": "OffloadTest",
+      "path_in_suite": ["custom", "keep.case"],
+      "requires": [],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "No requirements"
+    },
+    {
+      "name": "OffloadTest :: keep.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["keep.test"],
+      "requires": [],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "No requirements"
+    },
+    {
+      "name": "OffloadTest :: skip/keep.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["skip", "keep.test"],
+      "requires": [],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "No requirements"
+    }
+  ]
+}
