@@ -1,0 +1,14 @@
+# Test QuadAny emulation at SM 6.6.
+
+# Limit DXC to compute derivatives to select SPIR-V quad-read emulation.
+# REQUIRES: !Vulkan || ComputeDerivativeGroupQuads
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99214
+# XFAIL: Clang
+
+# RUN: split-file %S/QuadAny.test %t
+# RUN: %dxc_target -T cs_6_6 \
+# RUN:   %if Vulkan && DXC %{ \
+# RUN:     -fspv-extension=SPV_KHR_compute_shader_derivatives \
+# RUN:   %} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
