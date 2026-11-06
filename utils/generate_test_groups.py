@@ -307,8 +307,10 @@ def discover_tests(source_root):
     return sorted(tests, key=lambda test: test.path_in_suite)
 
 
-def describe_test(test, test_runner):
+def describe_test(test):
     """Read test directives without checking feature availability or removing tests marked config.unsupported. Require a RUN directive but do not execute it."""
+    from lit import TestRunner
+
     entry = {
         "name": test.getFullName(),
         "suite": test.suite.name,
@@ -318,7 +320,7 @@ def describe_test(test, test_runner):
         "unsupported": list(test.unsupported),
     }
     try:
-        parsed = test_runner._parseKeywords(test.getSourcePath(), require_script=True)
+        parsed = TestRunner._parseKeywords(test.getSourcePath(), require_script=True)
         entry["requires"] += parsed["REQUIRES:"] or []
         entry["xfail"] += parsed["XFAIL:"] or []
         entry["unsupported"] += parsed["UNSUPPORTED:"] or []
@@ -353,9 +355,7 @@ def build_requires_groups(entries):
 
 
 def generate_test_groups(source_root):
-    from lit import TestRunner
-
-    entries = [describe_test(test, TestRunner) for test in discover_tests(source_root)]
+    entries = [describe_test(test) for test in discover_tests(source_root)]
     groups = build_requires_groups(entries)
     return {"requires_groups": groups, "tests": entries}
 
