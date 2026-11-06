@@ -1,0 +1,8 @@
+# REQUIRES: Int16 && SM_6_5
+# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/7093
+# XFAIL: DXC && Vulkan
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitAnd.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 \
+# RUN:   -DTEST_MATRIX=1 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
