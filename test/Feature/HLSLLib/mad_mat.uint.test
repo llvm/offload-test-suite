@@ -1,0 +1,139 @@
+#--- source.hlsl
+StructuredBuffer<uint4> M : register(t0);
+StructuredBuffer<uint4> A : register(t1);
+StructuredBuffer<uint4> B : register(t2);
+
+RWStructuredBuffer<uint4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  uint3x2 U32 = mad(uint3x2(M[0].xyz, M[1].xyz),
+                    uint3x2(A[0].xyz, A[1].xyz),
+                    uint3x2(B[0].xyz, B[1].xyz));
+  uint2x4 U24 = mad(uint2x4(M[2], M[3]),
+                    uint2x4(A[2], A[3]),
+                    uint2x4(B[2], B[3]));
+  uint3x1 U31 = mad(uint3x1(M[4].xyz),
+                    uint3x1(A[4].xyz),
+                    uint3x1(B[4].xyz));
+  uint4x4 U44 = mad(uint4x4(M[5], M[6], M[7], M[8]),
+                    uint4x4(A[5], A[6], A[7], A[8]),
+                    uint4x4(B[5], B[6], B[7], B[8]));
+  uint2x2 U22Const = mad(uint2x2(3, 4, 6, 10),
+                         uint2x2(5, 7, 2, 10),
+                         uint2x2(5, 8, 2, 0));
+
+  Out[0] = uint4(U32[0], U32[1]);
+  Out[1] = uint4(U32[2], 0, 0);
+  Out[2] = U24[0];
+  Out[3] = U24[1];
+  Out[4] = uint4(U31[0], U31[1], U31[2], 0);
+  Out[5] = U44[0];
+  Out[6] = U44[1];
+  Out[7] = U44[2];
+  Out[8] = U44[3];
+  Out[9] = uint4(U22Const[0], U22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: M
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 2, 3, 0,
+            4, 5, 6, 0,
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+            0, 5, 3, 0,
+            3, 4, 6, 10,
+            1000, 300, 256, 5000,
+            7, 3, 6, 9,
+            4294967294, 2147483647, 4294967295, 2147483647 ]
+  - Name: A
+    Format: UInt32
+    Stride: 16
+    Data: [ 2, 3, 4, 0,
+            5, 6, 7, 0,
+            2, 3, 4, 5,
+            6, 7, 8, 9,
+            7, 0, 4, 0,
+            5, 7, 2, 10,
+            1000, 300, 256, 3000,
+            1, 1, 1, 1,
+            1, 1, 1, 1 ]
+  - Name: B
+    Format: UInt32
+    Stride: 16
+    Data: [ 3, 2, 1, 0,
+            6, 5, 4, 0,
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+            2, 1, 12, 0,
+            5, 8, 2, 0,
+            1, 10, 0, 7,
+            0, 0, 2, 4,
+            1, 1, 0, 0 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 16
+    Data: [ 5, 8, 13, 26,
+            35, 46, 0, 0,
+            3, 8, 15, 24,
+            35, 48, 63, 80,
+            2, 1, 24, 0,
+            20, 36, 14, 100,
+            1000001, 90010, 65536, 15000007,
+            7, 3, 8, 13,
+            4294967295, 2147483648, 4294967295, 2147483647,
+            20, 36, 14, 100 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: M
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: A
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: B
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184510
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 2021 -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
