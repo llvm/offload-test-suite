@@ -67,7 +67,7 @@ DescriptorSets:
 ...
 #--- end
 
-# Unimplemented https://github.com/llvm/wg-hlsl/issues/367
+# Bug https://github.com/llvm/llvm-project/issues/239858
 # XFAIL: Clang
 
 # RUN: split-file %s %t
