@@ -68,6 +68,7 @@ DescriptorSets:
 #--- end
 
 # Bug https://github.com/llvm/llvm-project/issues/239858
+# Bug https://github.com/llvm/llvm-project/issues/239857
 # XFAIL: Clang
 
 # RUN: split-file %s %t
