@@ -1,6 +1,5 @@
 # REQUIRES: SM_6_6 && WaveSize_128
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99211
-# XFAIL: Clang
+# Unimplemented for SPIR-V: https://github.com/llvm/llvm-project/issues/240510
 # XFAIL: Vulkan
 # RUN: split-file %S/Inputs/WaveMultiPrefixCountBits.test %t
 # RUN: %dxc_target -T cs_6_6 -DWAVE_SIZE=128 -Fo %t.o %t/source.hlsl
