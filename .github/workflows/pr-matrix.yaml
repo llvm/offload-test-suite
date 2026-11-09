@@ -114,7 +114,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk, check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
+        TestTarget: [check-hlsl-d3d12, check-hlsl-vk, check-hlsl-clang-d3d12, check-hlsl-clang-vk]
 
     uses: ./.github/workflows/test-callable.yaml
     with:
@@ -137,7 +137,7 @@ jobs:
       fail-fast: false
       matrix:
         # Lavapipe is only installed on the AMD (x64) and QC (arm64) workers.
-        # See docs/CI.md. AMD runs in Exec-Tests-Extra-Lavapipe-AMD below.
+        # See docs/CI.md. AMD runs in Exec-Tests-Windows-Lavapipe below.
         SKU: [windows-qc]
         TestTarget: [check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
 
@@ -150,14 +150,16 @@ jobs:
       SplitBuild: true
       LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
 
-  Exec-Tests-Extra-Lavapipe-AMD:
+  Exec-Tests-Windows-Lavapipe:
     permissions:
       contents: read
       checks: write
       actions: read
     if: >-
-      contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
-      && !contains(github.event.pull_request.labels.*.name, 'test-all')
+      !contains(github.event.pull_request.labels.*.name, 'disable-default-tests')
+      || contains(github.event.pull_request.labels.*.name, 'test-all')
+      || contains(github.event.pull_request.labels.*.name, 'test-lavapipe')
+      || contains(github.event.pull_request.labels.*.name, 'test-vk-all')
     needs: Resolve-Frequent-Builds
     strategy:
       fail-fast: false
@@ -257,7 +259,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        TestTarget: [check-hlsl-vk, check-hlsl-clang-vk, check-hlsl-vk-lavapipe, check-hlsl-clang-vk-lavapipe]
+        TestTarget: [check-hlsl-vk, check-hlsl-clang-vk]
 
     uses: ./.github/workflows/test-callable.yaml
     with:
