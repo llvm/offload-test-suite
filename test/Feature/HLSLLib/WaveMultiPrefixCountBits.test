@@ -1,6 +1,5 @@
 # REQUIRES: SM_6_5
-# Unimplemented: https://github.com/llvm/llvm-project/issues/99211
-# XFAIL: Clang
+# Unimplemented for SPIR-V: https://github.com/llvm/llvm-project/issues/240510
 # XFAIL: Vulkan
 # Bug: https://github.com/llvm/offload-test-suite/issues/1712
 # XFAIL: Metal && DXC
