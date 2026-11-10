@@ -1,5 +1,5 @@
-# REQUIRES: Half && SM_6_5
-# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# REQUIRES: Half && WaveMultiPrefix
+
 # RUN: split-file %S/Inputs/WaveMultiPrefixSum.test %t
 # RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 -DTEST_FLOAT=1 \
 # RUN:   -Fo %t.o %t/source.hlsl
