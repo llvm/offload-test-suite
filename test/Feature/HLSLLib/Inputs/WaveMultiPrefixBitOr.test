@@ -1,8 +1,6 @@
 #--- source.hlsl
 
 // Checks signed and unsigned scalars, vectors, and matrices.
-// Masks cover the full wave, even and odd lanes, four-lane groups,
-// single lanes, and inactive lanes.
 
 #if TYPE_BITS == 16
 typedef uint16_t UInt;
@@ -22,15 +20,16 @@ typedef matrix<UInt, 2, 3> UInt2x3;
 typedef matrix<Int, 2, 3> Int2x3;
 #endif
 
-StructuredBuffer<uint4> In : register(t0);
+// Negative inputs also test the upper bits at each width.
+StructuredBuffer<int4> Inputs : register(t0);
+// Rows 0-4 hold the OR of the inputs before lanes 0-4.
+// Row 0 is zero. Row 4 is all ones and also applies to later lanes.
+// Rows 5-7 hold even-group outputs; rows 8-10 hold odd-group outputs.
+StructuredBuffer<int4> ExpectedPrefixResults : register(t3);
 RWStructuredBuffer<uint4> OutGroups : register(u1);
 RWStructuredBuffer<uint> OutDivergent : register(u2);
 
-UInt4 laneValue(UInt4 Seed, uint Lane) {
-  uint4 Shift = (Lane + uint4(37, 11, 23, 47)) % TYPE_BITS;
-  UInt4 Bit = UInt4(1, 1, 1, 1) << UInt4(Shift);
-  return Seed & (Bit | (Bit >> 1));
-}
+static const UInt4 IdentityExpected = UInt4(0, 0, 0, 0);
 
 uint4 laneMask(uint Lane, uint Bits) {
   uint Word = Lane / 32;
@@ -38,7 +37,7 @@ uint4 laneMask(uint Lane, uint Bits) {
                Word == 3 ? Bits : 0);
 }
 
-uint check(UInt4 Value, UInt4 Expected, uint4 Mask) {
+bool check(UInt4 Value, UInt4 Expected, uint4 Mask) {
   Int4 SignedValue = Int4(Value);
   Int4 SignedExpected = Int4(Expected);
 #if TEST_MATRIX
@@ -46,31 +45,35 @@ uint check(UInt4 Value, UInt4 Expected, uint4 Mask) {
   Int2x3 IMatrix = Int2x3(SignedValue.xyz, SignedValue.wxy);
   UInt2x3 UResult = WaveMultiPrefixBitOr(UMatrix, Mask);
   Int2x3 IResult = WaveMultiPrefixBitOr(IMatrix, Mask);
-  return uint(all(UResult[0] == Expected.xyz) &&
-              all(UResult[1] == Expected.wxy) &&
-              all(IResult[0] == SignedExpected.xyz) &&
-              all(IResult[1] == SignedExpected.wxy));
+  UInt2x3 UExpected = UInt2x3(Expected.xyz, Expected.wxy);
+  Int2x3 IExpected = Int2x3(SignedExpected.xyz, SignedExpected.wxy);
+  bool Passed = true;
+  for (uint Row = 0; Row < 2; ++Row)
+    for (uint Column = 0; Column < 3; ++Column)
+      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column] &&
+               IResult[Row][Column] == IExpected[Row][Column];
+  return Passed;
 #else
-  uint Passed = uint(WaveMultiPrefixBitOr(Value.x, Mask) == Expected.x);
-  Passed |= uint(all(WaveMultiPrefixBitOr(Value.xy, Mask) == Expected.xy))
-            << 1;
-  Passed |= uint(all(WaveMultiPrefixBitOr(Value.xyz, Mask) == Expected.xyz))
-            << 2;
-  Passed |= uint(all(WaveMultiPrefixBitOr(Value, Mask) == Expected)) << 3;
+  UInt U1 = WaveMultiPrefixBitOr(Value.x, Mask);
+  Int I1 = WaveMultiPrefixBitOr(SignedValue.x, Mask);
+  vector<UInt, 2> U2 = WaveMultiPrefixBitOr(Value.xy, Mask);
+  vector<Int, 2> I2 = WaveMultiPrefixBitOr(SignedValue.xy, Mask);
+  vector<UInt, 3> U3 = WaveMultiPrefixBitOr(Value.xyz, Mask);
+  vector<Int, 3> I3 = WaveMultiPrefixBitOr(SignedValue.xyz, Mask);
+  UInt4 U4 = WaveMultiPrefixBitOr(Value, Mask);
+  Int4 I4 = WaveMultiPrefixBitOr(SignedValue, Mask);
 
-  Passed |= uint(WaveMultiPrefixBitOr(SignedValue.x, Mask) == SignedExpected.x)
-            << 4;
-  Passed |= uint(all(WaveMultiPrefixBitOr(SignedValue.xy, Mask) ==
-                     SignedExpected.xy))
-            << 5;
-  Passed |= uint(all(WaveMultiPrefixBitOr(SignedValue.xyz, Mask) ==
-                     SignedExpected.xyz))
-            << 6;
-  Passed |=
-      uint(all(WaveMultiPrefixBitOr(SignedValue, Mask) == SignedExpected))
-      << 7;
-
-  return uint(Passed == 255);
+  bool Passed = U1 == Expected.x && I1 == SignedExpected.x;
+  for (uint Component = 0; Component < 2; ++Component)
+    Passed = Passed && U2[Component] == Expected[Component] &&
+             I2[Component] == SignedExpected[Component];
+  for (uint Component = 0; Component < 3; ++Component)
+    Passed = Passed && U3[Component] == Expected[Component] &&
+             I3[Component] == SignedExpected[Component];
+  for (uint Component = 0; Component < 4; ++Component)
+    Passed = Passed && U4[Component] == Expected[Component] &&
+             I4[Component] == SignedExpected[Component];
+  return Passed;
 #endif
 }
 
@@ -80,42 +83,40 @@ uint check(UInt4 Value, UInt4 Expected, uint4 Mask) {
 [numthreads(128, 1, 1)]
 void main(uint3 TID : SV_GroupThreadID) {
   uint Lane = WaveGetLaneIndex();
-  UInt4 Seed = UInt4(In[0]);
-#if TYPE_BITS == 64
-  Seed = (Seed << 32) | UInt4(In[0].wzyx);
-#endif
-  UInt4 Value = laneValue(Seed, Lane);
-  UInt4 Identity = UInt4(0, 0, 0, 0);
-  UInt4 Full = Identity;
-  UInt4 Parity = Identity;
-  UInt4 Block = Identity;
-  UInt4 Divergent = Identity;
+  UInt4 Value = UInt4(Int4(Inputs[Lane % 4]));
 
-  for (uint Previous = 0; Previous < Lane; ++Previous) {
-    UInt4 V = laneValue(Seed, Previous);
-    Full |= V;
-    if ((Previous & 1) == (Lane & 1))
-      Parity |= V;
-    if (Previous / 4 == Lane / 4)
-      Block |= V;
-    if (Previous % 3 != 1)
-      Divergent |= V;
-  }
-
+  // Full wave: include every earlier lane.
   uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
+  UInt4 FullExpected = UInt4(Int4(ExpectedPrefixResults[min(Lane, 4u)]));
+  bool FullPassed = check(Value, FullExpected, FullMask);
+
+  // Even and odd lanes: each group uses only its own earlier lanes.
   uint4 ParityMask =
-      (Lane & 1) == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
-                      : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
-  uint4 BlockMask = laneMask(Lane, 0xFu << ((Lane % 32) & ~3u));
+      Lane % 2 == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
+                    : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
+  // Each parity group has two inputs before its result is fixed.
+  uint ParityOffset = 5 + 3 * (Lane % 2);
+  UInt4 ParityExpected =
+      UInt4(Int4(ExpectedPrefixResults[ParityOffset + min(Lane / 2, 2u)]));
+  bool ParityPassed = check(Value, ParityExpected, ParityMask);
+
+  // Four-lane groups: each group starts the same four-input sequence.
+  uint BlockBitOffset = (Lane % 32) / 4 * 4;
+  uint4 BlockMask = laneMask(Lane, 0xFu << BlockBitOffset);
+  UInt4 BlockExpected = UInt4(Int4(ExpectedPrefixResults[Lane % 4]));
+  bool BlockPassed = check(Value, BlockExpected, BlockMask);
+
+  // Single lanes: no earlier lane belongs to the group.
   uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
-
+  bool SinglePassed = check(Value, IdentityExpected, SingleMask);
   OutGroups[TID.x] =
-      uint4(check(Value, Full, FullMask), check(Value, Parity, ParityMask),
-            check(Value, Block, BlockMask), check(Value, Identity, SingleMask));
+      uint4(FullPassed, ParityPassed, BlockPassed, SinglePassed);
 
+  // Inactive lanes: only even lanes call the builtin.
+  // They expect the same result as the even group above.
   uint Passed = 1;
-  if (Lane % 3 != 1)
-    Passed = check(Value, Divergent, FullMask);
+  if (Lane % 2 == 0)
+    Passed = check(Value, ParityExpected, FullMask);
   OutDivergent[TID.x] = Passed;
 }
 
@@ -126,10 +127,34 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  - Name: In
-    Format: UInt32
+  - Name: Inputs
+    Format: Int32
     Stride: 16
-    Data: [ 0xFEDCBA98, 0x87654321, 0xDEADBEEF, 0x13579BDF ]
+    Data: [
+      # Four inputs, repeated across the wave.
+      -4, -7, -13, -25,
+      -6, -11, -21, -41,
+      -7, -13, -25, -49,
+      0, 0, 0, 0
+    ]
+  - Name: ExpectedPrefixResults
+    Format: Int32
+    Stride: 16
+    Data: [
+      # Rows 0-4: full-wave outputs for lanes 0-4, excluding each lane.
+      0, 0, 0, 0,
+      -4, -7, -13, -25,
+      -2, -3, -5, -9,
+      -1, -1, -1, -1,
+      -1, -1, -1, -1,
+      # Rows 5-7: even-group outputs. Rows 8-10: odd-group outputs.
+      0, 0, 0, 0,
+      -4, -7, -13, -25,
+      -3, -5, -9, -17,
+      0, 0, 0, 0,
+      -6, -11, -21, -41,
+      -6, -11, -21, -41
+    ]
   - Name: OutGroups
     Format: UInt32
     Stride: 16
@@ -159,13 +184,20 @@ Results:
     Expected: ExpectedDivergent
 DescriptorSets:
   - Resources:
-    - Name: In
+    - Name: Inputs
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
+    - Name: ExpectedPrefixResults
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
     - Name: OutGroups
       Kind: RWStructuredBuffer
       DirectXBinding:
