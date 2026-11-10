@@ -1,8 +1,9 @@
-# REQUIRES: Int64 && SM_6_5
-# REQUIRES: !Vulkan || VK_NV_shader_subgroup_partitioned
+# REQUIRES: Int64 && WaveMultiPrefix
+
+# The Metal shader converter does not support 64-bit wave operations.
 # Bug: https://github.com/llvm/offload-test-suite/issues/959
-# XFAIL: Metal && Clang
-# XFAIL: Metal && DXC
+# XFAIL: Metal && (Clang || DXC)
+
 # RUN: split-file %S/Inputs/WaveMultiPrefixBitXor.test %t
 # RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=64 -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
