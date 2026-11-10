@@ -1,16 +1,15 @@
 #--- source.hlsl
 
-// Checks false, true, and mixed predicates.
-// Masks cover the full wave, even and odd lanes, four-lane groups,
-// single lanes, and inactive lanes.
+// Checks false, true, alternating, and paired predicates.
 
-StructuredBuffer<uint4> In : register(t0);
+StructuredBuffer<uint4> Inputs : register(t0);
+// Rows 0-3 hold expected counts within a four-lane group.
+// Each row counts true predicates in earlier lanes, not its own lane.
+StructuredBuffer<uint4> ExpectedPrefixResults : register(t3);
 RWStructuredBuffer<uint4> OutGroups : register(u1);
 RWStructuredBuffer<uint> OutDivergent : register(u2);
 
-bool4 laneValue(uint4 Seed, uint Lane) {
-  return ((Seed >> (Lane % 32)) & 1u) != 0;
-}
+static const uint4 IdentityExpected = uint4(0, 0, 0, 0);
 
 uint4 laneMask(uint Lane, uint Bits) {
   uint Word = Lane / 32;
@@ -18,12 +17,15 @@ uint4 laneMask(uint Lane, uint Bits) {
                Word == 3 ? Bits : 0);
 }
 
-uint check(bool4 Value, uint4 Expected, uint4 Mask) {
+bool check(bool4 Value, uint4 Expected, uint4 Mask) {
   uint4 Result = uint4(WaveMultiPrefixCountBits(Value.x, Mask),
                        WaveMultiPrefixCountBits(Value.y, Mask),
                        WaveMultiPrefixCountBits(Value.z, Mask),
                        WaveMultiPrefixCountBits(Value.w, Mask));
-  return uint(all(Result == Expected));
+  bool Passed = true;
+  for (uint Component = 0; Component < 4; ++Component)
+    Passed = Passed && Result[Component] == Expected[Component];
+  return Passed;
 }
 
 #ifdef WAVE_SIZE
@@ -32,39 +34,42 @@ uint check(bool4 Value, uint4 Expected, uint4 Mask) {
 [numthreads(128, 1, 1)]
 void main(uint3 TID : SV_GroupThreadID) {
   uint Lane = WaveGetLaneIndex();
-  uint4 Seed = In[0];
-  bool4 Value = laneValue(Seed, Lane);
-  uint4 Identity = uint4(0, 0, 0, 0);
-  uint4 Full = Identity;
-  uint4 Parity = Identity;
-  uint4 Block = Identity;
-  uint4 Divergent = Identity;
+  bool4 Value = bool4(Inputs[Lane % 4]);
 
-  for (uint Previous = 0; Previous < Lane; ++Previous) {
-    uint4 V = uint4(laneValue(Seed, Previous));
-    Full += V;
-    if ((Previous & 1) == (Lane & 1))
-      Parity += V;
-    if (Previous / 4 == Lane / 4)
-      Block += V;
-    if (Previous % 3 != 1)
-      Divergent += V;
-  }
-
+  // Full wave: include every earlier lane.
   uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
+  // The predicates count no lanes, all lanes, even lanes, and pairs.
+  uint4 FullExpected = uint4(0, Lane, (Lane + 1) / 2,
+                             2 * (Lane / 4) + min(Lane % 4, 2u));
+  bool FullPassed = check(Value, FullExpected, FullMask);
+
+  // Even and odd lanes: each group uses only its own earlier lanes.
   uint4 ParityMask =
-      (Lane & 1) == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
-                      : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
-  uint4 BlockMask = laneMask(Lane, 0xFu << ((Lane % 32) & ~3u));
+      Lane % 2 == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
+                    : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
+  uint EarlierLanes = Lane / 2;
+  uint4 ParityExpected =
+      uint4(0, EarlierLanes, Lane % 2 == 0 ? EarlierLanes : 0,
+            (EarlierLanes + 1) / 2);
+  bool ParityPassed = check(Value, ParityExpected, ParityMask);
+
+  // Four-lane groups: each group starts the same four-input sequence.
+  uint BlockBitOffset = (Lane % 32) / 4 * 4;
+  uint4 BlockMask = laneMask(Lane, 0xFu << BlockBitOffset);
+  uint4 BlockExpected = ExpectedPrefixResults[Lane % 4];
+  bool BlockPassed = check(Value, BlockExpected, BlockMask);
+
+  // Single lanes: no earlier lane belongs to the group.
   uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
-
+  bool SinglePassed = check(Value, IdentityExpected, SingleMask);
   OutGroups[TID.x] =
-      uint4(check(Value, Full, FullMask), check(Value, Parity, ParityMask),
-            check(Value, Block, BlockMask), check(Value, Identity, SingleMask));
+      uint4(FullPassed, ParityPassed, BlockPassed, SinglePassed);
 
+  // Inactive lanes: only even lanes call the builtin.
+  // They expect the same result as the even group above.
   uint Passed = 1;
-  if (Lane % 3 != 1)
-    Passed = check(Value, Divergent, FullMask);
+  if (Lane % 2 == 0)
+    Passed = check(Value, ParityExpected, FullMask);
   OutDivergent[TID.x] = Passed;
 }
 
@@ -75,10 +80,26 @@ Shaders:
   - Stage: Compute
     Entry: main
 Buffers:
-  - Name: In
+  - Name: Inputs
     Format: UInt32
     Stride: 16
-    Data: [ 0, 0xFFFFFFFF, 0xDEADBEEF, 0x13579BDF ]
+    Data: [
+      # Four inputs, repeated across the wave.
+      0, 1, 1, 1,
+      0, 1, 0, 1,
+      0, 1, 1, 0,
+      0, 1, 0, 0
+    ]
+  - Name: ExpectedPrefixResults
+    Format: UInt32
+    Stride: 16
+    Data: [
+      # Counts before positions 0-3 in a four-lane group.
+      0, 0, 0, 0,
+      0, 1, 1, 1,
+      0, 2, 1, 2,
+      0, 3, 2, 2
+    ]
   - Name: OutGroups
     Format: UInt32
     Stride: 16
@@ -108,13 +129,20 @@ Results:
     Expected: ExpectedDivergent
 DescriptorSets:
   - Resources:
-    - Name: In
+    - Name: Inputs
       Kind: StructuredBuffer
       DirectXBinding:
         Register: 0
         Space: 0
       VulkanBinding:
         Binding: 0
+    - Name: ExpectedPrefixResults
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
     - Name: OutGroups
       Kind: RWStructuredBuffer
       DirectXBinding:
