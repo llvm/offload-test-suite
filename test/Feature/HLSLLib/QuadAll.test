@@ -69,8 +69,13 @@ DescriptorSets:
 # REQUIRES: NativeQuadAll
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1698
-# XFAIL: Intel && DXC && DirectX
+# XFAIL: Intel && DirectX
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T cs_6_7 -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T cs_6_7 \
+# RUN:   %if Vulkan %{ \
+# RUN:     -fspv-extension=SPV_KHR_quad_control \
+# RUN:     -fspv-extension=SPV_KHR_maximal_reconvergence \
+# RUN:     -fspv-extension=SPV_KHR_compute_shader_derivatives \
+# RUN:   %} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
