@@ -5,7 +5,7 @@
 
 # DXC and Metal return incorrect counts with inactive lanes.
 # Bug: https://github.com/llvm/offload-test-suite/issues/1712
-# XFAIL: Metal && DXC
+# XFAIL: Metal && (Clang || DXC)
 
 # RUN: split-file %S/Inputs/WaveMultiPrefixCountBits.test %t
 # RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
