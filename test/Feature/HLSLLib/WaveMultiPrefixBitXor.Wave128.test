@@ -1,6 +1,5 @@
 # REQUIRES: WaveMultiPrefix && WaveSizeSelection && WaveSize_128
 
-# WARP returns incorrect prefix results with a 128-lane wave.
 # Bug: https://github.com/llvm/offload-test-suite/issues/1714
 # XFAIL: WARP && DirectX
 

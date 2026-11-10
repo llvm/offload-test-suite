@@ -1,6 +1,5 @@
 # REQUIRES: Int64 && WaveMultiPrefix
 
-# The Metal shader converter does not support 64-bit wave operations.
 # Bug: https://github.com/llvm/offload-test-suite/issues/959
 # XFAIL: Metal && (Clang || DXC)
 

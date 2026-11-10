@@ -1,6 +1,5 @@
 # REQUIRES: Int16 && WaveMultiPrefix
 
-# DXC emits SPIR-V subgroup operations with unsupported matrix types.
 # Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/7093
 # XFAIL: DXC && Vulkan
 
