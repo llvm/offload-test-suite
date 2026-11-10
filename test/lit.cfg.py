@@ -317,11 +317,12 @@ config.substitutions.append(("%python", '"%s"' % (sys.executable)))
 generate_test_groups_path = os.path.join(
     config.offloadtest_src_root, "utils", "generate_test_groups.py"
 )
+# LLVM's launcher adds lit to sys.path
 lit_path = os.path.dirname(os.path.dirname(lit.__file__))
 tools.append(
     ToolSubst(
         "%generate_test_groups",
-        f'"{sys.executable}" "{generate_test_groups_path}" --lit-path "{lit_path}"',
+        f'env PYTHONPATH="{lit_path}" "{sys.executable}" "{generate_test_groups_path}"',
     )
 )
 

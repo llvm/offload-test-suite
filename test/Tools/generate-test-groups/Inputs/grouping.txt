@@ -1,6 +1,6 @@
 #--- and.test
 # RUN: never-execute-this-test
-# REQUIRES: Half, Double
+# REQUIRES: , Half,, Double,
 #--- continuation.test
 # RUN: never-execute-this-test
 # REQUIRES: Double && \

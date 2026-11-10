@@ -8,6 +8,29 @@ import sys
 import tempfile
 from pathlib import Path
 
+import lit.discovery
+import lit.formats
+from lit import TestRunner
+from lit.BooleanExpression import BooleanExpression
+from lit.LitConfig import LitConfig
+from lit.Test import TestSuite
+from lit.TestingConfig import TestingConfig
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument(
+    "--output",
+    metavar="FILE",
+    type=Path,
+    help="write JSON to FILE (default: stdout)",
+)
+parser.add_argument(
+    "source_root",
+    nargs="?",
+    type=Path,
+    default=Path(__file__).resolve().parents[1] / "test",
+    help="source test directory (default: this repository's test directory)",
+)
+args = parser.parse_args()
 MAX_VARIABLES = 16
 MAX_NORMALIZATION_WORK = 1_000_000
 NO_REQUIREMENTS = "No requirements"
@@ -15,8 +38,6 @@ NO_REQUIREMENTS = "No requirements"
 
 def parse_expression(text):
     """Parse a REQUIRES expression using lit's tokenizer, rejecting regexes."""
-    from lit.BooleanExpression import BooleanExpression
-
     if "{{" in text:
         raise ValueError("regex requirements are not supported: %r" % text)
 
@@ -87,8 +108,6 @@ def truth_table(node, variables):
         feature_masks[name] = bits
 
     def evaluate(current_node):
-        if isinstance(current_node, bool):
-            return all_assignments if current_node else 0
         if isinstance(current_node, str):
             if current_node == "true":
                 return all_assignments
@@ -226,11 +245,7 @@ def build_group_name(variables, table):
 
 def compute_requires_group(requires):
     """Combine requirements with AND and return a grouping key, name, and relevant features, treating empty requirements as true. The key uses sorted relevant features and their truth table so equivalent expressions match."""
-    nodes = []
-    for text in requires:
-        for part in text.split(","):
-            part = part.strip()
-            nodes.append(parse_expression(part))
+    nodes = [parse_expression(text) for text in requires]
     names = set()
     for node in nodes:
         collect_variables(node, names)
@@ -249,13 +264,7 @@ def compute_requires_group(requires):
 
 
 def discover_tests(source_root):
-    """Discover tests without loading tool and GPU setup from the root lit configuration. Start with the same suffixes and exclusions, then apply local lit configurations."""
-    import lit.discovery
-    import lit.formats
-    from lit.LitConfig import LitConfig
-    from lit.Test import TestSuite
-    from lit.TestingConfig import TestingConfig
-
+    """Discover tests using local lit settings without loading root or nested suite configurations."""
     if not source_root.is_dir():
         raise ValueError("test source directory does not exist: %s" % source_root)
     lit_config = LitConfig(
@@ -271,6 +280,8 @@ def discover_tests(source_root):
         order="lexical",
         params={},
     )
+    lit_config.config_names = []
+    lit_config.site_config_names = []
     config = TestingConfig.fromdefaults(lit_config)
     config.name = "OffloadTest"
     config.test_format = lit.formats.ShTest()
@@ -283,22 +294,7 @@ def discover_tests(source_root):
     ]
     config.test_source_root = config.test_exec_root = str(source_root)
 
-    # Nested suites would load runtime configuration, including hardware probes.
-    for directory, children, files in os.walk(source_root):
-        children[:] = [
-            name
-            for name in children
-            if name not in config.excludes and name not in ("Output", ".svn", ".git")
-        ]
-        if Path(directory) != source_root and any(
-            name in files
-            for name in lit_config.config_names + lit_config.site_config_names
-        ):
-            raise ValueError("nested test suites are not supported: %s" % directory)
-
-    suite = TestSuite(
-        config.name, str(source_root), str(source_root), config, lit_config
-    )
+    suite = TestSuite(config.name, str(source_root), str(source_root), config)
     tests = list(lit.discovery.getTestsInSuite(suite, (), lit_config, {}, {}))
     if lit_config.numErrors:
         raise ValueError("lit reported errors during test discovery")
@@ -309,8 +305,6 @@ def discover_tests(source_root):
 
 def describe_test(test):
     """Read test directives without checking feature availability or removing tests marked config.unsupported. Require a RUN directive but do not execute it."""
-    from lit import TestRunner
-
     entry = {
         "name": test.getFullName(),
         "suite": test.suite.name,
@@ -324,7 +318,7 @@ def describe_test(test):
         entry["requires"] += parsed["REQUIRES:"] or []
         entry["xfail"] += parsed["XFAIL:"] or []
         entry["unsupported"] += parsed["UNSUPPORTED:"] or []
-    except (ValueError, OSError, UnicodeDecodeError) as error:
+    except (ValueError, OSError) as error:
         raise ValueError("%s: %s" % (entry["name"], error)) from error
     return entry
 
@@ -371,8 +365,6 @@ def write_json(result, destination):
             mode="w",
             encoding="utf-8",
             dir=destination.parent,
-            prefix=destination.name + ".",
-            suffix=".tmp",
             delete=False,
         ) as stream:
             temporary = Path(stream.name)
@@ -384,32 +376,8 @@ def write_json(result, destination):
             temporary.unlink()
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--output",
-        metavar="FILE",
-        type=Path,
-        help="write JSON to FILE (default: stdout)",
-    )
-    parser.add_argument("--lit-path", metavar="DIR", help="directory containing lit")
-    parser.add_argument(
-        "source_root",
-        nargs="?",
-        type=Path,
-        default=Path(__file__).resolve().parents[1] / "test",
-        help="source test directory (default: this repository's test directory)",
-    )
-    args = parser.parse_args()
-    if args.lit_path:
-        sys.path.insert(0, args.lit_path)
-
-    try:
-        result = generate_test_groups(args.source_root.resolve())
-        write_json(result, args.output)
-    except (ImportError, ValueError, OSError, UnicodeDecodeError) as error:
-        parser.exit(1, "error: %s\n" % error)
-
-
-if __name__ == "__main__":
-    main()
+try:
+    result = generate_test_groups(args.source_root.resolve())
+    write_json(result, args.output)
+except (ValueError, OSError) as error:
+    parser.exit(1, "error: %s\n" % error)

@@ -4,4 +4,5 @@
 # RUN: %python -m json.tool --sort-keys "%t.json" "%t.actual"
 # RUN: diff --strip-trailing-cr "%t.expected" "%t.actual"
 
-# Honor local suffix overrides and retain tests marked config.unsupported.
+# Ignore suite configs and malformed timing data while honoring local discovery rules.
+# Retain tests marked config.unsupported.
