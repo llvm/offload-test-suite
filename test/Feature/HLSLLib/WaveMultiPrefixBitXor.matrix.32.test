@@ -4,6 +4,15 @@
 # XFAIL: DXC && Vulkan
 
 # RUN: split-file %S/Inputs/WaveMultiPrefixBitXor.test %t
-# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=32 -DTEST_MATRIX=1 -Fo %t.o \
-# RUN:   %t/source.hlsl
+# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=32 -DMATRIX_ROWS=3 -DMATRIX_COLS=2 \
+# RUN:   -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=32 -DMATRIX_ROWS=2 -DMATRIX_COLS=3 \
+# RUN:   -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=32 -DMATRIX_ROWS=3 -DMATRIX_COLS=1 \
+# RUN:   -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=32 -DMATRIX_ROWS=4 -DMATRIX_COLS=4 \
+# RUN:   -Fo %t.o %t/matrix.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o

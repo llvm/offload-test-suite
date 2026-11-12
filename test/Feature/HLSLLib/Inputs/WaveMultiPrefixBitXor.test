@@ -1,60 +1,50 @@
 #--- source.hlsl
 
-// Checks signed and unsigned scalars, vectors, and matrices.
+// Checks signed and unsigned scalars, vectors, and matrices at 16, 32,
+// and 64 bits. All cases share the input data and group masks below.
+//
+// Inputs[Lane % 4] repeats two negative input vectors, A and B. Lane 0
+// instead uses the extra zero row, Inputs[4]. Conversion through Int
+// preserves the sign at 64 bits. The zero at lane 0 makes a scan that
+// restarts at a later 32-lane boundary produce a different result.
+//
+// ExpectedPrefixResults row 0 is zero for lane 0. Rows 1-4 hold later
+// full-wave results for Lane % 4 of 0-3: A, zero, B, and A XOR B.
+// For example, lane 2 sees zero XOR B, and lane 3 sees zero XOR B XOR A.
+//
+// The parity masks separate even and odd lanes. Rows 9-12 hold their
+// results for Lane % 4 of 0-3: A, zero, zero, and B. Lane 0 uses row 0.
+// Equal input pairs cancel, so the results repeat every four lanes.
+//
+// The first four-lane group uses the full-wave rows. Later groups use
+// rows 5-8: zero, A, A XOR B, and B. A single-lane group expects zero.
+//
+// These examples show the first component as a signed value:
+// Lane  Input  Full wave  Parity  Four-lane group  Single lane
+//    0      0          0       0                0            0
+//    1     -3          0       0                0            0
+//    2     -2         -3       0               -3            0
+//    3     -3          3      -3                3            0
+//    4     -2         -2      -2                0            0
+//    5     -3          0       0               -2            0
+//
+// The inactive-lane check calls the builtin only in even lanes. It uses
+// the same expected result as the even parity group.
+//
+// Scalars use the first component; vectors use the first two, three, or
+// four components. Matrices repeat the four components in row order.
+// The matrix drivers select 3x2, 2x3, 3x1, and 4x4 dimensions.
+//
+// OutGroups stores four pass flags in this order: full wave, parity,
+// four-lane groups, and single lanes. OutDivergent stores one pass flag;
+// inactive lanes store 1 without a check. Both expected buffers contain
+// only ones, so each checked result must pass.
 
-#if TYPE_BITS == 16
-typedef uint16_t UInt;
-typedef int16_t Int;
-#elif TYPE_BITS == 64
-typedef uint64_t UInt;
-typedef int64_t Int;
-#else
-typedef uint UInt;
-typedef int Int;
-#endif
-
-typedef vector<UInt, 4> UInt4;
-typedef vector<Int, 4> Int4;
-#if TEST_MATRIX
-typedef matrix<UInt, 2, 3> UInt2x3;
-typedef matrix<Int, 2, 3> Int2x3;
-#endif
-
-// Negative inputs also test the upper bits at each width.
-StructuredBuffer<int4> Inputs : register(t0);
-// Expected outputs exclude the input at the current lane.
-// Row 0 is for lane 0. Rows 1-4 are later full-wave outputs.
-// Rows 5-8 are outputs within later four-lane groups.
-// Rows 9-12 are even/odd outputs for later lanes.
-StructuredBuffer<int4> ExpectedPrefixResults : register(t3);
-RWStructuredBuffer<uint4> OutGroups : register(u1);
-RWStructuredBuffer<uint> OutDivergent : register(u2);
-
-static const UInt4 IdentityExpected = UInt4(0, 0, 0, 0);
-
-uint4 laneMask(uint Lane, uint Bits) {
-  uint Word = Lane / 32;
-  return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
-               Word == 3 ? Bits : 0);
-}
+#include "common.hlsl"
 
 bool check(UInt4 Value, UInt4 Expected, uint4 Mask) {
   Int4 SignedValue = Int4(Value);
   Int4 SignedExpected = Int4(Expected);
-#if TEST_MATRIX
-  UInt2x3 UMatrix = UInt2x3(Value.xyz, Value.wxy);
-  Int2x3 IMatrix = Int2x3(SignedValue.xyz, SignedValue.wxy);
-  UInt2x3 UResult = WaveMultiPrefixBitXor(UMatrix, Mask);
-  Int2x3 IResult = WaveMultiPrefixBitXor(IMatrix, Mask);
-  UInt2x3 UExpected = UInt2x3(Expected.xyz, Expected.wxy);
-  Int2x3 IExpected = Int2x3(SignedExpected.xyz, SignedExpected.wxy);
-  bool Passed = true;
-  for (uint Row = 0; Row < 2; ++Row)
-    for (uint Column = 0; Column < 3; ++Column)
-      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column] &&
-               IResult[Row][Column] == IExpected[Row][Column];
-  return Passed;
-#else
   UInt U1 = WaveMultiPrefixBitXor(Value.x, Mask);
   Int I1 = WaveMultiPrefixBitXor(SignedValue.x, Mask);
   vector<UInt, 2> U2 = WaveMultiPrefixBitXor(Value.xy, Mask);
@@ -75,8 +65,71 @@ bool check(UInt4 Value, UInt4 Expected, uint4 Mask) {
     Passed = Passed && U4[Component] == Expected[Component] &&
              I4[Component] == SignedExpected[Component];
   return Passed;
-#endif
 }
+
+#include "main.hlsl"
+
+#--- matrix.hlsl
+
+#include "common.hlsl"
+
+typedef matrix<UInt, MATRIX_ROWS, MATRIX_COLS> UIntMatrix;
+typedef matrix<Int, MATRIX_ROWS, MATRIX_COLS> IntMatrix;
+
+bool check(UInt4 Value, UInt4 Expected, uint4 Mask) {
+  UIntMatrix UMatrix;
+  UIntMatrix UExpected;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      uint Component = (Row * MATRIX_COLS + Column) % 4;
+      UMatrix[Row][Column] = Value[Component];
+      UExpected[Row][Column] = Expected[Component];
+    }
+
+  IntMatrix IMatrix = IntMatrix(UMatrix);
+  IntMatrix IExpected = IntMatrix(UExpected);
+  UIntMatrix UResult = WaveMultiPrefixBitXor(UMatrix, Mask);
+  IntMatrix IResult = WaveMultiPrefixBitXor(IMatrix, Mask);
+  bool Passed = true;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column)
+      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column] &&
+               IResult[Row][Column] == IExpected[Row][Column];
+  return Passed;
+}
+
+#include "main.hlsl"
+
+#--- common.hlsl
+
+#if TYPE_BITS == 16
+typedef uint16_t UInt;
+typedef int16_t Int;
+#elif TYPE_BITS == 64
+typedef uint64_t UInt;
+typedef int64_t Int;
+#else
+typedef uint UInt;
+typedef int Int;
+#endif
+
+typedef vector<UInt, 4> UInt4;
+typedef vector<Int, 4> Int4;
+
+StructuredBuffer<int4> Inputs : register(t0);
+StructuredBuffer<int4> ExpectedPrefixResults : register(t3);
+RWStructuredBuffer<uint4> OutGroups : register(u1);
+RWStructuredBuffer<uint> OutDivergent : register(u2);
+
+static const UInt4 IdentityExpected = UInt4(0, 0, 0, 0);
+
+uint4 laneMask(uint Lane, uint Bits) {
+  uint Word = Lane / 32;
+  return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
+               Word == 3 ? Bits : 0);
+}
+
+#--- main.hlsl
 
 #ifdef WAVE_SIZE
 [WaveSize(WAVE_SIZE)]
@@ -84,17 +137,13 @@ bool check(UInt4 Value, UInt4 Expected, uint4 Mask) {
 [numthreads(128, 1, 1)]
 void main(uint3 TID : SV_GroupThreadID) {
   uint Lane = WaveGetLaneIndex();
-  // Lane 0 uses zero instead of the repeated input.
-  // This detects a scan that restarts at a later 32-lane boundary.
   UInt4 Value = UInt4(Int4(Inputs[Lane == 0 ? 4 : Lane % 4]));
 
-  // Full wave: include every earlier lane.
   uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
   uint FullExpectedRow = Lane == 0 ? 0 : 1 + Lane % 4;
   UInt4 FullExpected = UInt4(Int4(ExpectedPrefixResults[FullExpectedRow]));
   bool FullPassed = check(Value, FullExpected, FullMask);
 
-  // Even and odd lanes: each group uses only its own earlier lanes.
   uint4 ParityMask =
       Lane % 2 == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
                     : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
@@ -102,21 +151,17 @@ void main(uint3 TID : SV_GroupThreadID) {
   UInt4 ParityExpected = UInt4(Int4(ExpectedPrefixResults[ParityExpectedRow]));
   bool ParityPassed = check(Value, ParityExpected, ParityMask);
 
-  // Four-lane groups: only the first group starts with the zero input.
   uint BlockBitOffset = (Lane % 32) / 4 * 4;
   uint4 BlockMask = laneMask(Lane, 0xFu << BlockBitOffset);
   uint BlockExpectedRow = Lane < 4 ? FullExpectedRow : 5 + Lane % 4;
   UInt4 BlockExpected = UInt4(Int4(ExpectedPrefixResults[BlockExpectedRow]));
   bool BlockPassed = check(Value, BlockExpected, BlockMask);
 
-  // Single lanes: no earlier lane belongs to the group.
   uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
   bool SinglePassed = check(Value, IdentityExpected, SingleMask);
   OutGroups[TID.x] =
       uint4(FullPassed, ParityPassed, BlockPassed, SinglePassed);
 
-  // Inactive lanes: only even lanes call the builtin.
-  // They expect the same result as the even group above.
   uint Passed = 1;
   if (Lane % 2 == 0)
     Passed = check(Value, ParityExpected, FullMask);
@@ -134,30 +179,25 @@ Buffers:
     Format: Int32
     Stride: 16
     Data: [
-      # Four inputs, repeated across the wave.
       -2, -3, -5, -9,
       -3, -5, -9, -17,
       -2, -3, -5, -9,
       -3, -5, -9, -17,
-      # Lane 0 uses this zero input instead.
       0, 0, 0, 0
     ]
   - Name: ExpectedPrefixResults
     Format: Int32
     Stride: 16
     Data: [
-      # Row 0: lane 0. Rows 1-4: later lanes with Lane % 4 of 0-3.
       0, 0, 0, 0,
       -2, -3, -5, -9,
       0, 0, 0, 0,
       -3, -5, -9, -17,
       3, 6, 12, 24,
-      # Rows 5-8: four-lane groups after the first group.
       0, 0, 0, 0,
       -2, -3, -5, -9,
       3, 6, 12, 24,
       -3, -5, -9, -17,
-      # Rows 9-12: even/odd results for Lane % 4 of 0-3, after lane 0.
       -2, -3, -5, -9,
       0, 0, 0, 0,
       0, 0, 0, 0,
