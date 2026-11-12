@@ -1,6 +1,48 @@
-#--- source.hlsl
+#--- common.hlsl
 
-// Checks integer and floating-point scalars, vectors, and matrices.
+// Checks signed and unsigned integers and floating-point values at 16,
+// 32, and 64 bits. All cases share the group masks and output buffers.
+//
+// Each type selects its own input and expected buffers. The 16-bit tests
+// convert the 32-bit buffer values. The 64-bit buffers contain values
+// beyond 32-bit precision. Integer cases also check unsigned conversions.
+//
+// Inputs[Lane % 4] repeats four rows across each wave. Rows 0 and 1
+// contain nonzero values; rows 2 and 3 contain zeros. ExpectedPrefixResults
+// rows 0-4 hold the products before lanes 0-4. Row 0 contains ones.
+// The full-wave check selects row min(Lane, 4). Lane 2 supplies zero, so
+// lane 3 and every later lane expect zero.
+//
+// The parity masks separate even and odd lanes. Expected rows 5-7 hold
+// even-group results, and rows 8-10 hold odd-group results. Each group
+// selects its row with min(Lane / 2, 2). The first lane expects one,
+// the second expects the first input, and later lanes expect zero.
+//
+// Each four-lane group starts the same input sequence, so its expected row
+// is Lane % 4. A single-lane group always expects one.
+//
+// These examples show the first component of the signed 32-bit case:
+// Lane  Input  Full wave  Parity  Four-lane group  Single lane
+//    0     -2          1       1                1            1
+//    1     -3         -2       1               -2            1
+//    2      0          6      -2                6            1
+//    3      0          0      -3                0            1
+//    4     -2          0       0                1            1
+//    5     -3          0       0               -2            1
+//
+// For the 32-bit float case, lane 2 expects -1.5 * -0.5 = 0.75 in
+// the first component. The comparisons do not distinguish signed zeros.
+// The inactive-lane check calls the builtin only in even lanes and uses
+// the same expected result as the even parity group.
+//
+// Scalars use the first component; vectors use the first two, three, or
+// four components. Matrices repeat the four components in row order.
+// The matrix drivers select 3x2, 2x3, 3x1, and 4x4 dimensions.
+//
+// OutGroups stores four pass flags in this order: full wave, parity,
+// four-lane groups, and single lanes. OutDivergent stores one pass flag;
+// inactive lanes store 1 without a check. Both expected buffers contain
+// only ones, so each checked result must pass.
 
 #if TEST_FLOAT
 #if TYPE_BITS == 16
@@ -22,17 +64,10 @@ typedef int Element;
 typedef uint UnsignedElement;
 #endif
 typedef vector<UnsignedElement, 4> Unsigned4;
-#if TEST_MATRIX
-typedef matrix<UnsignedElement, 2, 3> Unsigned2x3;
-#endif
 #endif
 
 typedef vector<Element, 4> Value4;
-#if TEST_MATRIX
-typedef matrix<Element, 2, 3> Value2x3;
-#endif
 
-// Select separate input and expected buffers for the tested element type.
 #if TEST_FLOAT
 #if TYPE_BITS == 64
 StructuredBuffer<double4> Inputs : register(t3);
@@ -61,25 +96,11 @@ uint4 laneMask(uint Lane, uint Bits) {
                Word == 3 ? Bits : 0);
 }
 
+#--- source.hlsl
+
+#include "common.hlsl"
+
 bool check(Value4 Value, Value4 Expected, uint4 Mask) {
-#if TEST_MATRIX
-  Value2x3 Matrix = Value2x3(Value.xyz, Value.wxy);
-  Value2x3 Result = WaveMultiPrefixProduct(Matrix, Mask);
-  Value2x3 MatrixExpected = Value2x3(Expected.xyz, Expected.wxy);
-#if !TEST_FLOAT
-  Unsigned2x3 UResult = WaveMultiPrefixProduct(Unsigned2x3(Matrix), Mask);
-  Unsigned2x3 UExpected = Unsigned2x3(MatrixExpected);
-#endif
-  bool Passed = true;
-  for (uint Row = 0; Row < 2; ++Row)
-    for (uint Column = 0; Column < 3; ++Column) {
-      Passed = Passed && Result[Row][Column] == MatrixExpected[Row][Column];
-#if !TEST_FLOAT
-      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column];
-#endif
-    }
-  return Passed;
-#else
   Element R1 = WaveMultiPrefixProduct(Value.x, Mask);
   vector<Element, 2> R2 = WaveMultiPrefixProduct(Value.xy, Mask);
   vector<Element, 3> R3 = WaveMultiPrefixProduct(Value.xyz, Mask);
@@ -116,8 +137,48 @@ bool check(Value4 Value, Value4 Expected, uint4 Mask) {
 #endif
   }
   return Passed;
-#endif
 }
+
+#include "main.hlsl"
+
+#--- matrix.hlsl
+
+#include "common.hlsl"
+
+typedef matrix<Element, MATRIX_ROWS, MATRIX_COLS> ValueMatrix;
+#if !TEST_FLOAT
+typedef matrix<UnsignedElement, MATRIX_ROWS, MATRIX_COLS> UnsignedMatrix;
+#endif
+
+bool check(Value4 Value, Value4 Expected, uint4 Mask) {
+  ValueMatrix Matrix;
+  ValueMatrix MatrixExpected;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      uint Component = (Row * MATRIX_COLS + Column) % 4;
+      Matrix[Row][Column] = Value[Component];
+      MatrixExpected[Row][Column] = Expected[Component];
+    }
+
+  ValueMatrix Result = WaveMultiPrefixProduct(Matrix, Mask);
+#if !TEST_FLOAT
+  UnsignedMatrix UResult = WaveMultiPrefixProduct(UnsignedMatrix(Matrix), Mask);
+  UnsignedMatrix UExpected = UnsignedMatrix(MatrixExpected);
+#endif
+  bool Passed = true;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      Passed = Passed && Result[Row][Column] == MatrixExpected[Row][Column];
+#if !TEST_FLOAT
+      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column];
+#endif
+    }
+  return Passed;
+}
+
+#include "main.hlsl"
+
+#--- main.hlsl
 
 #ifdef WAVE_SIZE
 [WaveSize(WAVE_SIZE)]
@@ -127,38 +188,28 @@ void main(uint3 TID : SV_GroupThreadID) {
   uint Lane = WaveGetLaneIndex();
   Value4 Value = Value4(Inputs[Lane % 4]);
 
-  // Full wave: include every earlier lane.
-  // Expected row N excludes input N; row 0 is one.
-  // Input 2 is zero, so later lanes also use expected row 4.
   uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
   Value4 FullExpected = Value4(ExpectedPrefixResults[min(Lane, 4u)]);
   bool FullPassed = check(Value, FullExpected, FullMask);
 
-  // Even and odd lanes: each group uses only its own earlier lanes.
   uint4 ParityMask =
       Lane % 2 == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
                     : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
-  // Rows 5-7 hold even-group outputs; rows 8-10 hold odd-group outputs.
-  // Each group reaches zero after its second input.
   uint ParityOffset = 5 + 3 * (Lane % 2);
   Value4 ParityExpected =
       Value4(ExpectedPrefixResults[ParityOffset + min(Lane / 2, 2u)]);
   bool ParityPassed = check(Value, ParityExpected, ParityMask);
 
-  // Four-lane groups: each group starts the same four-input sequence.
   uint BlockBitOffset = (Lane % 32) / 4 * 4;
   uint4 BlockMask = laneMask(Lane, 0xFu << BlockBitOffset);
   Value4 BlockExpected = Value4(ExpectedPrefixResults[Lane % 4]);
   bool BlockPassed = check(Value, BlockExpected, BlockMask);
 
-  // Single lanes: no earlier lane belongs to the group.
   uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
   bool SinglePassed = check(Value, IdentityExpected, SingleMask);
   OutGroups[TID.x] =
       uint4(FullPassed, ParityPassed, BlockPassed, SinglePassed);
 
-  // Inactive lanes: only even lanes call the builtin.
-  // They expect the same result as the even group above.
   uint Passed = 1;
   if (Lane % 2 == 0)
     Passed = check(Value, ParityExpected, FullMask);
@@ -176,7 +227,6 @@ Buffers:
     Format: Int32
     Stride: 16
     Data: [
-      # Four inputs, repeated across the wave.
       -2, 3, -4, 5,
       -3, -2, 2, -1,
       0, 0, 0, 0,
@@ -186,13 +236,11 @@ Buffers:
     Format: Int32
     Stride: 16
     Data: [
-      # Rows 0-4: full-wave outputs for lanes 0-4, excluding each lane.
       1, 1, 1, 1,
       -2, 3, -4, 5,
       6, -6, -8, -5,
       0, 0, 0, 0,
       0, 0, 0, 0,
-      # Rows 5-7: even-group outputs. Rows 8-10: odd-group outputs.
       1, 1, 1, 1,
       -2, 3, -4, 5,
       0, 0, 0, 0,
@@ -204,7 +252,6 @@ Buffers:
     Format: Int64
     Stride: 32
     Data: [
-      # Four inputs, repeated across the wave.
       -4294967298, 4294967299, -4294967300, 4294967301,
       -3, -2, 2, -1,
       0, 0, 0, 0,
@@ -214,13 +261,11 @@ Buffers:
     Format: Int64
     Stride: 32
     Data: [
-      # Rows 0-4: full-wave outputs for lanes 0-4, excluding each lane.
       1, 1, 1, 1,
       -4294967298, 4294967299, -4294967300, 4294967301,
       12884901894, -8589934598, -8589934600, -4294967301,
       0, 0, 0, 0,
       0, 0, 0, 0,
-      # Rows 5-7: even-group outputs. Rows 8-10: odd-group outputs.
       1, 1, 1, 1,
       -4294967298, 4294967299, -4294967300, 4294967301,
       0, 0, 0, 0,
@@ -232,7 +277,6 @@ Buffers:
     Format: Float32
     Stride: 16
     Data: [
-      # Four inputs, repeated across the wave.
       -1.5, 2.5, -3.5, 4.5,
       -0.5, -1.5, 2.0, -2.0,
       0, 0, 0, 0,
@@ -242,13 +286,11 @@ Buffers:
     Format: Float32
     Stride: 16
     Data: [
-      # Rows 0-4: full-wave outputs for lanes 0-4, excluding each lane.
       1, 1, 1, 1,
       -1.5, 2.5, -3.5, 4.5,
       0.75, -3.75, -7.0, -9.0,
       0.0, -0.0, -0.0, -0.0,
       0.0, -0.0, -0.0, -0.0,
-      # Rows 5-7: even-group outputs. Rows 8-10: odd-group outputs.
       1, 1, 1, 1,
       -1.5, 2.5, -3.5, 4.5,
       -0.0, 0.0, -0.0, 0.0,
@@ -260,7 +302,6 @@ Buffers:
     Format: Float64
     Stride: 32
     Data: [
-      # Four inputs, repeated across the wave.
       -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
       -0.5, -1.5, 2.0, -2.0,
       0, 0, 0, 0,
@@ -270,13 +311,11 @@ Buffers:
     Format: Float64
     Stride: 32
     Data: [
-      # Rows 0-4: full-wave outputs for lanes 0-4, excluding each lane.
       1, 1, 1, 1,
       -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
       2147483648.25, -6442450946.25, -8589934597.0, -8589934599.0,
       0.0, -0.0, -0.0, -0.0,
       0.0, -0.0, -0.0, -0.0,
-      # Rows 5-7: even-group outputs. Rows 8-10: odd-group outputs.
       1, 1, 1, 1,
       -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
       -0.0, 0.0, -0.0, 0.0,
