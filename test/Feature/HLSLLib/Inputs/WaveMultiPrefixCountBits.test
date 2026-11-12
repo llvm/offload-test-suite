@@ -1,10 +1,42 @@
 #--- source.hlsl
 
-// Checks false, true, alternating, and paired predicates.
+// Checks four scalar predicates with the same group masks.
+//
+// Inputs[Lane % 4] repeats four rows across each wave. Read each column
+// down the rows: x is always false, y is always true, z repeats 1, 0,
+// and w repeats 1, 1, 0, 0. Each component calls the scalar builtin.
+//
+// FullExpected counts true predicates before the current lane. Component x
+// is zero, y is Lane, and z is (Lane + 1) / 2. Component w counts two true
+// lanes per complete four-lane block, then up to two in the partial block:
+// 2 * (Lane / 4) + min(Lane % 4, 2).
+//
+// Lane  FullExpected
+//    0  (0, 0, 0, 0)
+//    1  (0, 1, 1, 1)
+//    2  (0, 2, 1, 2)
+//    3  (0, 3, 2, 2)
+//    4  (0, 4, 2, 2)
+//    5  (0, 5, 3, 3)
+//
+// The parity masks separate even and odd lanes. Each group has Lane / 2
+// earlier lanes. Component z counts all of them in the even group and none
+// in the odd group. Component w alternates true and false within each
+// group, so its count is (Lane / 2 + 1) / 2.
+//
+// ExpectedPrefixResults stores the counts before positions 0-3 within a
+// four-lane group. The block check selects row Lane % 4. A single-lane
+// group expects zero in every component.
+//
+// The inactive-lane check calls the builtin only in even lanes. It uses
+// the same expected counts as the even parity group.
+//
+// OutGroups stores four pass flags in this order: full wave, parity,
+// four-lane groups, and single lanes. OutDivergent stores one pass flag;
+// inactive lanes store 1 without a check. Both expected buffers contain
+// only ones, so each checked result must pass.
 
 StructuredBuffer<uint4> Inputs : register(t0);
-// Rows 0-3 hold expected counts within a four-lane group.
-// Each row counts true predicates in earlier lanes, not its own lane.
 StructuredBuffer<uint4> ExpectedPrefixResults : register(t3);
 RWStructuredBuffer<uint4> OutGroups : register(u1);
 RWStructuredBuffer<uint> OutDivergent : register(u2);
@@ -36,14 +68,11 @@ void main(uint3 TID : SV_GroupThreadID) {
   uint Lane = WaveGetLaneIndex();
   bool4 Value = bool4(Inputs[Lane % 4]);
 
-  // Full wave: include every earlier lane.
   uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
-  // The predicates count no lanes, all lanes, even lanes, and pairs.
   uint4 FullExpected = uint4(0, Lane, (Lane + 1) / 2,
                              2 * (Lane / 4) + min(Lane % 4, 2u));
   bool FullPassed = check(Value, FullExpected, FullMask);
 
-  // Even and odd lanes: each group uses only its own earlier lanes.
   uint4 ParityMask =
       Lane % 2 == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
                     : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
@@ -53,20 +82,16 @@ void main(uint3 TID : SV_GroupThreadID) {
             (EarlierLanes + 1) / 2);
   bool ParityPassed = check(Value, ParityExpected, ParityMask);
 
-  // Four-lane groups: each group starts the same four-input sequence.
   uint BlockBitOffset = (Lane % 32) / 4 * 4;
   uint4 BlockMask = laneMask(Lane, 0xFu << BlockBitOffset);
   uint4 BlockExpected = ExpectedPrefixResults[Lane % 4];
   bool BlockPassed = check(Value, BlockExpected, BlockMask);
 
-  // Single lanes: no earlier lane belongs to the group.
   uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
   bool SinglePassed = check(Value, IdentityExpected, SingleMask);
   OutGroups[TID.x] =
       uint4(FullPassed, ParityPassed, BlockPassed, SinglePassed);
 
-  // Inactive lanes: only even lanes call the builtin.
-  // They expect the same result as the even group above.
   uint Passed = 1;
   if (Lane % 2 == 0)
     Passed = check(Value, ParityExpected, FullMask);
@@ -84,7 +109,6 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [
-      # Four inputs, repeated across the wave.
       0, 1, 1, 1,
       0, 1, 0, 1,
       0, 1, 1, 0,
@@ -94,7 +118,6 @@ Buffers:
     Format: UInt32
     Stride: 16
     Data: [
-      # Counts before positions 0-3 in a four-lane group.
       0, 0, 0, 0,
       0, 1, 1, 1,
       0, 2, 1, 2,
