@@ -69,6 +69,7 @@ D3D_FEATURE_BOOL(
 
 #ifdef D3D_FEATURE_UINT
 D3D_FEATURE_UINT(ResourceBindingTier)
+D3D_FEATURE_UINT(TiledResourcesTier)
 D3D_FEATURE_UINT(WaveLaneCountMin)
 D3D_FEATURE_UINT(WaveLaneCountMax)
 D3D_FEATURE_UINT(TotalLaneCount)

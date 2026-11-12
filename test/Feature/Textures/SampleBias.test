@@ -296,6 +296,8 @@ Results:
 ...
 #--- end
 
+# REQUIRES: LodClamp
+
 # Unimplemented: https://github.com/llvm/llvm-project/issues/189766
 # XFAIL: Clang && DirectX
 
