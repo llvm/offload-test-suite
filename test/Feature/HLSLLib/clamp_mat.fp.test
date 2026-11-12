@@ -1,0 +1,136 @@
+#--- source.hlsl
+StructuredBuffer<float4> X : register(t0);
+StructuredBuffer<float4> Min : register(t1);
+StructuredBuffer<float4> Max : register(t2);
+
+RWStructuredBuffer<float4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 F32 = clamp(float3x2(X[0].xyz, X[1].xyz),
+                       float3x2(Min[0].xyz, Min[1].xyz),
+                       float3x2(Max[0].xyz, Max[1].xyz));
+  float2x4 F24 = clamp(float2x4(X[2], X[3]),
+                       float2x4(Min[2], Min[3]),
+                       float2x4(Max[2], Max[3]));
+  float3x1 F31 = clamp(float3x1(X[4].xyz),
+                       float3x1(Min[4].xyz),
+                       float3x1(Max[4].xyz));
+  float4x4 F44 = clamp(float4x4(X[5], X[6], X[7], X[8]),
+                       float4x4(Min[5], Min[6], Min[7], Min[8]),
+                       float4x4(Max[5], Max[6], Max[7], Max[8]));
+  float2x2 F22Const = clamp(float2x2(-60000.0, 2.5, -30.0, 60000.0),
+                            float2x2(-5.5, -1.0, -50.0, 0.0),
+                            float2x2(50.0, 3.0, 60.0, 100.0));
+
+  Out[0] = float4(F32[0], F32[1]);
+  Out[1] = float4(F32[2], 0.0, 0.0);
+  Out[2] = F24[0];
+  Out[3] = F24[1];
+  Out[4] = float4(F31[0], F31[1], F31[2], 0.0);
+  Out[5] = F44[0];
+  Out[6] = F44[1];
+  Out[7] = F44[2];
+  Out[8] = F44[3];
+  Out[9] = float4(F22Const[0], F22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X
+    Format: Float32
+    Stride: 16
+    Data: [ 5.0, 9.0, 0.0, 0.0,
+            4.0, 7.0, 12.0, 0.0,
+            -3.0, -1.5, 0.0, 3.5,
+            10.5, -8.0, 15.0, 0.25,
+            -20.0, 2.0, 6.0, 0.0,
+            -60000.0, 2.5, -30.0, 60000.0,
+            -1.0, 100.0, -50.0, 25.5,
+            3.0, -3.0, 7.5, -9.0,
+            50.0, -25.0, 4.5, 9.0 ]
+  - Name: Min
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 2.0, 3.0, 0.0,
+            4.0, 0.0, 0.0, 0.0,
+            -2.0, -4.0, -1.0, -1.5,
+            11.0, -6.0, 0.0, 0.0,
+            -10.0, 1.5, -3.0, 0.0,
+            -5.5, -1.0, -50.0, 0.0,
+            -1.0, 25.0, -40.0, 25.0,
+            -2.0, -7.5, 0.5, 0.0,
+            -25.0, -24.0, 4.0, 1.0 ]
+  - Name: Max
+    Format: Float32
+    Stride: 16
+    Data: [ 8.0, 6.0, 4.0, 0.0,
+            10.0, 7.0, 10.0, 0.0,
+            5.0, 6.0, 2.0, 2.5,
+            20.0, 7.0, 12.5, 1.0,
+            15.0, 2.5, 5.0, 0.0,
+            50.0, 3.0, 60.0, 100.0,
+            4.0, 99.5, 50.0, 26.0,
+            3.0, 8.0, 7.0, 9.0,
+            40.0, 30.0, 5.0, 8.0 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 5.0, 6.0, 3.0, 4.0,
+            7.0, 10.0, 0.0, 0.0,
+            -2.0, -1.5, 0.0, 2.5,
+            11.0, -6.0, 12.5, 0.25,
+            -10.0, 2.0, 5.0, 0.0,
+            -5.5, 2.5, -30.0, 100.0,
+            -1.0, 99.5, -40.0, 25.5,
+            3.0, -3.0, 7.0, 0.0,
+            40.0, -24.0, 4.5, 8.0,
+            -5.5, 2.5, -30.0, 100.0 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Min
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Max
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

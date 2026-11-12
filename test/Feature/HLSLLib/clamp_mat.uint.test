@@ -1,0 +1,136 @@
+#--- source.hlsl
+StructuredBuffer<uint4> X : register(t0);
+StructuredBuffer<uint4> Min : register(t1);
+StructuredBuffer<uint4> Max : register(t2);
+
+RWStructuredBuffer<uint4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  uint3x2 U32 = clamp(uint3x2(X[0].xyz, X[1].xyz),
+                      uint3x2(Min[0].xyz, Min[1].xyz),
+                      uint3x2(Max[0].xyz, Max[1].xyz));
+  uint2x4 U24 = clamp(uint2x4(X[2], X[3]),
+                      uint2x4(Min[2], Min[3]),
+                      uint2x4(Max[2], Max[3]));
+  uint3x1 U31 = clamp(uint3x1(X[4].xyz),
+                      uint3x1(Min[4].xyz),
+                      uint3x1(Max[4].xyz));
+  uint4x4 U44 = clamp(uint4x4(X[5], X[6], X[7], X[8]),
+                      uint4x4(Min[5], Min[6], Min[7], Min[8]),
+                      uint4x4(Max[5], Max[6], Max[7], Max[8]));
+  uint2x2 U22Const = clamp(uint2x2(0, 2, 30, 4294967295),
+                           uint2x2(5, 1, 50, 0),
+                           uint2x2(50, 3, 60, 100));
+
+  Out[0] = uint4(U32[0], U32[1]);
+  Out[1] = uint4(U32[2], 0, 0);
+  Out[2] = U24[0];
+  Out[3] = U24[1];
+  Out[4] = uint4(U31[0], U31[1], U31[2], 0);
+  Out[5] = U44[0];
+  Out[6] = U44[1];
+  Out[7] = U44[2];
+  Out[8] = U44[3];
+  Out[9] = uint4(U22Const[0], U22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X
+    Format: UInt32
+    Stride: 16
+    Data: [ 5, 9, 0, 0,
+            4, 7, 12, 0,
+            3, 1, 0, 3,
+            10, 8, 15, 0,
+            20, 2, 6, 0,
+            0, 2, 30, 4294967295,
+            1, 100, 50, 25,
+            3, 3, 7, 9,
+            50, 25, 4, 9 ]
+  - Name: Min
+    Format: UInt32
+    Stride: 16
+    Data: [ 1, 2, 3, 0,
+            4, 0, 0, 0,
+            2, 4, 1, 1,
+            11, 6, 0, 0,
+            10, 1, 3, 0,
+            5, 1, 50, 0,
+            1, 25, 40, 25,
+            2, 7, 0, 0,
+            25, 24, 4, 1 ]
+  - Name: Max
+    Format: UInt32
+    Stride: 16
+    Data: [ 8, 6, 4, 0,
+            10, 7, 10, 0,
+            5, 6, 2, 2,
+            20, 7, 12, 1,
+            15, 2, 5, 0,
+            50, 3, 60, 100,
+            4, 99, 50, 26,
+            3, 8, 7, 9,
+            40, 30, 5, 8 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: UInt32
+    Stride: 16
+    Data: [ 5, 6, 3, 4,
+            7, 10, 0, 0,
+            3, 4, 1, 2,
+            11, 7, 12, 0,
+            15, 2, 5, 0,
+            5, 2, 50, 100,
+            1, 99, 50, 25,
+            3, 7, 7, 9,
+            40, 25, 4, 8,
+            5, 2, 50, 100 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Min
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Max
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
