@@ -1,0 +1,88 @@
+#--- source.hlsl
+StructuredBuffer<half4> N : register(t0);
+StructuredBuffer<half4> I : register(t1);
+StructuredBuffer<half4> Ng : register(t2);
+
+RWStructuredBuffer<half4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = faceforward(N[0], I[0], Ng[0]);
+  Out[1] = half4(faceforward(N[1].xyz, I[1].xyz, Ng[1].xyz), faceforward(N[1].w, I[1].w, Ng[1].w));
+  Out[2] = half4(faceforward(N[2].xy, I[2].xy, Ng[2].xy), faceforward(N[2].zw, I[2].zw, Ng[2].zw));
+  Out[3] = faceforward(half4(1, 2, -3, 4), half4(0.5, -0.5, 1, 1), half4(1, 1, 1, 1));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: N
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3c00, 0xc000, 0x4200, 0xc400, 0x3800, 0x3e00, 0xc100, 0x4600, 0xc700, 0x4800, 0x3400, 0xba00 ]
+    # 1, -2, 3, -4, 0.5, 1.5, -2.5, 6, -7, 8, 0.25, -0.75
+  - Name: I
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3c00, 0x4000, 0x4200, 0x4400, 0x3c00, 0x3c00, 0x3c00, 0x4000, 0x4000, 0xbc00, 0x3c00, 0x3c00 ]
+    # 1, 2, 3, 4, 1, 1, 1, 2, 2, -1, 1, 1
+  - Name: Ng
+    Format: Float16
+    Stride: 8
+    Data: [ 0xbc00, 0x3800, 0xbc00, 0x3800, 0x3c00, 0x4000, 0x4200, 0xc200, 0x3c00, 0x4200, 0x3c00, 0x4000 ]
+    # -1, 0.5, -1, 0.5, 1, 2, 3, -3, 1, 3, 1, 2
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 32
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    # faceforward returns N if dot(I, Ng) < 0, otherwise -N.
+    Data: [ 0x3c00, 0xc000, 0x4200, 0xc400, 0xb800, 0xbe00, 0x4100, 0x4600, 0xc700, 0x4800, 0xb400, 0x3a00, 0xbc00, 0xc000, 0x4200, 0xc400 ]
+    # 1, -2, 3, -4, -0.5, -1.5, 2.5, 6, -7, 8, -0.25, 0.75, -1, -2, 3, -4
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: N
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: I
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Ng
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Half
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
