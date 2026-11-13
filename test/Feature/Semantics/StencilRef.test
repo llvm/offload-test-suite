@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main(float4 position : POSITION) : SV_POSITION {
 #ifdef REVERSE_WINDING
   position.x = -position.x;
@@ -7,6 +11,10 @@ float4 main(float4 position : POSITION) : SV_POSITION {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 #ifndef REFERENCE_BASE
 #define REFERENCE_BASE 1
 #endif

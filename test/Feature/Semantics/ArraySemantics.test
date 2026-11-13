@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSInput {
     float4 position : POSITION;
 };
@@ -19,6 +23,10 @@ VSOutput main(VSInput input) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
     float4 position : SV_POSITION;
     float arr[4] : MY_ARRAY;

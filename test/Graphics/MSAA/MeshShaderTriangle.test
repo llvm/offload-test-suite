@@ -2,6 +2,10 @@
 # See Graphics/MSAA/SimpleTriangle.test for the `saturate` workaround.
 
 #--- mesh.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput
 {
     float4 position : SV_POSITION;
@@ -35,6 +39,10 @@ void main(uint groupThreadID: SV_GroupThreadID, out vertices PSInput verts[3], o
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput
 {
     float4 position : SV_POSITION;

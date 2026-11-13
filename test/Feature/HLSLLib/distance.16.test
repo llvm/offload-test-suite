@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test tests four different distance scenarios
 // One in 1D, 2D, 3D, and 4D

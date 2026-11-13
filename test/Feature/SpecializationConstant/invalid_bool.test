@@ -1,4 +1,8 @@
 #--- invalid_bool.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::constant_id(0)]]
 const bool spec_bool = false;
 RWStructuredBuffer<uint> OutBool : register(u0, space0);

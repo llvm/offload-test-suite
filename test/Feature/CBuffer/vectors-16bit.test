@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 cbuffer CBVectors : register(b0) {
   float16_t2 b1;

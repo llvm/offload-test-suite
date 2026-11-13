@@ -1,4 +1,7 @@
 #--- DescriptorSets.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 [[vk::binding(0)]] RWBuffer<float4> In : register(u0, space0);
 [[vk::binding(1)]] RWBuffer<float4> Out1 : register(u1, space4);

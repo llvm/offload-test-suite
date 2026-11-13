@@ -4,6 +4,10 @@
 # fields).
 #
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct Inner {
     uint b : B;
 };
@@ -29,6 +33,10 @@ VSOutput main(VSInput input) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct Inner {
     uint b : B;
 };

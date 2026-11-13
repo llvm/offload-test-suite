@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Dynamic resource: LocalBuf is Bufs[0] or Bufs[1] chosen by divergent control
 // flow, forming a phi of the resource. The dynamic array index must propagate

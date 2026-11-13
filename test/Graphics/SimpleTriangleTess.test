@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSOutput
 {
     float4 position : POSITION;
@@ -15,6 +19,10 @@ VSOutput main(float4 position : POSITION, float4 color : COLOR)
 }
 
 #--- hull.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct HSInput
 {
     float4 position : POSITION;
@@ -62,6 +70,10 @@ HSOutput main(InputPatch<HSInput, 3> patch,
 }
 
 #--- domain.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct DSInput
 {
     float4 position : POSITION;
@@ -99,6 +111,10 @@ DSOutput main(DSPatchConstants constants,
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput
 {
     float4 position : SV_POSITION;

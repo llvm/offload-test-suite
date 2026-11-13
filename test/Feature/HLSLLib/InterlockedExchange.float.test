@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Tests the float overload of InterlockedExchange on groupshared
 // destinations, with 256 concurrent threads. Float atomics are an optional

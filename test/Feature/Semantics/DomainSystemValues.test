@@ -22,6 +22,10 @@
 #              (0.25, 0.25) (0.75, 0.25)   <- bottom row (NDC -y)
 
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSOutput {
   float4 position : POSITION;
 };
@@ -35,6 +39,10 @@ VSOutput main(float4 position : POSITION) {
 }
 
 #--- hull.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct HSInput {
   float4 position : POSITION;
 };
@@ -72,6 +80,10 @@ HSOutput main(InputPatch<HSInput, 4> patch, uint i : SV_OutputControlPointID) {
 }
 
 #--- domain.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct DSInput {
   float4 position : POSITION;
 };
@@ -107,6 +119,10 @@ DSOutput main(DSPatchConstants constants, float2 uv : SV_DomainLocation,
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
   float4 position : SV_POSITION;
   float2 uv : TEXCOORD0;

@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWStructuredBuffer<uint> Out1 : register(u1);
 RWStructuredBuffer<uint> Out2 : register(u2);
 

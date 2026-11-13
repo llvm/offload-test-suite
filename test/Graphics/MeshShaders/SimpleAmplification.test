@@ -3,6 +3,10 @@
 // the payload is passed correctly to the mesh shader.
 
 #--- amplification.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct Payload {
     float3 color;
 };
@@ -17,6 +21,10 @@ void main()
 }
 
 #--- mesh.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct Payload {
     float3 color;
 };
@@ -59,6 +67,10 @@ void main(
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput
 {
     float4 position : SV_POSITION;

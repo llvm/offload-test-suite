@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Dynamic resource: Bufs[I] is indexed by the loop induction variable, so each
 // iteration selects a different resource. LICM cannot hoist the load, and the

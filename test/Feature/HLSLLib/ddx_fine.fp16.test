@@ -1,9 +1,17 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main(float2 Position : POSITION) : SV_Position {
   return float4(Position, 0, 1);
 }
 
 //--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Checks native-half scalar and vector overloads.
 float4 main(float4 Position : SV_Position) : SV_Target {
   half X = (half)Position.x;

@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Another variation testing resource arrays used as a local variable and
 // function argument. In this case the function SomeFn modifies the array B,

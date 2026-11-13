@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct S1 {
   int4 i;
   float4 f;

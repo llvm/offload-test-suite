@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test verifies handling of resource arrays when the
 // resource type has a counter.

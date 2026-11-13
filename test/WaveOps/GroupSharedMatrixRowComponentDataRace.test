@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This tests that we can concurrently write to the rows of a float4x4 as
 // though it is an array of four float4s. The large group size is used to force the

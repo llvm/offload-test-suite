@@ -1,4 +1,8 @@
 #--- simple.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // bool
 [[vk::constant_id(0)]]
 const bool spec_bool = false;

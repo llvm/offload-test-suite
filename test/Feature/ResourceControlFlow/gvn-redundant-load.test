@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // GVN sees BufA[TID] loaded on both the entry and the guarded block and
 // eliminates the second load as redundant, reusing a resource load's value

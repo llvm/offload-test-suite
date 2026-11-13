@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Test that both branches of an if/else assigning different elements of
 // the same unbounded global resource array produce correct output.
 // Two threads dispatch: thread 0 takes the `if` branch and writes to

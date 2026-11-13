@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 RWBuffer<uint64_t> Uint64LHSIn : register(u0);
 RWBuffer<uint64_t> Uint64RHSIn : register(u1);

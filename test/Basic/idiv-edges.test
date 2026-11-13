@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWStructuredBuffer<int> Buf : register(u0);
 RWStructuredBuffer<int> Zeros : register(u1);
 RWStructuredBuffer<int> NegOnes : register(u2);

@@ -2,6 +2,10 @@
 # the viewport index and transformed SV_POSITION for every covered pixel.
 
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSOutput {
     float4 position : SV_POSITION;
     uint viewport : SV_ViewportArrayIndex;
@@ -22,6 +26,10 @@ VSOutput main(uint vid : SV_VertexID) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
     float4 position : SV_POSITION;
     uint viewport : SV_ViewportArrayIndex;

@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWBuffer<float>  In;
 RWBuffer<float>  OutScalar;
 RWBuffer<float2> OutVec2;

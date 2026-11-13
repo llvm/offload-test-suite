@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test verified handling of resource arrays used as a local
 // variable and function argument.

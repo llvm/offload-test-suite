@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 RWBuffer<int> A; // dx: u0, vk: 0
 StructuredBuffer<int> B; // dx: t0, vk: 1

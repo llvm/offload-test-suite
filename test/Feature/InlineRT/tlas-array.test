@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Verifies binding an array of `RaytracingAccelerationStructure`s.
 // `Scenes[0]` and `Scenes[1]` each carry a single triangle instance with a

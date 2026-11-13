@@ -1,4 +1,8 @@
 #--- mesh.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct Vertex {
   float4 position : SV_Position;
 };
@@ -15,6 +19,10 @@ void main(out vertices Vertex vertices[3],
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main() : SV_Target { return float4(1, 0, 0, 1); }
 
 #--- pipeline.yaml

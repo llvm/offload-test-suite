@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSInput {
   float4 position : POSITION;
   float4 color : COLOR;
@@ -21,6 +25,10 @@ VSOutput main(VSInput input) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
   noperspective centroid float4 position : SV_Position;
   float4 color : COLOR;

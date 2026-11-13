@@ -1,4 +1,8 @@
 #--- compute.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTex1 : register(s0);
 [[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTex2 : register(s1);
 [[vk::binding(3, 0)]] vk::SampledTexture2D<float4> SampledTex3 : register(s2); // 4x4 with 3 mips

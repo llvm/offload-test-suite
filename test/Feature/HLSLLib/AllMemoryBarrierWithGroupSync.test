@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Tests AllMemoryBarrierWithGroupSync with group-shared and UAV memory.
 // Divergent calls are undefined and are not tested.

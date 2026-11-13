@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSOutput {
   float4 position : SV_POSITION;
 };
@@ -12,6 +16,10 @@ VSOutput main(float4 position : POSITION) {
 }
 
 #--- geometry.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct GSInput {
   float4 position : SV_POSITION;
 };
@@ -37,6 +45,10 @@ void main(point GSInput input[1], inout TriangleStream<GSOutput> stream) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
   float4 position : SV_POSITION;
 };

@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 RWStructuredBuffer<bool> In : register(u0);
 RWStructuredBuffer<bool> OrTrueTrueOut : register(u1);

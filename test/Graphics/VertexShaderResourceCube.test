@@ -8,6 +8,10 @@
 # integer/float varyings (nointerpolation uint + interpolated float3).
 
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // The vertex shader reads every per-draw transform from a bound resource, to
 // exercise vertex-stage resource access:
 //   * the camera view-projection from a constant buffer (b0)
@@ -63,6 +67,10 @@ VSOutput main(float3 localPos : POSITION, uint vid : SV_VertexID) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
   float4 position : SV_Position;
   float3 normal : NORMAL;

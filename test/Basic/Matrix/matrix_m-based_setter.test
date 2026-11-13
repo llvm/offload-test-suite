@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWBuffer<float>  In;
 RWStructuredBuffer<float3x4> OutScalar;
 RWStructuredBuffer<float3x4> OutVec2;

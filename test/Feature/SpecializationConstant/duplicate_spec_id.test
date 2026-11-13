@@ -1,4 +1,8 @@
 #--- duplicate_spec_id.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::constant_id(0)]]
 const int spec_int_A = 0;
 [[vk::constant_id(0)]]

@@ -1,4 +1,7 @@
 #--- simple.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 RWBuffer<float4> In : register(u0, space0);
 RWBuffer<float4> Out : register(u1, space0);

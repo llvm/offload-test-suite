@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test checks that we don't do any clobbering within a single word when
 // writing 16bit values to the same word from multiple threads.

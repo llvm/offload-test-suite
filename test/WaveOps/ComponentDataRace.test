@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This tests that we can concurrently write to the components of a uint4
 // as though it is an array. The large group size is used to force the write

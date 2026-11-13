@@ -1,4 +1,8 @@
 #--- invalid_float.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::constant_id(0)]]
 const float spec_float = 0.0;
 RWStructuredBuffer<float> OutFloat : register(u0, space0);

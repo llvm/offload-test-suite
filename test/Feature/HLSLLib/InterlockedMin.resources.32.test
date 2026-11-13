@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test exercises InterlockedMin against the full set of HLSL-legal
 // non-groupshared (resource) destination types:

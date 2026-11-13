@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test verifies that a texture with a zero extent is rejected with a
 // clear error rather than being handed to the driver.

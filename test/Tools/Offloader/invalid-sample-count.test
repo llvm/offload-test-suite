@@ -1,7 +1,15 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main(float4 position : POSITION) : SV_POSITION { return position; }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main() : SV_TARGET { return float4(1.0, 0.0, 0.0, 1.0); }
 
 #--- non-power-of-two.yaml

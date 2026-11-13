@@ -1,4 +1,8 @@
 #--- simple_64bit.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // double
 [[vk::constant_id(0)]]
 const double spec_double = 0.0;

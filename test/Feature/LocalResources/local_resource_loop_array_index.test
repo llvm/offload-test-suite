@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Test that indexing a local resource array inside a loop with
 // compiler-unrollable bounds writes each element distinctly.
 // Each iteration stores `I + 10` so a bug that hoisted the store or

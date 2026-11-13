@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test checks that we will get the expected values from invoking
 // Load and Store methods on 64-bit 2-element typed buffers `[RW]Buffer`.

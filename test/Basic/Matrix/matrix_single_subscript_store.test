@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWBuffer<int> In : register(u0);
 RWBuffer<int> Out : register(u1);
 

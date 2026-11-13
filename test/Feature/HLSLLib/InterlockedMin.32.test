@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test exercises InterlockedMin against non-resource (groupshared)
 // destinations. A set of 256 threads concurrently updates shared counters,

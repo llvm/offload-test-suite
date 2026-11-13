@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Reassign a local resource handle to a different global, then Store.
 // Verifies last-write-wins semantics: the pre-reassignment Store writes
 // to gBuf0, the post-reassignment Store writes to gBuf1, and both

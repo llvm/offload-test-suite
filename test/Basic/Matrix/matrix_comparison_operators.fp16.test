@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 RWStructuredBuffer<half> HalfLHSIn : register(u0);
 RWStructuredBuffer<half> HalfRHSIn : register(u1);

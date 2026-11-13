@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Tests InterlockedCompareStoreFloatBitwise on the resource destination
 // types that HLSL permits:

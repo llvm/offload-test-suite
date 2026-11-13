@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 [[vk::binding(0, 0)]] RaytracingAccelerationStructure Scene : register(t0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> Output : register(u0);

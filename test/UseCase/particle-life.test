@@ -1,4 +1,8 @@
 #--- particle-life.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 #define ROOT_SIGNATURE \
     "RootFlags(ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT)," \
     "CBV(b0)," \

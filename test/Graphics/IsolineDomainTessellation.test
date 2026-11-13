@@ -3,6 +3,10 @@
 # values prove the isoline domain ran and subdivided the line as expected.
 
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSOutput {
   float4 position : POSITION;
 };
@@ -14,6 +18,10 @@ VSOutput main(float4 position : POSITION) {
 }
 
 #--- hull.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct HSInput {
   float4 position : POSITION;
 };
@@ -47,6 +55,10 @@ HSOutput main(InputPatch<HSInput, 2> patch, uint i : SV_OutputControlPointID) {
 }
 
 #--- domain.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct DSInput {
   float4 position : POSITION;
 };
@@ -86,6 +98,10 @@ DSOutput main(DSPatchConstants constants, float2 uv : SV_DomainLocation,
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main(float4 position : SV_POSITION) : SV_TARGET {
   return float4(1.0, 1.0, 1.0, 1.0);
 }

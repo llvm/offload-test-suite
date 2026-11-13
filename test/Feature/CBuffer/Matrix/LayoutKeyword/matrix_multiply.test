@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 cbuffer CB_RM_2x3 : register(b0) {
     row_major float2x3 rm_2x3;

@@ -1,4 +1,8 @@
 #--- invalid_int32.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::constant_id(0)]]
 const int spec_int = 0;
 RWStructuredBuffer<int> OutInt : register(u0, space0);

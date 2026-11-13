@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Tests InterlockedCompareExchangeFloatBitwise on groupshared destinations.
 // 256 threads run at the same time. Each test value is exact in float, thus

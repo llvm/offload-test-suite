@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Runs 8,192 cross-wave trials on group-shared and UAV memory.
 // A domain fails only if both threads read its initial value.

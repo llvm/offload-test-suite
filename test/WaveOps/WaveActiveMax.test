@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWStructuredBuffer<float> Nans : register(u0);
 RWStructuredBuffer<float> Infs : register(u1);
 RWStructuredBuffer<float> NegInfs : register(u2);

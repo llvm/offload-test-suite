@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Tests InterlockedAdd on groupshared destinations, int and uint, with 256
 // concurrent threads. Three checks:

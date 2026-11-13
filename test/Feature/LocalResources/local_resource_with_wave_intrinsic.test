@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Test that a local resource handle interoperates with wave intrinsics:
 // each lane stores a per-lane value derived from a wave op through the
 // local handle, at a per-lane offset. A bug that hoisted or dropped the

@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 StructuredBuffer<float2> Min2D : register(t0);
 StructuredBuffer<float4> Min3D : register(t1);

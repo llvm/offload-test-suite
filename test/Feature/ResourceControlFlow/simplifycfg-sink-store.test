@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // SimplifyCFG sinks the store from both branches into the common successor,
 // creating a phi of a pointer into a resource.

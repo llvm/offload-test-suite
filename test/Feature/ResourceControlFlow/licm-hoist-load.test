@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // The BufA/BufB loads are loop-invariant, so LICM hoists them out of the loop,
 // moving the resource load above the loop.

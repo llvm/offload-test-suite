@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 StructuredBuffer<float4> X0 : register(t0);
 StructuredBuffer<float4> Y0 : register(t1);
 StructuredBuffer<int4> X1 : register(t2);

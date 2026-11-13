@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test verifies that an error is reported when a resource array is
 // used in a root signature as a root constant

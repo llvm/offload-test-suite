@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test is pretty much identical to Feature\Textures\Texture2D.Sampler.mips.test
 // except it uses dynamic resources.

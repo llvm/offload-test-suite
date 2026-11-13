@@ -1,4 +1,8 @@
 #--- invalid_int16.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::constant_id(0)]]
 const int16_t spec_short = 0;
 RWStructuredBuffer<int16_t> OutShort : register(u0, space0);

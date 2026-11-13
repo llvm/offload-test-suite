@@ -1,4 +1,7 @@
 #--- simple_64bit.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // short
 [[vk::constant_id(1)]]

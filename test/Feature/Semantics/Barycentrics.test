@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSInput {
     float4 position : POSITION;
 };
@@ -8,6 +12,10 @@ float4 main(VSInput input) : SV_POSITION {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 RWStructuredBuffer<float3> Output : register(u0);
 
 float4 main(float3 barycentrics : SV_Barycentrics) : SV_TARGET {

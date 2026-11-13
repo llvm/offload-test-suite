@@ -1,7 +1,15 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 float4 main(float4 position : POSITION) : SV_Position { return position; }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSOutput {
   float4 color : SV_Target;
   uint reference : SV_StencilRef;

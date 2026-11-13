@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 [[vk::binding(0, 0)]] Texture2DArray<float4> In2D : register(t0);
 [[vk::binding(1, 0)]] RWTexture2DArray<float4> Out2D : register(u1);

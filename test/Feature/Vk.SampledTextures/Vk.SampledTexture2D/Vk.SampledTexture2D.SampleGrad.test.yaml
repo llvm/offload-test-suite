@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTex0 : register(s0); // Mag=Nearest, Min=Linear
 [[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTex1 : register(s1); // Mag=Linear, Min=Nearest
 [[vk::binding(2, 0)]] RWBuffer<float4> Out : register(u0);

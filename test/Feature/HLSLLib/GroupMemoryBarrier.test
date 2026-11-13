@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // Runs 8,192 cross-wave store-buffering trials on group-shared memory.
 // A trial fails only if both threads read the initial value.

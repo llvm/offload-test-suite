@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // InstCombine sinks the two branch loads into the common successor, creating a
 // phi of pointers into BufA/BufB (a resource).

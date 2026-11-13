@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Test that a local resource array dispatches to the correct element
 // when indexed at runtime. The 4-thread dispatch and per-thread index
 // ensure the compiler can't constant-fold the index away. Each thread

@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Regression test for https://github.com/llvm/llvm-project/issues/156084
 RWStructuredBuffer<uint> output : register(u1);
 cbuffer Constants : register(b0) {

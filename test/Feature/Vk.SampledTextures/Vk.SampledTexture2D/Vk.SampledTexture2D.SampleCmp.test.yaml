@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct VSInput {
   float3 Pos : POSITION;
 };
@@ -14,6 +18,10 @@ VSOutput mainVS(VSInput input) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 [[vk::binding(0, 0)]] vk::SampledTexture2D<float4> SampledTexLess : register(s0); // Less
 [[vk::binding(1, 0)]] vk::SampledTexture2D<float4> SampledTexGreater : register(s1); // Greater
 [[vk::binding(2, 0)]] RWBuffer<float> Out : register(u0);

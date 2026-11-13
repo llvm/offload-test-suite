@@ -1,4 +1,8 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Test that a local read-only ByteAddressBuffer (SRV) can load data correctly.
 ByteAddressBuffer gInput : register(t0);
 RWByteAddressBuffer gOutput : register(u1);

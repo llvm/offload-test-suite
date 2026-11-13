@@ -1,4 +1,8 @@
 #--- vertex.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 struct PSInput {
   float4 position : SV_POSITION;
 };
@@ -12,6 +16,10 @@ PSInput main(float4 position : POSITION) {
 }
 
 #--- pixel.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
+
 // Offset into the image of our circle
 #define OFFSET 128.0
 // Radius of our circle

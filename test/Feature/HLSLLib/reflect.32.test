@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test tests three different reflection scenarios
 // One in 2D, 3D, and 4D

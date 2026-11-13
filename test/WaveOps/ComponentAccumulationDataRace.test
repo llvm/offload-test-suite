@@ -1,4 +1,7 @@
 #--- source.hlsl
+#ifdef __hlsl_clang
+using namespace hlsl;
+#endif
 
 // This test is added to continue having a test to track the Intel && DXC bug
 // below. This bug only appears when using GroupMemoryBarrierWithGroupSync
