@@ -1,4 +1,4 @@
-#--- common.hlsl
+#--- shared.hlsl
 
 // Checks signed and unsigned integers and floating-point values at 16,
 // 32, and 64 bits. All cases share the group masks and output buffers.
@@ -42,47 +42,6 @@
 // inactive lanes store 1 without a check. Both expected buffers contain
 // only ones, so each checked result must pass.
 
-#if TEST_FLOAT
-#if TYPE_BITS == 16
-typedef float16_t Element;
-#elif TYPE_BITS == 64
-typedef double Element;
-#else
-typedef float Element;
-#endif
-#else
-#if TYPE_BITS == 16
-typedef int16_t Element;
-typedef uint16_t UnsignedElement;
-#elif TYPE_BITS == 64
-typedef int64_t Element;
-typedef uint64_t UnsignedElement;
-#else
-typedef int Element;
-typedef uint UnsignedElement;
-#endif
-typedef vector<UnsignedElement, 4> Unsigned4;
-#endif
-
-typedef vector<Element, 4> Value4;
-
-#if TEST_FLOAT
-#if TYPE_BITS == 64
-StructuredBuffer<double4> Inputs : register(t3);
-StructuredBuffer<double4> ExpectedPrefixResults : register(t9);
-#else
-StructuredBuffer<float4> Inputs : register(t2);
-StructuredBuffer<float4> ExpectedPrefixResults : register(t8);
-#endif
-#else
-#if TYPE_BITS == 64
-StructuredBuffer<Value4> Inputs : register(t1);
-StructuredBuffer<Value4> ExpectedPrefixResults : register(t7);
-#else
-StructuredBuffer<int4> Inputs : register(t0);
-StructuredBuffer<int4> ExpectedPrefixResults : register(t6);
-#endif
-#endif
 RWStructuredBuffer<uint4> OutGroups : register(u4);
 RWStructuredBuffer<uint> OutDivergent : register(u5);
 
@@ -93,88 +52,6 @@ uint4 laneMask(uint Lane, uint Bits) {
   return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
                Word == 3 ? Bits : 0);
 }
-
-#--- source.hlsl
-
-#include "common.hlsl"
-
-bool check(Value4 Value, Value4 Expected, uint4 Mask) {
-  Element R1 = WaveMultiPrefixSum(Value.x, Mask);
-  vector<Element, 2> R2 = WaveMultiPrefixSum(Value.xy, Mask);
-  vector<Element, 3> R3 = WaveMultiPrefixSum(Value.xyz, Mask);
-  Value4 R4 = WaveMultiPrefixSum(Value, Mask);
-#if !TEST_FLOAT
-  Unsigned4 UValue = Unsigned4(Value);
-  Unsigned4 UExpected = Unsigned4(Expected);
-  UnsignedElement U1 = WaveMultiPrefixSum(UValue.x, Mask);
-  vector<UnsignedElement, 2> U2 = WaveMultiPrefixSum(UValue.xy, Mask);
-  vector<UnsignedElement, 3> U3 = WaveMultiPrefixSum(UValue.xyz, Mask);
-  Unsigned4 U4 = WaveMultiPrefixSum(UValue, Mask);
-#endif
-
-  bool Passed = R1 == Expected.x;
-#if !TEST_FLOAT
-  Passed = Passed && U1 == UExpected.x;
-#endif
-  for (uint Component = 0; Component < 2; ++Component) {
-    Passed = Passed && R2[Component] == Expected[Component];
-#if !TEST_FLOAT
-    Passed = Passed && U2[Component] == UExpected[Component];
-#endif
-  }
-  for (uint Component = 0; Component < 3; ++Component) {
-    Passed = Passed && R3[Component] == Expected[Component];
-#if !TEST_FLOAT
-    Passed = Passed && U3[Component] == UExpected[Component];
-#endif
-  }
-  for (uint Component = 0; Component < 4; ++Component) {
-    Passed = Passed && R4[Component] == Expected[Component];
-#if !TEST_FLOAT
-    Passed = Passed && U4[Component] == UExpected[Component];
-#endif
-  }
-  return Passed;
-}
-
-#include "main.hlsl"
-
-#--- matrix.hlsl
-
-#include "common.hlsl"
-
-typedef matrix<Element, MATRIX_ROWS, MATRIX_COLS> ValueMatrix;
-#if !TEST_FLOAT
-typedef matrix<UnsignedElement, MATRIX_ROWS, MATRIX_COLS> UnsignedMatrix;
-#endif
-
-bool check(Value4 Value, Value4 Expected, uint4 Mask) {
-  ValueMatrix Matrix;
-  ValueMatrix MatrixExpected;
-  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
-    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
-      uint Component = (Row * MATRIX_COLS + Column) % 4;
-      Matrix[Row][Column] = Value[Component];
-      MatrixExpected[Row][Column] = Expected[Component];
-    }
-
-  ValueMatrix Result = WaveMultiPrefixSum(Matrix, Mask);
-#if !TEST_FLOAT
-  UnsignedMatrix UResult = WaveMultiPrefixSum(UnsignedMatrix(Matrix), Mask);
-  UnsignedMatrix UExpected = UnsignedMatrix(MatrixExpected);
-#endif
-  bool Passed = true;
-  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
-    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
-      Passed = Passed && Result[Row][Column] == MatrixExpected[Row][Column];
-#if !TEST_FLOAT
-      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column];
-#endif
-    }
-  return Passed;
-}
-
-#include "main.hlsl"
 
 #--- main.hlsl
 
