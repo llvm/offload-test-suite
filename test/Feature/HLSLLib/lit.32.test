@@ -1,0 +1,98 @@
+#--- source.hlsl
+StructuredBuffer<float> NDotL : register(t0);
+StructuredBuffer<float> NDotH : register(t1);
+StructuredBuffer<float> M : register(t2);
+
+RWStructuredBuffer<float4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  for (uint I = 0; I < 6; ++I)
+    Out[I] = lit(NDotL[I], NDotH[I], M[I]);
+  Out[6] = lit(0.25, 0.5, 3.0);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: NDotL
+    Format: Float32
+    Stride: 4
+    Data: [ 0.5, -0.5, 0.75, -0.25, 1, 2 ]
+  - Name: NDotH
+    Format: Float32
+    Stride: 4
+    Data: [ 0.25, 0.5, -0.5, -0.75, 0.5, 4 ]
+  - Name: M
+    Format: Float32
+    Stride: 4
+    Data: [ 2, 2, 3, 4, 0, 0.5 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 112
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    # lit returns (1, NDotL < 0 ? 0 : NDotL,
+    #              (NDotL < 0 || NDotH < 0) ? 0 : pow(NDotH, M), 1).
+    Data: [ 1, 0.5, 0.0625, 1,
+            1, 0, 0, 1,
+            1, 0.75, 0, 1,
+            1, 0, 0, 1,
+            1, 1, 1, 1,
+            1, 2, 2, 1,
+            1, 0.25, 0.125, 1 ]
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0008
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: NDotL
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: NDotH
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: M
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# Bug: DXC's SPIR-V backend computes the specular term as NDotH * M instead of
+# pow(NDotH, M).
+# https://github.com/microsoft/DirectXShaderCompiler/blob/49fea47e722b14066d679e605e04b62ba0816b8d/tools/clang/lib/SPIRV/SpirvEmitter.cpp#L12435-L12468
+# XFAIL: DXC && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/235864
+# XFAIL: Clang && DirectX
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
