@@ -97,14 +97,11 @@ DescriptorSets:
 
 # REQUIRES: Half
 
-# Bug: DXC's SPIR-V backend asserts on half arguments to lit (it always builds
-# 32-bit float constants), and it computes the specular term as NDotH * M
-# instead of pow(NDotH, M).
-# https://github.com/microsoft/DirectXShaderCompiler/blob/49fea47e722b14066d679e605e04b62ba0816b8d/tools/clang/lib/SPIRV/SpirvEmitter.cpp#L12435-L12468
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/9123
 # XFAIL: DXC && Vulkan
 
 # Bug: https://github.com/llvm/llvm-project/issues/235864
-# XFAIL: Clang && DirectX
+# XFAIL: Clang && (DirectX || Metal)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
