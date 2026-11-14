@@ -1,0 +1,83 @@
+#--- source.hlsl
+StructuredBuffer<float4> N : register(t0);
+StructuredBuffer<float4> I : register(t1);
+StructuredBuffer<float4> Ng : register(t2);
+
+RWStructuredBuffer<float4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  Out[0] = faceforward(N[0], I[0], Ng[0]);
+  Out[1] = float4(faceforward(N[1].xyz, I[1].xyz, Ng[1].xyz), faceforward(N[1].w, I[1].w, Ng[1].w));
+  Out[2] = float4(faceforward(N[2].xy, I[2].xy, Ng[2].xy), faceforward(N[2].zw, I[2].zw, Ng[2].zw));
+  Out[3] = faceforward(float4(1, 2, -3, 4), float4(0.5, -0.5, 1, 1), float4(1, 1, 1, 1));
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: N
+    Format: Float32
+    Stride: 16
+    Data: [ 1, -2, 3, -4, 0.5, 1.5, -2.5, 6, -7, 8, 0.25, -0.75 ]
+  - Name: I
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 2, 3, 4, 1, 1, 1, 2, 2, -1, 1, 1 ]
+  - Name: Ng
+    Format: Float32
+    Stride: 16
+    Data: [ -1, 0.5, -1, 0.5, 1, 2, 3, -3, 1, 3, 1, 2 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    # faceforward returns N if dot(I, Ng) < 0, otherwise -N.
+    Data: [ 1, -2, 3, -4, -0.5, -1.5, 2.5, 6, -7, 8, -0.25, 0.75, -1, -2, 3, -4 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: N
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: I
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Ng
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
