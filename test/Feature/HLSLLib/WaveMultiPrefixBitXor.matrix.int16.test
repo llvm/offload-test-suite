@@ -1,0 +1,18 @@
+# REQUIRES: Int16 && WaveMultiPrefix
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/7093
+# XFAIL: DXC && Vulkan
+
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitXor.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 \
+# RUN:   -DMATRIX_ROWS=3 -DMATRIX_COLS=2 -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 \
+# RUN:   -DMATRIX_ROWS=2 -DMATRIX_COLS=3 -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 \
+# RUN:   -DMATRIX_ROWS=3 -DMATRIX_COLS=1 -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 \
+# RUN:   -DMATRIX_ROWS=4 -DMATRIX_COLS=4 -Fo %t.o %t/matrix.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
