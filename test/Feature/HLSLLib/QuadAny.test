@@ -1,0 +1,73 @@
+#--- source.hlsl
+// Test all 16 predicate patterns and both quads in each group.
+StructuredBuffer<uint> In : register(t0);
+RWStructuredBuffer<uint> Out : register(u1);
+
+[numthreads(4, 2, 1)]
+void main(uint3 GroupID : SV_GroupID, uint3 ThreadID : SV_GroupThreadID) {
+  uint Quad = GroupID.x * 2 + ThreadID.x / 2;
+  uint Lane = ThreadID.y * 2 + ThreadID.x % 2;
+  bool Predicate = (In[Quad] & (1u << Lane)) != 0;
+  Out[Quad * 4 + Lane] = QuadAny(Predicate);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+DispatchParameters:
+  DispatchGroupCount: [8, 1, 1]
+Buffers:
+  - Name: In
+    Format: UInt32
+    Stride: 4
+    Data: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+  - Name: Out
+    Format: UInt32
+    Stride: 4
+    FillSize: 256
+    FillValue: 137
+  - Name: Expected
+    Format: UInt32
+    Stride: 4
+    Data: [0, 0, 0, 0, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1,
+           1, 1, 1, 1, 1, 1, 1, 1]
+Results:
+  - Result: QuadAny
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: NativeQuadAny
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99214
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_7 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
