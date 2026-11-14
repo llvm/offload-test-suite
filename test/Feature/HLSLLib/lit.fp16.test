@@ -1,0 +1,108 @@
+#--- source.hlsl
+StructuredBuffer<half> NDotL : register(t0);
+StructuredBuffer<half> NDotH : register(t1);
+StructuredBuffer<half> M : register(t2);
+
+RWStructuredBuffer<half4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  for (uint I = 0; I < 6; ++I)
+    Out[I] = lit(NDotL[I], NDotH[I], M[I]);
+  Out[6] = lit((half)0.25, (half)0.5, (half)3.0);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: NDotL
+    Format: Float16
+    Stride: 2
+    Data: [ 0x3800, 0xb800, 0x3a00, 0xb400, 0x3c00, 0x4000 ]
+    # 0.5, -0.5, 0.75, -0.25, 1, 2
+  - Name: NDotH
+    Format: Float16
+    Stride: 2
+    Data: [ 0x3400, 0x3800, 0xb800, 0xba00, 0x3800, 0x4400 ]
+    # 0.25, 0.5, -0.5, -0.75, 0.5, 4
+  - Name: M
+    Format: Float16
+    Stride: 2
+    Data: [ 0x4000, 0x4000, 0x4200, 0x4400, 0x0000, 0x3800 ]
+    # 2, 2, 3, 4, 0, 0.5
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 56
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    # lit returns (1, NDotL < 0 ? 0 : NDotL,
+    #              (NDotL < 0 || NDotH < 0) ? 0 : pow(NDotH, M), 1).
+    Data: [ 0x3c00, 0x3800, 0x2c00, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3a00, 0x0000, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3c00, 0x3c00, 0x3c00,
+            0x3c00, 0x4000, 0x4000, 0x3c00,
+            0x3c00, 0x3400, 0x3000, 0x3c00 ]
+    # 1, 0.5, 0.0625, 1,
+    # 1, 0, 0, 1,
+    # 1, 0.75, 0, 1,
+    # 1, 0, 0, 1,
+    # 1, 1, 1, 1,
+    # 1, 2, 2, 1,
+    # 1, 0.25, 0.125, 1
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.003
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: NDotL
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: NDotH
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: M
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Half
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/9123
+# XFAIL: DXC && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/235864
+# XFAIL: Clang && (DirectX || Metal)
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
