@@ -1,0 +1,246 @@
+#--- source.hlsl
+StructuredBuffer<half4> NDotL : register(t0);
+StructuredBuffer<half4> NDotH : register(t1);
+StructuredBuffer<half4> M : register(t2);
+
+RWStructuredBuffer<half4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  half3x2 L32 = half3x2(NDotL[0].xyz, NDotL[1].xyz);
+  half3x2 H32 = half3x2(NDotH[0].xyz, NDotH[1].xyz);
+  half3x2 M32 = half3x2(M[0].xyz, M[1].xyz);
+  half2x4 L24 = half2x4(NDotL[2], NDotL[3]);
+  half2x4 H24 = half2x4(NDotH[2], NDotH[3]);
+  half2x4 M24 = half2x4(M[2], M[3]);
+  half3x1 L31 = half3x1(NDotL[4].xyz);
+  half3x1 H31 = half3x1(NDotH[4].xyz);
+  half3x1 M31 = half3x1(M[4].xyz);
+  half4x4 L44 = half4x4(NDotL[5], NDotL[6], NDotL[7], NDotL[8]);
+  half4x4 H44 = half4x4(NDotH[5], NDotH[6], NDotH[7], NDotH[8]);
+  half4x4 M44 = half4x4(M[5], M[6], M[7], M[8]);
+
+  uint I = 0;
+  for (uint R = 0; R < 3; ++R)
+    for (uint C = 0; C < 2; ++C)
+      Out[I++] = lit(L32[R][C], H32[R][C], M32[R][C]);
+  for (uint R = 0; R < 2; ++R)
+    for (uint C = 0; C < 4; ++C)
+      Out[I++] = lit(L24[R][C], H24[R][C], M24[R][C]);
+  for (uint R = 0; R < 3; ++R)
+    Out[I++] = lit(L31[R][0], H31[R][0], M31[R][0]);
+  for (uint R = 0; R < 4; ++R)
+    for (uint C = 0; C < 4; ++C)
+      Out[I++] = lit(L44[R][C], H44[R][C], M44[R][C]);
+
+  // lit returns a 4-component vector, so its results can form a 4x4 matrix.
+  half4x4 Const44 = half4x4(lit((half)0.25, (half)0.5, (half)3),
+                            lit((half)-0.5, (half)0.5, (half)2),
+                            lit((half)0.5, (half)-0.25, (half)2),
+                            lit((half)1, (half)2, (half)0.5));
+  for (uint R = 0; R < 4; ++R)
+    Out[I++] = Const44[R];
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: NDotL
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3800, 0xb800, 0x3a00, 0x0000,
+            0x3c00, 0x4000, 0x0000, 0x0000,
+            0x3400, 0x3e00, 0xbc00, 0x3800,
+            0x4200, 0x3000, 0xb400, 0x4400,
+            0x3800, 0xc000, 0x3c00, 0x0000,
+            0x3800, 0x3400, 0x3c00, 0xba00,
+            0x4000, 0x3800, 0x3c00, 0x3a00,
+            0x3d00, 0xbc00, 0x3800, 0x3c00,
+            0x3600, 0x3c00, 0x0000, 0x4600 ]
+    # 0.5, -0.5, 0.75, 0
+    # 1, 2, 0, 0
+    # 0.25, 1.5, -1, 0.5
+    # 3, 0.125, -0.25, 4
+    # 0.5, -2, 1, 0
+    # 0.5, 0.25, 1, -0.75
+    # 2, 0.5, 1, 0.75
+    # 1.25, -1, 0.5, 1
+    # 0.375, 1, 0, 6
+  - Name: NDotH
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3400, 0x3800, 0xb800, 0x0000,
+            0x3800, 0x4400, 0x3e00, 0x0000,
+            0x3800, 0x3d00, 0x4000, 0xc000,
+            0x3400, 0x4800, 0xb400, 0x3c00,
+            0x4c00, 0x3800, 0x3800, 0x0000,
+            0x3800, 0x4000, 0x4400, 0x3c00,
+            0x3800, 0xbc00, 0x3400, 0x3c00,
+            0x3400, 0xbc00, 0x4000, 0x4400,
+            0x4880, 0x4000, 0x3800, 0x3800 ]
+    # 0.25, 0.5, -0.5, 0
+    # 0.5, 4, 1.5, 0
+    # 0.5, 1.25, 2, -2
+    # 0.25, 8, -0.25, 1
+    # 16, 0.5, 0.5, 0
+    # 0.5, 2, 4, 1
+    # 0.5, -1, 0.25, 1
+    # 0.25, -1, 2, 4
+    # 9, 2, 0.5, 0.5
+  - Name: M
+    Format: Float16
+    Stride: 8
+    Data: [ 0x4000, 0x4000, 0x4200, 0x0000,
+            0x0000, 0x3800, 0x3c00, 0x0000,
+            0x3c00, 0x4000, 0x4000, 0x3c00,
+            0x3800, 0x3400, 0x4000, 0x4900,
+            0x3400, 0x3c00, 0x4400, 0x0000,
+            0x3c00, 0x3800, 0x3800, 0x3c00,
+            0x4200, 0x4000, 0x3800, 0x5640,
+            0x4000, 0x3c00, 0xbc00, 0xb800,
+            0x3400, 0x3c00, 0x0000, 0x4800 ]
+    # 2, 2, 3, 0
+    # 0, 0.5, 1, 0
+    # 1, 2, 2, 1
+    # 0.5, 0.25, 2, 10
+    # 0.25, 1, 4, 0
+    # 1, 0.5, 0.5, 1
+    # 3, 2, 0.5, 100
+    # 2, 1, -1, -0.5
+    # 0.25, 1, 0, 8
+  - Name: Out
+    Format: Float16
+    Stride: 8
+    FillSize: 296
+  - Name: ExpectedOut
+    Format: Float16
+    Stride: 8
+    # lit returns (1, NDotL < 0 ? 0 : NDotL,
+    #              (NDotL < 0 || NDotH < 0) ? 0 : pow(NDotH, M), 1).
+    Data: [ 0x3c00, 0x3800, 0x2c00, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3a00, 0x0000, 0x3c00,
+            0x3c00, 0x3c00, 0x3c00, 0x3c00,
+            0x3c00, 0x4000, 0x4000, 0x3c00,
+            0x3c00, 0x0000, 0x3e00, 0x3c00,
+            0x3c00, 0x3400, 0x3800, 0x3c00,
+            0x3c00, 0x3e00, 0x3e40, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3800, 0x0000, 0x3c00,
+            0x3c00, 0x4200, 0x3800, 0x3c00,
+            0x3c00, 0x3000, 0x3eba, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x4400, 0x3c00, 0x3c00,
+            0x3c00, 0x3800, 0x4000, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3c00, 0x2c00, 0x3c00,
+            0x3c00, 0x3800, 0x3800, 0x3c00,
+            0x3c00, 0x3400, 0x3da8, 0x3c00,
+            0x3c00, 0x3c00, 0x4000, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x4000, 0x3000, 0x3c00,
+            0x3c00, 0x3800, 0x0000, 0x3c00,
+            0x3c00, 0x3c00, 0x3800, 0x3c00,
+            0x3c00, 0x3a00, 0x3c00, 0x3c00,
+            0x3c00, 0x3d00, 0x2c00, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3800, 0x3800, 0x3c00,
+            0x3c00, 0x3c00, 0x3800, 0x3c00,
+            0x3c00, 0x3600, 0x3eee, 0x3c00,
+            0x3c00, 0x3c00, 0x4000, 0x3c00,
+            0x3c00, 0x0000, 0x3c00, 0x3c00,
+            0x3c00, 0x4600, 0x1c00, 0x3c00,
+            0x3c00, 0x3400, 0x3000, 0x3c00,
+            0x3c00, 0x0000, 0x0000, 0x3c00,
+            0x3c00, 0x3800, 0x0000, 0x3c00,
+            0x3c00, 0x3c00, 0x3da8, 0x3c00 ]
+    # 1, 0.5, 0.0625, 1
+    # 1, 0, 0, 1
+    # 1, 0.75, 0, 1
+    # 1, 1, 1, 1
+    # 1, 2, 2, 1
+    # 1, 0, 1.5, 1
+    # 1, 0.25, 0.5, 1
+    # 1, 1.5, 1.5625, 1
+    # 1, 0, 0, 1
+    # 1, 0.5, 0, 1
+    # 1, 3, 0.5, 1
+    # 1, 0.125, 1.68179, 1
+    # 1, 0, 0, 1
+    # 1, 4, 1, 1
+    # 1, 0.5, 2, 1
+    # 1, 0, 0, 1
+    # 1, 1, 0.0625, 1
+    # 1, 0.5, 0.5, 1
+    # 1, 0.25, 1.41421, 1
+    # 1, 1, 2, 1
+    # 1, 0, 0, 1
+    # 1, 2, 0.125, 1
+    # 1, 0.5, 0, 1
+    # 1, 1, 0.5, 1
+    # 1, 0.75, 1, 1
+    # 1, 1.25, 0.0625, 1
+    # 1, 0, 0, 1
+    # 1, 0.5, 0.5, 1
+    # 1, 1, 0.5, 1
+    # 1, 0.375, 1.73205, 1
+    # 1, 1, 2, 1
+    # 1, 0, 1, 1
+    # 1, 6, 0.00390625, 1
+    # 1, 0.25, 0.125, 1
+    # 1, 0, 0, 1
+    # 1, 0.5, 0, 1
+    # 1, 1, 1.41421, 1
+Results:
+  - Result: Test0
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.003
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: NDotL
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: NDotH
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: M
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# REQUIRES: Half
+
+# Bug: https://github.com/microsoft/DirectXShaderCompiler/issues/9123
+# XFAIL: DXC && Vulkan
+
+# Bug: https://github.com/llvm/llvm-project/issues/235864
+# XFAIL: Clang && (DirectX || Metal)
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
