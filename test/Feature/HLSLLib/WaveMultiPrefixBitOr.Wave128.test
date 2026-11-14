@@ -1,0 +1,10 @@
+# REQUIRES: WaveMultiPrefix && WaveSizeSelection && WaveSize_128
+
+# WARP returns incorrect prefix results with a 128-lane wave.
+# Bug: https://github.com/llvm/offload-test-suite/issues/1714
+# XFAIL: WARP && DirectX
+
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitOr.test %t
+# RUN: %dxc_target -T cs_6_6 -DTYPE_BITS=32 -DWAVE_SIZE=128 \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
