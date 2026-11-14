@@ -1,0 +1,228 @@
+{
+  "requires_groups": [
+    {
+      "group": "!true",
+      "features": [],
+      "tests": ["contradiction-constant.test", "contradiction.test"],
+      "test_count": 2
+    },
+    {
+      "group": "No requirements",
+      "features": [],
+      "tests": ["nested/relative-path.test", "no-requirements.test", "tautology.test"],
+      "test_count": 3
+    },
+    {
+      "group": "Double",
+      "features": ["Double"],
+      "tests": ["irrelevant-feature.test", "unsupported-xfail.test"],
+      "test_count": 2
+    },
+    {
+      "group": "false",
+      "features": ["false"],
+      "tests": ["false-feature.test"],
+      "test_count": 1
+    },
+    {
+      "group": "Clang && Vulkan",
+      "features": ["Clang", "Vulkan"],
+      "tests": ["vulkan.test"],
+      "test_count": 1
+    },
+    {
+      "group": "Clang || SM_6_9",
+      "features": ["Clang", "SM_6_9"],
+      "tests": ["equivalent-or.test", "or.test"],
+      "test_count": 2
+    },
+    {
+      "group": "Double && !WARP",
+      "features": ["Double", "WARP"],
+      "tests": ["not.test"],
+      "test_count": 1
+    },
+    {
+      "group": "Double && Half",
+      "features": ["Double", "Half"],
+      "tests": ["and.test", "continuation.test", "equivalent-and.test"],
+      "test_count": 3
+    },
+    {
+      "group": "DXC && DirectX && Windows",
+      "features": ["DXC", "DirectX", "Windows"],
+      "tests": ["environments.test"],
+      "test_count": 1
+    },
+    {
+      "group": "Double && Half || Half && Int64",
+      "features": ["Double", "Half", "Int64"],
+      "tests": ["distributed.test", "equivalent-distributed.test"],
+      "test_count": 2
+    }
+  ],
+  "tests": [
+    {
+      "name": "OffloadTest :: and.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["and.test"],
+      "requires": ["Half", "Double"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double && Half"
+    },
+    {
+      "name": "OffloadTest :: continuation.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["continuation.test"],
+      "requires": ["Double && Half"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double && Half"
+    },
+    {
+      "name": "OffloadTest :: contradiction-constant.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["contradiction-constant.test"],
+      "requires": ["!true"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "!true"
+    },
+    {
+      "name": "OffloadTest :: contradiction.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["contradiction.test"],
+      "requires": ["Half && !Half"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "!true"
+    },
+    {
+      "name": "OffloadTest :: distributed.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["distributed.test"],
+      "requires": ["Half && (Double || Int64)"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double && Half || Half && Int64"
+    },
+    {
+      "name": "OffloadTest :: environments.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["environments.test"],
+      "requires": ["Windows", "DirectX", "DXC"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "DXC && DirectX && Windows"
+    },
+    {
+      "name": "OffloadTest :: equivalent-and.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["equivalent-and.test"],
+      "requires": ["Double && !(!Half)"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double && Half"
+    },
+    {
+      "name": "OffloadTest :: equivalent-distributed.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["equivalent-distributed.test"],
+      "requires": ["(Half && Double) || (Half && Int64)"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double && Half || Half && Int64"
+    },
+    {
+      "name": "OffloadTest :: equivalent-or.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["equivalent-or.test"],
+      "requires": ["SM_6_9 || Clang"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Clang || SM_6_9"
+    },
+    {
+      "name": "OffloadTest :: false-feature.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["false-feature.test"],
+      "requires": ["false"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "false"
+    },
+    {
+      "name": "OffloadTest :: irrelevant-feature.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["irrelevant-feature.test"],
+      "requires": ["Double && (Unused || !Unused)"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double"
+    },
+    {
+      "name": "OffloadTest :: nested/relative-path.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["nested", "relative-path.test"],
+      "requires": [],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "No requirements"
+    },
+    {
+      "name": "OffloadTest :: no-requirements.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["no-requirements.test"],
+      "requires": [],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "No requirements"
+    },
+    {
+      "name": "OffloadTest :: not.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["not.test"],
+      "requires": ["Double && !WARP"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Double && !WARP"
+    },
+    {
+      "name": "OffloadTest :: or.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["or.test"],
+      "requires": ["Clang || SM_6_9"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Clang || SM_6_9"
+    },
+    {
+      "name": "OffloadTest :: tautology.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["tautology.test"],
+      "requires": ["Half || !Half"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "No requirements"
+    },
+    {
+      "name": "OffloadTest :: unsupported-xfail.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["unsupported-xfail.test"],
+      "requires": ["Double"],
+      "xfail": ["Intel", "*"],
+      "unsupported": ["WARP && DXC", "Lavapipe", "{{GPU.*}}"],
+      "requires_group": "Double"
+    },
+    {
+      "name": "OffloadTest :: vulkan.test",
+      "suite": "OffloadTest",
+      "path_in_suite": ["vulkan.test"],
+      "requires": ["Vulkan && Clang"],
+      "xfail": [],
+      "unsupported": [],
+      "requires_group": "Clang && Vulkan"
+    }
+  ]
+}

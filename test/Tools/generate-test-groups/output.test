@@ -1,0 +1,14 @@
+# RUN: split-file "%S/Inputs/grouping.txt" "%t.inputs"
+# RUN: split-file "%S/Inputs/errors.txt" "%t.errors"
+# RUN: %generate_test_groups "%t.inputs" --output "%t.json"
+# RUN: %generate_test_groups "%t.inputs" --output "%t.again.json"
+# RUN: diff --strip-trailing-cr "%t.json" "%t.again.json"
+# RUN: %generate_test_groups "%t.inputs" > "%t.stdout.json"
+# RUN: diff --strip-trailing-cr "%t.json" "%t.stdout.json"
+# RUN: not %generate_test_groups "%t.errors/invalid-expression" --output "%t.json" 2>&1 | FileCheck %s --check-prefix=INVALID
+# RUN: diff --strip-trailing-cr "%t.json" "%t.again.json"
+# RUN: not %generate_test_groups "%t.inputs" --output "%t.nonexistent/output.json" 2>&1 | FileCheck %s --check-prefix=WRITE
+
+# INVALID: error: OffloadTest :: invalid.test:
+# WRITE: error:
+# WRITE-SAME: {{[Nn]o such file|cannot find}}

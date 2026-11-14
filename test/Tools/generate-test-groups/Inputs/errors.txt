@@ -1,0 +1,14 @@
+#--- invalid-expression/invalid.test
+# RUN: never-execute-this-test
+# REQUIRES: Half &&
+#--- missing-run/missing.test
+# REQUIRES: Double
+#--- regex-requirement/regex.test
+# RUN: never-execute-this-test
+# REQUIRES: {{SM_.*}}
+#--- too-complex/complex.test
+# RUN: never-execute-this-test
+# REQUIRES: F0 || F1 || F2 || F3 || F4 || F5 || F6 || F7 || F8 || F9 || F10 || F11 || F12 || F13
+#--- too-many-features/features.test
+# RUN: never-execute-this-test
+# REQUIRES: F0 && F1 && F2 && F3 && F4 && F5 && F6 && F7 && F8 && F9 && F10 && F11 && F12 && F13 && F14 && F15 && F16

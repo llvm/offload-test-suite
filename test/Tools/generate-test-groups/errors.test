@@ -1,0 +1,21 @@
+# RUN: split-file "%S/Inputs/errors.txt" "%t.inputs"
+# RUN: not %generate_test_groups "%t.inputs/invalid-expression" 2>&1 | FileCheck %s --check-prefix=INVALID
+# RUN: not %generate_test_groups "%t.inputs/regex-requirement" 2>&1 | FileCheck %s --check-prefix=REGEX
+# RUN: not %generate_test_groups "%t.inputs/too-complex" 2>&1 | FileCheck %s --check-prefix=COMPLEX
+# RUN: not %generate_test_groups "%t.inputs/too-many-features" 2>&1 | FileCheck %s --check-prefix=FEATURES
+# RUN: not %generate_test_groups "%t.inputs/missing-run" 2>&1 | FileCheck %s --check-prefix=SCRIPT
+# RUN: mkdir -p "%t.empty"
+# RUN: not %generate_test_groups "%t.empty" 2>&1 | FileCheck %s --check-prefix=EMPTY
+# RUN: not %generate_test_groups "%t.missing" 2>&1 | FileCheck %s --check-prefix=MISSING
+
+# INVALID: error: OffloadTest :: invalid.test:
+# INVALID-SAME: expected:
+# INVALID: have: <end of expression>
+# INVALID: in expression: 'Half &&'
+# REGEX: error: OffloadTest :: regex.test: regex requirements are not supported
+# COMPLEX: error: OffloadTest :: complex.test: Boolean expression is too complex to normalize
+# FEATURES: error: OffloadTest :: features.test: REQUIRES uses 17 distinct features (max 16)
+# SCRIPT: error: OffloadTest :: missing.test:
+# SCRIPT-SAME: {{[Mm]issing.*RUN|no.*RUN}}
+# EMPTY: error: did not discover any tests
+# MISSING: error: test source directory does not exist:

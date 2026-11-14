@@ -1,0 +1,41 @@
+#--- keep.test
+# RUN: never-execute-this-test
+#--- .lit_test_times.txt
+invalid timing data
+#--- lit.cfg.py
+raise RuntimeError("Root suite configuration must not run")
+#--- lit.site.cfg.py
+raise RuntimeError("Root site configuration must not run")
+#--- custom/ignored.test
+This file must not be discovered with the local suffix rules.
+#--- custom/keep.case
+# RUN: never-execute-this-test
+#--- custom/lit.local.cfg
+config.suffixes = [".case"]
+config.excludes.append("ignored")
+#--- custom/ignored/lit.cfg.py
+raise RuntimeError("Excluded suite configuration must not run")
+#--- custom/ignored/ignored.case
+This excluded directory must not be discovered.
+#--- custom/nested/keep.case
+# RUN: never-execute-this-test
+#--- custom/nested/lit.cfg.py
+raise RuntimeError("Nested suite configuration must not run")
+#--- custom/nested/lit.site.cfg.py
+raise RuntimeError("Nested site configuration must not run")
+#--- custom/nested/lit.cfg
+raise RuntimeError("Nested suite configuration must not run")
+#--- custom/nested/lit.site.cfg
+raise RuntimeError("Nested site configuration must not run")
+#--- Inputs/ignored.test
+This fixture directory must not be discovered.
+#--- included/lit.local.cfg
+config.excludes = []
+#--- included/Inputs/keep.test
+# RUN: never-execute-this-test
+#--- included/Inputs/lit.cfg.py
+raise RuntimeError("Locally included suite configuration must not run")
+#--- skip/keep.test
+# RUN: never-execute-this-test
+#--- skip/lit.local.cfg
+config.unsupported = True
