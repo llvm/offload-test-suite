@@ -185,6 +185,11 @@ def setDeviceFeatures(config, device, compiler):
     if (6, 6) <= HighestShaderModel:
         # https://github.com/microsoft/DirectX-Specs/blob/master/d3d/HLSL_ShaderModel6_6.md#derivatives
         config.available_features.add("DerivativesInCompute")
+        config.available_features.add("ComputeDerivativeGroupQuads")
+
+    if (6, 7) <= HighestShaderModel:
+        config.available_features.add("NativeQuadAll")
+        config.available_features.add("NativeQuadAny")
 
     if device["API"] == "DirectX":
         if device["Features"].get("WaveOps", False):
@@ -254,6 +259,13 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("raytracing-pipeline")
 
     if device["API"] == "Vulkan":
+        if device["Features"].get("computeDerivativeGroupQuads", False):
+            config.available_features.add("ComputeDerivativeGroupQuads")
+            if device["Features"].get("shaderQuadControl", False) and device[
+                "Features"
+            ].get("shaderMaximalReconvergence", False):
+                config.available_features.add("NativeQuadAll")
+                config.available_features.add("NativeQuadAny")
         if device["Features"].get("shaderInt16", False):
             config.available_features.add("Int16")
         if device["Features"].get("shaderFloat16", False):

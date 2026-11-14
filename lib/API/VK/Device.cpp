@@ -683,6 +683,80 @@ static bool isExtensionSupported(
   return false;
 }
 
+#ifdef VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME
+static constexpr VkStructureType ComputeShaderDerivativesType =
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR;
+#endif
+static constexpr VkStructureType ShaderMaximalReconvergenceType =
+    VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_MAXIMAL_RECONVERGENCE_FEATURES_KHR;
+
+namespace {
+
+struct VulkanQuadFeatures {
+#ifdef VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME
+  VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR ComputeDerivatives{};
+#endif
+  VkPhysicalDeviceShaderMaximalReconvergenceFeaturesKHR MaximalReconvergence{};
+  VkPhysicalDeviceShaderQuadControlFeaturesKHR QuadControl{};
+
+  VulkanQuadFeatures(
+      VkPhysicalDevice PhysicalDevice,
+      const llvm::SmallVector<VkExtensionProperties, 0> &Extensions) {
+    VkPhysicalDeviceFeatures2 Features{};
+    Features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+#ifdef VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME
+    if (isExtensionSupported(
+            Extensions, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) {
+      ComputeDerivatives.sType = ComputeShaderDerivativesType;
+      ComputeDerivatives.pNext = Features.pNext;
+      Features.pNext = &ComputeDerivatives;
+    }
+#endif
+    if (isExtensionSupported(
+            Extensions, VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME)) {
+      MaximalReconvergence.sType = ShaderMaximalReconvergenceType;
+      MaximalReconvergence.pNext = Features.pNext;
+      Features.pNext = &MaximalReconvergence;
+    }
+    if (isExtensionSupported(Extensions,
+                             VK_KHR_SHADER_QUAD_CONTROL_EXTENSION_NAME)) {
+      QuadControl.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_QUAD_CONTROL_FEATURES_KHR;
+      QuadControl.pNext = Features.pNext;
+      Features.pNext = &QuadControl;
+    }
+    vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+  }
+
+  void enable(VkPhysicalDeviceFeatures2 &Features,
+              llvm::SmallVectorImpl<const char *> &Extensions,
+              bool HasVulkan12) {
+#ifdef VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME
+    if (ComputeDerivatives.computeDerivativeGroupQuads) {
+      ComputeDerivatives.computeDerivativeGroupLinear = VK_FALSE;
+      ComputeDerivatives.pNext = Features.pNext;
+      Features.pNext = &ComputeDerivatives;
+      Extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+    }
+#endif
+    if (MaximalReconvergence.shaderMaximalReconvergence) {
+      MaximalReconvergence.pNext = Features.pNext;
+      Features.pNext = &MaximalReconvergence;
+      Extensions.push_back(VK_KHR_SHADER_MAXIMAL_RECONVERGENCE_EXTENSION_NAME);
+    }
+    if (QuadControl.shaderQuadControl &&
+        MaximalReconvergence.shaderMaximalReconvergence) {
+      QuadControl.pNext = Features.pNext;
+      Features.pNext = &QuadControl;
+      Extensions.push_back(VK_KHR_SHADER_QUAD_CONTROL_EXTENSION_NAME);
+      if (!HasVulkan12)
+        Extensions.push_back(VK_KHR_VULKAN_MEMORY_MODEL_EXTENSION_NAME);
+    }
+  }
+};
+
+} // namespace
+
 static VkAttachmentLoadOp getVkLoadOp(offloadtest::LoadAction Action) {
   switch (Action) {
   case offloadtest::LoadAction::Load:
@@ -2058,6 +2132,9 @@ public:
     }
 
     vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
+
+    VulkanQuadFeatures QuadFeatures(PhysicalDevice, AvailableDeviceExtensions);
+    QuadFeatures.enable(Features, EnabledDeviceExtensions, HasVulkan12);
 
     // For every extension chained above we verify that its gating feature bool
     // came back true; if it didn't, return a descriptive error rather than
@@ -3656,6 +3733,10 @@ private:
         makeCapability<uint32_t>("APIMinorVersion",
                                  VK_API_VERSION_MINOR(Props.apiVersion))));
 
+    VulkanQuadFeatures QuadFeatures(PhysicalDevice, DeviceExtensions);
+#define VULKAN_QUAD_FEATURE_BOOL(Name, Field)                                  \
+  Caps.insert(std::make_pair(                                                  \
+      #Name, makeCapability<bool>(#Name, QuadFeatures.Field.Name)));
 #define VULKAN_FLOAT_CONTROLS_FEATURE_BOOL(Name)                               \
   Caps.insert(std::make_pair(                                                  \
       #Name, makeCapability<bool>(#Name, FloatControlProp.Name)));
