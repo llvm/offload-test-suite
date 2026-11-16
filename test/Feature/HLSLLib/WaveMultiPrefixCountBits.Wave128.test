@@ -1,6 +1,8 @@
 # REQUIRES: (!DirectX || WaveMultiPrefix) && WaveSizeSelection && WaveSize_128
 
-# Unimplemented for SPIR-V: https://github.com/llvm/llvm-project/issues/240510
+# Unimplemented for SPIR-V:
+# Clang: https://github.com/llvm/llvm-project/issues/240510
+# DXC: https://github.com/microsoft/DirectXShaderCompiler/issues/9127
 # XFAIL: Vulkan
 
 # RUN: split-file %S/Inputs/WaveMultiPrefixCountBits.test %t
