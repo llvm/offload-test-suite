@@ -1914,6 +1914,11 @@ public:
 
     llvm::SmallVector<const char *> EnabledDeviceExtensions;
 
+    if (isExtensionSupported(AvailableDeviceExtensions,
+                             VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME))
+      EnabledDeviceExtensions.push_back(
+          VK_NV_SHADER_SUBGROUP_PARTITIONED_EXTENSION_NAME);
+
 #ifdef VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME
     if (isExtensionSupported(AvailableDeviceExtensions,
                              VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME))

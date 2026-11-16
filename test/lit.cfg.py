@@ -187,8 +187,16 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("DerivativesInCompute")
 
     if device["API"] == "DirectX":
+        if device["Features"].get("WaveOps", False):
+            if (6, 5) <= HighestShaderModel:
+                config.available_features.add("WaveMultiPrefix")
+            if (6, 6) <= HighestShaderModel:
+                config.available_features.add("WaveSizeSelection")
         if device["Features"].get("ResourceBindingTier", 0) >= 3:
             config.available_features.add("ResourceBindingTier3")
+        # Tier 2 adds the shader instructions that take an LOD clamp.
+        if device["Features"].get("TiledResourcesTier", 0) >= 2:
+            config.available_features.add("LodClamp")
         if device["Features"].get("Native16BitShaderOpsSupported", False):
             config.available_features.add("Int16")
             config.available_features.add("Half")
@@ -231,6 +239,7 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("raytracing-pipeline")
 
     if device["API"] == "Metal":
+        config.available_features.add("WaveMultiPrefix")
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
@@ -267,6 +276,8 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Barycentrics")
         if device["Features"].get("pipelineFragmentShadingRate", False):
             config.available_features.add("FragmentShadingRate")
+        if device["Features"].get("shaderResourceMinLod", False):
+            config.available_features.add("LodClamp")
         if device["Features"].get("runtimeDescriptorArray", False):
             config.available_features.add("VulkanRuntimeDescriptorArray")
         if device["Features"].get("descriptorBindingPartiallyBound", False):
@@ -281,6 +292,8 @@ def setDeviceFeatures(config, device, compiler):
         # Add supported extensions.
         for Extension in device["Extensions"]:
             config.available_features.add(Extension["ExtensionName"])
+            if Extension["ExtensionName"] == "VK_NV_shader_subgroup_partitioned":
+                config.available_features.add("WaveMultiPrefix")
             if Extension["ExtensionName"] == "VK_EXT_mesh_shader":
                 config.available_features.add("MeshShader")
             if Extension["ExtensionName"] == "VK_EXT_mutable_descriptor_type":
