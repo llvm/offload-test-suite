@@ -1,0 +1,62 @@
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float64
+    Stride: 32
+    Data: [ -4294967297.25, 4294967298.5, -4294967299.75, 4294967300.25,
+            4294967301.5, -4294967302.75, 4294967303.25, -4294967304.5,
+            -4294967305.75, 4294967306.25, -4294967307.5, 4294967308.75,
+            4294967309.25, -4294967310.5, 4294967311.75, -4294967312.25,
+            -4294967313.5, 4294967314.75, -4294967315.25, 4294967316.5,
+            4294967317.75, -4294967318.25, 4294967319.5, -4294967320.75,
+            -4294967321.25, 4294967322.5, -4294967323.75, 4294967324.25,
+            4294967325.5, -4294967326.75, 4294967327.25, -4294967328.5 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: ScalarAndVectors
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Double
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99174
+# XFAIL: Clang
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1641
+# XFAIL: Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=double \
+# RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
