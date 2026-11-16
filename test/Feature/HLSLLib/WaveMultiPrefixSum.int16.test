@@ -1,0 +1,7 @@
+# REQUIRES: Int16 && WaveMultiPrefix
+
+# RUN: split-file %S/Inputs/WaveMultiPrefixSum.test %t
+# RUN: split-file %S/Inputs/WaveMultiPrefixSum.integer.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE_BITS=16 \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
