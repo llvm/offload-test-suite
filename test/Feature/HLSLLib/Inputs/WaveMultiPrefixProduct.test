@@ -1,0 +1,302 @@
+#--- shared.hlsl
+
+// Checks signed and unsigned integers and floating-point values at 16,
+// 32, and 64 bits. All cases share the group masks and output buffers.
+//
+// Each type selects its own input and expected buffers. The 16-bit tests
+// convert the 32-bit buffer values. The 64-bit buffers contain values
+// beyond 32-bit precision. Integer cases also check unsigned conversions.
+//
+// Inputs[Lane % 4] repeats four rows across each wave. Rows 0 and 1
+// contain nonzero values; rows 2 and 3 contain zeros. ExpectedPrefixResults
+// rows 0-4 hold the products before lanes 0-4. Row 0 contains ones.
+// The full-wave check selects row min(Lane, 4). Lane 2 supplies zero, so
+// lane 3 and every later lane expect zero.
+//
+// The parity masks separate even and odd lanes. Expected rows 5-7 hold
+// even-group results, and rows 8-10 hold odd-group results. Each group
+// selects its row with min(Lane / 2, 2). The first lane expects one,
+// the second expects the first input, and later lanes expect zero.
+//
+// Each four-lane group starts the same input sequence, so its expected row
+// is Lane % 4. A single-lane group always expects one.
+//
+// These examples show the first component of the signed 32-bit case:
+// Lane  Input  Full wave  Parity  Four-lane group  Single lane
+//    0     -2          1       1                1            1
+//    1     -3         -2       1               -2            1
+//    2      0          6      -2                6            1
+//    3      0          0      -3                0            1
+//    4     -2          0       0                1            1
+//    5     -3          0       0               -2            1
+//
+// For the 32-bit float case, lane 2 expects -1.5 * -0.5 = 0.75 in
+// the first component. The comparisons do not distinguish signed zeros.
+// The inactive-lane check calls the builtin only in even lanes and uses
+// the same expected result as the even parity group.
+//
+// Scalars use the first component; vectors use the first two, three, or
+// four components. Matrices repeat the four components in row order.
+// The matrix drivers select 3x2, 2x3, 3x1, and 4x4 dimensions.
+//
+// OutGroups stores four pass flags in this order: full wave, parity,
+// four-lane groups, and single lanes. OutDivergent stores one pass flag;
+// inactive lanes store 1 without a check. Both expected buffers contain
+// only ones, so each checked result must pass.
+
+RWStructuredBuffer<uint4> OutGroups : register(u4);
+RWStructuredBuffer<uint> OutDivergent : register(u5);
+
+static const Value4 IdentityExpected = Value4(1, 1, 1, 1);
+
+uint4 laneMask(uint Lane, uint Bits) {
+  uint Word = Lane / 32;
+  return uint4(Word == 0 ? Bits : 0, Word == 1 ? Bits : 0, Word == 2 ? Bits : 0,
+               Word == 3 ? Bits : 0);
+}
+
+#--- main.hlsl
+
+#ifdef WAVE_SIZE
+[WaveSize(WAVE_SIZE)]
+#endif
+[numthreads(128, 1, 1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint Lane = WaveGetLaneIndex();
+  Value4 Value = Value4(Inputs[Lane % 4]);
+
+  uint4 FullMask = uint4(~0u, ~0u, ~0u, ~0u);
+  Value4 FullExpected = Value4(ExpectedPrefixResults[min(Lane, 4u)]);
+  bool FullPassed = check(Value, FullExpected, FullMask);
+
+  uint4 ParityMask =
+      Lane % 2 == 0 ? uint4(0x55555555, 0x55555555, 0x55555555, 0x55555555)
+                    : uint4(0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA, 0xAAAAAAAA);
+  uint ParityOffset = 5 + 3 * (Lane % 2);
+  Value4 ParityExpected =
+      Value4(ExpectedPrefixResults[ParityOffset + min(Lane / 2, 2u)]);
+  bool ParityPassed = check(Value, ParityExpected, ParityMask);
+
+  uint BlockBitOffset = (Lane % 32) / 4 * 4;
+  uint4 BlockMask = laneMask(Lane, 0xFu << BlockBitOffset);
+  Value4 BlockExpected = Value4(ExpectedPrefixResults[Lane % 4]);
+  bool BlockPassed = check(Value, BlockExpected, BlockMask);
+
+  uint4 SingleMask = laneMask(Lane, 1u << (Lane % 32));
+  bool SinglePassed = check(Value, IdentityExpected, SingleMask);
+  OutGroups[TID.x] =
+      uint4(FullPassed, ParityPassed, BlockPassed, SinglePassed);
+
+  uint Passed = 1;
+  if (Lane % 2 == 0)
+    Passed = check(Value, ParityExpected, FullMask);
+  OutDivergent[TID.x] = Passed;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: IntegerInputs
+    Format: Int32
+    Stride: 16
+    Data: [
+      -2, 3, -4, 5,
+      -3, -2, 2, -1,
+      0, 0, 0, 0,
+      0, 0, 0, 0
+    ]
+  - Name: IntegerExpectedPrefixResults
+    Format: Int32
+    Stride: 16
+    Data: [
+      1, 1, 1, 1,
+      -2, 3, -4, 5,
+      6, -6, -8, -5,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      1, 1, 1, 1,
+      -2, 3, -4, 5,
+      0, 0, 0, 0,
+      1, 1, 1, 1,
+      -3, -2, 2, -1,
+      0, 0, 0, 0
+    ]
+  - Name: Integer64Inputs
+    Format: Int64
+    Stride: 32
+    Data: [
+      -4294967298, 4294967299, -4294967300, 4294967301,
+      -3, -2, 2, -1,
+      0, 0, 0, 0,
+      0, 0, 0, 0
+    ]
+  - Name: Integer64ExpectedPrefixResults
+    Format: Int64
+    Stride: 32
+    Data: [
+      1, 1, 1, 1,
+      -4294967298, 4294967299, -4294967300, 4294967301,
+      12884901894, -8589934598, -8589934600, -4294967301,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      1, 1, 1, 1,
+      -4294967298, 4294967299, -4294967300, 4294967301,
+      0, 0, 0, 0,
+      1, 1, 1, 1,
+      -3, -2, 2, -1,
+      0, 0, 0, 0
+    ]
+  - Name: FloatInputs
+    Format: Float32
+    Stride: 16
+    Data: [
+      -1.5, 2.5, -3.5, 4.5,
+      -0.5, -1.5, 2.0, -2.0,
+      0, 0, 0, 0,
+      0, 0, 0, 0
+    ]
+  - Name: FloatExpectedPrefixResults
+    Format: Float32
+    Stride: 16
+    Data: [
+      1, 1, 1, 1,
+      -1.5, 2.5, -3.5, 4.5,
+      0.75, -3.75, -7.0, -9.0,
+      0.0, -0.0, -0.0, -0.0,
+      0.0, -0.0, -0.0, -0.0,
+      1, 1, 1, 1,
+      -1.5, 2.5, -3.5, 4.5,
+      -0.0, 0.0, -0.0, 0.0,
+      1, 1, 1, 1,
+      -0.5, -1.5, 2.0, -2.0,
+      -0.0, -0.0, 0.0, -0.0
+    ]
+  - Name: DoubleInputs
+    Format: Float64
+    Stride: 32
+    Data: [
+      -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
+      -0.5, -1.5, 2.0, -2.0,
+      0, 0, 0, 0,
+      0, 0, 0, 0
+    ]
+  - Name: DoubleExpectedPrefixResults
+    Format: Float64
+    Stride: 32
+    Data: [
+      1, 1, 1, 1,
+      -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
+      2147483648.25, -6442450946.25, -8589934597.0, -8589934599.0,
+      0.0, -0.0, -0.0, -0.0,
+      0.0, -0.0, -0.0, -0.0,
+      1, 1, 1, 1,
+      -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
+      -0.0, 0.0, -0.0, 0.0,
+      1, 1, 1, 1,
+      -0.5, -1.5, 2.0, -2.0,
+      -0.0, -0.0, 0.0, -0.0
+    ]
+  - Name: OutGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+  - Name: ExpectedGroups
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+    FillValue: 1
+  - Name: OutDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: ExpectedDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: TestGroups
+    Rule: BufferExact
+    Actual: OutGroups
+    Expected: ExpectedGroups
+  - Result: TestDivergent
+    Rule: BufferExact
+    Actual: OutDivergent
+    Expected: ExpectedDivergent
+DescriptorSets:
+  - Resources:
+    - Name: IntegerInputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Integer64Inputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: FloatInputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: DoubleInputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: IntegerExpectedPrefixResults
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: Integer64ExpectedPrefixResults
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: FloatExpectedPrefixResults
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
+    - Name: DoubleExpectedPrefixResults
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 9
+        Space: 0
+      VulkanBinding:
+        Binding: 9
+    - Name: OutGroups
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+    - Name: OutDivergent
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+...
