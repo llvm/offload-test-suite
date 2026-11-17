@@ -54,8 +54,8 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99174
 # XFAIL: Clang
 
-# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1641
-# XFAIL: Vulkan
+# Bug: https://github.com/llvm/offload-test-suite/issues/959
+# XFAIL: Metal
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -DTYPE=int64_t \

@@ -6,6 +6,9 @@
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99174
 # XFAIL: Clang
 
+# Bug: https://github.com/llvm/offload-test-suite/issues/959
+# XFAIL: Metal
+
 # RUN: split-file %S/QuadReadLaneAt.int64.test %t
 # RUN: %dxc_target -T cs_6_5 -DTYPE=int64_t -DMATRIX_ROWS=3 -DMATRIX_COLS=2 \
 # RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl

@@ -58,9 +58,6 @@ DescriptorSets:
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99174
 # XFAIL: Clang
 
-# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1641
-# XFAIL: Vulkan
-
 # RUN: split-file %s %t
 # RUN: %dxc_target -T cs_6_5 -DTYPE=double \
 # RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
