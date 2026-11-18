@@ -11,8 +11,6 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      # Single-option today; listed so the axes stay visible and Phase 2 is
-      # an append. Only values the build workflows accept are offered.
       OS:
         description: 'Target OS (windows only -- the frequent-builder pool has no macOS machines)'
         required: true
@@ -21,14 +19,15 @@ on:
         options:
         - windows
       Arch:
-        description: 'Target arch (x64 only -- arm64 cross-compile lands in Phase 2)'
+        description: 'Target arch; use arm64 with windows-qc, x64 otherwise'
         required: true
         default: 'x64'
         type: choice
         options:
         - x64
+        - arm64
       SKU:
-        description: 'x64 GPU runner SKU to run the tests on'
+        description: 'GPU runner SKU; windows-qc requires Arch=arm64'
         required: true
         type: choice
         options:
@@ -36,6 +35,7 @@ on:
         - windows-nvidia
         - windows-amd
         - windows-sw-rasterizer-x86_64
+        - windows-qc
       TestTarget:
         description: 'lit suite to run'
         required: true

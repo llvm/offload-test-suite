@@ -12,16 +12,24 @@ on:
      - .github/workflows/windows-qc-dxc-d3d12.yaml
 
 jobs:
+  Resolve-Frequent-Builds:
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/resolve-frequent-builds.yaml
+
   Windows-D3D12-QC-DXC:
     permissions:
       contents: read
       checks: write
-    uses: ./.github/workflows/build-and-test-callable.yaml
+      actions: read
+    needs: Resolve-Frequent-Builds
+    uses: ./.github/workflows/test-callable.yaml
     with:
       OS: windows
+      Arch: arm64
       SKU: windows-qc
-      BuildType: Debug
       TestTarget: check-hlsl-d3d12
       OffloadTest-branch: ${{ github.ref }}
-      SplitBuild: true
-      LLVM-ExtraCMakeArgs: -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DOFFLOADTEST_USE_CLANG_TIDY=ON
+      LlvmRunId: ${{ needs.Resolve-Frequent-Builds.outputs.LlvmRunId }}
+      DxcRunId: ${{ needs.Resolve-Frequent-Builds.outputs.DxcRunId }}

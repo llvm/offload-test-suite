@@ -90,6 +90,11 @@ Configurations:
 
 ### Windows Qualcomm GPU
 
+The PR jobs and the `windows-qc-*.yaml` schedules download ARM64 LLVM and
+DXC distributions from the frequent builder. The machine builds only the
+offload-test-suite tools and runs the tests. See
+[frequent-builder.md](frequent-builder.md).
+
 * CPU: Qualcomm Snapdragon X Plus - X1P-64-100
 * GPU: Qualcomm Adreno X1-85
 * RAM: 32 GiB
