@@ -16,7 +16,7 @@ on:
         required: true
         type: string
       Arch:
-        description: 'Target arch. Accepted values: `x64`. arm64 cross-compile lands in Phase 2. Enforced by the "Validate inputs" step.'
+        description: 'Target arch: x64 or arm64. ARM64 uses an x64 cross-build.'
         required: true
         type: string
       OffloadTest-branch:
@@ -68,10 +68,12 @@ jobs:
             echo "::error::The frequent builder only supports OS=windows today (got '${{ inputs.OS }}')."
             exit 1
           fi
-          if [ '${{ inputs.Arch }}' != 'x64' ]; then
-            echo "::error::Phase 1 of the frequent builder only supports Arch=x64 (got '${{ inputs.Arch }}'). arm64 cross-compile arrives in Phase 2."
-            exit 1
-          fi
+          case '${{ inputs.Arch }}' in
+            x64|arm64) ;;
+            *)
+              echo "::error::Unsupported LLVM arch: '${{ inputs.Arch }}'."
+              exit 1 ;;
+          esac
       - name: Checkout LLVM
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
         with:
@@ -96,19 +98,59 @@ jobs:
         uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
         with:
           arch: amd64
+      - name: Build native code generators
+        if: inputs.Arch == 'arm64'
+        shell: bash
+        run: |
+            set -euxo pipefail
+            llvm_dir="$GITHUB_WORKSPACE/llvm-project"
+            cache_dir="$GITHUB_WORKSPACE/OffloadTest/cmake/caches"
+            rm -rf "$llvm_dir/build-host"
+            cmake -G Ninja -S "$llvm_dir/llvm" -B "$llvm_dir/build-host" \
+              -C "$cache_dir/StandaloneDistribution.cmake" \
+              -C "$cache_dir/sccache.cmake" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=clang-cl \
+              -DCMAKE_CXX_COMPILER=clang-cl \
+              -DLLVM_ENABLE_ASSERTIONS=On \
+              -DLLVM_INCLUDE_TESTS=Off \
+              -DLLVM_INCLUDE_BENCHMARKS=Off
+            cmake --build "$llvm_dir/build-host" \
+              --target llvm-tblgen llvm-min-tblgen clang-tblgen \
+                clang-tidy-confusable-chars-gen mlir-tblgen \
+                mlir-linalg-ods-yaml-gen mlir-src-sharder
+      - name: Setup Windows ARM64
+        if: inputs.Arch == 'arm64'
+        uses: llvm/actions/setup-windows@89a8cf80982d830faab019237860b344a6390c30 # main
+        with:
+          arch: arm64 -host_arch=amd64
       - name: Build and install LLVM distribution
         shell: bash
         run: |
             set -euxo pipefail
-            rm -rf "$GITHUB_WORKSPACE/llvm-project/build" "$GITHUB_WORKSPACE/install"
-            cmake -G Ninja -S "$GITHUB_WORKSPACE/llvm-project/llvm" -B "$GITHUB_WORKSPACE/llvm-project/build" \
-              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/StandaloneDistribution.cmake" \
-              -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
+            llvm_dir="$GITHUB_WORKSPACE/llvm-project"
+            cache_dir="$GITHUB_WORKSPACE/OffloadTest/cmake/caches"
+            rm -rf "$llvm_dir/build" "$GITHUB_WORKSPACE/install"
+            cross_args=()
+            if [ '${{ inputs.Arch }}' = 'arm64' ]; then
+              cross_args=(
+                -DCMAKE_SYSTEM_NAME=Windows
+                -DCMAKE_SYSTEM_PROCESSOR=ARM64
+                -DCMAKE_C_COMPILER_TARGET=aarch64-pc-windows-msvc
+                -DCMAKE_CXX_COMPILER_TARGET=aarch64-pc-windows-msvc
+                -DLLVM_HOST_TRIPLE=aarch64-pc-windows-msvc
+                "-DLLVM_NATIVE_TOOL_DIR=$llvm_dir/build-host/bin"
+              )
+            fi
+            cmake -G Ninja -S "$llvm_dir/llvm" -B "$llvm_dir/build" \
+              -C "$cache_dir/StandaloneDistribution.cmake" \
+              -C "$cache_dir/sccache.cmake" \
               -DCMAKE_BUILD_TYPE=${{ inputs.BuildType }} \
               -DLLVM_ENABLE_ASSERTIONS=On \
               -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/install" \
+              "${cross_args[@]}" \
               ${{ inputs.LLVM-ExtraCMakeArgs }}
-            cmake --build "$GITHUB_WORKSPACE/llvm-project/build" --target install-distribution
+            cmake --build "$llvm_dir/build" --target install-distribution
       - name: Dump sccache Stats
         if: always()
         shell: bash
