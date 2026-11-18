@@ -1,5 +1,5 @@
 #--- keep.test
-# RUN: never-execute-this-test
+# RUN: placeholder-command-must-not-run
 #--- .lit_test_times.txt
 invalid timing data
 #--- lit.cfg.py
@@ -9,7 +9,7 @@ raise RuntimeError("Root site configuration must not run")
 #--- custom/ignored.test
 This file must not be discovered with the local suffix rules.
 #--- custom/keep.case
-# RUN: never-execute-this-test
+# RUN: placeholder-command-must-not-run
 #--- custom/lit.local.cfg
 config.suffixes = [".case"]
 config.excludes.append("ignored")
@@ -18,7 +18,7 @@ raise RuntimeError("Excluded suite configuration must not run")
 #--- custom/ignored/ignored.case
 This excluded directory must not be discovered.
 #--- custom/nested/keep.case
-# RUN: never-execute-this-test
+# RUN: placeholder-command-must-not-run
 #--- custom/nested/lit.cfg.py
 raise RuntimeError("Nested suite configuration must not run")
 #--- custom/nested/lit.site.cfg.py
@@ -32,10 +32,10 @@ This fixture directory must not be discovered.
 #--- included/lit.local.cfg
 config.excludes = []
 #--- included/Inputs/keep.test
-# RUN: never-execute-this-test
+# RUN: placeholder-command-must-not-run
 #--- included/Inputs/lit.cfg.py
 raise RuntimeError("Locally included suite configuration must not run")
 #--- skip/keep.test
-# RUN: never-execute-this-test
+# RUN: placeholder-command-must-not-run
 #--- skip/lit.local.cfg
 config.unsupported = True
