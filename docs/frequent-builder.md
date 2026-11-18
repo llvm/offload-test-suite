@@ -15,9 +15,10 @@ such as `(windows-intel, check-hlsl-d3d12)`. Each cell shows as one check on
 the PR.
 
 Migration is incremental. Today `pr-matrix.yaml` routes its default x64
-cells (`Exec-Tests-Windows`: `windows-intel` and `windows-nvidia`) this way,
-plus the `windows-amd` cells of the label-gated jobs (`Exec-Tests-Extra-AMD`
-and the `-DX-All-AMD`, `-VK-All-AMD` and `-Lavapipe-AMD` jobs); the warp,
+cells (`Exec-Tests-Windows`: `windows-intel` and `windows-nvidia`, and
+`Exec-Tests-Windows-Lavapipe`: `windows-amd`) this way, plus the
+`windows-amd` cells of the label-gated jobs (`Exec-Tests-Extra-AMD` and the
+`-DX-All-AMD` and `-VK-All-AMD` jobs); the warp,
 arm64, remaining `windows-nvidia` label-gated and macOS cells still build
 their own toolchain via `build-and-test-callable.yaml` with
 `SplitBuild: true`. So "PRs never build LLVM or DXC" below describes the end
