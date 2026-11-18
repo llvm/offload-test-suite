@@ -9,6 +9,10 @@ LLVM and DXC are built by two independent schedules:
 | `frequent-build-llvm.yaml`| LLVM/Clang | every 2 hours| `build-llvm-callable.yaml` |
 | `frequent-build-dxc.yaml` | DXC        | daily        | `build-dxc-callable.yaml`  |
 
+Both schedules publish Windows x64 and Windows ARM64 artifacts. ARM64 PR
+jobs still build LLVM and DXC themselves; they do not yet consume these
+artifacts.
+
 Test cells consume both through `test-callable.yaml`. A **test cell** is one
 entry in a `pr-matrix.yaml` job matrix, that is one SKU and test-target pair
 such as `(windows-intel, check-hlsl-d3d12)`. Each cell shows as one check on
@@ -70,7 +74,7 @@ possibly-stale snapshot taken by the builder.
 
 | Label                   | Role |
 |-------------------------|------|
-| `hlsl-frequent-builder` | LLVM/Clang/DXC builds. No arch qualifier: in Phase 2 a single x64 box will produce both x64 and arm64 targets via cross-compile. |
+| `hlsl-frequent-builder` | x64 LLVM/Clang/DXC; ARM64 LLVM/Clang/DXC cross-builds. |
 | `hlsl-<sku>` (`windows-nvidia`, `windows-amd`, `windows-intel`, `windows-sw-rasterizer-x86_64`, `windows-qc`, `macos`) | Test execution against real hardware. |
 
 Machines are strictly one or the other. Because GitHub Actions schedules a
@@ -91,6 +95,24 @@ uploads one tarball per build config:
 - `hlsl-dist-<os>-<arch>`: the LLVM/Clang install prefix.
 - `hlsl-dxc-<os>-<arch>`: the DXC redistributable.
 
+For ARM64, the LLVM build first builds its code generators for x64. It then
+uses the ARM64 Visual Studio environment and `clang-cl` with the
+`aarch64-pc-windows-msvc` target. `LLVM_NATIVE_TOOL_DIR` selects the x64
+generators. The distribution contains ARM64 tools and libraries, not the
+x64 generators.
+
+The ARM64 DXC build also builds its code generators for x64 first. It
+then uses the ARM64 Visual Studio environment with x64 host tools.
+`LLVM_TABLEGEN` and `CLANG_TABLEGEN` select DXC's x64 generators.
+
+The builder needs the Visual Studio ARM64 C++ tools and the Windows SDK
+ARM64 libraries. DXC also needs the Visual Studio ARM64 ATL libraries.
+All four jobs use the existing `hlsl-frequent-builder` label.
+The LLVM jobs publish `hlsl-dist-windows-x64` and
+`hlsl-dist-windows-arm64` in the same workflow run, with three-day
+retention. The DXC jobs publish `hlsl-dxc-windows-x64` and
+`hlsl-dxc-windows-arm64` in their workflow run, with fourteen-day retention.
+
 These names are deliberately **stable**: they carry no build-config hash,
 so a PR can name the artifact it wants without knowing anything about how
 the scheduled run was configured.
@@ -101,8 +123,8 @@ supplies the first half. Successive scheduled builds all publish
 `hlsl-dist-windows-x64` without colliding. The one invariant this relies
 on is **at most one build job per `(OS, Arch)` per run**. Two jobs in the
 same run sharing an `(OS, Arch)` would collide, since `upload-artifact@v4`
-rejects duplicate names within a run. Phase 2's arm64 job is distinguished
-by `<arch>`.
+rejects duplicate names within a run. The ARM64 job has a distinct artifact
+name because `<arch>` differs.
 
 ### Choosing which build to consume
 
@@ -160,6 +182,10 @@ the whole matrix red. Because the two are separate, a broken LLVM
 silent from a PR's point of view: the distribution simply ages until
 someone notices the scheduled workflow is red. Treat both schedules as
 monitored workflows in their own right, not as PR signal.
+
+The resolver requires the whole workflow run to succeed for each schedule.
+If either architecture fails, migrated x64 PR jobs keep using an older
+successful run of that schedule, even if the new x64 build succeeds.
 
 Two further failure modes surface in a PR:
 
