@@ -43,7 +43,11 @@ bool check(Type4 Value, uint Period, bool Divergent) {
 
 typedef vector<TYPE, 4> Type4;
 
+#ifdef DOUBLE_INPUT
+StructuredBuffer<double4> Inputs : register(t0);
+#else
 StructuredBuffer<int4> Inputs : register(t0);
+#endif
 RWStructuredBuffer<uint4> Out : register(u1);
 
 uint4 expectedMask(uint Period, bool Divergent) {
@@ -63,18 +67,18 @@ uint4 expectedMask(uint Period, bool Divergent) {
 [numthreads(128, 1, 1)]
 void main(uint3 TID : SV_GroupThreadID) {
   uint Lane = WaveGetLaneIndex();
+#ifdef DOUBLE_INPUT
+  Type4 Value = Type4(Inputs[Lane % 2].x, Inputs[(Lane / 2) % 2].y,
+                      Inputs[(Lane / 4) % 2].z, Inputs[(Lane / 8) % 2].w);
+#else
   Type4 Value = Type4(Inputs[0]) +
                 Type4(Lane % 2, (Lane / 2) % 2, (Lane / 4) % 2,
                       (Lane / 8) % 2);
+#endif
 #ifdef WIDE_INT
   // Matching values differ only in the upper 32 bits.
   Value *= TYPE(4294967296ull);
 #endif
-#ifdef WIDE_FLOAT
-  // Conversion to float would make all inputs equal.
-  Value = Type4(1, 1, 1, 1) + Value * TYPE(1.0 / 1099511627776.0);
-#endif
-
   bool Grouped = check(Value, 2, false);
   bool Uniform = check(Type4(1, 1, 1, 1), 0, false);
   bool Unique = check(Type4(Lane, Lane, Lane, Lane), 128, false);
