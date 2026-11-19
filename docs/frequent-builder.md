@@ -106,9 +106,7 @@ then uses the ARM64 Visual Studio environment with x64 host tools.
 `LLVM_TABLEGEN` and `CLANG_TABLEGEN` select DXC's x64 generators.
 
 The DXC builder builds only the `dxc`, `dxv`, `dxcompiler`, and `dxildll`
-targets that it stages into the distribution. It does not build the
-default target set, which includes an unused native `llvm-config` build
-when cross-compiling.
+targets that it stages into the distribution.
 
 The builder needs the Visual Studio ARM64 C++ tools and the Windows SDK
 ARM64 libraries. DXC also needs the Visual Studio ARM64 ATL libraries.
