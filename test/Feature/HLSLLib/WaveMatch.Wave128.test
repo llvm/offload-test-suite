@@ -1,0 +1,15 @@
+# REQUIRES: WaveMultiPrefix && WaveSize_128
+# These platforms do not support the WaveSize attribute.
+# UNSUPPORTED: Vulkan || Metal
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99207
+# XFAIL: Clang
+
+# WARP returns incorrect masks for inactive lanes in 128-lane waves.
+# Bug: https://github.com/llvm/offload-test-suite/issues/1743
+# XFAIL: WARP
+
+# RUN: split-file %S/Inputs/WaveMatch.test %t
+# RUN: %dxc_target -T cs_6_6 -DTYPE=int -DWAVE_SIZE=128 \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
