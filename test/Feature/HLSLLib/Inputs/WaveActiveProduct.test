@@ -1,0 +1,154 @@
+#--- source.hlsl
+
+// Checks scalars and vectors with two, three, and four components.
+// Each wave uses two input rows and fills the other lanes with ones.
+// The third input row contains the expected product. The 64-bit inputs
+// contain values that lose precision if converted to 32-bit types.
+// Out stores full-wave, identity, zero, divergent, and single-lane checks.
+
+typedef vector<TYPE, 4> Value4;
+
+#if defined(TEST_INT64)
+StructuredBuffer<int64_t4> Inputs : register(t1);
+#elif defined(TEST_DOUBLE)
+StructuredBuffer<double4> Inputs : register(t3);
+#elif defined(TEST_INTEGER)
+StructuredBuffer<int4> Inputs : register(t0);
+#else
+StructuredBuffer<float4> Inputs : register(t2);
+#endif
+RWStructuredBuffer<uint4> Out : register(u4);
+
+uint4 check(Value4 Value, Value4 Expected) {
+  TYPE R1 = WaveActiveProduct(Value.x);
+  vector<TYPE, 2> R2 = WaveActiveProduct(Value.xy);
+  vector<TYPE, 3> R3 = WaveActiveProduct(Value.xyz);
+  Value4 R4 = WaveActiveProduct(Value);
+  uint4 Passed = uint4(R1 == Expected.x, 1, 1, 1);
+  for (uint Component = 0; Component < 2; ++Component)
+    Passed.y = Passed.y && R2[Component] == Expected[Component];
+  for (uint Component = 0; Component < 3; ++Component)
+    Passed.z = Passed.z && R3[Component] == Expected[Component];
+  for (uint Component = 0; Component < 4; ++Component)
+    Passed.w = Passed.w && R4[Component] == Expected[Component];
+  return Passed;
+}
+
+[numthreads(128, 1, 1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint Lane = WaveGetLaneIndex();
+  Value4 One = Value4(1, 1, 1, 1);
+  Value4 Zero = Value4(0, 0, 0, 0);
+  Value4 Value = Lane < 2 ? Value4(Inputs[Lane]) : One;
+  Value4 Expected = Value4(Inputs[2]);
+
+  Out[TID.x * 5] = check(Value, Expected);
+  Out[TID.x * 5 + 1] = check(One, One);
+  Out[TID.x * 5 + 2] = check(Lane == 0 ? Zero : Value, Zero);
+
+  // Odd lanes supply zero, but they must not affect the product.
+  Value4 DivergentValue = Lane % 2 == 0
+                             ? (Lane < 4 ? Value4(Inputs[Lane / 2]) : One)
+                             : Zero;
+  uint4 Divergent = uint4(1, 1, 1, 1);
+  if (Lane % 2 == 0)
+    Divergent = check(DivergentValue, Expected);
+  Out[TID.x * 5 + 3] = Divergent;
+
+  uint4 Single = uint4(1, 1, 1, 1);
+  if (Lane == 0)
+    Single = check(Value, Value4(Inputs[0]));
+  Out[TID.x * 5 + 4] = Single;
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: IntegerInputs
+    Format: Int32
+    Stride: 16
+    Data: [
+      -2, 3, -4, 5,
+      -3, -2, 2, -1,
+      6, -6, -8, -5
+    ]
+  - Name: Integer64Inputs
+    Format: Int64
+    Stride: 32
+    Data: [
+      -4294967298, 4294967299, -4294967300, 4294967301,
+      -3, -2, 2, -1,
+      12884901894, -8589934598, -8589934600, -4294967301
+    ]
+  - Name: FloatInputs
+    Format: Float32
+    Stride: 16
+    Data: [
+      -1.5, 2.5, -3.5, 4.5,
+      -0.5, -1.5, 2.0, -2.0,
+      0.75, -3.75, -7.0, -9.0
+    ]
+  - Name: DoubleInputs
+    Format: Float64
+    Stride: 32
+    Data: [
+      -4294967296.5, 4294967297.5, -4294967298.5, 4294967299.5,
+      -0.5, -1.5, 2.0, -2.0,
+      2147483648.25, -6442450946.25, -8589934597.0, -8589934599.0
+    ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 10240
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 10240
+    FillValue: 1
+Results:
+  - Result: TestProduct
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: IntegerInputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Integer64Inputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: FloatInputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: DoubleInputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 4
+        Space: 0
+      VulkanBinding:
+        Binding: 4
+...

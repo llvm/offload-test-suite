@@ -1,0 +1,9 @@
+# REQUIRES: Int64
+
+# RUN: split-file %S/Inputs/WaveActiveProduct.test %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=int64_t -DTEST_INT64 \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE=uint64_t -DTEST_INT64 \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
