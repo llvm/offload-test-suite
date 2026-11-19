@@ -4,7 +4,7 @@
 // Each wave uses two input rows and fills the other lanes with ones.
 // The third input row contains the expected product. The 64-bit inputs
 // contain values that lose precision if converted to 32-bit types.
-// Out stores full-wave, identity, zero, divergent, and single-lane checks.
+// Each output stores one flag per thread: 1 for pass and 0 for failure.
 
 typedef vector<TYPE, 4> Value4;
 
@@ -17,20 +17,24 @@ StructuredBuffer<int4> Inputs : register(t0);
 #else
 StructuredBuffer<float4> Inputs : register(t2);
 #endif
-RWStructuredBuffer<uint4> Out : register(u4);
+RWStructuredBuffer<uint> OutFullWave : register(u4);
+RWStructuredBuffer<uint> OutIdentity : register(u5);
+RWStructuredBuffer<uint> OutZero : register(u6);
+RWStructuredBuffer<uint> OutDivergent : register(u7);
+RWStructuredBuffer<uint> OutSingleLane : register(u8);
 
-uint4 check(Value4 Value, Value4 Expected) {
+bool check(Value4 Value, Value4 Expected) {
   TYPE R1 = WaveActiveProduct(Value.x);
   vector<TYPE, 2> R2 = WaveActiveProduct(Value.xy);
   vector<TYPE, 3> R3 = WaveActiveProduct(Value.xyz);
   Value4 R4 = WaveActiveProduct(Value);
-  uint4 Passed = uint4(R1 == Expected.x, 1, 1, 1);
+  bool Passed = R1 == Expected.x;
   for (uint Component = 0; Component < 2; ++Component)
-    Passed.y = Passed.y && R2[Component] == Expected[Component];
+    Passed = Passed && R2[Component] == Expected[Component];
   for (uint Component = 0; Component < 3; ++Component)
-    Passed.z = Passed.z && R3[Component] == Expected[Component];
+    Passed = Passed && R3[Component] == Expected[Component];
   for (uint Component = 0; Component < 4; ++Component)
-    Passed.w = Passed.w && R4[Component] == Expected[Component];
+    Passed = Passed && R4[Component] == Expected[Component];
   return Passed;
 }
 
@@ -42,23 +46,23 @@ void main(uint3 TID : SV_GroupThreadID) {
   Value4 Value = Lane < 2 ? Value4(Inputs[Lane]) : One;
   Value4 Expected = Value4(Inputs[2]);
 
-  Out[TID.x * 5] = check(Value, Expected);
-  Out[TID.x * 5 + 1] = check(One, One);
-  Out[TID.x * 5 + 2] = check(Lane == 0 ? Zero : Value, Zero);
+  OutFullWave[TID.x] = check(Value, Expected);
+  OutIdentity[TID.x] = check(One, One);
+  OutZero[TID.x] = check(Lane == 0 ? Zero : Value, Zero);
 
   // Odd lanes supply zero, but they must not affect the product.
   Value4 DivergentValue = Lane % 2 == 0
                              ? (Lane < 4 ? Value4(Inputs[Lane / 2]) : One)
                              : Zero;
-  uint4 Divergent = uint4(1, 1, 1, 1);
+  bool Divergent = true;
   if (Lane % 2 == 0)
     Divergent = check(DivergentValue, Expected);
-  Out[TID.x * 5 + 3] = Divergent;
+  OutDivergent[TID.x] = Divergent;
 
-  uint4 Single = uint4(1, 1, 1, 1);
+  bool Single = true;
   if (Lane == 0)
     Single = check(Value, Value4(Inputs[0]));
-  Out[TID.x * 5 + 4] = Single;
+  OutSingleLane[TID.x] = Single;
 }
 
 //--- pipeline.yaml
@@ -100,19 +104,51 @@ Buffers:
       -0.5, -1.5, 2.0, -2.0,
       2147483648.25, -6442450946.25, -8589934597.0, -8589934599.0
     ]
-  - Name: Out
+  - Name: OutFullWave
     Format: UInt32
-    Stride: 16
-    FillSize: 10240
+    Stride: 4
+    FillSize: 512
+  - Name: OutIdentity
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: OutZero
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: OutDivergent
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
+  - Name: OutSingleLane
+    Format: UInt32
+    Stride: 4
+    FillSize: 512
   - Name: Expected
     Format: UInt32
-    Stride: 16
-    FillSize: 10240
+    Stride: 4
+    FillSize: 512
     FillValue: 1
 Results:
-  - Result: TestProduct
+  - Result: FullWave
     Rule: BufferExact
-    Actual: Out
+    Actual: OutFullWave
+    Expected: Expected
+  - Result: Identity
+    Rule: BufferExact
+    Actual: OutIdentity
+    Expected: Expected
+  - Result: Zero
+    Rule: BufferExact
+    Actual: OutZero
+    Expected: Expected
+  - Result: Divergent
+    Rule: BufferExact
+    Actual: OutDivergent
+    Expected: Expected
+  - Result: SingleLane
+    Rule: BufferExact
+    Actual: OutSingleLane
     Expected: Expected
 DescriptorSets:
   - Resources:
@@ -144,11 +180,39 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 3
-    - Name: Out
+    - Name: OutFullWave
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 4
         Space: 0
       VulkanBinding:
         Binding: 4
+    - Name: OutIdentity
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 5
+        Space: 0
+      VulkanBinding:
+        Binding: 5
+    - Name: OutZero
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 6
+        Space: 0
+      VulkanBinding:
+        Binding: 6
+    - Name: OutDivergent
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 7
+        Space: 0
+      VulkanBinding:
+        Binding: 7
+    - Name: OutSingleLane
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 8
+        Space: 0
+      VulkanBinding:
+        Binding: 8
 ...
