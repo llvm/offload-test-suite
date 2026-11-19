@@ -3,6 +3,10 @@
 # Unimplemented: https://github.com/llvm/llvm-project/issues/99207
 # XFAIL: Clang
 
+# The Metal shader converter does not support 64-bit wave operations.
+# Bug: https://github.com/llvm/offload-test-suite/issues/959
+# XFAIL: Metal
+
 # RUN: split-file %S/Inputs/WaveMatch.test %t
 # RUN: %dxc_target -T cs_6_5 -DTYPE=int64_t -DWIDE_INT \
 # RUN:   -Fo %t.o %t/source.hlsl
