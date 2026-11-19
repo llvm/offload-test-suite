@@ -64,7 +64,8 @@ DescriptorSets:
 ...
 #--- end
 
-# XFAIL: DXC
+# XFAIL: Vulkan && DXC
+# XFAIL: Metal && DXC
 
 # REQUIRES: !Vulkan || VK_EXT_shader_long_vector
 # REQUIRES: Clang || SM_6_9
