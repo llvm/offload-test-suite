@@ -65,6 +65,6 @@ DescriptorSets:
 # REQUIRES: Clang || SM_6_9
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -enable-16bit-types -T %if Clang %{cs_6_2%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target %long_vector_flags -enable-16bit-types -T %if Clang %{cs_6_2%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
 
