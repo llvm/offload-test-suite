@@ -132,7 +132,8 @@ jobs:
               -C "$GITHUB_WORKSPACE/OffloadTest/cmake/caches/sccache.cmake" \
               -DHLSL_DISABLE_SOURCE_GENERATION=On \
               "${cross_args[@]}"
-            cmake --build "$dxc_dir/build"
+            cmake --build "$dxc_dir/build" \
+              --target dxc dxv dxcompiler dxildll
       - name: Dump sccache Stats
         if: always()
         shell: bash
