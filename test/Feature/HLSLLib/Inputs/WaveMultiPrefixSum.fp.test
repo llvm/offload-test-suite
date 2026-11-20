@@ -1,0 +1,75 @@
+#--- common.hlsl
+
+// Checks floating-point values at 16, 32, and 64 bits.
+// WaveMultiPrefixSum.test explains the shared data and result encoding.
+
+#if TYPE_BITS == 16
+typedef float16_t Element;
+#elif TYPE_BITS == 64
+typedef double Element;
+#else
+typedef float Element;
+#endif
+typedef vector<Element, 4> Value4;
+
+#if TYPE_BITS == 64
+StructuredBuffer<double4> Inputs : register(t3);
+StructuredBuffer<double4> ExpectedPrefixResults : register(t9);
+#else
+StructuredBuffer<float4> Inputs : register(t2);
+StructuredBuffer<float4> ExpectedPrefixResults : register(t8);
+#endif
+
+#include "shared.hlsl"
+
+#--- source.hlsl
+
+#include "common.hlsl"
+
+bool check(Value4 Value, Value4 Expected, uint4 Mask) {
+  Element R1 = WaveMultiPrefixSum(Value.x, Mask);
+  vector<Element, 2> R2 = WaveMultiPrefixSum(Value.xy, Mask);
+  vector<Element, 3> R3 = WaveMultiPrefixSum(Value.xyz, Mask);
+  Value4 R4 = WaveMultiPrefixSum(Value, Mask);
+
+  bool Passed = R1 == Expected.x;
+  for (uint Component = 0; Component < 2; ++Component) {
+    Passed = Passed && R2[Component] == Expected[Component];
+  }
+  for (uint Component = 0; Component < 3; ++Component) {
+    Passed = Passed && R3[Component] == Expected[Component];
+  }
+  for (uint Component = 0; Component < 4; ++Component) {
+    Passed = Passed && R4[Component] == Expected[Component];
+  }
+  return Passed;
+}
+
+#include "main.hlsl"
+
+#--- matrix.hlsl
+
+#include "common.hlsl"
+
+typedef matrix<Element, MATRIX_ROWS, MATRIX_COLS> ValueMatrix;
+
+bool check(Value4 Value, Value4 Expected, uint4 Mask) {
+  ValueMatrix Matrix;
+  ValueMatrix MatrixExpected;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      uint Component = (Row * MATRIX_COLS + Column) % 4;
+      Matrix[Row][Column] = Value[Component];
+      MatrixExpected[Row][Column] = Expected[Component];
+    }
+
+  ValueMatrix Result = WaveMultiPrefixSum(Matrix, Mask);
+  bool Passed = true;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      Passed = Passed && Result[Row][Column] == MatrixExpected[Row][Column];
+    }
+  return Passed;
+}
+
+#include "main.hlsl"

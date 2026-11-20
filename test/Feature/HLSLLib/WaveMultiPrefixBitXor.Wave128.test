@@ -1,0 +1,9 @@
+# REQUIRES: WaveMultiPrefix && WaveSizeSelection && WaveSize_128
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1714
+# XFAIL: WARP && DirectX
+
+# RUN: split-file %S/Inputs/WaveMultiPrefixBitXor.test %t
+# RUN: %dxc_target -T cs_6_6 -DTYPE_BITS=32 -DWAVE_SIZE=128 -Fo %t.o \
+# RUN:   %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
