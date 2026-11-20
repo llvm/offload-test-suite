@@ -1,0 +1,139 @@
+#--- source.hlsl
+StructuredBuffer<float4> X : register(t0);
+StructuredBuffer<float4> Y : register(t1);
+StructuredBuffer<float4> S : register(t2);
+
+RWStructuredBuffer<float4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 F32 = lerp(float3x2(X[0].xyz, X[1].xyz),
+                      float3x2(Y[0].xyz, Y[1].xyz),
+                      float3x2(S[0].xyz, S[1].xyz));
+  float2x4 F24 = lerp(float2x4(X[2], X[3]),
+                      float2x4(Y[2], Y[3]),
+                      float2x4(S[2], S[3]));
+  float3x1 F31 = lerp(float3x1(X[4].xyz),
+                      float3x1(Y[4].xyz),
+                      float3x1(S[4].xyz));
+  float4x4 F44 = lerp(float4x4(X[5], X[6], X[7], X[8]),
+                      float4x4(Y[5], Y[6], Y[7], Y[8]),
+                      float4x4(S[5], S[6], S[7], S[8]));
+  float2x2 F22Const = lerp(float2x2(1.5, -2.0, 0.0, 6.0),
+                           float2x2(2.5, 4.0, -8.0, 2.0),
+                           float2x2(0.25, 0.5, 0.75, 1.0));
+
+  Out[0] = float4(F32[0], F32[1]);
+  Out[1] = float4(F32[2], 0.0, 0.0);
+  Out[2] = F24[0];
+  Out[3] = F24[1];
+  Out[4] = float4(F31[0], F31[1], F31[2], 0.0);
+  Out[5] = F44[0];
+  Out[6] = F44[1];
+  Out[7] = F44[2];
+  Out[8] = F44[3];
+  Out[9] = float4(F22Const[0], F22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: X
+    Format: Float32
+    Stride: 16
+    Data: [ 1.0, 2.0, -3.0, 0.0,
+            4.0, -2.5, 0.0, 0.0,
+            0.5, 1.5, -4.5, 10.0,
+            -8.0, 3.5, 100.0, -6.0,
+            0.0, 2.0, -7.0, 0.0,
+            1.5, -2.0, 0.0, 6.0,
+            -60000.0, 60000.0, -60000.0, 60000.0,
+            0.0, -1.0, 3.0, -0.5,
+            2.5, -10.0, 8.0, 0.25 ]
+  - Name: Y
+    Format: Float32
+    Stride: 16
+    Data: [ 8.0, -7.0, 6.0, 0.0,
+            5.0, 2.5, 0.0, 0.0,
+            2.5, -1.5, -0.5, 20.0,
+            -16.0, -3.5, -100.0, -6.0,
+            12.0, 0.0, 9.0, 0.0,
+            2.5, 4.0, -8.0, 2.0,
+            60000.0, -60000.0, 60000.0, 0.0,
+            0.0, -5.0, 3.0, 0.5,
+            -2.5, 10.0, 0.0, 0.75 ]
+  - Name: S
+    Format: Float32
+    Stride: 16
+    Data: [ 0.25, 0.5, 0.75, 0.0,
+            0.0, 1.0, 0.5, 0.0,
+            0.5, 0.25, 0.75, 0.5,
+            0.25, 0.5, 0.75, 0.25,
+            0.25, 0.75, 0.5, 0.0,
+            0.25, 0.5, 0.75, 1.0,
+            0.5, 0.25, 1.0, 0.75,
+            0.75, 0.5, 0.5, 0.0,
+            0.25, 1.0, 0.75, 0.5 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 2.75, -2.5, 3.75, 4.0,
+            2.5, 0.0, 0.0, 0.0,
+            1.5, 0.75, -1.5, 15.0,
+            -10.0, 0.0, -50.0, -6.0,
+            3.0, 0.5, 1.0, 0.0,
+            1.75, 1.0, -6.0, 2.0,
+            0.0, 30000.0, 60000.0, 15000.0,
+            0.0, -3.0, 3.0, -0.5,
+            1.25, 10.0, 2.0, 0.5,
+            1.75, 1.0, -6.0, 2.0 ]
+Results:
+  - Result: Test
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: X
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Y
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: S
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+#--- end
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/184506
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 2021 -T cs_6_0 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
