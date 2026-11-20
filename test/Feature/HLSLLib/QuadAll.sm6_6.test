@@ -1,7 +1,6 @@
 # Test QuadAll emulation at SM 6.6.
 
-# Allow only compute derivatives to select SPIR-V quad-read emulation.
-# REQUIRES: !Vulkan || ComputeDerivativeGroupQuads
+# REQUIRES: ComputeDerivativeGroupQuads
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/1164
 # XFAIL: Metal
