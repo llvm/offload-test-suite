@@ -1,7 +1,7 @@
 # REQUIRES: Double && WaveMultiPrefix
 
 # https://github.com/llvm/offload-test-suite/issues/1720
-# XFAIL: WARP && DirectX && host-x86_64
+# XFAIL: WARP && DirectX && host-x86_64 && AVX512
 
 # RUN: split-file %S/Inputs/WaveMultiPrefixSum.test %t
 # RUN: split-file %S/Inputs/WaveMultiPrefixSum.fp.test %t
