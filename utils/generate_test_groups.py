@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Generate JSON groups from equivalent REQUIRES expressions without running tests. Use lit to discover tests and preserve UNSUPPORTED and XFAIL as test metadata."""
+"""Generate JSON containing unique REQUIRES groups and their lists of tests.
+A REQUIRES group contains tests with the same REQUIRES conditions, even if
+those conditions are written differently. Use lit to discover tests and read
+their directives without running tests. Preserve each test's original REQUIRES,
+UNSUPPORTED, and XFAIL metadata.
+"""
 
 import argparse
 import json
@@ -31,9 +36,10 @@ parser.add_argument(
     help="source test directory (default: this repository's test directory)",
 )
 args = parser.parse_args()
-MAX_VARIABLES = 16
+# Reject requirements with too many features to avoid excessive processing.
+# Each added feature doubles the number of combinations to check.
+MAX_REQUIREMENT_FEATURES = 16
 MAX_NORMALIZATION_WORK = 1_000_000
-NO_REQUIREMENTS = "No requirements"
 
 
 def parse_expression(text):
@@ -250,9 +256,10 @@ def compute_requires_group(requires):
     for node in nodes:
         collect_variables(node, names)
     names = sorted(names)
-    if len(names) > MAX_VARIABLES:
+    if len(names) > MAX_REQUIREMENT_FEATURES:
         raise ValueError(
-            "REQUIRES uses %d distinct features (max %d)" % (len(names), MAX_VARIABLES)
+            "REQUIRES uses %d distinct features (max %d)"
+            % (len(names), MAX_REQUIREMENT_FEATURES)
         )
     combined = {"op": "and", "operands": nodes}
     table = truth_table(combined, names)
@@ -326,13 +333,18 @@ def describe_test(test):
 def build_requires_groups(entries):
     """Group equivalent requirements, add group names to entries, and collect paths relative to the suite. Requirements that are always true join 'No requirements', while those that are always false remain in '!true'."""
     groups = {}
+    requires_cache = {}
     for entry in entries:
         try:
-            key, name, features = compute_requires_group(entry["requires"])
+            requires = tuple(entry["requires"])
+            # Reuse the group calculation for identical requirement lists.
+            if requires not in requires_cache:
+                requires_cache[requires] = compute_requires_group(requires)
+            key, name, features = requires_cache[requires]
         except ValueError as error:
             raise ValueError("%s: %s" % (entry["name"], error)) from error
         if name == "true":
-            name = NO_REQUIREMENTS
+            name = "No requirements"
         entry["requires_group"] = name
         group = groups.setdefault(
             key, {"group": name, "features": list(features), "tests": []}

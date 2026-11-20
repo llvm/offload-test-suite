@@ -1,11 +1,25 @@
 # RUN: split-file "%S/Inputs/errors.txt" "%t.inputs"
+
+# Invalid REQUIRES syntax must report an error.
 # RUN: not %generate_test_groups "%t.inputs/invalid-expression" 2>&1 | FileCheck %s --check-prefix=INVALID
+
+# Regex requirements must report an error.
 # RUN: not %generate_test_groups "%t.inputs/regex-requirement" 2>&1 | FileCheck %s --check-prefix=REGEX
+
+# Expressions that exceed the work limit must report an error.
 # RUN: not %generate_test_groups "%t.inputs/too-complex" 2>&1 | FileCheck %s --check-prefix=COMPLEX
+
+# Too many requirement features must report an error.
 # RUN: not %generate_test_groups "%t.inputs/too-many-features" 2>&1 | FileCheck %s --check-prefix=FEATURES
+
+# Tests without a RUN command must report an error.
 # RUN: not %generate_test_groups "%t.inputs/missing-run" 2>&1 | FileCheck %s --check-prefix=SCRIPT
+
+# An empty test directory must report an error.
 # RUN: mkdir -p "%t.empty"
 # RUN: not %generate_test_groups "%t.empty" 2>&1 | FileCheck %s --check-prefix=EMPTY
+
+# A missing test directory must report an error.
 # RUN: not %generate_test_groups "%t.missing" 2>&1 | FileCheck %s --check-prefix=MISSING
 
 # INVALID: error: OffloadTest :: invalid.test:
