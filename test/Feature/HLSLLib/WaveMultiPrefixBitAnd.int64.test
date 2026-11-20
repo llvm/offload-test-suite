@@ -1,7 +1,7 @@
 # REQUIRES: Int64 && WaveMultiPrefix
 
 # Bug: https://github.com/llvm/offload-test-suite/issues/959
-# XFAIL: Metal && (Clang || DXC)
+# XFAIL: Metal
 
 # RUN: split-file %S/Inputs/WaveMultiPrefixBitAnd.test %t
 # RUN: %dxc_target -T cs_6_5 -DTYPE_BITS=64 -Fo %t.o %t/source.hlsl
