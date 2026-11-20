@@ -144,11 +144,6 @@ PR use the same producer runs and select the artifact for their
 architecture. The Qualcomm schedules and `validate-frequent-builder.yaml`
 use the same resolver.
 
-Before enabling ARM64 consumers, both producer workflows must have a
-successful run on `main` that includes their ARM64 artifact. Older
-successful runs contain only x64 artifacts. Dispatch both producers after
-the ARM64 producer change merges, or wait for both schedules to succeed.
-
 The resolver accepts only `schedule` and `workflow_dispatch` runs
 originating from this repository, and neither event can be raised from a
 fork, so a fork PR cannot influence which binaries other PRs test against.
@@ -198,7 +193,6 @@ To check this path manually, dispatch `validate-frequent-builder.yaml`
 with `Arch=arm64` and `SKU=windows-qc`. Choose a Qualcomm GPU, WARP, or
 Lavapipe test target. Leave the run IDs blank to resolve the newest
 successful producer runs, or supply run IDs that contain ARM64 artifacts.
-The legacy `validate-split-build-test.yaml` no longer offers `windows-qc`.
 
 ### Failure semantics
 
@@ -213,7 +207,7 @@ monitored workflows in their own right, not as PR signal.
 
 The resolver requires the whole workflow run to succeed for each schedule.
 If either architecture fails, migrated PR jobs keep using an older
-successful run of that schedule, even if the new x64 build succeeds.
+successful run of that schedule, even if only one architecture succeeds.
 
 Two further failure modes surface in a PR:
 
