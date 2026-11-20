@@ -63,6 +63,16 @@ DescriptorSets:
 # REQUIRES: Clang || SM_6_9
 
 # RUN: split-file %s %t
-# RUN: %dxc_target -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target %long_vector_flags -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %if Clang && Vulkan %{ %dxc_target %long_vector_flags -T cs_6_0 -Fc - %t/source.hlsl | FileCheck %s --check-prefix=SPIRV %}
+
+# Check for the 16-component type, since the buffer comparison also passes on
+# split code. Sin itself is still split into 4-component pieces:
+# https://github.com/llvm/llvm-project/issues/244302
+# SPIRV-DAG: OpCapability LongVectorEXT
+# SPIRV-DAG: OpExtension "SPV_EXT_long_vector"
+# SPIRV-DAG: %[[#FLOAT:]] = OpTypeFloat 32
+# SPIRV-DAG: %[[#C16:]] = OpConstant %[[#]] 16{{ *$}}
+# SPIRV-DAG: %[[#]] = OpTypeVectorIdEXT %[[#FLOAT]] %[[#C16]]
 
