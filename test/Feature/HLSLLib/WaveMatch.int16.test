@@ -1,0 +1,12 @@
+# REQUIRES: Int16 && WaveMultiPrefix
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99207
+# XFAIL: Clang
+
+# RUN: split-file %S/Inputs/WaveMatch.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE=int16_t \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE=uint16_t \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
