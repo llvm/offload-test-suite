@@ -1,0 +1,44 @@
+// Checks scalars, vectors, and matrices from all four source lanes in two
+// quads. Outputs check each vector width or each matrix row. Signed and
+// unsigned integer runs use the same input bits.
+typedef vector<TYPE, 4> Value4;
+
+StructuredBuffer<Value4> In : register(t0);
+RWStructuredBuffer<uint4> Out : register(u1);
+
+uint4 check(uint InputIndex, uint ExpectedIndex, uint Lane) {
+#ifdef MATRIX_ROWS
+  typedef matrix<TYPE, MATRIX_ROWS, MATRIX_COLS> Matrix;
+  Matrix Value;
+  Matrix Expected;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      Value[Row][Column] = In[(InputIndex + Row) % 8][Column];
+      Expected[Row][Column] = In[(ExpectedIndex + Row) % 8][Column];
+    }
+
+  Matrix Result = QuadReadLaneAt(Value, Lane);
+  uint4 Passed = 1;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    Passed[Row] = all(Result[Row] == Expected[Row]);
+  return Passed;
+#else
+  Value4 Value = In[InputIndex];
+  Value4 Expected = In[ExpectedIndex];
+  TYPE Scalar = QuadReadLaneAt(Value.x, Lane);
+  vector<TYPE, 2> Vec2 = QuadReadLaneAt(Value.xy, Lane);
+  vector<TYPE, 3> Vec3 = QuadReadLaneAt(Value.xyz, Lane);
+  Value4 Vec4 = QuadReadLaneAt(Value, Lane);
+  return uint4(Scalar == Expected.x, all(Vec2 == Expected.xy),
+               all(Vec3 == Expected.xyz), all(Vec4 == Expected));
+#endif
+}
+
+[numthreads(8, 1, 1)] void main(uint3 DTID : SV_DispatchThreadID) {
+  uint Index = DTID.x;
+  uint InputIndex = WaveGetLaneIndex() % 8;
+  uint Base = InputIndex & ~3u;
+  for (uint Lane = 0; Lane < 4; ++Lane) {
+    Out[Index * 4 + Lane] = check(InputIndex, Base + Lane, Lane);
+  }
+}
