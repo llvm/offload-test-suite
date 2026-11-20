@@ -91,13 +91,11 @@ Buffers:
             1, 0, 1, 2 ]
 Results:
   - Result: Mantissa
-    Rule: BufferFloatULP
-    ULPT: 1
+    Rule: BufferExact
     Actual: Out
     Expected: ExpectedOut
   - Result: Exponent
-    Rule: BufferFloatULP
-    ULPT: 0
+    Rule: BufferExact
     Actual: ExpOut
     Expected: ExpectedExpOut
 DescriptorSets:
@@ -128,15 +126,9 @@ DescriptorSets:
 # Unimplemented https://github.com/llvm/llvm-project/issues/99119
 # XFAIL: Clang
 
-# DXC loses the sign of the mantissa for negative inputs when targeting
-# DirectX or Metal.
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/9155
 # XFAIL: DXC && DirectX
 # XFAIL: DXC && Metal
-
-# The SPIR-V backend does not legalize wide or non-power-of-two vectors for
-# Vulkan. Matrices are lowered to vectors, and a G_SITOFP on <6 x i32> cannot be
-# legalized. See also https://github.com/llvm/llvm-project/issues/220002.
-# XFAIL: Clang && Vulkan
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -HV 2021 -T cs_6_3 -Fo %t.o %t/source.hlsl
