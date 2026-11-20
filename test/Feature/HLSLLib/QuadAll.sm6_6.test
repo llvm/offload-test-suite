@@ -1,0 +1,13 @@
+# Test QuadAll emulation at SM 6.6.
+
+# REQUIRES: ComputeDerivativeGroupQuads
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1164
+# XFAIL: Metal
+
+# RUN: split-file %S/QuadAll.test %t
+# RUN: %dxc_target -T cs_6_6 \
+# RUN:   %if Vulkan %{ \
+# RUN:     -fspv-extension=SPV_KHR_compute_shader_derivatives \
+# RUN:   %} -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

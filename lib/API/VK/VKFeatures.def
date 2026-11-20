@@ -1,4 +1,13 @@
 // Definitions of Vulkan features.
+#ifdef VULKAN_QUAD_FEATURE_BOOL
+#ifdef VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME
+VULKAN_QUAD_FEATURE_BOOL(computeDerivativeGroupQuads, ComputeDerivatives)
+#endif
+VULKAN_QUAD_FEATURE_BOOL(shaderMaximalReconvergence, MaximalReconvergence)
+VULKAN_QUAD_FEATURE_BOOL(shaderQuadControl, QuadControl)
+#undef VULKAN_QUAD_FEATURE_BOOL
+#endif
+
 #ifdef VULKAN_FEATURE_BOOL
 VULKAN_FEATURE_BOOL(robustBufferAccess)
 VULKAN_FEATURE_BOOL(fullDrawIndexUint32)
