@@ -1,8 +1,7 @@
 name: Frequent Build (DXC)
 
-# Builds x64 and ARM64 DXC distributions. ARM64 PR jobs still build their
-# own compilers. Runs daily rather than 2-hourly because DXC's main branch
-# changes roughly weekly.
+# Builds x64 and ARM64 DXC distributions for the test jobs. Runs daily
+# rather than 2-hourly because DXC's main branch changes roughly weekly.
 # See docs/frequent-builder.md.
 
 permissions:
