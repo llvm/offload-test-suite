@@ -1,0 +1,93 @@
+#--- common.hlsl
+
+// Checks signed and unsigned integers at 16, 32, and 64 bits.
+// WaveMultiPrefixSum.test explains the shared data and result encoding.
+
+#if TYPE_BITS == 16
+typedef int16_t Element;
+typedef uint16_t UnsignedElement;
+#elif TYPE_BITS == 64
+typedef int64_t Element;
+typedef uint64_t UnsignedElement;
+#else
+typedef int Element;
+typedef uint UnsignedElement;
+#endif
+typedef vector<UnsignedElement, 4> Unsigned4;
+typedef vector<Element, 4> Value4;
+
+#if TYPE_BITS == 64
+StructuredBuffer<Value4> Inputs : register(t1);
+StructuredBuffer<Value4> ExpectedPrefixResults : register(t7);
+#else
+StructuredBuffer<int4> Inputs : register(t0);
+StructuredBuffer<int4> ExpectedPrefixResults : register(t6);
+#endif
+
+#include "shared.hlsl"
+
+#--- source.hlsl
+
+#include "common.hlsl"
+
+bool check(Value4 Value, Value4 Expected, uint4 Mask) {
+  Element R1 = WaveMultiPrefixSum(Value.x, Mask);
+  vector<Element, 2> R2 = WaveMultiPrefixSum(Value.xy, Mask);
+  vector<Element, 3> R3 = WaveMultiPrefixSum(Value.xyz, Mask);
+  Value4 R4 = WaveMultiPrefixSum(Value, Mask);
+  Unsigned4 UValue = Unsigned4(Value);
+  Unsigned4 UExpected = Unsigned4(Expected);
+  UnsignedElement U1 = WaveMultiPrefixSum(UValue.x, Mask);
+  vector<UnsignedElement, 2> U2 = WaveMultiPrefixSum(UValue.xy, Mask);
+  vector<UnsignedElement, 3> U3 = WaveMultiPrefixSum(UValue.xyz, Mask);
+  Unsigned4 U4 = WaveMultiPrefixSum(UValue, Mask);
+
+  bool Passed = R1 == Expected.x;
+  Passed = Passed && U1 == UExpected.x;
+  for (uint Component = 0; Component < 2; ++Component) {
+    Passed = Passed && R2[Component] == Expected[Component];
+    Passed = Passed && U2[Component] == UExpected[Component];
+  }
+  for (uint Component = 0; Component < 3; ++Component) {
+    Passed = Passed && R3[Component] == Expected[Component];
+    Passed = Passed && U3[Component] == UExpected[Component];
+  }
+  for (uint Component = 0; Component < 4; ++Component) {
+    Passed = Passed && R4[Component] == Expected[Component];
+    Passed = Passed && U4[Component] == UExpected[Component];
+  }
+  return Passed;
+}
+
+#include "main.hlsl"
+
+#--- matrix.hlsl
+
+#include "common.hlsl"
+
+typedef matrix<Element, MATRIX_ROWS, MATRIX_COLS> ValueMatrix;
+typedef matrix<UnsignedElement, MATRIX_ROWS, MATRIX_COLS> UnsignedMatrix;
+
+bool check(Value4 Value, Value4 Expected, uint4 Mask) {
+  ValueMatrix Matrix;
+  ValueMatrix MatrixExpected;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      uint Component = (Row * MATRIX_COLS + Column) % 4;
+      Matrix[Row][Column] = Value[Component];
+      MatrixExpected[Row][Column] = Expected[Component];
+    }
+
+  ValueMatrix Result = WaveMultiPrefixSum(Matrix, Mask);
+  UnsignedMatrix UResult = WaveMultiPrefixSum(UnsignedMatrix(Matrix), Mask);
+  UnsignedMatrix UExpected = UnsignedMatrix(MatrixExpected);
+  bool Passed = true;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column) {
+      Passed = Passed && Result[Row][Column] == MatrixExpected[Row][Column];
+      Passed = Passed && UResult[Row][Column] == UExpected[Row][Column];
+    }
+  return Passed;
+}
+
+#include "main.hlsl"
