@@ -81,9 +81,6 @@ DescriptorSets:
 ...
 #--- end
 
-# Bug https://github.com/llvm/llvm-project/issues/235864
-# XFAIL: Clang && (DirectX || Metal)
-
 # Bug: DXC's SPIR-V lowering of `dst` always uses 32-bit float types, producing
 # invalid SPIR-V (or an assert) for double4.
 # XFAIL: DXC && Vulkan
