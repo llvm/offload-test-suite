@@ -1,0 +1,160 @@
+#--- source.hlsl
+StructuredBuffer<float4> N : register(t0);
+StructuredBuffer<float4> I : register(t1);
+StructuredBuffer<float4> Ng : register(t2);
+
+RWStructuredBuffer<float4> Out : register(u3);
+
+[numthreads(1,1,1)]
+void main() {
+  float3x2 N32 = float3x2(N[0].xy, N[1].xy, N[2].xy);
+  float3x2 I32 = float3x2(I[0].xy, I[1].xy, I[2].xy);
+  float3x2 Ng32 = float3x2(Ng[0].xy, Ng[1].xy, Ng[2].xy);
+  float2x4 N24 = float2x4(N[3], N[4]);
+  float2x4 I24 = float2x4(I[3], I[4]);
+  float2x4 Ng24 = float2x4(Ng[3], Ng[4]);
+  float3x1 N31 = float3x1(N[5].x, N[6].x, N[7].x);
+  float3x1 I31 = float3x1(I[5].x, I[6].x, I[7].x);
+  float3x1 Ng31 = float3x1(Ng[5].x, Ng[6].x, Ng[7].x);
+  float4x4 N44 = float4x4(N[8], N[9], N[10], N[11]);
+  float4x4 I44 = float4x4(I[8], I[9], I[10], I[11]);
+  float4x4 Ng44 = float4x4(Ng[8], Ng[9], Ng[10], Ng[11]);
+
+  // faceforward is applied to each row of the matrices.
+  float3x2 F32 = float3x2(faceforward(N32[0], I32[0], Ng32[0]),
+                          faceforward(N32[1], I32[1], Ng32[1]),
+                          faceforward(N32[2], I32[2], Ng32[2]));
+  float2x4 F24 = float2x4(faceforward(N24[0], I24[0], Ng24[0]),
+                          faceforward(N24[1], I24[1], Ng24[1]));
+  float3x1 F31 = float3x1(faceforward(N31[0], I31[0], Ng31[0]),
+                          faceforward(N31[1], I31[1], Ng31[1]),
+                          faceforward(N31[2], I31[2], Ng31[2]));
+  float4x4 F44 = float4x4(faceforward(N44[0], I44[0], Ng44[0]),
+                          faceforward(N44[1], I44[1], Ng44[1]),
+                          faceforward(N44[2], I44[2], Ng44[2]),
+                          faceforward(N44[3], I44[3], Ng44[3]));
+  float2x2 F22Const = float2x2(faceforward(float2(1, -3), float2(1, 1), float2(-1, 0.5)),
+                               faceforward(float2(2, 4), float2(1, -2), float2(-1, -1)));
+
+  Out[0] = float4(F32[0], F32[1]);
+  Out[1] = float4(F32[2], 0, 0);
+  Out[2] = F24[0];
+  Out[3] = F24[1];
+  Out[4] = float4(F31[0], F31[1], F31[2], 0);
+  Out[5] = F44[0];
+  Out[6] = F44[1];
+  Out[7] = F44[2];
+  Out[8] = F44[3];
+  Out[9] = float4(F22Const[0], F22Const[1]);
+}
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: N
+    Format: Float32
+    Stride: 16
+    Data: [ 1, -2, 0, 0,
+            3, -4, 0, 0,
+            0.5, 1.5, 0, 0,
+            -2.5, 6, -7, 8,
+            0.25, -0.75, 10, -12,
+            5, 0, 0, 0,
+            -6, 0, 0, 0,
+            7.5, 0, 0, 0,
+            1, 2, 3, 4,
+            -1, -2, -3, -4,
+            0.5, -1.5, 2.5, -3.5,
+            9, -10, 11, -12 ]
+  - Name: I
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 2, 0, 0,
+            2, 1, 0, 0,
+            1, -1, 0, 0,
+            1, 2, 1, 1,
+            2, -1, 0.5, 3,
+            2, 0, 0, 0,
+            1, 0, 0, 0,
+            3, 0, 0, 0,
+            1, 1, 1, 1,
+            1, 1, 1, 1,
+            1, -2, 3, -4,
+            -0.5, 0.25, -1, 2 ]
+  - Name: Ng
+    Format: Float32
+    Stride: 16
+    Data: [ -1, 0.5, 0, 0,
+            -1, 0.5, 0, 0,
+            3, 2, 0, 0,
+            1, -1, -1, -1,
+            1, 3, 2, 1,
+            -1, 0, 0, 0,
+            4, 0, 0, 0,
+            0, 0, 0, 0,
+            -1, -1, -1, -1,
+            1, 1, 1, 1,
+            4, 3, 2, 1,
+            2, 4, 1, -0.5 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 160
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    # faceforward returns N if dot(I, Ng) < 0, otherwise -N.
+    Data: [ -1, 2, 3, -4,
+            -0.5, -1.5, 0, 0,
+            -2.5, 6, -7, 8,
+            -0.25, 0.75, -10, 12,
+            5, 6, -7.5, 0,
+            1, 2, 3, 4,
+            1, 2, 3, 4,
+            -0.5, 1.5, -2.5, 3.5,
+            9, -10, 11, -12,
+            1, -3, -2, -4 ]
+Results:
+  - Result: Test0
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: N
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: I
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+    - Name: Ng
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 2
+        Space: 0
+      VulkanBinding:
+        Binding: 2
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 3
+        Space: 0
+      VulkanBinding:
+        Binding: 3
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
