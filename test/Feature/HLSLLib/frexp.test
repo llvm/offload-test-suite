@@ -1,7 +1,7 @@
 #--- source.hlsl
 StructuredBuffer<float4> In : register(t0);
-RWStructuredBuffer<float4> Out : register(u1);
-RWStructuredBuffer<float4> ExpOut : register(u2);
+RWStructuredBuffer<float4> MantissaOut : register(u1);
+RWStructuredBuffer<float4> ExponentOut : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
@@ -10,20 +10,20 @@ void main() {
   float3 E3;
   float4 E4a, E4b, E4c;
 
-  Out[0] = frexp(In[0], E4a);
-  ExpOut[0] = E4a;
+  MantissaOut[0] = frexp(In[0], E4a);
+  ExponentOut[0] = E4a;
 
-  Out[1] = float4(frexp(In[1].xyz, E3), frexp(In[1].w, E1));
-  ExpOut[1] = float4(E3, E1);
+  MantissaOut[1] = float4(frexp(In[1].xyz, E3), frexp(In[1].w, E1));
+  ExponentOut[1] = float4(E3, E1);
 
-  Out[2] = float4(frexp(In[2].xy, E2a), frexp(In[2].zw, E2b));
-  ExpOut[2] = float4(E2a, E2b);
+  MantissaOut[2] = float4(frexp(In[2].xy, E2a), frexp(In[2].zw, E2b));
+  ExponentOut[2] = float4(E2a, E2b);
 
-  Out[3] = frexp(In[3], E4b);
-  ExpOut[3] = E4b;
+  MantissaOut[3] = frexp(In[3], E4b);
+  ExponentOut[3] = E4b;
 
-  Out[4] = frexp(float4(0.125, 4, 1000.5, 0.00001), E4c);
-  ExpOut[4] = E4c;
+  MantissaOut[4] = frexp(float4(0.125, 4, 1000.5, 0.00001), E4c);
+  ExponentOut[4] = E4c;
 }
 
 //--- pipeline.yaml
@@ -40,11 +40,11 @@ Buffers:
             2, 4, 8, 10,
             -0.375, 0.1, 1000.5, -12345.678,
             0, 5.5, -2.25, 0.00001 ]
-  - Name: Out
+  - Name: MantissaOut
     Format: Float32
     Stride: 16
     FillSize: 80
-  - Name: ExpectedOut
+  - Name: ExpectedMantissaOut
     Format: Float32
     Stride: 16
     Data: [ 0.5, 0.5, 0.5, 0.5,
@@ -52,11 +52,11 @@ Buffers:
             -0.75, 0.8, 0.9770508, -0.75352037,
             0, 0.6875, -0.5625, 0.65536,
             0.5, 0.5, 0.9770508, 0.65536 ]
-  - Name: ExpOut
+  - Name: ExponentOut
     Format: Float32
     Stride: 16
     FillSize: 80
-  - Name: ExpectedExpOut
+  - Name: ExpectedExponentOut
     Format: Float32
     Stride: 16
     Data: [ -2, -1, 0, 1,
@@ -67,12 +67,12 @@ Buffers:
 Results:
   - Result: Mantissa
     Rule: BufferExact
-    Actual: Out
-    Expected: ExpectedOut
+    Actual: MantissaOut
+    Expected: ExpectedMantissaOut
   - Result: Exponent
     Rule: BufferExact
-    Actual: ExpOut
-    Expected: ExpectedExpOut
+    Actual: ExponentOut
+    Expected: ExpectedExponentOut
 DescriptorSets:
   - Resources:
     - Name: In
@@ -82,14 +82,14 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
+    - Name: MantissaOut
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: ExpOut
+    - Name: ExponentOut
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2

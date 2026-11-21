@@ -1,7 +1,7 @@
 #--- source.hlsl
 StructuredBuffer<float4> In : register(t0);
-RWStructuredBuffer<float4> Out : register(u1);
-RWStructuredBuffer<float4> ExpOut : register(u2);
+RWStructuredBuffer<float4> MantissaOut : register(u1);
+RWStructuredBuffer<float4> ExponentOut : register(u2);
 
 [numthreads(1,1,1)]
 void main() {
@@ -17,27 +17,27 @@ void main() {
   float4x4 R44 = frexp(float4x4(In[0], In[1], In[2], In[3]), E44);
   float2x2 R22Const = frexp(float2x2(-1.0, 0.0, 1.0, 2.0), E22Const);
 
-  Out[0] = float4(R32[0], R32[1]);
-  Out[1] = float4(R32[2], 0.0, 0.0);
-  Out[2] = R24[0];
-  Out[3] = R24[1];
-  Out[4] = float4(R31[0], R31[1], R31[2], 0.0);
-  Out[5] = R44[0];
-  Out[6] = R44[1];
-  Out[7] = R44[2];
-  Out[8] = R44[3];
-  Out[9] = float4(R22Const[0], R22Const[1]);
+  MantissaOut[0] = float4(R32[0], R32[1]);
+  MantissaOut[1] = float4(R32[2], 0.0, 0.0);
+  MantissaOut[2] = R24[0];
+  MantissaOut[3] = R24[1];
+  MantissaOut[4] = float4(R31[0], R31[1], R31[2], 0.0);
+  MantissaOut[5] = R44[0];
+  MantissaOut[6] = R44[1];
+  MantissaOut[7] = R44[2];
+  MantissaOut[8] = R44[3];
+  MantissaOut[9] = float4(R22Const[0], R22Const[1]);
 
-  ExpOut[0] = float4(E32[0], E32[1]);
-  ExpOut[1] = float4(E32[2], 0.0, 0.0);
-  ExpOut[2] = E24[0];
-  ExpOut[3] = E24[1];
-  ExpOut[4] = float4(E31[0], E31[1], E31[2], 0.0);
-  ExpOut[5] = E44[0];
-  ExpOut[6] = E44[1];
-  ExpOut[7] = E44[2];
-  ExpOut[8] = E44[3];
-  ExpOut[9] = float4(E22Const[0], E22Const[1]);
+  ExponentOut[0] = float4(E32[0], E32[1]);
+  ExponentOut[1] = float4(E32[2], 0.0, 0.0);
+  ExponentOut[2] = E24[0];
+  ExponentOut[3] = E24[1];
+  ExponentOut[4] = float4(E31[0], E31[1], E31[2], 0.0);
+  ExponentOut[5] = E44[0];
+  ExponentOut[6] = E44[1];
+  ExponentOut[7] = E44[2];
+  ExponentOut[8] = E44[3];
+  ExponentOut[9] = float4(E22Const[0], E22Const[1]);
 }
 
 //--- pipeline.yaml
@@ -55,11 +55,11 @@ Buffers:
             5.5, -1.5, 1000.25, 0.0625,
             -0.2, 7, -33, 123456,
             0.75, -6.5, 0.001, 0 ]
-  - Name: Out
+  - Name: MantissaOut
     Format: Float32
     Stride: 16
     FillSize: 160
-  - Name: ExpectedOut
+  - Name: ExpectedMantissaOut
     Format: Float32
     Stride: 16
     Data: [ 0.5, 0.5, 0.5, -0.5,
@@ -72,11 +72,11 @@ Buffers:
             0.6875, -0.75, 0.97680664, 0.5,
             -0.8, 0.875, -0.515625, 0.94189453,
             -0.5, 0, 0.5, 0.5 ]
-  - Name: ExpOut
+  - Name: ExponentOut
     Format: Float32
     Stride: 16
     FillSize: 160
-  - Name: ExpectedExpOut
+  - Name: ExpectedExponentOut
     Format: Float32
     Stride: 16
     Data: [ 0, 1, 2, 3,
@@ -92,12 +92,12 @@ Buffers:
 Results:
   - Result: Mantissa
     Rule: BufferExact
-    Actual: Out
-    Expected: ExpectedOut
+    Actual: MantissaOut
+    Expected: ExpectedMantissaOut
   - Result: Exponent
     Rule: BufferExact
-    Actual: ExpOut
-    Expected: ExpectedExpOut
+    Actual: ExponentOut
+    Expected: ExpectedExponentOut
 DescriptorSets:
   - Resources:
     - Name: In
@@ -107,14 +107,14 @@ DescriptorSets:
         Space: 0
       VulkanBinding:
         Binding: 0
-    - Name: Out
+    - Name: MantissaOut
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 1
         Space: 0
       VulkanBinding:
         Binding: 1
-    - Name: ExpOut
+    - Name: ExponentOut
       Kind: RWStructuredBuffer
       DirectXBinding:
         Register: 2
