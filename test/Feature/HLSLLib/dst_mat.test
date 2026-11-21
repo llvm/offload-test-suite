@@ -1,0 +1,95 @@
+#--- source.hlsl
+
+// dst(Src0, Src1) = { 1, Src0.y * Src1.y, Src0.z, Src1.w }
+// dst is only defined for 4-component floating-point vectors, so matrix
+// operands reach it through rows, constructors and casts, and int/uint
+// matrices are not applicable.
+
+StructuredBuffer<float4> In : register(t0);
+RWStructuredBuffer<float4> Out : register(u1);
+
+[numthreads(1,1,1)]
+void main() {
+  float2x4 M24 = float2x4(In[0], In[1]);
+  float4x2 M42 = float4x2(In[2], In[3]);
+  float1x4 M14 = float1x4(In[4]);
+  float4x1 M41 = float4x1(In[5]);
+  float4x4 M44 = float4x4(In[0], In[2], In[4], In[5]);
+
+  // Columns > rows: each row is a float4.
+  Out[0] = dst(M24[0], M24[1]);
+  // Rows > columns: two rows form a float4.
+  Out[1] = dst(float4(M42[0], M42[1]), float4(M42[2], M42[3]));
+  // 1-dimensional matrices.
+  Out[2] = dst(M14[0], (float4)M41);
+  Out[3] = dst(float4(M41[0], M41[1], M41[2], M41[3]), (float4)M14);
+  // Max size matrix.
+  Out[4] = dst(M44[0], M44[1]);
+  Out[5] = dst(M44[3], M44[0]);
+  // Results written to matrix rows.
+  float2x4 R24;
+  R24[0] = dst(M44[2], M24[0]);
+  R24[1] = dst(M24[1], M44[3]);
+  Out[6] = R24[0];
+  Out[7] = R24[1];
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ 2, 3, 4, 5,
+            6, 7, 8, 9,
+            -1.5, 0.5, -8, 16,
+            2, -4, 0.25, -0.125,
+            10, -3, 0.5, 12,
+            1, 1.5, -6, -2 ]
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 128
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [ 1, 21, 4, 9,
+            1, -2, -8, -0.125,
+            1, -4.5, 0.5, -2,
+            1, -4.5, -6, 12,
+            1, 1.5, 4, 16,
+            1, 4.5, -6, 5,
+            1, -9, 0.5, 5,
+            1, 10.5, 8, -2 ]
+Results:
+  - Result: Test1
+    Rule: BufferFloatULP
+    ULPT: 0
+    Actual: Out
+    Expected: ExpectedOut
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -HV 2021 -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
