@@ -1,0 +1,7 @@
+# Check local suffixes and exclusions without running test commands.
+# Ignore suite configs and timing data, and include unsupported tests.
+# RUN: split-file "%S/Inputs/discovery.txt" "%t.inputs"
+# RUN: %generate_test_groups "%t.inputs" --output "%t.json"
+# RUN: %python -m json.tool --sort-keys "%S/Inputs/discovery.expected.json" "%t.expected"
+# RUN: %python -m json.tool --sort-keys "%t.json" "%t.actual"
+# RUN: diff --strip-trailing-cr "%t.expected" "%t.actual"
