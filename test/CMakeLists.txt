@@ -274,6 +274,10 @@ install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/utils/configure-test-suite.py
   DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}
   COMPONENT offload-test-suite)
 
+install(PROGRAMS ${OFFLOADTEST_SOURCE_DIR}/utils/generate_test_groups.py
+  DESTINATION ${OFFLOADTEST_INSTALL_TESTDIR}/utils
+  COMPONENT offload-test-suite)
+
 # Install requirements.txt so the standalone test runner can pip install
 # its dependencies (lit, pyyaml) without needing a source checkout. This
 # keeps a single source of truth for pinned versions.
