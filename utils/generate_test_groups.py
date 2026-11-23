@@ -70,14 +70,20 @@ def parse_expression(text):
         while parser.accept("&&"):
             operands.append(parse_not())
         return (
-            operands[0] if len(operands) == 1 else {"op": "and", "operands": operands}
+            operands[0]
+            if len(operands) == 1
+            else {"op": "and", "operands": operands}
         )
 
     def parse_or():
         operands = [parse_and()]
         while parser.accept("||"):
             operands.append(parse_and())
-        return operands[0] if len(operands) == 1 else {"op": "or", "operands": operands}
+        return (
+            operands[0]
+            if len(operands) == 1
+            else {"op": "or", "operands": operands}
+        )
 
     try:
         parser.token = next(parser.tokens)
@@ -102,7 +108,11 @@ def collect_variables(node, variables):
 
 
 def truth_table(node, variables):
-    """Evaluate every feature combination and store the results as bits. Each bit records whether the expression is true for that feature combination."""
+    """Evaluate every feature combination and store the results as bits.
+
+    Each bit records whether the expression is true for that feature
+    combination.
+    """
     assignment_count = 1 << len(variables)
     all_assignments = (1 << assignment_count) - 1
     feature_masks = {}
@@ -146,7 +156,10 @@ def relevant_variables(table, variables):
 
 
 def matching_combinations(table, variable_count):
-    """Return the indices of feature combinations where the expression is true. Each index uses one bit per feature to represent its value."""
+    """Return indices of feature combinations where the expression is true.
+
+    Each index uses one bit per feature to represent its value.
+    """
     return [
         assignment
         for assignment in range(1 << variable_count)
@@ -155,7 +168,10 @@ def matching_combinations(table, variable_count):
 
 
 def merge_matching_terms(minterms, variable_count):
-    """Merge terms that differ in one feature and return those that cannot merge further. Each (value, mask) pair marks ignored features with set mask bits."""
+    """Merge terms differing in one feature and return those that cannot merge.
+
+    Each (value, mask) pair marks ignored features with set mask bits.
+    """
     current = {(minterm, 0) for minterm in minterms}
     primes = set()
     work = 0
@@ -196,7 +212,12 @@ def literal_count(implicant, variable_count):
 
 
 def select_group_terms(minterms, variable_count):
-    """Choose terms covering every matching combination, starting with uniquely needed terms. Prefer more remaining combinations, fewer literals, then lower (value, mask), without guaranteeing the smallest result."""
+    """Choose terms covering every matching combination.
+
+    Start with uniquely needed terms. Prefer more remaining combinations,
+    fewer literals, then lower (value, mask), without guaranteeing the
+    smallest result.
+    """
     primes = sorted(merge_matching_terms(minterms, variable_count))
     work = len(primes) * len(minterms)
     if work > MAX_NORMALIZATION_WORK:
@@ -204,11 +225,15 @@ def select_group_terms(minterms, variable_count):
     remaining = set(minterms)
     chosen = []
     for minterm in minterms:
-        candidates = [implicant for implicant in primes if covers(implicant, minterm)]
+        candidates = [
+            implicant for implicant in primes if covers(implicant, minterm)
+        ]
         if len(candidates) == 1 and candidates[0] not in chosen:
             chosen.append(candidates[0])
     for implicant in chosen:
-        remaining -= {minterm for minterm in remaining if covers(implicant, minterm)}
+        remaining -= {
+            minterm for minterm in remaining if covers(implicant, minterm)
+        }
     while remaining:
         work += len(primes) * len(remaining)
         if work > MAX_NORMALIZATION_WORK:
@@ -227,7 +252,11 @@ def select_group_terms(minterms, variable_count):
 
 
 def build_group_name(variables, table):
-    """Build a stable name from sorted features using AND and OR, or 'true' and '!true' for constant results. The name is not necessarily the shortest expression."""
+    """Build a stable name from sorted features using AND and OR.
+
+    Use 'true' and '!true' for constant results. The name is not necessarily
+    the shortest expression.
+    """
     variable_count = len(variables)
     if variable_count == 0:
         return "true" if table & 1 else "!true"
@@ -238,7 +267,9 @@ def build_group_name(variables, table):
         for feature_index, name in enumerate(variables):
             if mask & (1 << feature_index):
                 continue
-            literals.append(name if value & (1 << feature_index) else "!" + name)
+            literals.append(
+                name if value & (1 << feature_index) else "!" + name
+            )
         terms.append(literals)
     terms.sort(
         key=lambda term: (
@@ -250,7 +281,11 @@ def build_group_name(variables, table):
 
 
 def compute_requires_group(requires):
-    """Combine requirements with AND and return a grouping key, name, and relevant features, treating empty requirements as true. The key uses sorted relevant features and their truth table so equivalent expressions match."""
+    """Combine requirements with AND and return a grouping key, name, features.
+
+    Treat empty requirements as true. The key uses sorted relevant features
+    and their truth table so equivalent expressions match.
+    """
     nodes = [parse_expression(text) for text in requires]
     names = set()
     for node in nodes:
@@ -264,16 +299,21 @@ def compute_requires_group(requires):
     combined = {"op": "and", "operands": nodes}
     table = truth_table(combined, names)
     support = relevant_variables(table, names)
-    # Irrelevant variables don't affect the result, so re-evaluate over the support
-    # (truth_table treats variables outside its list as false).
+    # Irrelevant variables don't affect the result, so re-evaluate over the
+    # support (truth_table treats variables outside its list as false).
     table = truth_table(combined, support)
     return (tuple(support), table), build_group_name(support, table), support
 
 
 def discover_tests(source_root):
-    """Discover tests using local lit settings without loading root or nested suite configurations."""
+    """Discover tests using local lit settings.
+
+    Do not load root or nested suite configurations.
+    """
     if not source_root.is_dir():
-        raise ValueError("test source directory does not exist: %s" % source_root)
+        raise ValueError(
+            "test source directory does not exist: %s" % source_root
+        )
     lit_config = LitConfig(
         progname="generate_test_groups",
         path=[],
@@ -311,7 +351,11 @@ def discover_tests(source_root):
 
 
 def describe_test(test):
-    """Read test directives without checking feature availability or removing tests marked config.unsupported. Require a RUN directive but do not execute it."""
+    """Read directives without checking features or config.unsupported.
+
+    Keep tests marked config.unsupported. Require a RUN directive but do not
+    execute it.
+    """
     entry = {
         "name": test.getFullName(),
         "suite": test.suite.name,
@@ -321,7 +365,9 @@ def describe_test(test):
         "unsupported": list(test.unsupported),
     }
     try:
-        parsed = TestRunner._parseKeywords(test.getSourcePath(), require_script=True)
+        parsed = TestRunner._parseKeywords(
+            test.getSourcePath(), require_script=True
+        )
         entry["requires"] += parsed["REQUIRES:"] or []
         entry["xfail"] += parsed["XFAIL:"] or []
         entry["unsupported"] += parsed["UNSUPPORTED:"] or []
@@ -331,7 +377,11 @@ def describe_test(test):
 
 
 def build_requires_groups(entries):
-    """Group equivalent requirements, add group names to entries, and collect paths relative to the suite. Requirements that are always true join 'No requirements', while those that are always false remain in '!true'."""
+    """Group equivalent requirements and add group names to entries.
+
+    Collect paths relative to the suite. Requirements that are always true
+    join 'No requirements', while those that are always false remain in '!true'.
+    """
     groups = {}
     requires_cache = {}
     for entry in entries:
@@ -352,7 +402,8 @@ def build_requires_groups(entries):
         group["tests"].append("/".join(entry["path_in_suite"]))
     result = []
     for group in sorted(
-        groups.values(), key=lambda group: (len(group["features"]), group["group"])
+        groups.values(),
+        key=lambda group: (len(group["features"]), group["group"]),
     ):
         group["tests"].sort()
         group["test_count"] = len(group["tests"])
