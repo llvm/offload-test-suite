@@ -1,0 +1,137 @@
+#--- vertex.hlsl
+struct VSOutput {
+  float4 Pos : SV_Position;
+  float3x2 M32 : MATA;
+  float2x4 M24 : MATB;
+  float3x1 M31 : MATC;
+  float4x4 M44 : MATD;
+};
+
+VSOutput main(float2 Position : POSITION) {
+  // Pixel coordinate of this vertex in the 1x1 render target.
+  float2 P = float2(Position.x + 1, 1 - Position.y) / 2;
+  VSOutput O;
+  O.Pos = float4(Position, 0, 1);
+  O.M32 = float3x2(P, P + 1, P + 2);
+  O.M24 = float2x4(P.xyxy, P.xyxy + 1);
+  O.M31 = float3x1(P.x, P.x + 1, P.x + 2);
+  O.M44 = float4x4(P.xyxy, P.xyxy + 1, P.xyxy + 2, P.xyxy + 3);
+  return O;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 Pos : SV_Position;
+  float3x2 M32 : MATA;
+  float2x4 M24 : MATB;
+  float3x1 M31 : MATC;
+  float4x4 M44 : MATD;
+};
+
+RWStructuredBuffer<float4> Out : register(u0);
+
+float4 main(PSInput I) : SV_Target {
+  float3x2 M32 = EvaluateAttributeCentroid(I.M32);
+  float2x4 M24 = EvaluateAttributeCentroid(I.M24);
+  float3x1 M31 = EvaluateAttributeCentroid(I.M31);
+  float4x4 M44 = EvaluateAttributeCentroid(I.M44);
+
+  Out[0] = float4(M32[0], 0, 0);
+  Out[1] = float4(M32[1], 0, 0);
+  Out[2] = float4(M32[2], 0, 0);
+  Out[3] = M24[0];
+  Out[4] = M24[1];
+  Out[5] = float4(M31[0], 0, 0, 0);
+  Out[6] = float4(M31[1], 0, 0, 0);
+  Out[7] = float4(M31[2], 0, 0, 0);
+  Out[8] = M44[0];
+  Out[9] = M44[1];
+  Out[10] = M44[2];
+  Out[11] = M44[3];
+  return 0;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [-1, -1, 3, -1, -1, 3]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 192
+    FillValue: 100 # Any value the shader does not write fails.
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [0.5, 0.5, 0, 0,
+           1.5, 1.5, 0, 0,
+           2.5, 2.5, 0, 0,
+           0.5, 0.5, 0.5, 0.5,
+           1.5, 1.5, 1.5, 1.5,
+           0.5, 0, 0, 0,
+           1.5, 0, 0, 0,
+           2.5, 0, 0, 0,
+           0.5, 0.5, 0.5, 0.5,
+           1.5, 1.5, 1.5, 1.5,
+           2.5, 2.5, 2.5, 2.5,
+           3.5, 3.5, 3.5, 3.5]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: Evaluate
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.0001
+    Actual: Out
+    Expected: ExpectedOut
+...
+#--- end
+
+# Without MSAA the centroid is the pixel center, (0.5, 0.5).
+
+# A constant-folded matrix is not applicable: the argument must be a pixel
+# shader input.
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99110
+# XFAIL: Clang
+
+# DXC's SPIR-V backend emits InterpolateAt* on matrices, which is invalid
+# SPIR-V.
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: !Vulkan || VulkanSampleRateShading
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
