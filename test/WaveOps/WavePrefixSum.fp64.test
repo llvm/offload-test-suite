@@ -166,9 +166,6 @@ DescriptorSets:
 
 # REQUIRES: Double
 
-# Bug: https://github.com/llvm/llvm-project/issues/217826
-# XFAIL: Clang && Vulkan
-
 # Bug: https://github.com/llvm/offload-test-suite/issues/961
 # XFAIL: NV && Clang && DirectX
 
