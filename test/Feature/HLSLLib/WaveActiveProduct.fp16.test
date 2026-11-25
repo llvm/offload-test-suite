@@ -1,0 +1,6 @@
+# REQUIRES: Half
+
+# RUN: split-file %S/Inputs/WaveActiveProduct.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE=float16_t \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

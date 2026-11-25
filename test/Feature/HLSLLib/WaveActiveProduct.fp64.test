@@ -1,0 +1,6 @@
+# REQUIRES: Double
+
+# RUN: split-file %S/Inputs/WaveActiveProduct.test %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=double -DTEST_DOUBLE \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

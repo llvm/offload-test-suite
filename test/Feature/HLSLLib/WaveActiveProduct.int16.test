@@ -1,0 +1,9 @@
+# REQUIRES: Int16
+
+# RUN: split-file %S/Inputs/WaveActiveProduct.test %t
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE=int16_t \
+# RUN:   -DTEST_INTEGER -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -enable-16bit-types -DTYPE=uint16_t \
+# RUN:   -DTEST_INTEGER -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

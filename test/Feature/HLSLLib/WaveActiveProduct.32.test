@@ -1,0 +1,9 @@
+# RUN: split-file %S/Inputs/WaveActiveProduct.test %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=int -DTEST_INTEGER \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE=uint -DTEST_INTEGER \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE=float -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
