@@ -12,10 +12,10 @@ VSOutput main(float2 Position : POSITION) {
   float2 P = float2(Position.x + 1, 1 - Position.y) / 2;
   VSOutput O;
   O.Pos = float4(Position, 0, 1);
-  O.S = (TYPE)P.x;
-  O.V2 = (vector<TYPE, 2>)P;
-  O.V3 = (vector<TYPE, 3>)P.xyx;
-  O.V4 = (vector<TYPE, 4>)P.xyxy;
+  O.S = (TYPE)(P.x + 1);
+  O.V2 = (vector<TYPE, 2>)(P + float2(2, 3));
+  O.V3 = (vector<TYPE, 3>)(P.xyx + float3(4, 5, 6));
+  O.V4 = (vector<TYPE, 4>)(P.xyxy + float4(7, 8, 9, 10));
   return O;
 }
 
@@ -67,10 +67,10 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
-    Data: [0.5, 0, 0, 0,
-           0.5, 0.5, 0, 0,
-           0.5, 0.5, 0.5, 0,
-           0.5, 0.5, 0.5, 0.5]
+    Data: [1.5, 0, 0, 0,
+           2.5, 3.5, 0, 0,
+           4.5, 5.5, 6.5, 0,
+           7.5, 8.5, 9.5, 10.5]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:

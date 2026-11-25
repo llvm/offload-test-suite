@@ -12,10 +12,12 @@ VSOutput main(float2 Position : POSITION) {
   float2 P = float2(Position.x + 1, 1 - Position.y) / 2;
   VSOutput O;
   O.Pos = float4(Position, 0, 1);
-  O.M32 = float3x2(P, P + 1, P + 2);
-  O.M24 = float2x4(P.xyxy, P.xyxy + 1);
-  O.M31 = float3x1(P.x, P.x + 1, P.x + 2);
-  O.M44 = float4x4(P.xyxy, P.xyxy + 1, P.xyxy + 2, P.xyxy + 3);
+  O.M32 = float3x2(P, P, P) + float3x2(1, 2, 3, 4, 5, 6);
+  O.M24 = float2x4(P.xyxy, P.xyxy) + float2x4(7, 8, 9, 10, 11, 12, 13, 14);
+  O.M31 = float3x1(P.x, P.x, P.x) + float3x1(15, 16, 17);
+  O.M44 = float4x4(P.xyxy, P.xyxy, P.xyxy, P.xyxy) +
+          float4x4(18, 19, 20, 21, 22, 23, 24, 25,
+                   26, 27, 28, 29, 30, 31, 32, 33);
   return O;
 }
 
@@ -79,18 +81,18 @@ Buffers:
   - Name: ExpectedOut
     Format: Float32
     Stride: 16
-    Data: [0.5, 0.5, 0, 0,
-           1.5, 1.5, 0, 0,
-           2.5, 2.5, 0, 0,
-           0.5, 0.5, 0.5, 0.5,
-           1.5, 1.5, 1.5, 1.5,
-           0.5, 0, 0, 0,
-           1.5, 0, 0, 0,
-           2.5, 0, 0, 0,
-           0.5, 0.5, 0.5, 0.5,
-           1.5, 1.5, 1.5, 1.5,
-           2.5, 2.5, 2.5, 2.5,
-           3.5, 3.5, 3.5, 3.5]
+    Data: [1.5, 2.5, 0, 0,
+           3.5, 4.5, 0, 0,
+           5.5, 6.5, 0, 0,
+           7.5, 8.5, 9.5, 10.5,
+           11.5, 12.5, 13.5, 14.5,
+           15.5, 0, 0, 0,
+           16.5, 0, 0, 0,
+           17.5, 0, 0, 0,
+           18.5, 19.5, 20.5, 21.5,
+           22.5, 23.5, 24.5, 25.5,
+           26.5, 27.5, 28.5, 29.5,
+           30.5, 31.5, 32.5, 33.5]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
