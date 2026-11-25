@@ -6,8 +6,8 @@ permissions:
 # Runs one lit suite on a GPU runner against distributions built by earlier
 # frequent-build-llvm.yaml and frequent-build-dxc.yaml runs, rebuilding the
 # offload-test-suite tools standalone from the PR head. Called by
-# pr-matrix.yaml for its default x64 cells and by
-# validate-frequent-builder.yaml; see docs/frequent-builder.md.
+# pr-matrix.yaml, the Qualcomm schedules, and validate-frequent-builder.yaml.
+# See docs/frequent-builder.md.
 
 on:
   workflow_call:
@@ -17,7 +17,7 @@ on:
         required: true
         type: string
       Arch:
-        description: 'Target arch of the consumed artifact; must match the producing build. Accepted values: `x64`.'
+        description: 'Target arch of the consumed artifact; must match the runner and producing build. Accepted values: `x64`, `arm64`.'
         required: true
         type: string
       SKU:
@@ -62,6 +62,17 @@ jobs:
       actions: read
     runs-on: [self-hosted, "hlsl-${{ inputs.SKU }}"]
     steps:
+      - name: Validate inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          case '${{ inputs.OS }}:${{ inputs.Arch }}:${{ runner.arch }}' in
+            windows:x64:X64|windows:arm64:ARM64) ;;
+            *)
+              echo "::error::Unsupported OS/architecture or runner mismatch:" \
+                "${{ inputs.OS }}/${{ inputs.Arch }} on ${{ runner.arch }}."
+              exit 1 ;;
+          esac
       # run-id + github-token make these downloads cross-run. LLVM and DXC
       # come from separate builds, so each has its own run id.
       - name: Download LLVM distribution artifact

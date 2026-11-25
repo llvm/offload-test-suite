@@ -1,8 +1,7 @@
 name: Frequent Build (LLVM)
 
-# Builds x64 and ARM64 LLVM/Clang distributions. Migrated x64 PR jobs
-# download the most recent successful build. ARM64 PR jobs still build
-# their own compilers.
+# Builds x64 and ARM64 LLVM/Clang distributions. Migrated x64 PR jobs and
+# all ARM64 test jobs download the most recent successful build.
 # See docs/frequent-builder.md.
 
 permissions:
