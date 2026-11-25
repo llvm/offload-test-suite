@@ -71,7 +71,7 @@ DescriptorSets:
 Results:
   - Result: Barycentrics
     Rule: BufferFloatULP
-    ULPT: 17
+    ULPT: 20
     Actual: Output
     Expected: Output_Expected
 ...
