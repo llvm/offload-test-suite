@@ -1,0 +1,100 @@
+#--- vertex.hlsl
+struct VSOutput {
+  float4 Pos : SV_Position;
+  float X : ATTR0;
+};
+
+VSOutput main(float2 Position : POSITION) {
+  VSOutput O;
+  O.Pos = float4(Position, 0, 1);
+  // Pixel x coordinate of this vertex in the 1x1 render target.
+  O.X = (Position.x + 1) / 2;
+  return O;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 Pos : SV_Position;
+  float X : ATTR0;
+};
+
+RWStructuredBuffer<float> Out : register(u0);
+
+float4 main(PSInput I) : SV_Target {
+  // X is the pixel x coordinate where the attribute is evaluated. The
+  // triangle covers only x >= 0.6 of the pixel, so the centroid will detect
+  // this, whereas, normally reading the input at, x = 0.5 would not.
+  float X = EvaluateAttributeCentroid(I.X);
+  Out[0] = X > 0.55 && X < 1.05 ? 1 : 0;
+  return 0;
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Covers the pixel right of x = 0.6, which includes samples of the standard
+  # 4x pattern but not the pixel center.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [0.2, 3, 0.2, -3, 5, 0]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Stride: 4
+    FillSize: 4
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 4
+    FillSize: 4
+    FillValue: 1
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+  SampleCount: 4
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: PartialCoverage
+    Rule: BufferExact
+    Actual: Out
+    Expected: ExpectedOut
+...
+#--- end
+
+# With 4x MSAA and the pixel center uncovered, the centroid is in the covered
+# part of the pixel.
+
+# Unimplemented https://github.com/llvm/llvm-project/issues/99110
+# XFAIL: Clang
+
+# REQUIRES: !Vulkan || VulkanSampleRateShading
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
