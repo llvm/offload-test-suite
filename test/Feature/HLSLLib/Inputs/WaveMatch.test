@@ -1,0 +1,132 @@
+#--- source.hlsl
+
+// Checks matching groups, uniform values, unique values, and inactive lanes.
+// Each component adds one lane-index bit, so scalar and vector matches
+// repeat every 2, 4, 8, and 16 lanes. Every mask word must match.
+
+#include "common.hlsl"
+
+bool check(Type4 Value, uint Period, bool Divergent) {
+  uint4 Result1 = WaveMatch(Value.x);
+  uint4 Result2 = WaveMatch(Value.xy);
+  uint4 Result3 = WaveMatch(Value.xyz);
+  uint4 Result4 = WaveMatch(Value);
+  return all(Result1 == expectedMask(Period ? Period : 1, Divergent)) &&
+         all(Result2 == expectedMask(Period ? Period * 2 : 1, Divergent)) &&
+         all(Result3 == expectedMask(Period ? Period * 4 : 1, Divergent)) &&
+         all(Result4 == expectedMask(Period ? Period * 8 : 1, Divergent));
+}
+
+#include "main.hlsl"
+
+#--- matrix.hlsl
+
+#include "common.hlsl"
+
+typedef matrix<TYPE, MATRIX_ROWS, MATRIX_COLS> TypeMatrix;
+
+bool check(Type4 Value, uint Period, bool Divergent) {
+  TypeMatrix Input;
+  for (uint Row = 0; Row < MATRIX_ROWS; ++Row)
+    for (uint Column = 0; Column < MATRIX_COLS; ++Column)
+      Input[Row][Column] = Value[(Row * MATRIX_COLS + Column) % 4];
+
+  uint Components = min(MATRIX_ROWS * MATRIX_COLS, 4);
+  uint MatrixPeriod = Period ? Period * (1u << (Components - 1)) : 1;
+  uint4 Result = WaveMatch(Input);
+  return all(Result == expectedMask(MatrixPeriod, Divergent));
+}
+
+#include "main.hlsl"
+
+#--- common.hlsl
+
+typedef vector<TYPE, 4> Type4;
+
+#ifdef DOUBLE_INPUT
+StructuredBuffer<double4> Inputs : register(t0);
+#else
+StructuredBuffer<int4> Inputs : register(t0);
+#endif
+RWStructuredBuffer<uint4> Out : register(u1);
+
+uint4 expectedMask(uint Period, bool Divergent) {
+  uint Lane = WaveGetLaneIndex();
+  uint4 Mask = uint4(0, 0, 0, 0);
+  for (uint Other = 0; Other < WaveGetLaneCount(); ++Other)
+    if (Other % Period == Lane % Period && (!Divergent || Other % 3 != 1))
+      Mask[Other / 32] |= 1u << (Other % 32);
+  return Mask;
+}
+
+#--- main.hlsl
+
+#ifdef WAVE_SIZE
+[WaveSize(WAVE_SIZE)]
+#endif
+[numthreads(128, 1, 1)]
+void main(uint3 TID : SV_GroupThreadID) {
+  uint Lane = WaveGetLaneIndex();
+#ifdef DOUBLE_INPUT
+  Type4 Value = Type4(Inputs[Lane % 2].x, Inputs[(Lane / 2) % 2].y,
+                      Inputs[(Lane / 4) % 2].z, Inputs[(Lane / 8) % 2].w);
+#else
+  Type4 Value = Type4(Inputs[0]) +
+                Type4(Lane % 2, (Lane / 2) % 2, (Lane / 4) % 2,
+                      (Lane / 8) % 2);
+#endif
+#ifdef WIDE_INT
+  // Matching values differ only in the upper 32 bits.
+  Value *= TYPE(4294967296ull);
+#endif
+  bool Grouped = check(Value, 2, false);
+  bool Uniform = check(Type4(1, 1, 1, 1), 0, false);
+  bool Unique = check(Type4(Lane, Lane, Lane, Lane), 128, false);
+  bool Divergent = true;
+  if (Lane % 3 != 1)
+    Divergent = check(Value, 2, true);
+  Out[TID.x] = uint4(Grouped, Uniform, Unique, Divergent);
+}
+
+//--- pipeline.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Inputs
+    Format: Int32
+    Stride: 16
+    Data: [ -3, -5, -9, -17 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+    FillValue: 1
+Results:
+  - Result: TestMatch
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: Inputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...

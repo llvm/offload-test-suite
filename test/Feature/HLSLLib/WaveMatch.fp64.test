@@ -1,0 +1,58 @@
+#--- pipeline.fp64.yaml
+
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: Inputs
+    Format: Float64
+    Stride: 32
+    # These rows differ as doubles but become equal as floats.
+    Data: [
+      16777216.0, 16777216.0, 16777216.0, 16777216.0,
+      16777217.0, 16777217.0, 16777217.0, 16777217.0
+    ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 2048
+    FillValue: 1
+Results:
+  - Result: TestMatch
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: Inputs
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Double && WaveMultiPrefix
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99207
+# XFAIL: Clang
+
+# RUN: split-file %S/Inputs/WaveMatch.test %t
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=double -DDOUBLE_INPUT \
+# RUN:   -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.fp64.yaml %t.o
