@@ -1,0 +1,134 @@
+# Draws one point with PointSize = 4.0 into an 8x8 render target and checks
+# which pixels it covers.
+#
+# Per the Vulkan spec (34.10.1), a point is rasterized as an
+# axis-aligned square, centered on the vertex, with side lengths PointSize.
+# A pixel is covered if one of its sample points intersects that square.
+# The point sits at NDC (0,0) so the square spans [2,6) on both axes and
+# pixel centers are 0.5 px away from its edges.
+#
+#      x: 0 1 2 3 4 5 6 7
+#   y: 0  . . . . . . . .
+#      1  . O . . . . O .      # pixel covered by the 4x4 point
+#      2  . . I # # I . .      I probe expected covered
+#      3  . . # # # # . .      O probe expected NOT covered
+#      4  . . # # # # . .      . not probed
+#      5  . . I # # I . .
+#      6  . O . . . . O .      The point center is the corner shared by
+#      7  . . . . . . . .      pixels (3,3), (4,3), (3,4) and (4,4).
+#
+# The pixel shader writes Output[i] = 1 for each probe i it runs on. Expected
+# result: [1,1,1,1, 0,0,0,0]. Without PointSize taking effect the point is 1 px
+# wide and the inside probes are not covered, so the test fails.
+
+#--- vertex.hlsl
+struct VSOutput {
+  float4 position : SV_POSITION;
+  [[vk::builtin("PointSize")]] float size : PSIZE;
+};
+
+VSOutput main(float4 pos : POSITION) {
+  VSOutput o;
+  o.position = pos;
+  o.size = 4.0;
+  return o;
+}
+
+#--- pixel.hlsl
+struct PSInput {
+  float4 position : SV_POSITION;
+};
+
+RWStructuredBuffer<uint> Output : register(u0);
+
+// Probe pixels, relative to a 4x4 point centered on the 8x8 target (pixel
+// coordinates [2,6) on both axes). Probe centers sit 1.5 (inside) and 2.5
+// (outside) pixels from the point center, so any driver that rounds the point
+// size anywhere in [3, 5) agrees (the spec lets an implementation use the
+// nearest supported size). Edge pixels are deliberately not probed.
+static const uint2 Probes[8] = {
+  uint2(2, 2), uint2(5, 5), uint2(2, 5), uint2(5, 2), // inside
+  uint2(1, 1), uint2(6, 6), uint2(1, 6), uint2(6, 1)  // outside
+};
+
+float4 main(PSInput input) : SV_TARGET {
+  uint2 pixel = (uint2)input.position.xy;
+  for (uint i = 0; i < 8; ++i) {
+    if (all(pixel == Probes[i]))
+      Output[i] = 1;
+  }
+  return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # One point at NDC (0, 0): the center of the render target, which is a
+  # pixel corner on an even-sized target.
+  - Name: VertexData
+    Format: Float32
+    Stride: 16
+    Data: [ 0.0, 0.0, 0.0, 1.0 ]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 1024   # 8x8 @ 16 bytes per pixel
+    OutputProps:
+      Height: 8
+      Width: 8
+      Depth: 1
+  - Name: Output
+    Format: UInt32
+    Stride: 4
+    FillSize: 32   # 8 x uint32
+    FillValue: 0
+  - Name: Output_Expected
+    Format: UInt32
+    Stride: 4
+    # 4 inside probes covered, 4 outside probes not covered.
+    Data: [ 1, 1, 1, 1, 0, 0, 0, 0 ]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 4
+      Offset: 0
+      Name: POSITION
+  # PointSize only takes effect with a point-list topology.
+  Topology: PointList
+  # Single sample keeps point coverage a plain pixel-center test.
+  SampleCount: 1
+  RenderTarget: RenderTarget
+DescriptorSets:
+  - Resources:
+    - Name: Output
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: PointCoverage
+    Rule: BufferExact
+    Actual: Output
+    Expected: Output_Expected
+...
+#--- end
+
+# vk::builtin("PointSize") has no DXIL equivalent: the attribute is inert on
+# DirectX and Metal (shader converter consumes DXIL), so there is nothing to test.
+# REQUIRES: Vulkan
+# Only a size of 1.0 is guaranteed. Larger sizes need the largePoints device
+# feature (Vulkan spec, "Basic Point Rasterization").
+# REQUIRES: VulkanLargePoints
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T vs_6_1 -Fo %t-vertex.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_1 -Fo %t-pixel.o %t/pixel.hlsl
+# RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
