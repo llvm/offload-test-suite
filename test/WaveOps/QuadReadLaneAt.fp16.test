@@ -1,0 +1,59 @@
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float16
+    Stride: 8
+    Data: [ 0x3c00, 0xc000, 0x4200, 0xc400,
+            0x4500, 0xc600, 0x4700, 0xc800,
+            0x4880, 0xc900, 0x4980, 0xca00,
+            0x4a80, 0xcb00, 0x4b80, 0xcc00,
+            0x4c40, 0xcc80, 0x4cc0, 0xcd00,
+            0x4d40, 0xcd80, 0x4dc0, 0xce00,
+            0x4e40, 0xce80, 0x4ec0, 0xcf00,
+            0x4f40, 0xcf80, 0x4fc0, 0xd000 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: ScalarAndVectors
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Half
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99174
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -DTYPE=half \
+# RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

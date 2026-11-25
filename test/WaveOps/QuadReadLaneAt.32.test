@@ -1,0 +1,100 @@
+#--- int.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Int32
+    Stride: 16
+    Data: [ -1, 2, -3, 4, 5, -6, 7, -8,
+            -9, 10, -11, 12, 13, -14, 15, -16,
+            -17, 18, -19, 20, 21, -22, 23, -24,
+            -25, 26, -27, 28, 29, -30, 31, -32 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: ScalarAndVectors
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- float.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float32
+    Stride: 16
+    Data: [ -1.5, 2.25, -3.5, 4.75, 5.5, -6.25, 7.5, -8.75,
+            -9.5, 10.25, -11.5, 12.75, 13.5, -14.25, 15.5, -16.75,
+            -17.5, 18.25, -19.5, 20.75, 21.5, -22.25, 23.5, -24.75,
+            -25.5, 26.25, -27.5, 28.75, 29.5, -30.25, 31.5, -32.75 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: ScalarAndVectors
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99174
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=int -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/int.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE=uint -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/int.yaml %t.o
+# RUN: %dxc_target -T cs_6_5 -DTYPE=float -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/float.yaml %t.o

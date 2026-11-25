@@ -1,0 +1,58 @@
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Int16
+    Stride: 8
+    Data: [ -1, 2, -3, 4, 5, -6, 7, -8,
+            -9, 10, -11, 12, 13, -14, 15, -16,
+            -17, 18, -19, 20, 21, -22, 23, -24,
+            -25, 26, -27, 28, 29, -30, 31, -32 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: ScalarAndVectors
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Int16
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99174
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -DTYPE=int16_t \
+# RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -DTYPE=uint16_t \
+# RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

@@ -1,0 +1,64 @@
+#--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+Buffers:
+  - Name: In
+    Format: Float64
+    Stride: 32
+    # The last four rows test the float32 range limit.
+    Data: [ -4294967297.25, 4294967298.5, -4294967299.75, 4294967300.25,
+            2147483647.0, 2147483646.0, 2147483648.0, -2147483648.0,
+            4294967295.0, 4294967294.0, 4294967296.0, 0.0,
+            1.5, -2.25, 3.5, -4.75,
+            3.4028234663852882e+38, -3.4028234663852882e+38,
+            4294967313.5, -4294967314.75,
+            3.4028234663852886e+38, -3.4028234663852886e+38,
+            4294967317.75, -4294967318.25,
+            3.402823466385289e+38, -3.402823466385289e+38,
+            4294967321.25, -4294967322.5,
+            6.805646932770577e+38, -6.805646932770577e+38,
+            4294967325.5, -4294967326.75 ]
+  - Name: Out
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+  - Name: Expected
+    Format: UInt32
+    Stride: 16
+    FillSize: 512
+    FillValue: 1
+Results:
+  - Result: ScalarAndVectors
+    Rule: BufferExact
+    Actual: Out
+    Expected: Expected
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 1
+        Space: 0
+      VulkanBinding:
+        Binding: 1
+...
+#--- end
+
+# REQUIRES: Double
+
+# Unimplemented: https://github.com/llvm/llvm-project/issues/99174
+# XFAIL: Clang
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -DTYPE=double \
+# RUN:   -Fo %t.o %S/Inputs/QuadReadLaneAt.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
