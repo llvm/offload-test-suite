@@ -232,8 +232,7 @@ DescriptorSets:
 
 # REQUIRES: Int64
 
-# Bug: https://github.com/llvm/offload-test-suite/issues/988
-# Bug: https://github.com/llvm/offload-test-suite/issues/989
+# Bug: https://github.com/llvm/offload-test-suite/issues/959
 # XFAIL: Metal
 
 # RUN: split-file %s %t
