@@ -8,14 +8,14 @@ struct VSOutput {
 };
 
 VSOutput main(float2 Position : POSITION) {
-  // Pixel coordinate of this vertex in the 1x1 render target.
-  float2 P = float2(Position.x + 1, 1 - Position.y) / 2;
+  // Pixel x coordinate of this vertex in the 1x1 render target.
+  float X = (Position.x + 1) / 2;
   VSOutput O;
   O.Pos = float4(Position, 0, 1);
-  O.S = P.x + 1;
-  O.V2 = P + float2(2, 3);
-  O.V3 = P.xyx + float3(4, 5, 6);
-  O.V4 = P.xyxy + float4(7, 8, 9, 10);
+  O.S = X + 1;
+  O.V2 = X + float2(2, 3);
+  O.V3 = X + float3(4, 5, 6);
+  O.V4 = X + float4(7, 8, 9, 10);
   return O;
 }
 
@@ -46,6 +46,7 @@ Shaders:
   - Stage: Pixel
     Entry: main
 Buffers:
+  # Covers the whole pixel.
   - Name: VertexData
     Format: Float32
     Stride: 8
@@ -90,13 +91,77 @@ DescriptorSets:
 Results:
   - Result: Evaluate
     Rule: BufferFloatEpsilon
-    Epsilon: 0.001
+    Epsilon: 0.0001
+    Actual: Out
+    Expected: ExpectedOut
+...
+
+#--- msaa.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: main
+  - Stage: Pixel
+    Entry: main
+Buffers:
+  # Covers the pixel right of x = 0.6, which includes samples of the standard
+  # 4x pattern but not the pixel center.
+  - Name: VertexData
+    Format: Float32
+    Stride: 8
+    Data: [0.2, 3, 0.2, -3, 5, 0]
+  - Name: RenderTarget
+    Format: Float32
+    Channels: 4
+    FillSize: 16
+    OutputProps:
+      Height: 1
+      Width: 1
+      Depth: 1
+  - Name: Out
+    Format: Float32
+    Stride: 16
+    FillSize: 64
+    FillValue: 100 # Any value the shader does not write fails.
+  # The centroid x is anywhere in the covered [0.6, 1], so expect x = 0.8 with
+  # an epsilon that accepts [0.55, 1.05] but rejects the pixel center, 0.5.
+  - Name: ExpectedOut
+    Format: Float32
+    Stride: 16
+    Data: [1.8, 0, 0, 0,
+           2.8, 3.8, 0, 0,
+           4.8, 5.8, 6.8, 0,
+           7.8, 8.8, 9.8, 10.8]
+Bindings:
+  VertexBuffer: VertexData
+  VertexAttributes:
+    - Format: Float32
+      Channels: 2
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RenderTarget
+  SampleCount: 4
+DescriptorSets:
+  - Resources:
+    - Name: Out
+      Kind: RWStructuredBuffer
+      DirectXBinding:
+        Register: 0
+        Space: 0
+      VulkanBinding:
+        Binding: 0
+Results:
+  - Result: PartialCoverage
+    Rule: BufferFloatEpsilon
+    Epsilon: 0.25
     Actual: Out
     Expected: ExpectedOut
 ...
 #--- end
 
-# Without MSAA the centroid is the pixel center, (0.5, 0.5).
+# pipeline.yaml: without MSAA the centroid is the pixel center, (0.5, 0.5).
+# msaa.yaml: with 4x MSAA and the pixel center uncovered, the centroid is in the
+# covered part of the pixel, so returning the plain input fails.
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/99110
 # XFAIL: Clang
@@ -107,3 +172,4 @@ Results:
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T ps_6_0 -Fo %t-pixel.o %t/pixel.hlsl
 # RUN: %offloader %t/pipeline.yaml %t-vertex.o %t-pixel.o
+# RUN: %offloader %t/msaa.yaml %t-vertex.o %t-pixel.o

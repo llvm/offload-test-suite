@@ -34,10 +34,12 @@ Shaders:
   - Stage: Pixel
     Entry: main
 Buffers:
+  # Covers the pixel right of x = 0.6, which includes samples of the standard
+  # 4x pattern but not the pixel center.
   - Name: VertexData
     Format: Float32
     Stride: 8
-    Data: [-1, -1, 3, -1, -1, 3]
+    Data: [0.2, 3, 0.2, -3, 5, 0]
   - Name: RenderTarget
     Format: Float32
     Channels: 4
@@ -51,10 +53,12 @@ Buffers:
     Stride: 4
     FillSize: 4
     FillValue: 100 # Any value the shader does not write fails.
+  # The centroid x is anywhere in the covered [0.6, 1], so expect x = 0.8 with
+  # an epsilon that accepts [0.55, 1.05] but rejects the pixel center, 0.5.
   - Name: ExpectedOut
     Format: Float32
     Stride: 4
-    Data: [0.5]
+    Data: [0.8]
 Bindings:
   VertexBuffer: VertexData
   VertexAttributes:
@@ -63,6 +67,7 @@ Bindings:
       Offset: 0
       Name: POSITION
   RenderTarget: RenderTarget
+  SampleCount: 4
 DescriptorSets:
   - Resources:
     - Name: Out
@@ -73,16 +78,17 @@ DescriptorSets:
       VulkanBinding:
         Binding: 0
 Results:
-  - Result: Evaluate
+  - Result: PartialCoverage
     Rule: BufferFloatEpsilon
-    Epsilon: 0.001
+    Epsilon: 0.25
     Actual: Out
     Expected: ExpectedOut
 ...
 #--- end
 
-# A basic 16-bit check; the vector sizes are covered by the fp32 test. Without
-# MSAA the centroid is the pixel center, (0.5, 0.5).
+# A basic 16-bit check; the vector sizes are covered by the fp32 test. With 4x
+# MSAA and the pixel center uncovered, the centroid is in the covered part of
+# the pixel, so returning the plain input fails.
 
 # Unimplemented https://github.com/llvm/llvm-project/issues/99110
 # XFAIL: Clang
