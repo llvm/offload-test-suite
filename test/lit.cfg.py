@@ -208,6 +208,7 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("AtomicInt64OnTypedResourceSupported", False):
             config.available_features.add("Int64TypedResourceAtomics")
+        config.available_features.add("SampleRateShading")
         # Float32 atomic exchange on groupshared memory is core DXIL from
         # SM 6.0 on D3D12, with no separate capability bit to query.
         config.available_features.add("Float32GroupSharedAtomics")
@@ -244,6 +245,7 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Int64")
         config.available_features.add("Half")
         config.available_features.add("multi-viewport")
+        config.available_features.add("SampleRateShading")
         if device["Features"].get("MeshShader", False):
             config.available_features.add("MeshShader")
         if device["Features"].get("supportsRaytracing", False):
@@ -265,7 +267,7 @@ def setDeviceFeatures(config, device, compiler):
         if device["Features"].get("storageInputOutput16", False):
             config.available_features.add("VulkanStorageInputOutput16")
         if device["Features"].get("sampleRateShading", False):
-            config.available_features.add("VulkanSampleRateShading")
+            config.available_features.add("SampleRateShading")
         if device["Features"].get("shaderSharedInt64Atomics", False):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("shaderBufferInt64Atomics", False):

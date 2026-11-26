@@ -97,7 +97,7 @@ Results:
 # invalid SPIR-V.
 # XFAIL: DXC && Vulkan
 
-# REQUIRES: Half && (!Vulkan || (VulkanSampleRateShading && VulkanStorageInputOutput16))
+# REQUIRES: Half && SampleRateShading && (!Vulkan || VulkanStorageInputOutput16)
 
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_2 -enable-16bit-types -Fo %t-vertex.o %t/vertex.hlsl
