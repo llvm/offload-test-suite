@@ -3701,6 +3701,21 @@ private:
                                       FeaturesFragmentShadingRate.Name)));
 #endif
 #include "VKFeatures.def"
+
+    const auto SupportsSampledImage = [this](VkFormat Format) {
+      VkFormatProperties FormatProps;
+      vkGetPhysicalDeviceFormatProperties(PhysicalDevice, Format, &FormatProps);
+      return (FormatProps.optimalTilingFeatures &
+              VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT) != 0;
+    };
+    Caps.insert(std::make_pair(
+        "R64UintSampledImage",
+        makeCapability<bool>("R64UintSampledImage",
+                             SupportsSampledImage(VK_FORMAT_R64_UINT))));
+    Caps.insert(std::make_pair(
+        "R64SintSampledImage",
+        makeCapability<bool>("R64SintSampledImage",
+                             SupportsSampledImage(VK_FORMAT_R64_SINT))));
   }
 
 public:

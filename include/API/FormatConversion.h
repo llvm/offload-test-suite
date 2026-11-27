@@ -80,6 +80,14 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
       return Format::RGBA32Float;
     }
     break;
+  case DataFormat::Float64:
+    switch (Channels) {
+    case 1:
+      return Format::R64Float;
+    case 2:
+      return Format::RG64Float;
+    }
+    break;
   case DataFormat::Depth32:
     // D32FloatS8Uint is not expressible as DataFormat + Channels because the
     // stencil component is uint8, not a second Depth32 channel. Once the
@@ -111,7 +119,6 @@ inline llvm::Expected<Format> toFormat(DataFormat Format, int Channels) {
   case DataFormat::Hex32:
   case DataFormat::Hex64:
   case DataFormat::Float16:
-  case DataFormat::Float64:
   case DataFormat::Bool:
     return llvm::createStringError(std::errc::invalid_argument,
                                    "DataFormat %d has no Format equivalent.",

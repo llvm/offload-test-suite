@@ -208,6 +208,9 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("Int64GroupSharedAtomics")
         if device["Features"].get("AtomicInt64OnTypedResourceSupported", False):
             config.available_features.add("Int64TypedResourceAtomics")
+        # D3D12 stores 64-bit texels as R32G32, which every device supports.
+        config.available_features.add("Int64TypedResources")
+        config.available_features.add("Int64SampledTextures")
         # Float32 atomic exchange on groupshared memory is core DXIL from
         # SM 6.0 on D3D12, with no separate capability bit to query.
         config.available_features.add("Float32GroupSharedAtomics")
@@ -243,6 +246,9 @@ def setDeviceFeatures(config, device, compiler):
         config.available_features.add("Int16")
         config.available_features.add("Int64")
         config.available_features.add("Half")
+        # Metal stores 64-bit texels as RG32Uint, which every device supports.
+        config.available_features.add("Int64TypedResources")
+        config.available_features.add("Int64SampledTextures")
         config.available_features.add("multi-viewport")
         if device["Features"].get("MeshShader", False):
             config.available_features.add("MeshShader")
@@ -268,6 +274,11 @@ def setDeviceFeatures(config, device, compiler):
             config.available_features.add("VulkanInt64BufferAtomics")
         if device["Features"].get("shaderImageInt64Atomics", False):
             config.available_features.add("Int64TypedResourceAtomics")
+            config.available_features.add("Int64TypedResources")
+        HasR64UintSampledImage = device["Features"].get("R64UintSampledImage", False)
+        HasR64SintSampledImage = device["Features"].get("R64SintSampledImage", False)
+        if HasR64UintSampledImage and HasR64SintSampledImage:
+            config.available_features.add("Int64SampledTextures")
         if device["Features"].get("shaderSharedFloat32Atomics", False):
             config.available_features.add("Float32GroupSharedAtomics")
         if device["Features"].get("shaderBufferFloat32Atomics", False):

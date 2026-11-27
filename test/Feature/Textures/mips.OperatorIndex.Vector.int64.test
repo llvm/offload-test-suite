@@ -1,0 +1,145 @@
+#--- source.hlsl
+
+// mips[][] reads on textures with two-component 64-bit integer elements at
+// mip 0 and mip 1. Every component has a nonzero high word that differs
+// between components and texels and a nonzero low word, so a lost or swapped
+// word changes the result.
+
+Texture1D<int64_t2> Tex1D : register(t0);
+Texture2D<uint64_t2> Tex2D : register(t1);
+Texture3D<int64_t2> Tex3D : register(t2);
+RWStructuredBuffer<int64_t2> OutS : register(u3);
+RWStructuredBuffer<uint64_t2> OutU : register(u4);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Texture1D::mips.operator[][]
+  OutS[0] = Tex1D.mips[0][0];
+  OutS[1] = Tex1D.mips[0][1];
+  OutS[2] = Tex1D.mips[1][0];
+
+  // Texture3D::mips.operator[][]
+  OutS[3] = Tex3D.mips[0][uint3(0, 0, 0)];
+  OutS[4] = Tex3D.mips[0][uint3(1, 1, 1)];
+  OutS[5] = Tex3D.mips[1][uint3(0, 0, 0)];
+
+  // Texture2D::mips.operator[][]
+  OutU[0] = Tex2D.mips[0][int2(0, 0)];
+  OutU[1] = Tex2D.mips[0][int2(1, 1)];
+  OutU[2] = Tex2D.mips[1][int2(0, 0)];
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex1D
+    Format: Int64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1, MipLevels: 2 }
+    Data: [ 0x0000011080000210, -0x0000031080000410,   # Mip 0 (0)
+            -0x0000011180000211, 0x0000031180000411,   # Mip 0 (1)
+            -0x0000011880000218, 0x0000031880000418 ]  # Mip 1 (0)
+
+  - Name: Tex2D
+    Format: UInt64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 2, Depth: 1, MipLevels: 2 }
+    Data: [ 0xC000012080000220, 0xC000032080000420,    # Mip 0 (0,0)
+            0xC000012180000221, 0xC000032180000421,    # Mip 0 (1,0)
+            0xC000012280000222, 0xC000032280000422,    # Mip 0 (0,1)
+            0xC000012380000223, 0xC000032380000423,    # Mip 0 (1,1)
+            0xC000012880000228, 0xC000032880000428 ]   # Mip 1 (0,0)
+
+  - Name: Tex3D
+    Format: Int64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 2, Depth: 2, MipLevels: 2 }
+    Data: [ 0x0000013080000230, -0x0000033080000430,   # Mip 0 (0,0,0)
+            -0x0000013180000231, 0x0000033180000431,   # Mip 0 (1,0,0)
+            0x0000013280000232, -0x0000033280000432,   # Mip 0 (0,1,0)
+            -0x0000013380000233, 0x0000033380000433,   # Mip 0 (1,1,0)
+            0x0000013480000234, -0x0000033480000434,   # Mip 0 (0,0,1)
+            -0x0000013580000235, 0x0000033580000435,   # Mip 0 (1,0,1)
+            0x0000013680000236, -0x0000033680000436,   # Mip 0 (0,1,1)
+            -0x0000013780000237, 0x0000033780000437,   # Mip 0 (1,1,1)
+            0x0000013880000238, -0x0000033880000438 ]  # Mip 1 (0,0,0)
+
+  - Name: OutS
+    Format: Int64
+    Stride: 16
+    FillSize: 96
+
+  - Name: ExpectedS
+    Format: Int64
+    Stride: 16
+    Data: [ 0x0000011080000210, -0x0000031080000410,   # [0] Tex1D mip 0 (0)
+            -0x0000011180000211, 0x0000031180000411,   # [1] Tex1D mip 0 (1)
+            -0x0000011880000218, 0x0000031880000418,   # [2] Tex1D mip 1 (0)
+            0x0000013080000230, -0x0000033080000430,   # [3] Tex3D mip 0 (0,0,0)
+            -0x0000013780000237, 0x0000033780000437,   # [4] Tex3D mip 0 (1,1,1)
+            0x0000013880000238, -0x0000033880000438 ]  # [5] Tex3D mip 1 (0,0,0)
+
+  - Name: OutU
+    Format: UInt64
+    Stride: 16
+    FillSize: 48
+
+  - Name: ExpectedU
+    Format: UInt64
+    Stride: 16
+    Data: [ 0xC000012080000220, 0xC000032080000420,    # [0] Tex2D mip 0 (0,0)
+            0xC000012380000223, 0xC000032380000423,    # [1] Tex2D mip 0 (1,1)
+            0xC000012880000228, 0xC000032880000428 ]   # [2] Tex2D mip 1 (0,0)
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex1D
+      Kind: Texture1D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Tex2D
+      Kind: Texture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Tex3D
+      Kind: Texture3D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: OutU
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+
+Results:
+  - Result: SignedMipsOperatorIndex
+    Rule: BufferExact
+    Actual: OutS
+    Expected: ExpectedS
+  - Result: UnsignedMipsOperatorIndex
+    Rule: BufferExact
+    Actual: OutU
+    Expected: ExpectedU
+...
+#--- end
+
+# Bug https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8615
+# XFAIL: DXC && Vulkan
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1039
+# XFAIL: Metal
+
+# REQUIRES: Int64
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
