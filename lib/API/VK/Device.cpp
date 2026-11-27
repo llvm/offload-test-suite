@@ -1971,6 +1971,17 @@ public:
       Features.pNext = &FeaturesFragmentShaderBarycentric;
     }
 #endif
+#ifdef VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME
+    const bool HasShaderLongVectorExt = isExtensionSupported(
+        AvailableDeviceExtensions, VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME);
+    VkPhysicalDeviceShaderLongVectorFeaturesEXT FeaturesLongVector{};
+    if (HasShaderLongVectorExt) {
+      FeaturesLongVector.sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_LONG_VECTOR_FEATURES_EXT;
+      FeaturesLongVector.pNext = Features.pNext;
+      Features.pNext = &FeaturesLongVector;
+    }
+#endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
     const bool HasFragmentShadingRateExt = isExtensionSupported(
         AvailableDeviceExtensions, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
@@ -2131,6 +2142,17 @@ public:
             VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
       EnabledDeviceExtensions.push_back(
           VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+    }
+#endif
+#ifdef VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME
+    if (HasShaderLongVectorExt) {
+      if (!FeaturesLongVector.longVector)
+        return llvm::createStringError(
+            std::errc::not_supported,
+            "Device advertises %s but reports longVector=0",
+            VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME);
+      EnabledDeviceExtensions.push_back(
+          VK_EXT_SHADER_LONG_VECTOR_EXTENSION_NAME);
     }
 #endif
 #ifdef VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME
