@@ -1,0 +1,183 @@
+#--- source.hlsl
+
+struct Pair {
+  int4 A;
+  uint4 B;
+};
+
+StructuredBuffer<float4> InF : register(t0);
+StructuredBuffer<int4> InI : register(t1);
+StructuredBuffer<uint4> InU : register(t2);
+
+RWTexture2D<float4> Tex : register(u3);
+RWBuffer<int4> Buf : register(u4);
+RWStructuredBuffer<uint4> SB : register(u5);
+RWStructuredBuffer<Pair> SBS : register(u6);
+RWByteAddressBuffer BAB : register(u7);
+
+[numthreads(1, 1, 1)]
+void main() {
+  float4 F = InF[0];
+  int4 I = InI[0];
+  uint4 U = InU[0];
+
+  // Typed texture: a reordered pair and a compound update of a non-first
+  // component.
+  Tex[int2(1, 0)].zx = F.yw;
+  Tex[int2(0, 1)].y += F.z;
+
+  // Typed buffer: a lone first component and a reordered pair.
+  Buf[0].x = I.w;
+  Buf[1].wz = I.xy;
+
+  // Structured buffer vector elements and struct vector members.
+  SB[0].wx = U.yz;
+  SB[1].z = U.w;
+  SBS[0].A.yw = I.xz;
+  SBS[0].B.x = U.y;
+
+  // Byte-address stores of swizzled values; the surrounding words are
+  // unchanged.
+  BAB.Store2(4, U.wy);
+  BAB.Store<int3>(16, I.zxy);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: InF
+    Format: Float32
+    Stride: 16
+    Data: [ 1.5, 2.5, 3.5, 4.5 ]
+  - Name: InI
+    Format: Int32
+    Stride: 16
+    Data: [ -11, 12, -13, 14 ]
+  - Name: InU
+    Format: UInt32
+    Stride: 16
+    Data: [ 101, 102, 103, 104 ]
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 10.0, 20.0, 30.0, 40.0,       # (0,0)
+            50.0, 60.0, 70.0, 80.0,       # (1,0)
+            90.0, 100.0, 110.0, 120.0,    # (0,1)
+            130.0, 140.0, 150.0, 160.0 ]  # (1,1)
+  - Name: ExpectedTex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 10.0, 20.0, 30.0, 40.0,
+            4.5, 60.0, 2.5, 80.0,         # .zx = F.yw
+            90.0, 103.5, 110.0, 120.0,    # .y += F.z
+            130.0, 140.0, 150.0, 160.0 ]
+  - Name: Buf
+    Format: Int32
+    Channels: 4
+    Data: [ 1, 2, 3, 4,
+            5, 6, 7, 8 ]
+  - Name: ExpectedBuf
+    Format: Int32
+    Channels: 4
+    Data: [ 14, 2, 3, 4,      # .x = I.w
+            5, 6, 12, -11 ]   # .wz = I.xy
+  - Name: SB
+    Format: UInt32
+    Stride: 16
+    Data: [ 21, 22, 23, 24,
+            25, 26, 27, 28 ]
+  - Name: ExpectedSB
+    Format: UInt32
+    Stride: 16
+    Data: [ 103, 22, 23, 102,   # .wx = U.yz
+            25, 26, 104, 28 ]   # .z = U.w
+  - Name: SBS
+    Format: Int32
+    Stride: 32
+    Data: [ 31, 32, 33, 34,  35, 36, 37, 38 ]
+  - Name: ExpectedSBS
+    Format: Int32
+    Stride: 32
+    Data: [ 31, -11, 33, -13,  # A.yw = I.xz
+            102, 36, 37, 38 ]  # B.x = U.y
+  - Name: BAB
+    Format: Int32
+    Stride: 4
+    Data: [ 41, 42, 43, 44, 45, 46, 47, 48 ]
+  - Name: ExpectedBAB
+    Format: Int32
+    Stride: 4
+    Data: [ 41, 104, 102, 44,    # Store2(4, U.wy)
+            -13, -11, 12, 48 ]   # Store<int3>(16, I.zxy)
+
+Results:
+  - Result: Texture
+    Rule: BufferExact
+    Actual: Tex
+    Expected: ExpectedTex
+  - Result: TypedBuffer
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+  - Result: StructuredBuffer
+    Rule: BufferExact
+    Actual: SB
+    Expected: ExpectedSB
+  - Result: StructMembers
+    Rule: BufferExact
+    Actual: SBS
+    Expected: ExpectedSBS
+  - Result: ByteAddressBuffer
+    Rule: BufferExact
+    Actual: BAB
+    Expected: ExpectedBAB
+
+DescriptorSets:
+  - Resources:
+    - Name: InF
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: InI
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: InU
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Tex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: SB
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 5, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+    - Name: SBS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 6, Space: 0 }
+      VulkanBinding: { Binding: 6 }
+    - Name: BAB
+      Kind: RWByteAddressBuffer
+      DirectXBinding: { Register: 7, Space: 0 }
+      VulkanBinding: { Binding: 7 }
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/235868
+# XFAIL: Clang && Vulkan
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

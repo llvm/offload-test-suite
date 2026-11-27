@@ -1,0 +1,84 @@
+#--- source.hlsl
+
+StructuredBuffer<double2> In : register(t0);
+
+RWTexture2D<double2> Tex : register(u1);
+RWBuffer<double2> Buf : register(u2);
+
+[numthreads(1, 1, 1)]
+void main() {
+  double2 D = In[0];
+  Tex[int2(1, 0)].y = D.x;
+  Buf[0].x = D.y;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: In
+    Format: Hex64
+    Stride: 16
+    Data: [ 0x3FF8000000000000, 0xC002000000000000 ]  # 1.5, -2.25
+  # Typed resources have no double format; the data are double bit patterns.
+  - Name: Tex
+    Format: UInt64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0x4016000000000000, 0x401B000000000000,   # (0,0): 5.5, 6.75
+            0xC01E000000000000, 0x4020800000000000 ]  # (1,0): -7.5, 8.25
+  - Name: ExpectedTex
+    Format: UInt64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 0x4016000000000000, 0x401B000000000000,
+            0xC01E000000000000, 0x3FF8000000000000 ]  # .y = D.x
+  - Name: Buf
+    Format: UInt64
+    Channels: 2
+    Data: [ 0x4009000000000000, 0xC010000000000000 ]  # 3.125, -4.0
+  - Name: ExpectedBuf
+    Format: UInt64
+    Channels: 2
+    Data: [ 0xC002000000000000, 0xC010000000000000 ]  # .x = D.y
+
+Results:
+  - Result: Texture
+    Rule: BufferExact
+    Actual: Tex
+    Expected: ExpectedTex
+  - Result: TypedBuffer
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+
+DescriptorSets:
+  - Resources:
+    - Name: In
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Tex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && DirectX
+
+# Vulkan rejects double texture and typed buffer elements.
+# UNSUPPORTED: Vulkan
+# REQUIRES: Double
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

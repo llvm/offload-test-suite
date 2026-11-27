@@ -1,0 +1,109 @@
+#--- source.hlsl
+
+struct Pair {
+  uint16_t4 A;
+  uint16_t4 B;
+};
+
+StructuredBuffer<int16_t4> InI : register(t0);
+StructuredBuffer<uint16_t4> InU : register(t1);
+
+RWStructuredBuffer<int16_t4> SB : register(u2);
+RWStructuredBuffer<Pair> SBS : register(u3);
+RWByteAddressBuffer BAB : register(u4);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int16_t4 I = InI[0];
+  uint16_t4 U = InU[0];
+  SB[0].wy = I.xz;
+  SBS[0].A.x = U.z;
+  BAB.Store<uint16_t3>(8, U.wyx);
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: InI
+    Format: Int16
+    Stride: 8
+    Data: [ -11, 12, -13, 14 ]
+  - Name: InU
+    Format: UInt16
+    Stride: 8
+    Data: [ 101, 102, 103, 104 ]
+  - Name: SB
+    Format: Int16
+    Stride: 8
+    Data: [ 1, 2, 3, 4 ]
+  - Name: ExpectedSB
+    Format: Int16
+    Stride: 8
+    Data: [ 1, -13, 3, -11 ]  # .wy = I.xz
+  - Name: SBS
+    Format: UInt16
+    Stride: 16
+    Data: [ 21, 22, 23, 24,  25, 26, 27, 28 ]
+  - Name: ExpectedSBS
+    Format: UInt16
+    Stride: 16
+    Data: [ 103, 22, 23, 24,  # A.x = U.z
+            25, 26, 27, 28 ]
+  - Name: BAB
+    Format: UInt16
+    Stride: 2
+    Data: [ 41, 42, 43, 44, 45, 46, 47, 48 ]
+  - Name: ExpectedBAB
+    Format: UInt16
+    Stride: 2
+    Data: [ 41, 42, 43, 44,
+            104, 102, 101, 48 ]  # Store<uint16_t3>(8, U.wyx)
+
+Results:
+  - Result: StructuredBuffer
+    Rule: BufferExact
+    Actual: SB
+    Expected: ExpectedSB
+  - Result: StructMember
+    Rule: BufferExact
+    Actual: SBS
+    Expected: ExpectedSBS
+  - Result: ByteAddressBuffer
+    Rule: BufferExact
+    Actual: BAB
+    Expected: ExpectedBAB
+
+DescriptorSets:
+  - Resources:
+    - Name: InI
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: InU
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: SB
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: SBS
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: BAB
+      Kind: RWByteAddressBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+...
+#--- end
+
+# REQUIRES: Int16
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

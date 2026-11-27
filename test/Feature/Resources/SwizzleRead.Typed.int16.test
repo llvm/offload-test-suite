@@ -1,0 +1,129 @@
+#--- source.hlsl
+
+Texture2D<int16_t4> Tex : register(t0);
+Buffer<uint16_t4> Buf : register(t1);
+
+RWStructuredBuffer<int16_t> OutI : register(u2);
+RWStructuredBuffer<uint16_t> OutU : register(u3);
+RWStructuredBuffer<int16_t4> OutI4 : register(u4);
+RWStructuredBuffer<uint16_t4> OutU4 : register(u5);
+
+[numthreads(1, 1, 1)]
+void main() {
+  OutI[0] = Tex[int2(0, 0)].w;
+  OutI4[0] = Tex.Load(int3(1, 0, 0)).yyxz;
+  OutU[0] = Buf[1].z;
+  OutU4[0] = Buf.Load(0).wxyw;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex
+    Format: Int16
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1, -2, 3, -4,   # (0,0)
+            5, -6, 7, -8 ]  # (1,0)
+  - Name: Buf
+    Format: UInt16
+    Channels: 4
+    Data: [ 10, 20, 30, 40,
+            50, 60, 70, 80 ]
+  - Name: OutI
+    Format: Int16
+    Stride: 2
+    FillSize: 4
+  - Name: OutU
+    Format: UInt16
+    Stride: 2
+    FillSize: 4
+  - Name: OutI4
+    Format: Int16
+    Stride: 8
+    FillSize: 8
+  - Name: OutU4
+    Format: UInt16
+    Stride: 8
+    FillSize: 8
+  - Name: ExpectedI
+    Format: Int16
+    Stride: 2
+    Data: [ -4, 0 ]  # Tex[(0,0)].w, then unwritten
+  - Name: ExpectedU
+    Format: UInt16
+    Stride: 2
+    Data: [ 70, 0 ]  # Buf[1].z, then unwritten
+  - Name: ExpectedI4
+    Format: Int16
+    Stride: 8
+    Data: [ -6, -6, 5, 7 ]  # Tex.Load((1,0)).yyxz
+  - Name: ExpectedU4
+    Format: UInt16
+    Stride: 8
+    Data: [ 40, 10, 20, 40 ]  # Buf.Load(0).wxyw
+
+Results:
+  - Result: Int16
+    Rule: BufferExact
+    Actual: OutI
+    Expected: ExpectedI
+  - Result: UInt16
+    Rule: BufferExact
+    Actual: OutU
+    Expected: ExpectedU
+  - Result: Int16x4
+    Rule: BufferExact
+    Actual: OutI4
+    Expected: ExpectedI4
+  - Result: UInt16x4
+    Rule: BufferExact
+    Actual: OutU4
+    Expected: ExpectedU4
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Buf
+      Kind: Buffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: OutI
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutU
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: OutI4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: OutU4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 5, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+...
+#--- end
+
+# Vulkan rejects 16-bit texture and typed buffer elements.
+# UNSUPPORTED: Vulkan
+# REQUIRES: Int16
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1761
+# XFAIL: Metal
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1762
+# XFAIL: DirectX && NV
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

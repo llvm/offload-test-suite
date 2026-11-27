@@ -1,0 +1,99 @@
+#--- source.hlsl
+
+StructuredBuffer<int16_t4> InI : register(t0);
+StructuredBuffer<uint16_t4> InU : register(t1);
+
+RWTexture2D<int16_t4> Tex : register(u2);
+RWBuffer<uint16_t4> Buf : register(u3);
+
+[numthreads(1, 1, 1)]
+void main() {
+  int16_t4 I = InI[0];
+  uint16_t4 U = InU[0];
+  Tex[int2(0, 0)].xw = I.yz;
+  Buf[1].y = U.w;
+  Buf[0].z += U.x;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: InI
+    Format: Int16
+    Stride: 8
+    Data: [ -11, 12, -13, 14 ]
+  - Name: InU
+    Format: UInt16
+    Stride: 8
+    Data: [ 101, 102, 103, 104 ]
+  - Name: Tex
+    Format: Int16
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1, 2, 3, 4,   # (0,0)
+            5, 6, 7, 8 ]  # (1,0)
+  - Name: ExpectedTex
+    Format: Int16
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 12, 2, 3, -13,  # .xw = I.yz
+            5, 6, 7, 8 ]
+  - Name: Buf
+    Format: UInt16
+    Channels: 4
+    Data: [ 10, 20, 30, 40,
+            50, 60, 70, 80 ]
+  - Name: ExpectedBuf
+    Format: UInt16
+    Channels: 4
+    Data: [ 10, 20, 131, 40,  # .z += U.x
+            50, 104, 70, 80 ] # .y = U.w
+
+Results:
+  - Result: Texture
+    Rule: BufferExact
+    Actual: Tex
+    Expected: ExpectedTex
+  - Result: TypedBuffer
+    Rule: BufferExact
+    Actual: Buf
+    Expected: ExpectedBuf
+
+DescriptorSets:
+  - Resources:
+    - Name: InI
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: InU
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Tex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: Buf
+      Kind: RWBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# Vulkan rejects 16-bit texture and typed buffer elements.
+# UNSUPPORTED: Vulkan
+# REQUIRES: Int16
+
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1761
+# XFAIL: Metal
+
+# Bug: https://github.com/llvm/offload-test-suite/issues/1762
+# XFAIL: DirectX && (Intel || NV)
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -enable-16bit-types -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o

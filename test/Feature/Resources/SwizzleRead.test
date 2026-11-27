@@ -1,0 +1,375 @@
+#--- source.hlsl
+
+struct Pair {
+  int4 A;
+  uint4 B;
+};
+
+Texture2D<float4> Tex : register(t0);
+RWTexture2D<int4> RWTex : register(u1);
+Buffer<uint4> Buf : register(t2);
+RWBuffer<float4> RWBuf : register(u3);
+StructuredBuffer<float4> SB : register(t4);
+RWStructuredBuffer<Pair> RWSB : register(u5);
+ByteAddressBuffer BAB : register(t6);
+cbuffer CB : register(b7) {
+  int4 CI;
+  uint4 CU;
+};
+
+RWStructuredBuffer<float> OutF : register(u8);
+RWStructuredBuffer<int> OutI : register(u9);
+RWStructuredBuffer<uint> OutU : register(u10);
+RWStructuredBuffer<float4> OutF4 : register(u11);
+RWStructuredBuffer<int4> OutI4 : register(u12);
+RWStructuredBuffer<uint4> OutU4 : register(u13);
+
+[numthreads(1, 1, 1)]
+void main() {
+  // Typed textures.
+  OutF[0] = Tex[int2(1, 0)].x;
+  OutF4[0] = Tex.Load(int3(0, 1, 0)).zzxy;
+  OutI[0] = RWTex[int2(1, 1)].w;
+  OutI4[0] = RWTex.Load(int2(0, 0)).wzyx;
+
+  // Typed buffers.
+  OutU[0] = Buf.Load(1).x;
+  OutU4[0] = Buf[0].yxyx;
+  OutF[1] = RWBuf[1].y;
+
+  // Structured buffers: vector elements and struct vector members.
+  OutF[2] = SB[1].z;
+  OutF4[1] = SB.Load(0).wxzy;
+  OutU[1] = RWSB[0].B.w;
+  OutI4[1] = RWSB[1].A.yyww;
+
+  // Byte-address buffer values.
+  OutU[2] = BAB.Load4(0).w;
+  OutI4[2] = BAB.Load<int4>(16).zxwy;
+
+  // Constant buffer vector members.
+  OutI[1] = CI.y;
+  OutU4[1] = CU.wwzx;
+}
+
+//--- vertex.hlsl
+struct VSInput {
+  float3 Pos : POSITION;
+};
+
+struct VSOutput {
+  float4 Pos : SV_POSITION;
+};
+
+VSOutput mainVS(VSInput input) {
+  VSOutput output;
+  output.Pos = float4(input.Pos, 1.0f);
+  return output;
+}
+
+//--- pixel.hlsl
+Texture2D<uint4> PTex : register(t0);
+Buffer<int4> PBuf : register(t1);
+RWStructuredBuffer<uint> POutU : register(u2);
+RWStructuredBuffer<int4> POutI4 : register(u3);
+
+float4 mainPS(float4 Pos : SV_POSITION) : SV_Target {
+  if (all(uint2(Pos.xy) == 0)) {
+    POutU[0] = PTex[int2(1, 0)].x;
+    POutI4[0] = PBuf[1].zwzw;
+  }
+  return float4(0, 0, 0, 0);
+}
+
+//--- compute.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex
+    Format: Float32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ 1.0, 2.0, 3.0, 4.0,       # (0,0)
+            5.0, 6.0, 7.0, 8.0,       # (1,0)
+            9.0, 10.0, 11.0, 12.0,    # (0,1)
+            13.0, 14.0, 15.0, 16.0 ]  # (1,1)
+  - Name: RWTex
+    Format: Int32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+    Data: [ -1, -2, -3, -4,       # (0,0)
+            -5, -6, -7, -8,       # (1,0)
+            -9, -10, -11, -12,    # (0,1)
+            -13, -14, -15, -16 ]  # (1,1)
+  - Name: Buf
+    Format: UInt32
+    Channels: 4
+    Data: [ 10, 20, 30, 40,
+            50, 60, 70, 80 ]
+  - Name: RWBuf
+    Format: Float32
+    Channels: 4
+    Data: [ 0.5, 1.5, 2.5, 3.5,
+            4.5, 5.5, 6.5, 7.5 ]
+  - Name: SB
+    Format: Float32
+    Stride: 16
+    Data: [ 100.0, 200.0, 300.0, 400.0,
+            500.0, 600.0, 700.0, 800.0 ]
+  - Name: RWSB
+    Format: Int32
+    Stride: 32
+    Data: [ 1, -2, 3, -4,  11, 12, 13, 14,   # [0] A, B
+            5, -6, 7, -8,  15, 16, 17, 18 ]  # [1] A, B
+  - Name: BAB
+    Format: Int32
+    Stride: 4
+    Data: [ 21, 22, 23, 24, -25, -26, -27, -28 ]
+  - Name: CB
+    Format: Int32
+    Data: [ -31, -32, -33, -34,  # CI
+            41, 42, 43, 44 ]     # CU
+  - Name: OutF
+    Format: Float32
+    Stride: 4
+    FillSize: 12
+  - Name: OutI
+    Format: Int32
+    Stride: 4
+    FillSize: 8
+  - Name: OutU
+    Format: UInt32
+    Stride: 4
+    FillSize: 12
+  - Name: OutF4
+    Format: Float32
+    Stride: 16
+    FillSize: 32
+  - Name: OutI4
+    Format: Int32
+    Stride: 16
+    FillSize: 48
+  - Name: OutU4
+    Format: UInt32
+    Stride: 16
+    FillSize: 32
+  - Name: ExpectedF
+    Format: Float32
+    Stride: 4
+    Data: [ 5.0,     # Tex[(1,0)].x
+            5.5,     # RWBuf[1].y
+            700.0 ]  # SB[1].z
+  - Name: ExpectedI
+    Format: Int32
+    Stride: 4
+    Data: [ -16,   # RWTex[(1,1)].w
+            -32 ]  # CI.y
+  - Name: ExpectedU
+    Format: UInt32
+    Stride: 4
+    Data: [ 50,   # Buf.Load(1).x
+            14,   # RWSB[0].B.w
+            24 ]  # BAB.Load4(0).w
+  - Name: ExpectedF4
+    Format: Float32
+    Stride: 16
+    Data: [ 11.0, 11.0, 9.0, 10.0,        # Tex.Load((0,1)).zzxy
+            400.0, 100.0, 300.0, 200.0 ]  # SB.Load(0).wxzy
+  - Name: ExpectedI4
+    Format: Int32
+    Stride: 16
+    Data: [ -4, -3, -2, -1,       # RWTex.Load((0,0)).wzyx
+            -6, -6, -8, -8,       # RWSB[1].A.yyww
+            -27, -25, -28, -26 ]  # BAB.Load<int4>(16).zxwy
+  - Name: ExpectedU4
+    Format: UInt32
+    Stride: 16
+    Data: [ 20, 10, 20, 10,   # Buf[0].yxyx
+            44, 44, 43, 41 ]  # CU.wwzx
+
+Results:
+  - Result: Float
+    Rule: BufferExact
+    Actual: OutF
+    Expected: ExpectedF
+  - Result: Int
+    Rule: BufferExact
+    Actual: OutI
+    Expected: ExpectedI
+  - Result: UInt
+    Rule: BufferExact
+    Actual: OutU
+    Expected: ExpectedU
+  - Result: Float4
+    Rule: BufferExact
+    Actual: OutF4
+    Expected: ExpectedF4
+  - Result: Int4
+    Rule: BufferExact
+    Actual: OutI4
+    Expected: ExpectedI4
+  - Result: UInt4
+    Rule: BufferExact
+    Actual: OutU4
+    Expected: ExpectedU4
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: RWTex
+      Kind: RWTexture2D
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: Buf
+      Kind: Buffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: RWBuf
+      Kind: RWBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: SB
+      Kind: StructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+    - Name: RWSB
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 5, Space: 0 }
+      VulkanBinding: { Binding: 5 }
+    - Name: BAB
+      Kind: ByteAddressBuffer
+      DirectXBinding: { Register: 6, Space: 0 }
+      VulkanBinding: { Binding: 6 }
+    - Name: CB
+      Kind: ConstantBuffer
+      DirectXBinding: { Register: 7, Space: 0 }
+      VulkanBinding: { Binding: 7 }
+    - Name: OutF
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 8, Space: 0 }
+      VulkanBinding: { Binding: 8 }
+    - Name: OutI
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 9, Space: 0 }
+      VulkanBinding: { Binding: 9 }
+    - Name: OutU
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 10, Space: 0 }
+      VulkanBinding: { Binding: 10 }
+    - Name: OutF4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 11, Space: 0 }
+      VulkanBinding: { Binding: 11 }
+    - Name: OutI4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 12, Space: 0 }
+      VulkanBinding: { Binding: 12 }
+    - Name: OutU4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 13, Space: 0 }
+      VulkanBinding: { Binding: 13 }
+...
+
+//--- pixel.yaml
+---
+Shaders:
+  - Stage: Vertex
+    Entry: mainVS
+  - Stage: Pixel
+    Entry: mainPS
+
+Buffers:
+  - Name: PTex
+    Format: UInt32
+    Channels: 4
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ 1, 2, 3, 4,   # (0,0)
+            5, 6, 7, 8 ]  # (1,0)
+  - Name: PBuf
+    Format: Int32
+    Channels: 4
+    Data: [ 10, -20, 30, -40,
+            50, -60, 70, -80 ]
+  - Name: POutU
+    Format: UInt32
+    Stride: 4
+    FillSize: 4
+  - Name: POutI4
+    Format: Int32
+    Stride: 16
+    FillSize: 16
+  - Name: ExpectedU
+    Format: UInt32
+    Stride: 4
+    Data: [ 5 ]  # PTex[(1,0)].x
+  - Name: ExpectedI4
+    Format: Int32
+    Stride: 16
+    Data: [ 70, -80, 70, -80 ]  # PBuf[1].zwzw
+  - Name: RT
+    Format: Float32
+    Channels: 4
+    FillSize: 64
+    OutputProps: { Width: 2, Height: 2, Depth: 1 }
+  - Name: VB
+    Format: Float32
+    Channels: 3
+    Data: [ -1.0, -1.0, 0.0,
+             3.0, -1.0, 0.0,
+            -1.0,  3.0, 0.0 ]
+
+Bindings:
+  VertexBuffer: VB
+  VertexAttributes:
+    - Format: Float32
+      Channels: 3
+      Offset: 0
+      Name: POSITION
+  RenderTarget: RT
+
+Results:
+  - Result: PixelUInt
+    Rule: BufferExact
+    Actual: POutU
+    Expected: ExpectedU
+  - Result: PixelInt4
+    Rule: BufferExact
+    Actual: POutI4
+    Expected: ExpectedI4
+
+DescriptorSets:
+  - Resources:
+    - Name: PTex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: PBuf
+      Kind: Buffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: POutU
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: POutI4
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/191248
+# XFAIL: Clang && (DirectX || Metal)
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/compute.yaml %t.o
+# RUN: %dxc_target -T vs_6_0 -E mainVS -Fo %t-vs.o %t/vertex.hlsl
+# RUN: %dxc_target -T ps_6_0 -E mainPS -Fo %t-ps.o %t/pixel.hlsl
+# RUN: %offloader %t/pixel.yaml %t-vs.o %t-ps.o
