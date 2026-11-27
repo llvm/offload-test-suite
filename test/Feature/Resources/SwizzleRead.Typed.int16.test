@@ -118,6 +118,9 @@ DescriptorSets:
 # UNSUPPORTED: Vulkan
 # REQUIRES: Int16
 
+# Unimplemented: https://github.com/llvm/offload-test-suite/issues/1761
+# XFAIL: Metal
+
 # Bug: https://github.com/llvm/offload-test-suite/issues/1762
 # XFAIL: DirectX && NV
 
