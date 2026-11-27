@@ -404,7 +404,7 @@ Results:
 # Unimplimented: https://github.com/llvm/offload-test-suite/issues/1607
 # XFAIL: Metal
 
-# Intel Vulkan Clang
+# Bug: https://github.com/llvm/offload-test-suite/issues/1764
 # XFAIL: Clang && Vulkan && Intel
 
 # RUN: split-file %s %t
