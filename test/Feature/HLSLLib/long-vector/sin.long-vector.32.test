@@ -63,7 +63,7 @@ DescriptorSets:
 # REQUIRES: Clang || SM_6_9
 
 # RUN: split-file %s %t
-# RUN: %dxc_target %long_vector_flags -T %if Clang %{cs_6_0%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
+# RUN: %dxc_target -T %if Clang %{cs_6_0 %long_vector_flags%} %else %{cs_6_9%} -Fo %t.o %t/source.hlsl
 # RUN: %offloader %t/pipeline.yaml %t.o
 # RUN: %if Clang && Vulkan %{ %dxc_target %long_vector_flags -T cs_6_0 -Fc - %t/source.hlsl | FileCheck %s --check-prefix=SPIRV %}
 
