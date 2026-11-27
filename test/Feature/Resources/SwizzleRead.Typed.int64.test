@@ -1,0 +1,110 @@
+#--- source.hlsl
+
+Texture2D<int64_t2> Tex : register(t0);
+Buffer<uint64_t2> Buf : register(t1);
+
+RWStructuredBuffer<int64_t> OutI : register(u2);
+RWStructuredBuffer<uint64_t> OutU : register(u3);
+RWStructuredBuffer<int64_t2> OutI2 : register(u4);
+
+[numthreads(1, 1, 1)]
+void main() {
+  OutU[0] = Buf[1].x;
+  OutI[0] = Tex[int2(1, 0)].y;
+  OutI2[0] = Tex.Load(int3(0, 0, 0)).yx;
+}
+
+//--- pipeline.yaml
+---
+Shaders:
+  - Stage: Compute
+    Entry: main
+
+Buffers:
+  - Name: Tex
+    Format: Int64
+    Channels: 2
+    OutputProps: { Width: 2, Height: 1, Depth: 1 }
+    Data: [ -4294967299, 8589934597,     # (0,0)
+            -12884901895, 17179869193 ]  # (1,0)
+  - Name: Buf
+    Format: UInt64
+    Channels: 2
+    Data: [ 0x0000000100000002, 0x0000000300000004,
+            0x0000000500000006, 0x0000000700000008 ]
+  - Name: OutI
+    Format: Int64
+    Stride: 8
+    FillSize: 8
+  - Name: OutU
+    Format: UInt64
+    Stride: 8
+    FillSize: 8
+  - Name: OutI2
+    Format: Int64
+    Stride: 16
+    FillSize: 16
+  - Name: ExpectedI
+    Format: Int64
+    Stride: 8
+    Data: [ 17179869193 ]  # Tex[(1,0)].y
+  - Name: ExpectedU
+    Format: UInt64
+    Stride: 8
+    Data: [ 0x0000000500000006 ]  # Buf[1].x
+  - Name: ExpectedI2
+    Format: Int64
+    Stride: 16
+    Data: [ 8589934597, -4294967299 ]  # Tex.Load((0,0)).yx
+
+Results:
+  - Result: Int64
+    Rule: BufferExact
+    Actual: OutI
+    Expected: ExpectedI
+  - Result: UInt64
+    Rule: BufferExact
+    Actual: OutU
+    Expected: ExpectedU
+  - Result: Int64x2
+    Rule: BufferExact
+    Actual: OutI2
+    Expected: ExpectedI2
+
+DescriptorSets:
+  - Resources:
+    - Name: Tex
+      Kind: Texture2D
+      DirectXBinding: { Register: 0, Space: 0 }
+      VulkanBinding: { Binding: 0 }
+    - Name: Buf
+      Kind: Buffer
+      DirectXBinding: { Register: 1, Space: 0 }
+      VulkanBinding: { Binding: 1 }
+    - Name: OutI
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 2, Space: 0 }
+      VulkanBinding: { Binding: 2 }
+    - Name: OutU
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 3, Space: 0 }
+      VulkanBinding: { Binding: 3 }
+    - Name: OutI2
+      Kind: RWStructuredBuffer
+      DirectXBinding: { Register: 4, Space: 0 }
+      VulkanBinding: { Binding: 4 }
+...
+#--- end
+
+# Bug: https://github.com/llvm/llvm-project/issues/191248
+# Bug: https://github.com/llvm/llvm-project/issues/235930
+# XFAIL: Clang && (DirectX || Metal)
+
+# Bug https://github.com/microsoft/DirectXShaderCompiler/issues/8615
+# XFAIL: DXC && Vulkan
+
+# REQUIRES: Int64
+
+# RUN: split-file %s %t
+# RUN: %dxc_target -T cs_6_5 -Fo %t.o %t/source.hlsl
+# RUN: %offloader %t/pipeline.yaml %t.o
