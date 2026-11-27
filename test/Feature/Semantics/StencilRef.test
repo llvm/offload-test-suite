@@ -228,6 +228,9 @@ Results:
 # Unimplimented: https://github.com/llvm/offload-test-suite/issues/1607
 # XFAIL: Metal
 
+# Intel Vulkan Clang
+# XFAIL: Clang && Vulkan && Intel
+
 # RUN: split-file %s %t
 # RUN: %dxc_target -T vs_6_0 -Fo %t-vertex.o %t/vertex.hlsl
 # RUN: %dxc_target -T vs_6_0 -DREVERSE_WINDING -Fo %t-reversed.o %t/vertex.hlsl
