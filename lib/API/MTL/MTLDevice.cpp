@@ -162,6 +162,10 @@ static llvm::Error toError(const IRError *Err, llvm::StringRef Context) {
 
 static MTL::PixelFormat getMTLFormat(DataFormat Format, int Channels) {
   switch (Format) {
+  case DataFormat::Int16:
+    MTLFormats(16Sint) break;
+  case DataFormat::UInt16:
+    MTLFormats(16Uint) break;
   case DataFormat::Int32:
     MTLFormats(32Sint) break;
   case DataFormat::UInt32:
